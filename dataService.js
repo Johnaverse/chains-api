@@ -93,6 +93,8 @@ function buildNetworkIdToChainIdMap(theGraph) {
   if (theGraph && theGraph.networks && Array.isArray(theGraph.networks)) {
     theGraph.networks.forEach(network => {
       // Extract chain ID from caip2Id (format: "eip155:1" or "beacon:11155111")
+      // Note: Only numeric chain IDs are supported; named beacon chains (e.g., "beacon:mainnet") 
+      // won't be mapped but will still add tags to their target chains if relations exist
       if (network.caip2Id) {
         const match = network.caip2Id.match(/^(?:eip155|beacon):(\d+)$/);
         if (match) {
@@ -104,6 +106,20 @@ function buildNetworkIdToChainIdMap(theGraph) {
   }
   
   return networkIdToChainId;
+}
+
+/**
+ * Helper function to add Beacon tag to a target chain
+ */
+function addBeaconTagToTargetChain(indexed, targetChainId) {
+  if (targetChainId !== undefined && indexed.byChainId[targetChainId]) {
+    if (!indexed.byChainId[targetChainId].tags) {
+      indexed.byChainId[targetChainId].tags = [];
+    }
+    if (!indexed.byChainId[targetChainId].tags.includes('Beacon')) {
+      indexed.byChainId[targetChainId].tags.push('Beacon');
+    }
+  }
 }
 
 /**
@@ -233,14 +249,14 @@ function indexData(theGraph, chainlist, chains, slip44) {
               }
             });
           }
-        }
-        
-        // Ensure tags and relations arrays exist
-        if (!indexed.byChainId[chainId].tags) {
-          indexed.byChainId[chainId].tags = [];
-        }
-        if (!indexed.byChainId[chainId].relations) {
-          indexed.byChainId[chainId].relations = [];
+          
+          // Ensure tags and relations arrays exist for chains from other sources
+          if (!indexed.byChainId[chainId].tags) {
+            indexed.byChainId[chainId].tags = [];
+          }
+          if (!indexed.byChainId[chainId].relations) {
+            indexed.byChainId[chainId].relations = [];
+          }
         }
         
         // Process network type for testnet marking
@@ -276,16 +292,9 @@ function indexData(theGraph, chainlist, chains, slip44) {
               if (!indexed.byChainId[chainId].tags.includes('L2')) {
                 indexed.byChainId[chainId].tags.push('L2');
               }
-            } else if (kind === 'beaconOf' && targetChainId !== undefined) {
+            } else if (kind === 'beaconOf') {
               // Add "Beacon" tag to the target chain
-              if (indexed.byChainId[targetChainId]) {
-                if (!indexed.byChainId[targetChainId].tags) {
-                  indexed.byChainId[targetChainId].tags = [];
-                }
-                if (!indexed.byChainId[targetChainId].tags.includes('Beacon')) {
-                  indexed.byChainId[targetChainId].tags.push('Beacon');
-                }
-              }
+              addBeaconTagToTargetChain(indexed, targetChainId);
             }
           });
         }
@@ -318,15 +327,7 @@ function indexData(theGraph, chainlist, chains, slip44) {
             
             if (kind === 'beaconOf') {
               const targetChainId = networkIdToChainId[targetNetworkId];
-              
-              if (targetChainId !== undefined && indexed.byChainId[targetChainId]) {
-                if (!indexed.byChainId[targetChainId].tags) {
-                  indexed.byChainId[targetChainId].tags = [];
-                }
-                if (!indexed.byChainId[targetChainId].tags.includes('Beacon')) {
-                  indexed.byChainId[targetChainId].tags.push('Beacon');
-                }
-              }
+              addBeaconTagToTargetChain(indexed, targetChainId);
             }
           });
         }
