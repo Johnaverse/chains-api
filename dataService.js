@@ -172,38 +172,7 @@ function indexData(theGraph, chainlist, chains, slip44) {
       }
     });
     
-    // Second pass: Find mainnet relations for testnets from chains.json
-    // When slip44 === 1, find other chains with same "chain" value but slip44 !== 1
-    chains.forEach(testnetChain => {
-      if (testnetChain.slip44 === 1 && testnetChain.chain && testnetChain.chainId !== undefined) {
-        // Find mainnet with same "chain" value but slip44 !== 1
-        const mainnetChain = chains.find(c => 
-          c.chain === testnetChain.chain && 
-          c.slip44 !== 1 && 
-          c.chainId !== undefined &&
-          c.chainId !== testnetChain.chainId
-        );
-        
-        if (mainnetChain && indexed.byChainId[testnetChain.chainId]) {
-          // Add testnetOf relation
-          const relation = {
-            kind: 'testnetOf',
-            network: mainnetChain.name,
-            chainId: mainnetChain.chainId,
-            source: 'chains'
-          };
-          
-          // Check if relation doesn't already exist
-          const existingRelation = indexed.byChainId[testnetChain.chainId].relations.find(
-            r => r.kind === 'testnetOf' && r.chainId === mainnetChain.chainId
-          );
-          
-          if (!existingRelation) {
-            indexed.byChainId[testnetChain.chainId].relations.push(relation);
-          }
-        }
-      }
-    });
+    // chains.json no longer used for testnet and l2Of relation indexing
   }
   
   // Merge chainlist RPC data
@@ -435,6 +404,55 @@ function indexData(theGraph, chainlist, chains, slip44) {
     const chain = indexed.byChainId[chainId];
     if (!chain.status) {
       chain.status = 'active';
+    }
+  });
+  
+  // Add reverse relations: mainnetOf and parentOf
+  Object.keys(indexed.byChainId).forEach(chainId => {
+    const chain = indexed.byChainId[chainId];
+    
+    if (chain.relations && Array.isArray(chain.relations)) {
+      chain.relations.forEach(relation => {
+        // Add mainnetOf reverse relation for testnetOf
+        if (relation.kind === 'testnetOf' && relation.chainId !== undefined) {
+          const mainnetChain = indexed.byChainId[relation.chainId];
+          if (mainnetChain) {
+            // Check if mainnetOf relation doesn't already exist
+            const existingMainnetOf = mainnetChain.relations.find(
+              r => r.kind === 'mainnetOf' && r.chainId === parseInt(chainId)
+            );
+            
+            if (!existingMainnetOf) {
+              mainnetChain.relations.push({
+                kind: 'mainnetOf',
+                network: chain.name || chain.shortName || chainId.toString(),
+                chainId: parseInt(chainId),
+                source: relation.source
+              });
+            }
+          }
+        }
+        
+        // Add parentOf reverse relation for l2Of
+        if (relation.kind === 'l2Of' && relation.chainId !== undefined) {
+          const parentChain = indexed.byChainId[relation.chainId];
+          if (parentChain) {
+            // Check if parentOf relation doesn't already exist
+            const existingParentOf = parentChain.relations.find(
+              r => r.kind === 'parentOf' && r.chainId === parseInt(chainId)
+            );
+            
+            if (!existingParentOf) {
+              parentChain.relations.push({
+                kind: 'parentOf',
+                network: chain.name || chain.shortName || chainId.toString(),
+                chainId: parseInt(chainId),
+                source: relation.source
+              });
+            }
+          }
+        }
+      });
     }
   });
   
