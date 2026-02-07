@@ -1,0 +1,27 @@
+{
+  "name": "chains-api",
+  "version": "1.0.0",
+  "description": "API query service for blockchain chain data from multiple sources",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Johnaverse/chains-api.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Johnaverse/chains-api/issues"
+  },
+  "homepage": "https://github.com/Johnaverse/chains-api#readme",
+  "dependencies": {
+    "fastify": "^5.7.4",
+    "node-fetch": "^3.3.2"
+  }
+}
