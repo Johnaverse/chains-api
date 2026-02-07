@@ -131,6 +131,45 @@ Get status of data sources.
 }
 ```
 
+### `GET /slip44`
+Get all SLIP-0044 coin types as JSON. The table from the markdown file is converted to JSON format using "Coin type" as the key (id).
+
+**Response:**
+```json
+{
+  "count": 1279,
+  "coinTypes": {
+    "0": {
+      "coinType": 0,
+      "pathComponent": "0x80000000",
+      "symbol": "BTC",
+      "coin": "Bitcoin"
+    },
+    "60": {
+      "coinType": 60,
+      "pathComponent": "0x8000003c",
+      "symbol": "ETH",
+      "coin": "Ether"
+    }
+  }
+}
+```
+
+### `GET /slip44/:coinType`
+Get a specific SLIP-0044 coin type by its coin type ID.
+
+**Example:** `GET /slip44/60` (Ethereum)
+
+**Response:**
+```json
+{
+  "coinType": 60,
+  "pathComponent": "0x8000003c",
+  "symbol": "ETH",
+  "coin": "Ether"
+}
+```
+
 ### `POST /reload`
 Reload data from all sources.
 
@@ -147,7 +186,7 @@ Reload data from all sources.
 
 Each chain object contains:
 
-- `chainId`: The chain ID
+- `chainId`: The chain ID (extracted from caip2Id for The Graph data)
 - `name`: Full name of the chain
 - `shortName`: Short name/symbol
 - `network`: Network type (mainnet, testnet, etc.)
@@ -157,7 +196,23 @@ Each chain object contains:
 - `infoURL`: Information URL
 - `sources`: Array of data sources that provided this chain's data
 - `theGraph`: The Graph specific data (if available)
+  - `id`: The Graph network identifier
+  - `fullName`: Full network name
+  - `caip2Id`: CAIP-2 identifier (e.g., "eip155:1")
+  - `aliases`: Alternative names
+  - `networkType`: Network type
+  - `services`: The Graph services (firehose, substreams, etc.)
+  - `nativeToken`: Native token symbol
 - `slip44Info`: SLIP-0044 coin type information (if available)
+
+## SLIP-0044 Data Structure
+
+Each SLIP-0044 coin type object contains:
+
+- `coinType`: The coin type number (used as the key/id)
+- `pathComponent`: BIP-0044 path component in hexadecimal
+- `symbol`: Coin symbol
+- `coin`: Full coin name
 
 ## License
 

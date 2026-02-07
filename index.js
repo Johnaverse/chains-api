@@ -87,6 +87,41 @@ fastify.get('/sources', async (request, reply) => {
 });
 
 /**
+ * Get SLIP-0044 coin types as JSON
+ */
+fastify.get('/slip44', async (request, reply) => {
+  const cachedData = getCachedData();
+  
+  if (!cachedData.slip44) {
+    return reply.code(503).send({ error: 'SLIP-0044 data not loaded' });
+  }
+  
+  return {
+    count: Object.keys(cachedData.slip44).length,
+    coinTypes: cachedData.slip44
+  };
+});
+
+/**
+ * Get specific SLIP-0044 coin type by ID
+ */
+fastify.get('/slip44/:coinType', async (request, reply) => {
+  const coinType = parseInt(request.params.coinType);
+  
+  if (isNaN(coinType)) {
+    return reply.code(400).send({ error: 'Invalid coin type' });
+  }
+  
+  const cachedData = getCachedData();
+  
+  if (!cachedData.slip44 || !cachedData.slip44[coinType]) {
+    return reply.code(404).send({ error: 'Coin type not found' });
+  }
+  
+  return cachedData.slip44[coinType];
+});
+
+/**
  * Reload data from sources
  */
 fastify.post('/reload', async (request, reply) => {
@@ -117,6 +152,8 @@ fastify.get('/', async (request, reply) => {
       '/chains/:id': 'Get chain by ID',
       '/search?q={query}': 'Search chains by name or ID',
       '/sources': 'Get data sources status',
+      '/slip44': 'Get all SLIP-0044 coin types as JSON',
+      '/slip44/:coinType': 'Get specific SLIP-0044 coin type by ID',
       '/reload': 'Reload data from sources (POST)'
     },
     dataSources: [

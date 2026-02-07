@@ -41,6 +41,8 @@ async function fetchData(url, format = 'json') {
 
 /**
  * Parse SLIP-0044 markdown file to extract coin types
+ * Table structure: | Coin type | Path component | Symbol | Coin |
+ * Uses "Coin type" as the key (id)
  */
 function parseSLIP44(markdown) {
   if (!markdown) return {};
@@ -50,26 +52,29 @@ function parseSLIP44(markdown) {
   let inTable = false;
   
   for (const line of lines) {
-    // Detect table rows (format: | index | coin | symbol | ...)
+    // Detect table rows (format: | Coin type | Path component | Symbol | Coin |)
     if (line.trim().startsWith('|') && line.includes('|')) {
       const cells = line.split('|').map(cell => cell.trim()).filter(cell => cell);
       
       // Skip header and separator rows
-      if (cells[0] === 'index' || cells[0].includes('-')) {
+      if (cells[0] === 'Coin type' || cells[0].includes('-')) {
         inTable = true;
         continue;
       }
       
-      if (inTable && cells.length >= 3) {
-        const index = cells[0];
-        const coin = cells[1];
+      if (inTable && cells.length >= 4) {
+        const coinType = cells[0];
+        const pathComponent = cells[1];
         const symbol = cells[2];
+        const coin = cells[3];
         
-        if (index && !isNaN(index)) {
-          slip44Data[index] = {
-            coin,
+        if (coinType && !isNaN(coinType)) {
+          const coinTypeNum = parseInt(coinType);
+          slip44Data[coinTypeNum] = {
+            coinType: coinTypeNum,
+            pathComponent,
             symbol,
-            index: parseInt(index)
+            coin
           };
         }
       }
@@ -146,28 +151,65 @@ function indexData(theGraph, chainlist, chains, slip44) {
   }
   
   // Merge The Graph registry data
-  if (Array.isArray(theGraph)) {
-    theGraph.forEach(network => {
-      const chainId = network.chainId;
-      if (chainId !== undefined) {
+  // The Graph uses caip2Id format (e.g., "eip155:1" for Ethereum mainnet)
+  if (theGraph && theGraph.networks && Array.isArray(theGraph.networks)) {
+    theGraph.networks.forEach(network => {
+      let chainId = null;
+      
+      // Extract chain ID from caip2Id (format: "eip155:1")
+      if (network.caip2Id) {
+        const match = network.caip2Id.match(/^eip155:(\d+)$/);
+        if (match) {
+          chainId = parseInt(match[1]);
+        }
+      }
+      
+      if (chainId !== null) {
         if (!indexed.byChainId[chainId]) {
           indexed.byChainId[chainId] = {
             chainId,
-            name: network.name,
+            name: network.fullName || network.shortName || network.id,
+            shortName: network.shortName,
+            nativeCurrency: { symbol: network.nativeToken },
+            rpc: network.rpcUrls || [],
+            explorers: network.explorerUrls || [],
             sources: ['theGraph']
           };
         } else {
           if (!indexed.byChainId[chainId].sources.includes('theGraph')) {
             indexed.byChainId[chainId].sources.push('theGraph');
           }
+          // Merge RPC URLs
+          if (network.rpcUrls && Array.isArray(network.rpcUrls)) {
+            const existingRpcs = new Set(indexed.byChainId[chainId].rpc);
+            network.rpcUrls.forEach(rpc => {
+              if (!existingRpcs.has(rpc)) {
+                indexed.byChainId[chainId].rpc.push(rpc);
+              }
+            });
+          }
         }
         
         // Add The Graph specific data
         indexed.byChainId[chainId].theGraph = {
-          name: network.name,
-          logo: network.logo,
-          subgraphs: network.subgraphs
+          id: network.id,
+          fullName: network.fullName,
+          shortName: network.shortName,
+          caip2Id: network.caip2Id,
+          aliases: network.aliases,
+          networkType: network.networkType,
+          services: network.services,
+          nativeToken: network.nativeToken
         };
+        
+        // Add to name index
+        const nameLower = (network.fullName || network.shortName || '').toLowerCase();
+        if (nameLower && !indexed.byName[nameLower]) {
+          indexed.byName[nameLower] = [];
+        }
+        if (nameLower && !indexed.byName[nameLower].includes(chainId)) {
+          indexed.byName[nameLower].push(chainId);
+        }
       }
     });
   }
