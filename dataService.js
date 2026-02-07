@@ -85,6 +85,44 @@ function parseSLIP44(markdown) {
 }
 
 /**
+ * Build a mapping of network IDs to chain IDs from The Graph data
+ */
+function buildNetworkIdToChainIdMap(theGraph) {
+  const networkIdToChainId = {};
+  
+  if (theGraph && theGraph.networks && Array.isArray(theGraph.networks)) {
+    theGraph.networks.forEach(network => {
+      // Extract chain ID from caip2Id (format: "eip155:1" or "beacon:11155111")
+      // Note: Only numeric chain IDs are supported; named beacon chains (e.g., "beacon:mainnet") 
+      // won't be mapped but will still add tags to their target chains if relations exist
+      if (network.caip2Id) {
+        const match = network.caip2Id.match(/^(?:eip155|beacon):(\d+)$/);
+        if (match) {
+          const chainId = parseInt(match[1]);
+          networkIdToChainId[network.id] = chainId;
+        }
+      }
+    });
+  }
+  
+  return networkIdToChainId;
+}
+
+/**
+ * Helper function to add Beacon tag to a target chain
+ */
+function addBeaconTagToTargetChain(indexed, targetChainId) {
+  if (targetChainId !== undefined && indexed.byChainId[targetChainId]) {
+    if (!indexed.byChainId[targetChainId].tags) {
+      indexed.byChainId[targetChainId].tags = [];
+    }
+    if (!indexed.byChainId[targetChainId].tags.includes('Beacon')) {
+      indexed.byChainId[targetChainId].tags.push('Beacon');
+    }
+  }
+}
+
+/**
  * Index all data into a searchable structure
  */
 function indexData(theGraph, chainlist, chains, slip44) {
@@ -93,6 +131,9 @@ function indexData(theGraph, chainlist, chains, slip44) {
     byName: {},
     all: []
   };
+  
+  // Build network ID to chain ID mapping for resolving relations
+  const networkIdToChainId = buildNetworkIdToChainIdMap(theGraph);
   
   // Index chains data
   if (Array.isArray(chains)) {
@@ -109,8 +150,18 @@ function indexData(theGraph, chainlist, chains, slip44) {
             rpc: chain.rpc || [],
             explorers: chain.explorers || [],
             infoURL: chain.infoURL,
-            sources: ['chains']
+            sources: ['chains'],
+            tags: [],
+            relations: [],
+            status: chain.status || 'active' // Default to 'active' if not present
           };
+        }
+        
+        // Check slip44 for testnet marking
+        if (chain.slip44 === 1) {
+          if (!indexed.byChainId[chainId].tags.includes('Testnet')) {
+            indexed.byChainId[chainId].tags.push('Testnet');
+          }
         }
         
         const nameLower = (chain.name || '').toLowerCase();
@@ -118,6 +169,39 @@ function indexData(theGraph, chainlist, chains, slip44) {
           indexed.byName[nameLower] = [];
         }
         indexed.byName[nameLower].push(chainId);
+      }
+    });
+    
+    // Second pass: Find mainnet relations for testnets from chains.json
+    // When slip44 === 1, find other chains with same "chain" value but slip44 !== 1
+    chains.forEach(testnetChain => {
+      if (testnetChain.slip44 === 1 && testnetChain.chain && testnetChain.chainId !== undefined) {
+        // Find mainnet with same "chain" value but slip44 !== 1
+        const mainnetChain = chains.find(c => 
+          c.chain === testnetChain.chain && 
+          c.slip44 !== 1 && 
+          c.chainId !== undefined &&
+          c.chainId !== testnetChain.chainId
+        );
+        
+        if (mainnetChain && indexed.byChainId[testnetChain.chainId]) {
+          // Add testnetOf relation
+          const relation = {
+            kind: 'testnetOf',
+            network: mainnetChain.name,
+            chainId: mainnetChain.chainId,
+            source: 'chains'
+          };
+          
+          // Check if relation doesn't already exist
+          const existingRelation = indexed.byChainId[testnetChain.chainId].relations.find(
+            r => r.kind === 'testnetOf' && r.chainId === mainnetChain.chainId
+          );
+          
+          if (!existingRelation) {
+            indexed.byChainId[testnetChain.chainId].relations.push(relation);
+          }
+        }
       }
     });
   }
@@ -131,7 +215,10 @@ function indexData(theGraph, chainlist, chains, slip44) {
           chainId: parseInt(chainId),
           name: chainData.name,
           rpc: chainData.rpc || [],
-          sources: ['chainlist']
+          sources: ['chainlist'],
+          tags: [],
+          relations: [],
+          status: chainData.status || 'active' // Default to 'active' if not present
         };
       } else {
         // Merge RPC data
@@ -145,6 +232,54 @@ function indexData(theGraph, chainlist, chains, slip44) {
         }
         if (!indexed.byChainId[chainId].sources.includes('chainlist')) {
           indexed.byChainId[chainId].sources.push('chainlist');
+        }
+        // Merge status if not already present
+        if (chainData.status && !indexed.byChainId[chainId].status) {
+          indexed.byChainId[chainId].status = chainData.status;
+        }
+      }
+      
+      // Check for testnet based on slip44 and isTestnet flag
+      if ((chainData.slip44 === 1 || chainData.isTestnet === true) && indexed.byChainId[chainId]) {
+        if (!indexed.byChainId[chainId].tags.includes('Testnet')) {
+          indexed.byChainId[chainId].tags.push('Testnet');
+        }
+      }
+    });
+    
+    // Second pass: Find mainnet relations for testnets from chainlist
+    // Use tvl value and isTestnet flag
+    Object.keys(chainlist).forEach(testnetChainId => {
+      const testnetData = chainlist[testnetChainId];
+      
+      // Check if it's a testnet
+      if ((testnetData.slip44 === 1 || testnetData.isTestnet === true) && testnetData.tvl !== undefined) {
+        // Find mainnet with same tvl but isTestnet: false
+        const mainnetEntry = Object.entries(chainlist).find(([mainnetChainId, mainnetData]) => {
+          return mainnetData.tvl === testnetData.tvl &&
+                 mainnetData.isTestnet === false &&
+                 mainnetChainId !== testnetChainId;
+        });
+        
+        if (mainnetEntry && indexed.byChainId[testnetChainId]) {
+          const [mainnetChainId, mainnetData] = mainnetEntry;
+          
+          // Add testnetOf relation
+          const relation = {
+            kind: 'testnetOf',
+            network: mainnetData.name,
+            chainId: parseInt(mainnetChainId),
+            source: 'chainlist'
+          };
+          
+          // Check if relation doesn't already exist
+          const existingRelation = indexed.byChainId[testnetChainId].relations.find(
+            r => r.kind === 'testnetOf' && r.chainId === parseInt(mainnetChainId)
+          );
+          
+          if (!existingRelation) {
+            indexed.byChainId[testnetChainId].relations.push(relation);
+          }
         }
       }
     });
@@ -164,6 +299,9 @@ function indexData(theGraph, chainlist, chains, slip44) {
         }
       }
       
+      // Process beacon chains separately (they don't get their own chain entry)
+      const isBeaconChain = network.caip2Id && network.caip2Id.startsWith('beacon:');
+      
       if (chainId !== null) {
         if (!indexed.byChainId[chainId]) {
           indexed.byChainId[chainId] = {
@@ -174,7 +312,10 @@ function indexData(theGraph, chainlist, chains, slip44) {
             nativeCurrency: { symbol: network.nativeToken },
             rpc: network.rpcUrls || [],
             explorers: network.explorerUrls || [],
-            sources: ['theGraph']
+            sources: ['theGraph'],
+            tags: [],
+            relations: [],
+            status: 'active' // Default to 'active' for The Graph chains
           };
         } else {
           if (!indexed.byChainId[chainId].sources.includes('theGraph')) {
@@ -192,6 +333,55 @@ function indexData(theGraph, chainlist, chains, slip44) {
               }
             });
           }
+          
+          // Ensure tags and relations arrays exist for chains from other sources
+          if (!indexed.byChainId[chainId].tags) {
+            indexed.byChainId[chainId].tags = [];
+          }
+          if (!indexed.byChainId[chainId].relations) {
+            indexed.byChainId[chainId].relations = [];
+          }
+        }
+        
+        // Process network type for testnet marking
+        if (network.networkType === 'testnet') {
+          if (!indexed.byChainId[chainId].tags.includes('Testnet')) {
+            indexed.byChainId[chainId].tags.push('Testnet');
+          }
+        }
+        
+        // Process relations
+        if (network.relations && Array.isArray(network.relations)) {
+          network.relations.forEach(relation => {
+            const { kind, network: targetNetworkId } = relation;
+            
+            // Convert network ID to chain ID
+            const targetChainId = networkIdToChainId[targetNetworkId];
+            
+            // Store relation with chain ID if available, otherwise with network ID
+            const relationData = {
+              kind,
+              network: targetNetworkId,
+              ...(targetChainId !== undefined && { chainId: targetChainId }),
+              source: 'theGraph'
+            };
+            
+            indexed.byChainId[chainId].relations.push(relationData);
+            
+            // Add tags based on relation kind
+            if (kind === 'testnetOf') {
+              if (!indexed.byChainId[chainId].tags.includes('Testnet')) {
+                indexed.byChainId[chainId].tags.push('Testnet');
+              }
+            } else if (kind === 'l2Of') {
+              if (!indexed.byChainId[chainId].tags.includes('L2')) {
+                indexed.byChainId[chainId].tags.push('L2');
+              }
+            } else if (kind === 'beaconOf') {
+              // Add "Beacon" tag to the target chain
+              addBeaconTagToTargetChain(indexed, targetChainId);
+            }
+          });
         }
         
         // Add The Graph specific data
@@ -214,6 +404,18 @@ function indexData(theGraph, chainlist, chains, slip44) {
         if (nameLower && !indexed.byName[nameLower].includes(chainId)) {
           indexed.byName[nameLower].push(chainId);
         }
+      } else if (isBeaconChain) {
+        // Process beacon chains to add "Beacon" tag to their target chains
+        if (network.relations && Array.isArray(network.relations)) {
+          network.relations.forEach(relation => {
+            const { kind, network: targetNetworkId } = relation;
+            
+            if (kind === 'beaconOf') {
+              const targetChainId = networkIdToChainId[targetNetworkId];
+              addBeaconTagToTargetChain(indexed, targetChainId);
+            }
+          });
+        }
       }
     });
   }
@@ -227,6 +429,14 @@ function indexData(theGraph, chainlist, chains, slip44) {
       }
     });
   }
+  
+  // Set default status to "active" for chains without status
+  Object.keys(indexed.byChainId).forEach(chainId => {
+    const chain = indexed.byChainId[chainId];
+    if (!chain.status) {
+      chain.status = 'active';
+    }
+  });
   
   // Build all chains array
   indexed.all = Object.values(indexed.byChainId);

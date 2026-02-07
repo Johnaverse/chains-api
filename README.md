@@ -14,6 +14,10 @@ A Node.js API query service built with Fastify that indexes and provides access 
 - **Indexed Data**: Efficient querying with indexed chain data
 - **Search Capabilities**: Search chains by name, ID, or other attributes
 - **RESTful Endpoints**: Clean and intuitive API design
+- **Chain Relations & Tags**: Automatic indexing of chain relationships and tags
+  - Tags: `Testnet`, `L2`, `Beacon`
+  - Relations: `testnetOf`, `l2Of`, `beaconOf` with resolved chain IDs
+  - Example: Base Sepolia (84532) is tagged as `Testnet` and `L2`, with relations to Base (8453) and Sepolia (11155111)
 
 ## Installation
 
@@ -74,11 +78,39 @@ Health check and data status.
 ### `GET /chains`
 Get all indexed chains.
 
+**Query Parameters:**
+- `tag` (optional): Filter chains by tag (e.g., `Testnet`, `L2`, `Beacon`)
+
+**Example:** `GET /chains?tag=Testnet`
+
 **Response:**
 ```json
 {
   "count": 1234,
   "chains": [ ... ]
+}
+```
+
+**Example Response (with tags and relations):**
+```json
+{
+  "chainId": 84532,
+  "name": "Base Sepolia Testnet",
+  "tags": ["Testnet", "L2"],
+  "relations": [
+    {
+      "kind": "testnetOf",
+      "network": "base",
+      "chainId": 8453
+    },
+    {
+      "kind": "l2Of",
+      "network": "sepolia",
+      "chainId": 11155111
+    }
+  ],
+  "sources": ["theGraph"],
+  ...
 }
 ```
 
@@ -195,6 +227,15 @@ Each chain object contains:
 - `explorers`: Array of block explorers
 - `infoURL`: Information URL
 - `sources`: Array of data sources that provided this chain's data
+- `status`: Chain status - defaults to `"active"` when not present in any data source
+- `tags`: Array of tags (e.g., "Testnet", "L2", "Beacon")
+- `relations`: Array of relations to other chains
+  - Each relation contains: `kind`, `network` (network ID), optionally `chainId` (resolved chain ID), and `source` (data source)
+  - Relation kinds: `testnetOf`, `l2Of`, `beaconOf`
+  - Relation sources: `theGraph`, `chains`, `chainlist`
+  - **chains.json relations**: When `slip44 === 1`, finds mainnet by matching `chain` field value with chains where `slip44 !== 1`
+  - **chainlist relations**: When `slip44 === 1` or `isTestnet === true`, finds mainnet by matching `tvl` field value with chains where `isTestnet === false`
+    - Note: `tvl` matching is based on chainlist data structure; this field may represent a chain identifier rather than Total Value Locked in some contexts
 - `theGraph`: The Graph specific data (if available)
   - `id`: The Graph network identifier
   - `fullName`: Full network name
