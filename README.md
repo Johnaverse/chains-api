@@ -235,6 +235,7 @@ Each chain object contains:
   - Relation sources: `theGraph`, `chains`, `chainlist`
   - **chains.json relations**: When `slip44 === 1`, finds mainnet by matching `chain` field value with chains where `slip44 !== 1`
   - **chainlist relations**: When `slip44 === 1` or `isTestnet === true`, finds mainnet by matching `tvl` field value with chains where `isTestnet === false`
+    - Note: `tvl` matching is based on chainlist data structure; this field may represent a chain identifier rather than Total Value Locked in some contexts
 - `theGraph`: The Graph specific data (if available)
   - `id`: The Graph network identifier
   - `fullName`: Full network name
