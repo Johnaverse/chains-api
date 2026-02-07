@@ -14,6 +14,10 @@ A Node.js API query service built with Fastify that indexes and provides access 
 - **Indexed Data**: Efficient querying with indexed chain data
 - **Search Capabilities**: Search chains by name, ID, or other attributes
 - **RESTful Endpoints**: Clean and intuitive API design
+- **Chain Relations & Tags**: Automatic indexing of chain relationships and tags
+  - Tags: `Testnet`, `L2`, `Beacon`
+  - Relations: `testnetOf`, `l2Of`, `beaconOf` with resolved chain IDs
+  - Example: Base Sepolia (84532) is tagged as `Testnet` and `L2`, with relations to Base (8453) and Sepolia (11155111)
 
 ## Installation
 
@@ -73,6 +77,11 @@ Health check and data status.
 
 ### `GET /chains`
 Get all indexed chains.
+
+**Query Parameters:**
+- `tag` (optional): Filter chains by tag (e.g., `Testnet`, `L2`, `Beacon`)
+
+**Example:** `GET /chains?tag=Testnet`
 
 **Response:**
 ```json
@@ -195,6 +204,10 @@ Each chain object contains:
 - `explorers`: Array of block explorers
 - `infoURL`: Information URL
 - `sources`: Array of data sources that provided this chain's data
+- `tags`: Array of tags (e.g., "Testnet", "L2", "Beacon")
+- `relations`: Array of relations to other chains
+  - Each relation contains: `kind`, `network` (network ID), and optionally `chainId` (resolved chain ID)
+  - Relation kinds: `testnetOf`, `l2Of`, `beaconOf`
 - `theGraph`: The Graph specific data (if available)
   - `id`: The Graph network identifier
   - `fullName`: Full network name

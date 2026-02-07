@@ -25,7 +25,14 @@ fastify.get('/health', async (request, reply) => {
  * Get all chains
  */
 fastify.get('/chains', async (request, reply) => {
-  const chains = getAllChains();
+  const { tag } = request.query;
+  let chains = getAllChains();
+  
+  // Filter by tag if provided
+  if (tag) {
+    chains = chains.filter(chain => chain.tags && chain.tags.includes(tag));
+  }
+  
   return {
     count: chains.length,
     chains
@@ -148,7 +155,7 @@ fastify.get('/', async (request, reply) => {
     description: 'API query service for blockchain chain data from multiple sources',
     endpoints: {
       '/health': 'Health check and data status',
-      '/chains': 'Get all chains',
+      '/chains': 'Get all chains (optional ?tag=Testnet|L2|Beacon)',
       '/chains/:id': 'Get chain by ID',
       '/search?q={query}': 'Search chains by name or ID',
       '/sources': 'Get data sources status',
