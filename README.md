@@ -91,6 +91,29 @@ Get all indexed chains.
 }
 ```
 
+**Example Response (with tags and relations):**
+```json
+{
+  "chainId": 84532,
+  "name": "Base Sepolia Testnet",
+  "tags": ["Testnet", "L2"],
+  "relations": [
+    {
+      "kind": "testnetOf",
+      "network": "base",
+      "chainId": 8453
+    },
+    {
+      "kind": "l2Of",
+      "network": "sepolia",
+      "chainId": 11155111
+    }
+  ],
+  "sources": ["theGraph"],
+  ...
+}
+```
+
 ### `GET /chains/:id`
 Get a specific chain by its chain ID.
 
