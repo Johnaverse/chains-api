@@ -361,7 +361,8 @@ function indexData(theGraph, chainlist, chains, slip44) {
             const relationData = {
               kind,
               network: targetNetworkId,
-              ...(targetChainId !== undefined && { chainId: targetChainId })
+              ...(targetChainId !== undefined && { chainId: targetChainId }),
+              source: 'theGraph'
             };
             
             indexed.byChainId[chainId].relations.push(relationData);
