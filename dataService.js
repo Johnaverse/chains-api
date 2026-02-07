@@ -168,7 +168,8 @@ function indexData(theGraph, chainlist, chains, slip44) {
         if (!indexed.byChainId[chainId]) {
           indexed.byChainId[chainId] = {
             chainId,
-            name: network.fullName || network.shortName || network.id,
+            // Use fullName for display, fallback to shortName, then id (The Graph network identifier)
+            name: network.fullName || network.shortName || network.id || 'Unknown',
             shortName: network.shortName,
             nativeCurrency: { symbol: network.nativeToken },
             rpc: network.rpcUrls || [],
@@ -179,8 +180,11 @@ function indexData(theGraph, chainlist, chains, slip44) {
           if (!indexed.byChainId[chainId].sources.includes('theGraph')) {
             indexed.byChainId[chainId].sources.push('theGraph');
           }
-          // Merge RPC URLs
+          // Merge RPC URLs - ensure rpc array exists
           if (network.rpcUrls && Array.isArray(network.rpcUrls)) {
+            if (!indexed.byChainId[chainId].rpc) {
+              indexed.byChainId[chainId].rpc = [];
+            }
             const existingRpcs = new Set(indexed.byChainId[chainId].rpc);
             network.rpcUrls.forEach(rpc => {
               if (!existingRpcs.has(rpc)) {
