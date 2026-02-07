@@ -227,7 +227,7 @@ Each chain object contains:
 - `explorers`: Array of block explorers
 - `infoURL`: Information URL
 - `sources`: Array of data sources that provided this chain's data
-- `status`: Chain status (if available from data sources)
+- `status`: Chain status - defaults to `"active"` when not present in any data source
 - `tags`: Array of tags (e.g., "Testnet", "L2", "Beacon")
 - `relations`: Array of relations to other chains
   - Each relation contains: `kind`, `network` (network ID), optionally `chainId` (resolved chain ID), and `source` (data source)
