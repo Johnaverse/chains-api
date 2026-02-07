@@ -7,7 +7,7 @@ A Node.js API query service built with Fastify that indexes and provides access 
 - **Multi-Source Data Aggregation**: Combines data from multiple blockchain registries:
   - [The Graph Networks Registry](https://raw.githubusercontent.com/Johnaverse/networks-registry/refs/heads/main/public/TheGraphNetworksRegistry.json)
   - [Chainlist RPCs](https://chainlist.org/rpcs.json)
-  - [Chain ID Network](https://chainid.network/chains.json)
+  - [Chain ID Network](https://chainid.network/chains.json) (for basic chain data only, not for relation indexing)
   - [SLIP-0044 Coin Types](https://github.com/satoshilabs/slips/blob/master/slip-0044.md)
 
 - **Fast API**: Built with Fastify for high performance
@@ -16,8 +16,9 @@ A Node.js API query service built with Fastify that indexes and provides access 
 - **RESTful Endpoints**: Clean and intuitive API design
 - **Chain Relations & Tags**: Automatic indexing of chain relationships and tags
   - Tags: `Testnet`, `L2`, `Beacon`
-  - Relations: `testnetOf`, `l2Of`, `beaconOf` with resolved chain IDs
+  - Relations: `testnetOf`, `mainnetOf`, `l2Of`, `parentOf`, `beaconOf` with resolved chain IDs
   - Example: Base Sepolia (84532) is tagged as `Testnet` and `L2`, with relations to Base (8453) and Sepolia (11155111)
+  - Reverse relations: Mainnets have `mainnetOf` relations pointing to testnets, L1s have `parentOf` relations pointing to L2s
 
 ## Installation
 
@@ -231,9 +232,11 @@ Each chain object contains:
 - `tags`: Array of tags (e.g., "Testnet", "L2", "Beacon")
 - `relations`: Array of relations to other chains
   - Each relation contains: `kind`, `network` (network ID), optionally `chainId` (resolved chain ID), and `source` (data source)
-  - Relation kinds: `testnetOf`, `l2Of`, `beaconOf`
-  - Relation sources: `theGraph`, `chains`, `chainlist`
-  - **chains.json relations**: When `slip44 === 1`, finds mainnet by matching `chain` field value with chains where `slip44 !== 1`
+  - Relation kinds: `testnetOf`, `mainnetOf`, `l2Of`, `parentOf`, `beaconOf`
+  - Relation sources: `theGraph`, `chainlist`
+  - **Reverse relations**: After all relations are indexed, reverse relations are automatically created:
+    - `mainnetOf`: Added to mainnets pointing to their testnets (reverse of `testnetOf`)
+    - `parentOf`: Added to L1 chains pointing to their L2 chains (reverse of `l2Of`)
   - **chainlist relations**: When `slip44 === 1` or `isTestnet === true`, finds mainnet by matching `tvl` field value with chains where `isTestnet === false`
     - Note: `tvl` matching is based on chainlist data structure; this field may represent a chain identifier rather than Total Value Locked in some contexts
 - `theGraph`: The Graph specific data (if available)
