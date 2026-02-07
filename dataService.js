@@ -153,7 +153,7 @@ function indexData(theGraph, chainlist, chains, slip44) {
             sources: ['chains'],
             tags: [],
             relations: [],
-            status: chain.status // Add status field
+            status: chain.status || 'active' // Default to 'active' if not present
           };
         }
         
@@ -218,7 +218,7 @@ function indexData(theGraph, chainlist, chains, slip44) {
           sources: ['chainlist'],
           tags: [],
           relations: [],
-          status: chainData.status // Add status field from chainlist
+          status: chainData.status || 'active' // Default to 'active' if not present
         };
       } else {
         // Merge RPC data
@@ -314,7 +314,8 @@ function indexData(theGraph, chainlist, chains, slip44) {
             explorers: network.explorerUrls || [],
             sources: ['theGraph'],
             tags: [],
-            relations: []
+            relations: [],
+            status: 'active' // Default to 'active' for The Graph chains
           };
         } else {
           if (!indexed.byChainId[chainId].sources.includes('theGraph')) {
@@ -428,6 +429,14 @@ function indexData(theGraph, chainlist, chains, slip44) {
       }
     });
   }
+  
+  // Set default status to "active" for chains without status
+  Object.keys(indexed.byChainId).forEach(chainId => {
+    const chain = indexed.byChainId[chainId];
+    if (!chain.status) {
+      chain.status = 'active';
+    }
+  });
   
   // Build all chains array
   indexed.all = Object.values(indexed.byChainId);
