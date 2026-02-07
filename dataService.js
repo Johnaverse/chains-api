@@ -152,7 +152,8 @@ function indexData(theGraph, chainlist, chains, slip44) {
             infoURL: chain.infoURL,
             sources: ['chains'],
             tags: [],
-            relations: []
+            relations: [],
+            status: chain.status // Add status field
           };
         }
         
@@ -170,6 +171,39 @@ function indexData(theGraph, chainlist, chains, slip44) {
         indexed.byName[nameLower].push(chainId);
       }
     });
+    
+    // Second pass: Find mainnet relations for testnets from chains.json
+    // When slip44 === 1, find other chains with same "chain" value but slip44 !== 1
+    chains.forEach(testnetChain => {
+      if (testnetChain.slip44 === 1 && testnetChain.chain && testnetChain.chainId !== undefined) {
+        // Find mainnet with same "chain" value but slip44 !== 1
+        const mainnetChain = chains.find(c => 
+          c.chain === testnetChain.chain && 
+          c.slip44 !== 1 && 
+          c.chainId !== undefined &&
+          c.chainId !== testnetChain.chainId
+        );
+        
+        if (mainnetChain && indexed.byChainId[testnetChain.chainId]) {
+          // Add testnetOf relation
+          const relation = {
+            kind: 'testnetOf',
+            network: mainnetChain.name,
+            chainId: mainnetChain.chainId,
+            source: 'chains'
+          };
+          
+          // Check if relation doesn't already exist
+          const existingRelation = indexed.byChainId[testnetChain.chainId].relations.find(
+            r => r.kind === 'testnetOf' && r.chainId === mainnetChain.chainId
+          );
+          
+          if (!existingRelation) {
+            indexed.byChainId[testnetChain.chainId].relations.push(relation);
+          }
+        }
+      }
+    });
   }
   
   // Merge chainlist RPC data
@@ -183,7 +217,8 @@ function indexData(theGraph, chainlist, chains, slip44) {
           rpc: chainData.rpc || [],
           sources: ['chainlist'],
           tags: [],
-          relations: []
+          relations: [],
+          status: chainData.status // Add status field from chainlist
         };
       } else {
         // Merge RPC data
@@ -197,6 +232,54 @@ function indexData(theGraph, chainlist, chains, slip44) {
         }
         if (!indexed.byChainId[chainId].sources.includes('chainlist')) {
           indexed.byChainId[chainId].sources.push('chainlist');
+        }
+        // Merge status if not already present
+        if (chainData.status && !indexed.byChainId[chainId].status) {
+          indexed.byChainId[chainId].status = chainData.status;
+        }
+      }
+      
+      // Check for testnet based on slip44 and isTestnet flag
+      if ((chainData.slip44 === 1 || chainData.isTestnet === true) && indexed.byChainId[chainId]) {
+        if (!indexed.byChainId[chainId].tags.includes('Testnet')) {
+          indexed.byChainId[chainId].tags.push('Testnet');
+        }
+      }
+    });
+    
+    // Second pass: Find mainnet relations for testnets from chainlist
+    // Use tvl value and isTestnet flag
+    Object.keys(chainlist).forEach(testnetChainId => {
+      const testnetData = chainlist[testnetChainId];
+      
+      // Check if it's a testnet
+      if ((testnetData.slip44 === 1 || testnetData.isTestnet === true) && testnetData.tvl !== undefined) {
+        // Find mainnet with same tvl but isTestnet: false
+        const mainnetEntry = Object.entries(chainlist).find(([mainnetChainId, mainnetData]) => {
+          return mainnetData.tvl === testnetData.tvl &&
+                 mainnetData.isTestnet === false &&
+                 mainnetChainId !== testnetChainId;
+        });
+        
+        if (mainnetEntry && indexed.byChainId[testnetChainId]) {
+          const [mainnetChainId, mainnetData] = mainnetEntry;
+          
+          // Add testnetOf relation
+          const relation = {
+            kind: 'testnetOf',
+            network: mainnetData.name,
+            chainId: parseInt(mainnetChainId),
+            source: 'chainlist'
+          };
+          
+          // Check if relation doesn't already exist
+          const existingRelation = indexed.byChainId[testnetChainId].relations.find(
+            r => r.kind === 'testnetOf' && r.chainId === parseInt(mainnetChainId)
+          );
+          
+          if (!existingRelation) {
+            indexed.byChainId[testnetChainId].relations.push(relation);
+          }
         }
       }
     });

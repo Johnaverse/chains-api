@@ -227,10 +227,14 @@ Each chain object contains:
 - `explorers`: Array of block explorers
 - `infoURL`: Information URL
 - `sources`: Array of data sources that provided this chain's data
+- `status`: Chain status (if available from data sources)
 - `tags`: Array of tags (e.g., "Testnet", "L2", "Beacon")
 - `relations`: Array of relations to other chains
-  - Each relation contains: `kind`, `network` (network ID), and optionally `chainId` (resolved chain ID)
+  - Each relation contains: `kind`, `network` (network ID), optionally `chainId` (resolved chain ID), and `source` (data source)
   - Relation kinds: `testnetOf`, `l2Of`, `beaconOf`
+  - Relation sources: `theGraph`, `chains`, `chainlist`
+  - **chains.json relations**: When `slip44 === 1`, finds mainnet by matching `chain` field value with chains where `slip44 !== 1`
+  - **chainlist relations**: When `slip44 === 1` or `isTestnet === true`, finds mainnet by matching `tvl` field value with chains where `isTestnet === false`
 - `theGraph`: The Graph specific data (if available)
   - `id`: The Graph network identifier
   - `fullName`: Full network name
