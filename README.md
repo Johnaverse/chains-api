@@ -330,7 +330,7 @@ This endpoint analyzes the chain data and identifies potential inconsistencies o
 
 1. **Rule 1 - Relation Conflicts**: Assumes graph relations are always true and finds conflicts with other sources
 2. **Rule 2 - slip44/Testnet Mismatch**: Chains with slip44=1 but isTestnet=false
-3. **Rule 3 - Name/Tag Mismatch**: Chain full names containing "Testnet" or "Denver" but not tagged as Testnet
+3. **Rule 3 - Name/Tag Mismatch**: Chain full names containing "Testnet" or "Devnet" but not tagged as Testnet
 4. **Rule 4 - Sepolia/Hoodie Networks**: Chains containing "sepolia" or "hoodie" keywords but not identifying as L2 or having no relations
 5. **Rule 5 - Status Conflicts**: Deprecated status conflicts across different sources
 6. **Rule 6 - Goerli Deprecation**: Chains containing "Goerli" keyword but not marked as deprecated

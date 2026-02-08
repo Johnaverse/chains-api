@@ -943,18 +943,17 @@ export function validateChainData() {
       });
     }
     
-    // Rule 3: Chain full name includes "Testnet" or "Denver" but identifying as Mainnet
-    // Note: "Denver" is as specified in requirements (may refer to development networks)
+    // Rule 3: Chain full name includes "Testnet" or "Devnet" but identifying as Mainnet
     const fullName = chain.theGraph?.fullName || chain.name || '';
     const nameLower = fullName.toLowerCase();
     
-    if ((nameLower.includes('testnet') || nameLower.includes('denver')) && !chain.tags.includes('Testnet')) {
+    if ((nameLower.includes('testnet') || nameLower.includes('devnet')) && !chain.tags.includes('Testnet')) {
       errors.push({
         rule: 3,
         chainId: chainId,
         chainName: chain.name,
         type: 'name_testnet_mismatch',
-        message: `Chain ${chainId} (${chain.name}) has "Testnet" or "Denver" in full name "${fullName}" but not tagged as Testnet`,
+        message: `Chain ${chainId} (${chain.name}) has "Testnet" or "Devnet" in full name "${fullName}" but not tagged as Testnet`,
         fullName: fullName,
         tags: chain.tags
       });
