@@ -215,12 +215,19 @@ function indexData(theGraph, chainlist, chains, slip44) {
   }
   
   // Merge chainlist RPC data
-  if (chainlist) {
-    Object.keys(chainlist).forEach(chainId => {
-      const chainData = chainlist[chainId];
+  // chainlist is an array of chain objects, each with chainId, name, rpc, etc.
+  if (chainlist && Array.isArray(chainlist)) {
+    chainlist.forEach(chainData => {
+      const chainId = chainData.chainId;
+      
+      // Skip if chainId is not valid
+      if (chainId === undefined || chainId === null || isNaN(chainId)) {
+        return;
+      }
+      
       if (!indexed.byChainId[chainId]) {
         indexed.byChainId[chainId] = {
-          chainId: parseInt(chainId),
+          chainId: Number(chainId),
           name: chainData.name,
           rpc: chainData.rpc || [],
           sources: ['chainlist'],
@@ -231,10 +238,23 @@ function indexData(theGraph, chainlist, chains, slip44) {
       } else {
         // Merge RPC data
         if (chainData.rpc && Array.isArray(chainData.rpc)) {
-          const existingRpcs = new Set(indexed.byChainId[chainId].rpc);
+          if (!indexed.byChainId[chainId].rpc) {
+            indexed.byChainId[chainId].rpc = [];
+          }
+          
+          // Build a set of existing RPCs for comparison
+          // Need to handle both string and object formats
+          const existingRpcUrls = new Set();
+          indexed.byChainId[chainId].rpc.forEach(rpc => {
+            const url = typeof rpc === 'string' ? rpc : rpc.url;
+            if (url) existingRpcUrls.add(url);
+          });
+          
           chainData.rpc.forEach(rpc => {
-            if (!existingRpcs.has(rpc)) {
+            const url = typeof rpc === 'string' ? rpc : rpc.url;
+            if (url && !existingRpcUrls.has(url)) {
               indexed.byChainId[chainId].rpc.push(rpc);
+              existingRpcUrls.add(url);
             }
           });
         }
@@ -257,32 +277,37 @@ function indexData(theGraph, chainlist, chains, slip44) {
     
     // Second pass: Find mainnet relations for testnets from chainlist
     // Use tvl value and isTestnet flag
-    Object.keys(chainlist).forEach(testnetChainId => {
-      const testnetData = chainlist[testnetChainId];
+    chainlist.forEach(testnetData => {
+      const testnetChainId = testnetData.chainId;
+      
+      // Skip if chainId is not valid (reusing same validation logic)
+      if (testnetChainId === undefined || testnetChainId === null || isNaN(testnetChainId)) {
+        return;
+      }
       
       // Check if it's a testnet
       if ((testnetData.slip44 === 1 || testnetData.isTestnet === true) && testnetData.tvl !== undefined) {
         // Find mainnet with same tvl but isTestnet: false
-        const mainnetEntry = Object.entries(chainlist).find(([mainnetChainId, mainnetData]) => {
-          return mainnetData.tvl === testnetData.tvl &&
-                 mainnetData.isTestnet === false &&
-                 mainnetChainId !== testnetChainId;
+        const mainnetData = chainlist.find(chain => {
+          return chain.tvl === testnetData.tvl &&
+                 chain.isTestnet === false &&
+                 chain.chainId !== testnetChainId;
         });
         
-        if (mainnetEntry && indexed.byChainId[testnetChainId]) {
-          const [mainnetChainId, mainnetData] = mainnetEntry;
+        if (mainnetData && indexed.byChainId[testnetChainId]) {
+          const mainnetChainId = mainnetData.chainId;
           
           // Add testnetOf relation
           const relation = {
             kind: 'testnetOf',
             network: mainnetData.name,
-            chainId: parseInt(mainnetChainId),
+            chainId: Number(mainnetChainId),
             source: 'chainlist'
           };
           
           // Check if relation doesn't already exist
           const existingRelation = indexed.byChainId[testnetChainId].relations.find(
-            r => r.kind === 'testnetOf' && r.chainId === parseInt(mainnetChainId)
+            r => r.kind === 'testnetOf' && r.chainId === Number(mainnetChainId)
           );
           
           if (!existingRelation) {
@@ -334,10 +359,20 @@ function indexData(theGraph, chainlist, chains, slip44) {
             if (!indexed.byChainId[chainId].rpc) {
               indexed.byChainId[chainId].rpc = [];
             }
-            const existingRpcs = new Set(indexed.byChainId[chainId].rpc);
+            
+            // Build a set of existing RPC URLs for comparison
+            // Need to handle both string and object formats
+            const existingRpcUrls = new Set();
+            indexed.byChainId[chainId].rpc.forEach(rpc => {
+              const url = typeof rpc === 'string' ? rpc : rpc.url;
+              if (url) existingRpcUrls.add(url);
+            });
+            
             network.rpcUrls.forEach(rpc => {
-              if (!existingRpcs.has(rpc)) {
+              const url = typeof rpc === 'string' ? rpc : rpc.url;
+              if (url && !existingRpcUrls.has(url)) {
                 indexed.byChainId[chainId].rpc.push(rpc);
+                existingRpcUrls.add(url);
               }
             });
           }
