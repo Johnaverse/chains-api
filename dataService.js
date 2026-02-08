@@ -220,14 +220,14 @@ function indexData(theGraph, chainlist, chains, slip44) {
     chainlist.forEach(chainData => {
       const chainId = chainData.chainId;
       
-      // Skip if chainId is not defined
-      if (chainId === undefined || chainId === null) {
+      // Skip if chainId is not valid
+      if (chainId === undefined || chainId === null || isNaN(chainId)) {
         return;
       }
       
       if (!indexed.byChainId[chainId]) {
         indexed.byChainId[chainId] = {
-          chainId: parseInt(chainId),
+          chainId: Number(chainId),
           name: chainData.name,
           rpc: chainData.rpc || [],
           sources: ['chainlist'],
@@ -280,8 +280,8 @@ function indexData(theGraph, chainlist, chains, slip44) {
     chainlist.forEach(testnetData => {
       const testnetChainId = testnetData.chainId;
       
-      // Skip if chainId is not defined
-      if (testnetChainId === undefined || testnetChainId === null) {
+      // Skip if chainId is not valid (reusing same validation logic)
+      if (testnetChainId === undefined || testnetChainId === null || isNaN(testnetChainId)) {
         return;
       }
       
@@ -301,13 +301,13 @@ function indexData(theGraph, chainlist, chains, slip44) {
           const relation = {
             kind: 'testnetOf',
             network: mainnetData.name,
-            chainId: parseInt(mainnetChainId),
+            chainId: Number(mainnetChainId),
             source: 'chainlist'
           };
           
           // Check if relation doesn't already exist
           const existingRelation = indexed.byChainId[testnetChainId].relations.find(
-            r => r.kind === 'testnetOf' && r.chainId === parseInt(mainnetChainId)
+            r => r.kind === 'testnetOf' && r.chainId === Number(mainnetChainId)
           );
           
           if (!existingRelation) {
