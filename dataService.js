@@ -553,3 +553,49 @@ export function getAllChains() {
   
   return cachedData.indexed.all;
 }
+
+/**
+ * Get all relations from all chains
+ */
+export function getAllRelations() {
+  if (!cachedData.indexed) {
+    return [];
+  }
+  
+  const allRelations = [];
+  
+  cachedData.indexed.all.forEach(chain => {
+    if (chain.relations && Array.isArray(chain.relations) && chain.relations.length > 0) {
+      chain.relations.forEach(relation => {
+        allRelations.push({
+          chainId: chain.chainId,
+          chainName: chain.name,
+          ...relation
+        });
+      });
+    }
+  });
+  
+  return allRelations;
+}
+
+/**
+ * Get relations for a specific chain by ID
+ */
+export function getRelationsById(chainId) {
+  if (!cachedData.indexed) {
+    return null;
+  }
+  
+  const chain = cachedData.indexed.byChainId[chainId];
+  
+  if (!chain) {
+    return null;
+  }
+  
+  return {
+    chainId: chain.chainId,
+    chainName: chain.name,
+    relations: chain.relations || []
+  };
+}

@@ -1,5 +1,5 @@
 import Fastify from 'fastify';
-import { loadData, getCachedData, searchChains, getChainById, getAllChains } from './dataService.js';
+import { loadData, getCachedData, searchChains, getChainById, getAllChains, getAllRelations, getRelationsById } from './dataService.js';
 
 const fastify = Fastify({
   logger: true
@@ -75,6 +75,37 @@ fastify.get('/search', async (request, reply) => {
     count: results.length,
     results
   };
+});
+
+/**
+ * Get all chain relations
+ */
+fastify.get('/relations', async (request, reply) => {
+  const relations = getAllRelations();
+  
+  return {
+    count: relations.length,
+    relations
+  };
+});
+
+/**
+ * Get relations for a specific chain by ID
+ */
+fastify.get('/relations/:id', async (request, reply) => {
+  const chainId = parseInt(request.params.id);
+  
+  if (isNaN(chainId)) {
+    return reply.code(400).send({ error: 'Invalid chain ID' });
+  }
+  
+  const result = getRelationsById(chainId);
+  
+  if (!result) {
+    return reply.code(404).send({ error: 'Chain not found' });
+  }
+  
+  return result;
 });
 
 /**
@@ -158,6 +189,8 @@ fastify.get('/', async (request, reply) => {
       '/chains': 'Get all chains (optional ?tag=Testnet|L2|Beacon)',
       '/chains/:id': 'Get chain by ID',
       '/search?q={query}': 'Search chains by name or ID',
+      '/relations': 'Get all chain relations data',
+      '/relations/:id': 'Get relations for a specific chain by ID',
       '/sources': 'Get data sources status',
       '/slip44': 'Get all SLIP-0044 coin types as JSON',
       '/slip44/:coinType': 'Get specific SLIP-0044 coin type by ID',
