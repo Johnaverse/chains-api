@@ -83,10 +83,7 @@ fastify.get('/search', async (request, reply) => {
 fastify.get('/relations', async (request, reply) => {
   const relations = getAllRelations();
   
-  return {
-    count: relations.length,
-    relations
-  };
+  return relations;
 });
 
 /**
