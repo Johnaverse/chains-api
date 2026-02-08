@@ -92,45 +92,62 @@ Get all indexed chains.
 }
 ```
 
-**Example Response (with tags and relations):**
+**Example Chain Object:**
 ```json
 {
-  "chainId": 84532,
-  "name": "Base Sepolia Testnet",
+  "chainId": 80002,
+  "name": "Amoy",
+  "shortName": "polygonamoy",
+  "theGraph-id": "polygon-amoy",
+  "fullName": "Polygon Amoy Testnet",
+  "caip2Id": "eip155:80002",
+  "aliases": ["amoy-testnet", "amoy"],
+  "nativeCurrency": {
+    "name": "POL",
+    "symbol": "POL",
+    "decimals": 18
+  },
+  "explorers": [ ... ],
+  "infoURL": "https://polygon.technology/",
+  "sources": ["chains", "theGraph"],
   "tags": ["Testnet", "L2"],
-  "relations": [
-    {
-      "kind": "testnetOf",
-      "network": "base",
-      "chainId": 8453
-    },
-    {
-      "kind": "l2Of",
-      "network": "sepolia",
-      "chainId": 11155111
-    }
-  ],
-  "sources": ["theGraph"],
-  ...
+  "status": "active"
 }
 ```
+
+**Note:** Chain info no longer includes `rpc` or `relations` fields. Use `/endpoints/:id` for RPC endpoints and `/relations/:id` for chain relations.
 
 ### `GET /chains/:id`
 Get a specific chain by its chain ID.
 
-**Example:** `GET /chains/1` (Ethereum Mainnet)
+**Example:** `GET /chains/80002` (Amoy)
 
 **Response:**
 ```json
 {
-  "chainId": 1,
-  "name": "Ethereum Mainnet",
-  "shortName": "eth",
-  "network": "mainnet",
-  "nativeCurrency": { ... },
-  "rpc": [ ... ],
-  "explorers": [ ... ],
-  "sources": ["chains", "chainlist", "theGraph"]
+  "chainId": 80002,
+  "name": "Amoy",
+  "shortName": "polygonamoy",
+  "theGraph-id": "polygon-amoy",
+  "fullName": "Polygon Amoy Testnet",
+  "caip2Id": "eip155:80002",
+  "aliases": ["amoy-testnet", "amoy"],
+  "nativeCurrency": {
+    "name": "POL",
+    "symbol": "POL",
+    "decimals": 18
+  },
+  "explorers": [
+    {
+      "name": "polygonscan-amoy",
+      "url": "https://amoy.polygonscan.com",
+      "standard": "EIP3091"
+    }
+  ],
+  "infoURL": "https://polygon.technology/",
+  "sources": ["chains", "theGraph"],
+  "tags": ["Testnet", "L2"],
+  "status": "active"
 }
 ```
 
@@ -145,6 +162,97 @@ Search chains by name or ID.
   "query": "ethereum",
   "count": 15,
   "results": [ ... ]
+}
+```
+
+### `GET /endpoints`
+Get endpoints (RPC, firehose, substreams) for all chains.
+
+**Response:**
+```json
+{
+  "count": 4236,
+  "endpoints": [
+    {
+      "chainId": 80002,
+      "name": "Amoy",
+      "rpc": [
+        "https://rpc-amoy.polygon.technology",
+        "https://polygon-amoy-bor-rpc.publicnode.com",
+        ...
+      ],
+      "firehose": [
+        "amoy.firehose.pinax.network:443"
+      ],
+      "substreams": [
+        "amoy.substreams.pinax.network:443"
+      ]
+    },
+    ...
+  ]
+}
+```
+
+### `GET /endpoints/:id`
+Get endpoints (RPC, firehose, substreams) for a specific chain by ID.
+
+**Example:** `GET /endpoints/80002` (Amoy)
+
+**Response:**
+```json
+{
+  "chainId": 80002,
+  "name": "Amoy",
+  "rpc": [
+    "https://rpc-amoy.polygon.technology",
+    "https://polygon-amoy-bor-rpc.publicnode.com",
+    "wss://polygon-amoy-bor-rpc.publicnode.com",
+    "https://amoy.rpc.service.pinax.network"
+  ],
+  "firehose": [
+    "amoy.firehose.pinax.network:443"
+  ],
+  "substreams": [
+    "amoy.substreams.pinax.network:443"
+  ]
+}
+```
+
+### `GET /relations`
+Get all chain relations data.
+
+**Response:**
+```json
+{
+  "count": 123,
+  "relations": [ ... ]
+}
+```
+
+### `GET /relations/:id`
+Get relations for a specific chain by ID.
+
+**Example:** `GET /relations/80002`
+
+**Response:**
+```json
+{
+  "chainId": 80002,
+  "chainName": "Amoy",
+  "relations": [
+    {
+      "kind": "testnetOf",
+      "network": "matic",
+      "chainId": 137,
+      "source": "theGraph"
+    },
+    {
+      "kind": "l2Of",
+      "network": "sepolia",
+      "chainId": 11155111,
+      "source": "theGraph"
+    }
+  ]
 }
 ```
 
@@ -217,19 +325,41 @@ Reload data from all sources.
 
 ## Data Structure
 
-Each chain object contains:
+### Chain Object (from `/chains` endpoints)
+
+Each chain object returned from `/chains` and `/chains/:id` contains:
 
 - `chainId`: The chain ID (extracted from caip2Id for The Graph data)
 - `name`: Full name of the chain
 - `shortName`: Short name/symbol
-- `network`: Network type (mainnet, testnet, etc.)
+- `theGraph-id`: The Graph network identifier (if available from The Graph)
+- `fullName`: Full network name (if available from The Graph)
+- `caip2Id`: CAIP-2 identifier, e.g., "eip155:1" (if available from The Graph)
+- `aliases`: Alternative names array (if available from The Graph)
 - `nativeCurrency`: Native currency information
-- `rpc`: Array of RPC endpoints
 - `explorers`: Array of block explorers
 - `infoURL`: Information URL
 - `sources`: Array of data sources that provided this chain's data
 - `status`: Chain status - defaults to `"active"` when not present in any data source
 - `tags`: Array of tags (e.g., "Testnet", "L2", "Beacon")
+
+**Note:** Chain objects no longer include `rpc` or `relations` fields. Use `/endpoints/:id` for RPC endpoints and `/relations/:id` for relations.
+
+### Endpoints Object (from `/endpoints` endpoints)
+
+Each endpoints object returned from `/endpoints` and `/endpoints/:id` contains:
+
+- `chainId`: The chain ID
+- `name`: Chain name
+- `rpc`: Array of RPC endpoints (strings or objects with url and metadata)
+- `firehose`: Array of The Graph firehose endpoints (if available)
+- `substreams`: Array of The Graph substreams endpoints (if available)
+
+### Relations Object (from `/relations/:id` endpoint)
+
+Relations data contains:
+- `chainId`: The chain ID
+- `chainName`: Chain name
 - `relations`: Array of relations to other chains
   - Each relation contains: `kind`, `network` (network ID), optionally `chainId` (resolved chain ID), and `source` (data source)
   - Relation kinds: `testnetOf`, `mainnetOf`, `l2Of`, `parentOf`, `beaconOf`
@@ -241,15 +371,6 @@ Each chain object contains:
     - Note: `tvl` matching is based on chainlist data structure; this field may represent a chain identifier rather than Total Value Locked in some contexts
   - **chains.json relations**: When `parent.type === "L2"`, creates `l2Of` relation using parent chain ID extracted from `parent.chain` field (format: `eip155-<chainId>`)
     - Example: Mode Testnet (919) has `parent: { type: "L2", chain: "eip155-11155111" }`, creating a `l2Of` relation to Sepolia (11155111)
-- `theGraph`: The Graph specific data (if available)
-  - `id`: The Graph network identifier
-  - `fullName`: Full network name
-  - `caip2Id`: CAIP-2 identifier (e.g., "eip155:1")
-  - `aliases`: Alternative names
-  - `networkType`: Network type
-  - `services`: The Graph services (firehose, substreams, etc.)
-  - `nativeToken`: Native token symbol
-- `slip44Info`: SLIP-0044 coin type information (if available)
 
 ## SLIP-0044 Data Structure
 
