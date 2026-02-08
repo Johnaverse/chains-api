@@ -688,7 +688,7 @@ export function getAllChains() {
 
 /**
  * Get all relations from all chains
- * Returns relations with composite keys: parentChainId-childChainId
+ * Returns relations with nested structure: { parentChainId: { childChainId: {...} } }
  */
 export function getAllRelations() {
   if (!cachedData.indexed) {
@@ -730,10 +730,17 @@ export function getAllRelations() {
             parentName = parentChain ? parentChain.name : relation.network;
           }
           
-          // Create key using composite parentChainId-childChainId
-          const key = `${parentChainId}-${childChainId}`;
+          // Use nested structure: parentChainId -> childChainId -> relation data
+          const parentKey = String(parentChainId);
+          const childKey = String(childChainId);
           
-          allRelations[key] = {
+          // Initialize parent entry if it doesn't exist
+          if (!allRelations[parentKey]) {
+            allRelations[parentKey] = {};
+          }
+          
+          // Store relation under child chainId within parent's object
+          allRelations[parentKey][childKey] = {
             parentName,
             kind,
             childName,
