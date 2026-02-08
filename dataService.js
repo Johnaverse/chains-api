@@ -944,6 +944,7 @@ export function validateChainData() {
     }
     
     // Rule 3: Chain full name includes "Testnet" or "Denver" but identifying as Mainnet
+    // Note: "Denver" is as specified in requirements (may refer to development networks)
     const fullName = chain.theGraph?.fullName || chain.name || '';
     const nameLower = fullName.toLowerCase();
     
