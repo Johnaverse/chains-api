@@ -549,8 +549,9 @@ export function searchChains(query) {
   // Search by chain ID (exact match)
   if (!isNaN(query)) {
     const chainId = parseInt(query);
-    if (cachedData.indexed.byChainId[chainId]) {
-      results.push(cachedData.indexed.byChainId[chainId]);
+    const chain = getChainById(chainId);
+    if (chain) {
+      results.push(chain);
     }
   }
   
@@ -558,12 +559,12 @@ export function searchChains(query) {
   cachedData.indexed.all.forEach(chain => {
     if (chain.name && chain.name.toLowerCase().includes(queryLower)) {
       if (!results.find(r => r.chainId === chain.chainId)) {
-        results.push(chain);
+        results.push(getChainById(chain.chainId));
       }
     }
     if (chain.shortName && chain.shortName.toLowerCase().includes(queryLower)) {
       if (!results.find(r => r.chainId === chain.chainId)) {
-        results.push(chain);
+        results.push(getChainById(chain.chainId));
       }
     }
   });
@@ -572,9 +573,9 @@ export function searchChains(query) {
 }
 
 /**
- * Get chain by ID
+ * Get chain by ID (returns full data including rpc, relations, theGraph)
  */
-export function getChainById(chainId) {
+function getChainByIdRaw(chainId) {
   if (!cachedData.indexed) {
     return null;
   }
@@ -583,14 +584,71 @@ export function getChainById(chainId) {
 }
 
 /**
- * Get all chains
+ * Transform chain to API format (without rpc, relations, and with flattened theGraph fields)
+ */
+function transformChain(chain) {
+  if (!chain) {
+    return null;
+  }
+  
+  // Create transformed chain object
+  const transformedChain = {
+    chainId: chain.chainId,
+    name: chain.name,
+    shortName: chain.shortName,
+  };
+  
+  // Add theGraph fields if available
+  if (chain.theGraph) {
+    transformedChain['theGraph-id'] = chain.theGraph.id;
+    transformedChain.fullName = chain.theGraph.fullName;
+    transformedChain.caip2Id = chain.theGraph.caip2Id;
+    if (chain.theGraph.aliases) {
+      transformedChain.aliases = chain.theGraph.aliases;
+    }
+  }
+  
+  // Add other fields
+  if (chain.nativeCurrency) {
+    transformedChain.nativeCurrency = chain.nativeCurrency;
+  }
+  if (chain.explorers) {
+    transformedChain.explorers = chain.explorers;
+  }
+  if (chain.infoURL) {
+    transformedChain.infoURL = chain.infoURL;
+  }
+  if (chain.sources) {
+    transformedChain.sources = chain.sources;
+  }
+  if (chain.tags) {
+    transformedChain.tags = chain.tags;
+  }
+  if (chain.status) {
+    transformedChain.status = chain.status;
+  }
+  
+  return transformedChain;
+}
+
+/**
+ * Get chain by ID (transformed format without rpc, relations, and with flattened theGraph fields)
+ */
+export function getChainById(chainId) {
+  const chain = getChainByIdRaw(chainId);
+  return transformChain(chain);
+}
+
+/**
+ * Get all chains (transformed format without rpc, relations, and with flattened theGraph fields)
  */
 export function getAllChains() {
   if (!cachedData.indexed) {
     return [];
   }
   
-  return cachedData.indexed.all;
+  // Transform all chains using the helper function
+  return cachedData.indexed.all.map(transformChain);
 }
 
 /**
@@ -637,4 +695,52 @@ export function getRelationsById(chainId) {
     chainName: chain.name,
     relations: chain.relations || []
   };
+}
+
+/**
+ * Extract endpoints from a chain (helper function)
+ */
+function extractEndpoints(chain) {
+  if (!chain) {
+    return null;
+  }
+  
+  const endpoints = {
+    chainId: chain.chainId,
+    name: chain.name,
+    rpc: chain.rpc || [],
+    firehose: [],
+    substreams: []
+  };
+  
+  // Extract firehose and substreams from theGraph services
+  if (chain.theGraph && chain.theGraph.services) {
+    if (chain.theGraph.services.firehose) {
+      endpoints.firehose = chain.theGraph.services.firehose;
+    }
+    if (chain.theGraph.services.substreams) {
+      endpoints.substreams = chain.theGraph.services.substreams;
+    }
+  }
+  
+  return endpoints;
+}
+
+/**
+ * Get endpoints for a specific chain by ID
+ */
+export function getEndpointsById(chainId) {
+  const chain = getChainByIdRaw(chainId);
+  return extractEndpoints(chain);
+}
+
+/**
+ * Get endpoints for all chains
+ */
+export function getAllEndpoints() {
+  if (!cachedData.indexed) {
+    return [];
+  }
+  
+  return cachedData.indexed.all.map(extractEndpoints);
 }

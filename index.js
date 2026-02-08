@@ -1,5 +1,5 @@
 import Fastify from 'fastify';
-import { loadData, getCachedData, searchChains, getChainById, getAllChains, getAllRelations, getRelationsById } from './dataService.js';
+import { loadData, getCachedData, searchChains, getChainById, getAllChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints } from './dataService.js';
 
 const fastify = Fastify({
   logger: true
@@ -109,6 +109,37 @@ fastify.get('/relations/:id', async (request, reply) => {
 });
 
 /**
+ * Get all endpoints
+ */
+fastify.get('/endpoints', async (request, reply) => {
+  const endpoints = getAllEndpoints();
+  
+  return {
+    count: endpoints.length,
+    endpoints
+  };
+});
+
+/**
+ * Get endpoints for a specific chain by ID
+ */
+fastify.get('/endpoints/:id', async (request, reply) => {
+  const chainId = parseInt(request.params.id);
+  
+  if (isNaN(chainId)) {
+    return reply.code(400).send({ error: 'Invalid chain ID' });
+  }
+  
+  const result = getEndpointsById(chainId);
+  
+  if (!result) {
+    return reply.code(404).send({ error: 'Chain not found' });
+  }
+  
+  return result;
+});
+
+/**
  * Get raw data sources
  */
 fastify.get('/sources', async (request, reply) => {
@@ -191,6 +222,8 @@ fastify.get('/', async (request, reply) => {
       '/search?q={query}': 'Search chains by name or ID',
       '/relations': 'Get all chain relations data',
       '/relations/:id': 'Get relations for a specific chain by ID',
+      '/endpoints': 'Get all chain endpoints (RPC, firehose, substreams)',
+      '/endpoints/:id': 'Get endpoints for a specific chain by ID',
       '/sources': 'Get data sources status',
       '/slip44': 'Get all SLIP-0044 coin types as JSON',
       '/slip44/:coinType': 'Get specific SLIP-0044 coin type by ID',
