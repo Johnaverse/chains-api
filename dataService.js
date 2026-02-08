@@ -697,7 +697,7 @@ export function getAllRelations() {
   
   const allRelations = {};
   
-  // Allowed relation kinds
+  // Allowed relation kinds (parentOf will be renamed to l1Of in the output)
   const allowedKinds = ['l2Of', 'parentOf', 'testnetOf', 'mainnetOf'];
   
   cachedData.indexed.all.forEach(chain => {
