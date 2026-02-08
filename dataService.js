@@ -688,22 +688,66 @@ export function getAllChains() {
 
 /**
  * Get all relations from all chains
+ * Returns relations with nested structure: { parentChainId: { childChainId: {...} } }
  */
 export function getAllRelations() {
   if (!cachedData.indexed) {
-    return [];
+    return {};
   }
   
-  const allRelations = [];
+  const allRelations = {};
+  
+  // Allowed relation kinds (parentOf will be renamed to l1Of in the output)
+  const allowedKinds = ['l2Of', 'parentOf', 'testnetOf', 'mainnetOf'];
   
   cachedData.indexed.all.forEach(chain => {
     if (chain.relations && Array.isArray(chain.relations) && chain.relations.length > 0) {
       chain.relations.forEach(relation => {
-        allRelations.push({
-          chainId: chain.chainId,
-          chainName: chain.name,
-          ...relation
-        });
+        // Only include allowed relation kinds and those with chainId
+        if (allowedKinds.includes(relation.kind) && relation.chainId !== undefined) {
+          let parentChainId, childChainId, parentName, childName;
+          
+          // Rename parentOf to l1Of
+          let kind = relation.kind;
+          if (kind === 'parentOf') {
+            kind = 'l1Of';
+          }
+          
+          // Determine parent and child based on relation type
+          if (kind === 'l1Of' || kind === 'mainnetOf') {
+            // For l1Of (parentOf) and mainnetOf: the chain having the relation is the parent
+            parentChainId = chain.chainId;
+            childChainId = relation.chainId;
+            parentName = chain.name;
+            const childChain = cachedData.indexed.byChainId[childChainId];
+            childName = childChain ? childChain.name : relation.network;
+          } else {
+            // For l2Of and testnetOf: the chain having the relation is the child
+            childChainId = chain.chainId;
+            parentChainId = relation.chainId;
+            childName = chain.name;
+            const parentChain = cachedData.indexed.byChainId[parentChainId];
+            parentName = parentChain ? parentChain.name : relation.network;
+          }
+          
+          // Use nested structure: parentChainId -> childChainId -> relation data
+          const parentKey = String(parentChainId);
+          const childKey = String(childChainId);
+          
+          // Initialize parent entry if it doesn't exist
+          if (!allRelations[parentKey]) {
+            allRelations[parentKey] = {};
+          }
+          
+          // Store relation under child chainId within parent's object
+          allRelations[parentKey][childKey] = {
+            parentName,
+            kind,
+            childName,
+            chainId: childChainId,
+            source: relation.source
+          };
+        }
       });
     }
   });
