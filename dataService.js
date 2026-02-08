@@ -172,7 +172,46 @@ function indexData(theGraph, chainlist, chains, slip44) {
       }
     });
     
-    // chains.json no longer used for testnet and l2Of relation indexing
+    // Process L2 relations from parent field in chains.json
+    chains.forEach(chain => {
+      const chainId = chain.chainId;
+      
+      // Check for L2 parent relation
+      if (chainId !== undefined && chain.parent && chain.parent.type === 'L2') {
+        // Extract parent chain ID from format like "eip155-11155111"
+        if (chain.parent.chain) {
+          const match = chain.parent.chain.match(/^eip155-(\d+)$/);
+          if (match) {
+            const parentChainId = parseInt(match[1]);
+            
+            // Ensure the chain exists in indexed data
+            if (indexed.byChainId[chainId]) {
+              // Add L2 tag
+              if (!indexed.byChainId[chainId].tags.includes('L2')) {
+                indexed.byChainId[chainId].tags.push('L2');
+              }
+              
+              // Add l2Of relation
+              const relation = {
+                kind: 'l2Of',
+                network: chain.parent.chain,
+                chainId: parentChainId,
+                source: 'chains'
+              };
+              
+              // Check if relation doesn't already exist
+              const existingRelation = indexed.byChainId[chainId].relations.find(
+                r => r.kind === 'l2Of' && r.chainId === parentChainId
+              );
+              
+              if (!existingRelation) {
+                indexed.byChainId[chainId].relations.push(relation);
+              }
+            }
+          }
+        }
+      }
+    });
   }
   
   // Merge chainlist RPC data

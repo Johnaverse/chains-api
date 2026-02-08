@@ -7,7 +7,7 @@ A Node.js API query service built with Fastify that indexes and provides access 
 - **Multi-Source Data Aggregation**: Combines data from multiple blockchain registries:
   - [The Graph Networks Registry](https://raw.githubusercontent.com/Johnaverse/networks-registry/refs/heads/main/public/TheGraphNetworksRegistry.json)
   - [Chainlist RPCs](https://chainlist.org/rpcs.json)
-  - [Chain ID Network](https://chainid.network/chains.json) (for basic chain data only, not for relation indexing)
+  - [Chain ID Network](https://chainid.network/chains.json) (for basic chain data and L2 relation indexing using parent field)
   - [SLIP-0044 Coin Types](https://github.com/satoshilabs/slips/blob/master/slip-0044.md)
 
 - **Fast API**: Built with Fastify for high performance
@@ -233,12 +233,14 @@ Each chain object contains:
 - `relations`: Array of relations to other chains
   - Each relation contains: `kind`, `network` (network ID), optionally `chainId` (resolved chain ID), and `source` (data source)
   - Relation kinds: `testnetOf`, `mainnetOf`, `l2Of`, `parentOf`, `beaconOf`
-  - Relation sources: `theGraph`, `chainlist`
+  - Relation sources: `theGraph`, `chainlist`, `chains`
   - **Reverse relations**: After all relations are indexed, reverse relations are automatically created:
     - `mainnetOf`: Added to mainnets pointing to their testnets (reverse of `testnetOf`)
     - `parentOf`: Added to L1 chains pointing to their L2 chains (reverse of `l2Of`)
   - **chainlist relations**: When `slip44 === 1` or `isTestnet === true`, finds mainnet by matching `tvl` field value with chains where `isTestnet === false`
     - Note: `tvl` matching is based on chainlist data structure; this field may represent a chain identifier rather than Total Value Locked in some contexts
+  - **chains.json relations**: When `parent.type === "L2"`, creates `l2Of` relation using parent chain ID extracted from `parent.chain` field (format: `eip155-<chainId>`)
+    - Example: Mode Testnet (919) has `parent: { type: "L2", chain: "eip155-11155111" }`, creating a `l2Of` relation to Sepolia (11155111)
 - `theGraph`: The Graph specific data (if available)
   - `id`: The Graph network identifier
   - `fullName`: Full network name
