@@ -584,10 +584,9 @@ function getChainByIdRaw(chainId) {
 }
 
 /**
- * Get chain by ID (transformed format without rpc, relations, and with flattened theGraph fields)
+ * Transform chain to API format (without rpc, relations, and with flattened theGraph fields)
  */
-export function getChainById(chainId) {
-  const chain = getChainByIdRaw(chainId);
+function transformChain(chain) {
   if (!chain) {
     return null;
   }
@@ -633,6 +632,14 @@ export function getChainById(chainId) {
 }
 
 /**
+ * Get chain by ID (transformed format without rpc, relations, and with flattened theGraph fields)
+ */
+export function getChainById(chainId) {
+  const chain = getChainByIdRaw(chainId);
+  return transformChain(chain);
+}
+
+/**
  * Get all chains (transformed format without rpc, relations, and with flattened theGraph fields)
  */
 export function getAllChains() {
@@ -640,46 +647,8 @@ export function getAllChains() {
     return [];
   }
   
-  // Transform all chains
-  return cachedData.indexed.all.map(chain => {
-    const transformedChain = {
-      chainId: chain.chainId,
-      name: chain.name,
-      shortName: chain.shortName,
-    };
-    
-    // Add theGraph fields if available
-    if (chain.theGraph) {
-      transformedChain['theGraph-id'] = chain.theGraph.id;
-      transformedChain.fullName = chain.theGraph.fullName;
-      transformedChain.caip2Id = chain.theGraph.caip2Id;
-      if (chain.theGraph.aliases) {
-        transformedChain.aliases = chain.theGraph.aliases;
-      }
-    }
-    
-    // Add other fields
-    if (chain.nativeCurrency) {
-      transformedChain.nativeCurrency = chain.nativeCurrency;
-    }
-    if (chain.explorers) {
-      transformedChain.explorers = chain.explorers;
-    }
-    if (chain.infoURL) {
-      transformedChain.infoURL = chain.infoURL;
-    }
-    if (chain.sources) {
-      transformedChain.sources = chain.sources;
-    }
-    if (chain.tags) {
-      transformedChain.tags = chain.tags;
-    }
-    if (chain.status) {
-      transformedChain.status = chain.status;
-    }
-    
-    return transformedChain;
-  });
+  // Transform all chains using the helper function
+  return cachedData.indexed.all.map(transformChain);
 }
 
 /**
@@ -729,11 +698,9 @@ export function getRelationsById(chainId) {
 }
 
 /**
- * Get endpoints for a specific chain by ID
+ * Extract endpoints from a chain (helper function)
  */
-export function getEndpointsById(chainId) {
-  const chain = getChainByIdRaw(chainId);
-  
+function extractEndpoints(chain) {
   if (!chain) {
     return null;
   }
@@ -760,6 +727,14 @@ export function getEndpointsById(chainId) {
 }
 
 /**
+ * Get endpoints for a specific chain by ID
+ */
+export function getEndpointsById(chainId) {
+  const chain = getChainByIdRaw(chainId);
+  return extractEndpoints(chain);
+}
+
+/**
  * Get endpoints for all chains
  */
 export function getAllEndpoints() {
@@ -767,25 +742,5 @@ export function getAllEndpoints() {
     return [];
   }
   
-  return cachedData.indexed.all.map(chain => {
-    const endpoints = {
-      chainId: chain.chainId,
-      name: chain.name,
-      rpc: chain.rpc || [],
-      firehose: [],
-      substreams: []
-    };
-    
-    // Extract firehose and substreams from theGraph services
-    if (chain.theGraph && chain.theGraph.services) {
-      if (chain.theGraph.services.firehose) {
-        endpoints.firehose = chain.theGraph.services.firehose;
-      }
-      if (chain.theGraph.services.substreams) {
-        endpoints.substreams = chain.theGraph.services.substreams;
-      }
-    }
-    
-    return endpoints;
-  });
+  return cachedData.indexed.all.map(extractEndpoints);
 }
