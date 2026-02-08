@@ -823,3 +823,228 @@ export function getAllEndpoints() {
   
   return cachedData.indexed.all.map(extractEndpoints);
 }
+
+/**
+ * Validate chain data for potential human errors
+ * Returns an object with validation results categorized by error type
+ */
+export function validateChainData() {
+  if (!cachedData.indexed || !cachedData.theGraph || !cachedData.chainlist || !cachedData.chains) {
+    return {
+      error: 'Data not loaded. Please reload data sources first.',
+      errors: []
+    };
+  }
+
+  const errors = [];
+  
+  // Helper function to get chain from different sources
+  const getChainFromSource = (chainId, source) => {
+    if (source === 'theGraph') {
+      return cachedData.theGraph.networks?.find(n => {
+        if (n.caip2Id) {
+          const match = n.caip2Id.match(/^eip155:(\d+)$/);
+          return match && parseInt(match[1]) === chainId;
+        }
+        return false;
+      });
+    } else if (source === 'chainlist') {
+      return cachedData.chainlist?.find(c => c.chainId === chainId);
+    } else if (source === 'chains') {
+      return cachedData.chains?.find(c => c.chainId === chainId);
+    }
+    return null;
+  };
+
+  // Build network ID to chain ID map for relation checking
+  const networkIdToChainId = buildNetworkIdToChainIdMap(cachedData.theGraph);
+
+  // Iterate through all indexed chains
+  Object.values(cachedData.indexed.byChainId).forEach(chain => {
+    const chainId = chain.chainId;
+    
+    // Rule 1: Conflicts between graph relations and other sources
+    // Assume graph relations are always true, check if other sources conflict
+    if (chain.relations && chain.relations.length > 0) {
+      const graphRelations = chain.relations.filter(r => r.source === 'theGraph');
+      
+      graphRelations.forEach(graphRel => {
+        // Check testnetOf relation
+        if (graphRel.kind === 'testnetOf' && graphRel.chainId) {
+          // Check if chain is marked as Testnet
+          if (!chain.tags.includes('Testnet')) {
+            errors.push({
+              rule: 1,
+              chainId: chainId,
+              chainName: chain.name,
+              type: 'relation_tag_conflict',
+              message: `Chain ${chainId} (${chain.name}) has testnetOf relation but is not tagged as Testnet`,
+              graphRelation: graphRel
+            });
+          }
+          
+          // Check if other sources have conflicting data
+          const chainlistChain = getChainFromSource(chainId, 'chainlist');
+          if (chainlistChain && chainlistChain.isTestnet === false) {
+            errors.push({
+              rule: 1,
+              chainId: chainId,
+              chainName: chain.name,
+              type: 'relation_source_conflict',
+              message: `Chain ${chainId} (${chain.name}) has testnetOf relation in theGraph but isTestnet=false in chainlist`,
+              graphRelation: graphRel,
+              chainlistData: { isTestnet: chainlistChain.isTestnet }
+            });
+          }
+        }
+        
+        // Check l2Of relation
+        if (graphRel.kind === 'l2Of' && graphRel.chainId) {
+          // Check if chain is marked as L2
+          if (!chain.tags.includes('L2')) {
+            errors.push({
+              rule: 1,
+              chainId: chainId,
+              chainName: chain.name,
+              type: 'relation_tag_conflict',
+              message: `Chain ${chainId} (${chain.name}) has l2Of relation but is not tagged as L2`,
+              graphRelation: graphRel
+            });
+          }
+        }
+      });
+    }
+    
+    // Rule 2: slip44 = 1 but isTestnet = false
+    const chainlistChain = getChainFromSource(chainId, 'chainlist');
+    const chainsChain = getChainFromSource(chainId, 'chains');
+    
+    if (chainlistChain && chainlistChain.slip44 === 1 && chainlistChain.isTestnet === false) {
+      errors.push({
+        rule: 2,
+        chainId: chainId,
+        chainName: chain.name,
+        type: 'slip44_testnet_mismatch',
+        message: `Chain ${chainId} (${chain.name}) has slip44=1 (testnet indicator) but isTestnet=false in chainlist`,
+        slip44: chainlistChain.slip44,
+        isTestnet: chainlistChain.isTestnet
+      });
+    }
+    
+    if (chainsChain && chainsChain.slip44 === 1 && !chain.tags.includes('Testnet')) {
+      errors.push({
+        rule: 2,
+        chainId: chainId,
+        chainName: chain.name,
+        type: 'slip44_testnet_mismatch',
+        message: `Chain ${chainId} (${chain.name}) has slip44=1 (testnet indicator) in chains.json but not tagged as Testnet`,
+        slip44: chainsChain.slip44,
+        tags: chain.tags
+      });
+    }
+    
+    // Rule 3: Chain full name includes "Testnet" or "Devnet" but identifying as Mainnet
+    const fullName = chain.theGraph?.fullName || chain.name || '';
+    const nameLower = fullName.toLowerCase();
+    
+    if ((nameLower.includes('testnet') || nameLower.includes('devnet')) && !chain.tags.includes('Testnet')) {
+      errors.push({
+        rule: 3,
+        chainId: chainId,
+        chainName: chain.name,
+        type: 'name_testnet_mismatch',
+        message: `Chain ${chainId} (${chain.name}) has "Testnet" or "Devnet" in full name "${fullName}" but not tagged as Testnet`,
+        fullName: fullName,
+        tags: chain.tags
+      });
+    }
+    
+    // Rule 4: Chain name contains "sepolia" or "hoodie" but not identifying as L2 or no relations with other networks
+    if (nameLower.includes('sepolia') || nameLower.includes('hoodie')) {
+      const hasL2Tag = chain.tags.includes('L2');
+      const hasRelations = chain.relations && chain.relations.length > 0;
+      
+      if (!hasL2Tag && !hasRelations) {
+        errors.push({
+          rule: 4,
+          chainId: chainId,
+          chainName: chain.name,
+          type: 'sepolia_hoodie_no_l2_or_relations',
+          message: `Chain ${chainId} (${chain.name}) contains "sepolia" or "hoodie" but not tagged as L2 and has no relations`,
+          fullName: fullName,
+          tags: chain.tags,
+          relations: chain.relations
+        });
+      }
+    }
+    
+    // Rule 5: Status "deprecated" conflicts in different sources
+    const statuses = [];
+    
+    if (chainlistChain && chainlistChain.status) {
+      statuses.push({ source: 'chainlist', status: chainlistChain.status });
+    }
+    if (chainsChain && chainsChain.status) {
+      statuses.push({ source: 'chains', status: chainsChain.status });
+    }
+    
+    // Check for conflicts
+    const deprecatedInSources = statuses.filter(s => s.status === 'deprecated');
+    const activeInSources = statuses.filter(s => s.status === 'active');
+    
+    if (deprecatedInSources.length > 0 && activeInSources.length > 0) {
+      errors.push({
+        rule: 5,
+        chainId: chainId,
+        chainName: chain.name,
+        type: 'status_conflict',
+        message: `Chain ${chainId} (${chain.name}) has conflicting status across sources`,
+        statuses: statuses
+      });
+    }
+    
+    // Rule 6: Chains containing "Goerli" not marked as deprecated
+    if (nameLower.includes('goerli')) {
+      const isDeprecated = chain.status === 'deprecated' || 
+                          (chainlistChain && chainlistChain.status === 'deprecated') ||
+                          (chainsChain && chainsChain.status === 'deprecated');
+      
+      if (!isDeprecated) {
+        errors.push({
+          rule: 6,
+          chainId: chainId,
+          chainName: chain.name,
+          type: 'goerli_not_deprecated',
+          message: `Chain ${chainId} (${chain.name}) contains "Goerli" but is not marked as deprecated`,
+          fullName: fullName,
+          status: chain.status,
+          statusInSources: statuses
+        });
+      }
+    }
+  });
+  
+  // Group errors by rule
+  const errorsByRule = {
+    rule1_relation_conflicts: errors.filter(e => e.rule === 1),
+    rule2_slip44_testnet_mismatch: errors.filter(e => e.rule === 2),
+    rule3_name_testnet_mismatch: errors.filter(e => e.rule === 3),
+    rule4_sepolia_hoodie_issues: errors.filter(e => e.rule === 4),
+    rule5_status_conflicts: errors.filter(e => e.rule === 5),
+    rule6_goerli_not_deprecated: errors.filter(e => e.rule === 6)
+  };
+  
+  return {
+    totalErrors: errors.length,
+    errorsByRule: errorsByRule,
+    summary: {
+      rule1: errorsByRule.rule1_relation_conflicts.length,
+      rule2: errorsByRule.rule2_slip44_testnet_mismatch.length,
+      rule3: errorsByRule.rule3_name_testnet_mismatch.length,
+      rule4: errorsByRule.rule4_sepolia_hoodie_issues.length,
+      rule5: errorsByRule.rule5_status_conflicts.length,
+      rule6: errorsByRule.rule6_goerli_not_deprecated.length
+    },
+    allErrors: errors
+  };
+}

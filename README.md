@@ -323,6 +323,56 @@ Reload data from all sources.
 }
 ```
 
+### `GET /validate`
+Validate chain data for potential human errors across all three data sources.
+
+This endpoint analyzes the chain data and identifies potential inconsistencies or errors based on the following rules:
+
+1. **Rule 1 - Relation Conflicts**: Assumes graph relations are always true and finds conflicts with other sources
+2. **Rule 2 - slip44/Testnet Mismatch**: Chains with slip44=1 but isTestnet=false
+3. **Rule 3 - Name/Tag Mismatch**: Chain full names containing "Testnet" or "Devnet" but not tagged as Testnet
+4. **Rule 4 - Sepolia/Hoodie Networks**: Chains containing "sepolia" or "hoodie" keywords but not identifying as L2 or having no relations
+5. **Rule 5 - Status Conflicts**: Deprecated status conflicts across different sources
+6. **Rule 6 - Goerli Deprecation**: Chains containing "Goerli" keyword but not marked as deprecated
+
+**Response:**
+```json
+{
+  "totalErrors": 85,
+  "summary": {
+    "rule1": 3,
+    "rule2": 57,
+    "rule3": 16,
+    "rule4": 1,
+    "rule5": 1,
+    "rule6": 7
+  },
+  "errorsByRule": {
+    "rule1_relation_conflicts": [...],
+    "rule2_slip44_testnet_mismatch": [...],
+    "rule3_name_testnet_mismatch": [...],
+    "rule4_sepolia_hoodie_issues": [...],
+    "rule5_status_conflicts": [...],
+    "rule6_goerli_not_deprecated": [...]
+  },
+  "allErrors": [...]
+}
+```
+
+**Example Error Object:**
+```json
+{
+  "rule": 6,
+  "chainId": 5,
+  "chainName": "Goerli",
+  "type": "goerli_not_deprecated",
+  "message": "Chain 5 (Goerli) contains \"Goerli\" but is not marked as deprecated",
+  "fullName": "Goerli",
+  "status": "active",
+  "statusInSources": []
+}
+```
+
 ## Data Structure
 
 ### Chain Object (from `/chains` endpoints)

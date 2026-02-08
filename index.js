@@ -1,5 +1,5 @@
 import Fastify from 'fastify';
-import { loadData, getCachedData, searchChains, getChainById, getAllChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints } from './dataService.js';
+import { loadData, getCachedData, searchChains, getChainById, getAllChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints, validateChainData } from './dataService.js';
 
 const fastify = Fastify({
   logger: true
@@ -205,6 +205,14 @@ fastify.post('/reload', async (request, reply) => {
 });
 
 /**
+ * Validate chain data for potential human errors
+ */
+fastify.get('/validate', async (request, reply) => {
+  const validationResults = validateChainData();
+  return validationResults;
+});
+
+/**
  * Root endpoint with API information
  */
 fastify.get('/', async (request, reply) => {
@@ -224,6 +232,7 @@ fastify.get('/', async (request, reply) => {
       '/sources': 'Get data sources status',
       '/slip44': 'Get all SLIP-0044 coin types as JSON',
       '/slip44/:coinType': 'Get specific SLIP-0044 coin type by ID',
+      '/validate': 'Validate chain data for potential human errors',
       '/reload': 'Reload data from sources (POST)'
     },
     dataSources: [
