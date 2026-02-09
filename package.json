@@ -28,6 +28,7 @@
   "homepage": "https://github.com/Johnaverse/chains-api#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.26.0",
+    "@octokit/rest": "^22.0.1",
     "express": "^5.2.1",
     "fastify": "^5.7.4",
     "node-fetch": "^3.3.2"

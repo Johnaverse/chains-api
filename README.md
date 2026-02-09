@@ -153,6 +153,9 @@ Each tool returns JSON data that can be used by AI assistants to answer question
 - `HOST`: REST API server host (default: 0.0.0.0)
 - `MCP_PORT`: MCP HTTP server port (default: 3001)
 - `MCP_HOST`: MCP HTTP server host (default: 0.0.0.0)
+- `GITHUB_TOKEN`: GitHub Personal Access Token for creating issues (required for `/validate/create-issues` endpoint, needs `repo` or `public_repo` scope)
+- `GITHUB_OWNER`: GitHub repository owner (default: Johnaverse)
+- `GITHUB_REPO`: GitHub repository name (default: chains-api)
 
 ## API Endpoints
 
@@ -479,6 +482,59 @@ This endpoint analyzes the chain data and identifies potential inconsistencies o
   "statusInSources": []
 }
 ```
+
+### `POST /validate/create-issues`
+Create GitHub issues for each relation conflict found in the validation results.
+
+This endpoint creates a GitHub issue for each relation conflict (Rule 1) detected by the `/validate` endpoint. Each issue includes detailed information about the conflict, including the chain ID, name, the conflicting relation from The Graph, and the conflicting data from other sources.
+
+**Prerequisites:**
+- `GITHUB_TOKEN` environment variable must be set with a GitHub Personal Access Token that has `repo` or `public_repo` scope
+- Optional: `GITHUB_OWNER` (default: "Johnaverse") and `GITHUB_REPO` (default: "chains-api")
+
+**Response (Success):**
+```json
+{
+  "message": "Successfully created 3 issues for relation conflicts",
+  "totalConflicts": 3,
+  "issuesCreated": 3,
+  "issues": [
+    {
+      "chainId": 1287,
+      "chainName": "Moonbase Alpha",
+      "issueNumber": 123,
+      "issueUrl": "https://github.com/Johnaverse/chains-api/issues/123"
+    }
+  ]
+}
+```
+
+**Response (No Conflicts):**
+```json
+{
+  "message": "No relation conflicts found",
+  "issuesCreated": 0
+}
+```
+
+**Response (Error - No Token):**
+```json
+{
+  "error": "GITHUB_TOKEN environment variable is not set",
+  "message": "Please set GITHUB_TOKEN to create issues"
+}
+```
+
+**Created Issue Format:**
+
+Each created issue will have:
+- **Title:** `[Data Validation] Relation conflict for chain <chainId> (<chainName>)`
+- **Labels:** `data-validation`, `relation-conflict`, `automated`
+- **Body:** Detailed information about the conflict including:
+  - Chain ID and name
+  - Conflict type
+  - The Graph relation details
+  - Conflicting data from other sources
 
 ## Data Structure
 

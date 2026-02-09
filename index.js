@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import { loadData, getCachedData, searchChains, getChainById, getAllChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints, validateChainData } from './dataService.js';
+import { Octokit } from '@octokit/rest';
 
 const fastify = Fastify({
   logger: true
@@ -213,6 +214,108 @@ fastify.get('/validate', async (request, reply) => {
 });
 
 /**
+ * Create GitHub issues for each relation conflict from validation results
+ */
+fastify.post('/validate/create-issues', async (request, reply) => {
+  const githubToken = process.env.GITHUB_TOKEN;
+  const githubOwner = process.env.GITHUB_OWNER || 'Johnaverse';
+  const githubRepo = process.env.GITHUB_REPO || 'chains-api';
+
+  if (!githubToken) {
+    return reply.code(400).send({ 
+      error: 'GITHUB_TOKEN environment variable is not set',
+      message: 'Please set GITHUB_TOKEN to create issues'
+    });
+  }
+
+  try {
+    const octokit = new Octokit({ auth: githubToken });
+    const validationResults = validateChainData();
+    
+    if (!validationResults.errorsByRule || !validationResults.errorsByRule.rule1_relation_conflicts) {
+      return {
+        message: 'No relation conflicts found',
+        issuesCreated: 0
+      };
+    }
+
+    const relationConflicts = validationResults.errorsByRule.rule1_relation_conflicts;
+    
+    if (relationConflicts.length === 0) {
+      return {
+        message: 'No relation conflicts found',
+        issuesCreated: 0
+      };
+    }
+
+    const createdIssues = [];
+
+    for (const conflict of relationConflicts) {
+      // Create a detailed issue title
+      const title = `[Data Validation] Relation conflict for chain ${conflict.chainId} (${conflict.chainName})`;
+      
+      // Create a detailed issue body
+      let body = `## Relation Conflict Detected\n\n`;
+      body += `**Chain ID:** ${conflict.chainId}\n`;
+      body += `**Chain Name:** ${conflict.chainName}\n`;
+      body += `**Conflict Type:** ${conflict.type}\n`;
+      body += `**Message:** ${conflict.message}\n\n`;
+      
+      if (conflict.graphRelation) {
+        body += `### The Graph Relation\n`;
+        body += `- **Kind:** ${conflict.graphRelation.kind}\n`;
+        body += `- **Network:** ${conflict.graphRelation.network}\n`;
+        if (conflict.graphRelation.chainId) {
+          body += `- **Chain ID:** ${conflict.graphRelation.chainId}\n`;
+        }
+        body += `- **Source:** ${conflict.graphRelation.source}\n\n`;
+      }
+      
+      if (conflict.chainlistData) {
+        body += `### Chainlist Data\n`;
+        body += `- **isTestnet:** ${conflict.chainlistData.isTestnet}\n\n`;
+      }
+      
+      body += `---\n`;
+      body += `This issue was automatically created by the data validation system.\n`;
+      body += `Rule: Rule 1 - Relation Conflicts\n`;
+
+      try {
+        const issue = await octokit.rest.issues.create({
+          owner: githubOwner,
+          repo: githubRepo,
+          title: title,
+          body: body,
+          labels: ['data-validation', 'relation-conflict', 'automated']
+        });
+
+        createdIssues.push({
+          chainId: conflict.chainId,
+          chainName: conflict.chainName,
+          issueNumber: issue.data.number,
+          issueUrl: issue.data.html_url
+        });
+      } catch (error) {
+        fastify.log.error(`Failed to create issue for chain ${conflict.chainId}: ${error.message}`);
+      }
+    }
+
+    return {
+      message: `Successfully created ${createdIssues.length} issues for relation conflicts`,
+      totalConflicts: relationConflicts.length,
+      issuesCreated: createdIssues.length,
+      issues: createdIssues
+    };
+  } catch (error) {
+    fastify.log.error('Error creating issues:', error);
+    return reply.code(500).send({ 
+      error: 'Failed to create issues',
+      message: error.message 
+    });
+  }
+});
+
+/**
  * Root endpoint with API information
  */
 fastify.get('/', async (request, reply) => {
@@ -233,6 +336,7 @@ fastify.get('/', async (request, reply) => {
       '/slip44': 'Get all SLIP-0044 coin types as JSON',
       '/slip44/:coinType': 'Get specific SLIP-0044 coin type by ID',
       '/validate': 'Validate chain data for potential human errors',
+      '/validate/create-issues': 'Create GitHub issues for relation conflicts (POST)',
       '/reload': 'Reload data from sources (POST)'
     },
     dataSources: [
