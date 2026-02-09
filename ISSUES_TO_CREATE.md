@@ -1,6 +1,8 @@
 # GitHub Issues to Create for Relation Conflicts
 
-Based on the `/validate` endpoint results, the following GitHub issues should be created:
+**⚠️ ACTION REQUIRED**: Please create these 3 GitHub issues manually.
+
+Based on the `/validate` endpoint results, the following GitHub issues need to be created in the repository:
 
 ---
 
