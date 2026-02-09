@@ -47,9 +47,14 @@ npm run dev
 
 ### MCP Server (for AI Assistants)
 
-The Chains API can also be used as an MCP (Model Context Protocol) server, allowing AI assistants like Claude to query blockchain chain data directly.
+The Chains API can also be used as an MCP (Model Context Protocol) server, allowing AI assistants like Claude to query blockchain chain data directly. Two transport modes are supported:
 
-#### Running the MCP Server
+1. **Stdio Mode** (for local AI assistants like Claude Desktop)
+2. **HTTP Mode** (for external clients like n8n, Make.com, etc.)
+
+#### Running the MCP Server (Stdio Mode)
+
+For local use with Claude Desktop and similar applications:
 
 ```bash
 npm run mcp
@@ -61,7 +66,46 @@ Or directly with Node.js:
 node mcp-server.js
 ```
 
-#### MCP Server Configuration
+#### Running the MCP HTTP Server (Network Mode)
+
+For external clients that need HTTP access:
+
+```bash
+npm run mcp:http
+```
+
+Or directly with Node.js:
+
+```bash
+node mcp-server-http.js
+```
+
+The HTTP server will start on `http://0.0.0.0:3001` by default (configurable via `MCP_PORT` and `MCP_HOST` environment variables).
+
+**Endpoints:**
+- `POST /mcp` - MCP protocol endpoint for tool calls
+- `DELETE /mcp` - Session termination endpoint
+- `GET /health` - Health check
+- `GET /` - Server information
+
+**Example HTTP MCP usage with curl:**
+
+```bash
+# Initialize a session
+curl -X POST http://localhost:3001/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"my-client","version":"1.0.0"}}}'
+
+# Extract session ID from the mcp-session-id header, then call a tool:
+curl -X POST http://localhost:3001/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "mcp-session-id: <session-id>" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_chain_by_id","arguments":{"chainId":1}}}'
+```
+
+#### MCP Server Configuration (Stdio Mode)
 
 To use the Chains API MCP server with Claude Desktop or other MCP clients, add it to your MCP settings configuration file:
 
@@ -105,8 +149,10 @@ Each tool returns JSON data that can be used by AI assistants to answer question
 
 ## Environment Variables
 
-- `PORT`: Server port (default: 3000)
-- `HOST`: Server host (default: 0.0.0.0)
+- `PORT`: REST API server port (default: 3000)
+- `HOST`: REST API server host (default: 0.0.0.0)
+- `MCP_PORT`: MCP HTTP server port (default: 3001)
+- `MCP_HOST`: MCP HTTP server host (default: 0.0.0.0)
 
 ## API Endpoints
 
