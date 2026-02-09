@@ -1,6 +1,6 @@
 # Chains API
 
-A Node.js API query service built with Fastify that indexes and provides access to blockchain chain data from multiple sources.
+A Node.js API query service built with Fastify that indexes and provides access to blockchain chain data from multiple sources. Also available as an MCP (Model Context Protocol) server for AI assistants.
 
 ## Features
 
@@ -11,6 +11,7 @@ A Node.js API query service built with Fastify that indexes and provides access 
   - [SLIP-0044 Coin Types](https://github.com/satoshilabs/slips/blob/master/slip-0044.md)
 
 - **Fast API**: Built with Fastify for high performance
+- **MCP Server**: Available as a Model Context Protocol server for AI assistants
 - **Indexed Data**: Efficient querying with indexed chain data
 - **Search Capabilities**: Search chains by name, ID, or other attributes
 - **RESTful Endpoints**: Clean and intuitive API design
@@ -28,7 +29,9 @@ npm install
 
 ## Usage
 
-### Start the server
+### REST API Server
+
+#### Start the server
 
 ```bash
 npm start
@@ -36,16 +39,120 @@ npm start
 
 The server will start on `http://localhost:3000` by default.
 
-### Development mode (with auto-reload)
+#### Development mode (with auto-reload)
 
 ```bash
 npm run dev
 ```
 
+### MCP Server (for AI Assistants)
+
+The Chains API can also be used as an MCP (Model Context Protocol) server, allowing AI assistants like Claude to query blockchain chain data directly. Two transport modes are supported:
+
+1. **Stdio Mode** (for local AI assistants like Claude Desktop)
+2. **HTTP Mode** (for external clients like n8n, Make.com, etc.)
+
+#### Running the MCP Server (Stdio Mode)
+
+For local use with Claude Desktop and similar applications:
+
+```bash
+npm run mcp
+```
+
+Or directly with Node.js:
+
+```bash
+node mcp-server.js
+```
+
+#### Running the MCP HTTP Server (Network Mode)
+
+For external clients that need HTTP access:
+
+```bash
+npm run mcp:http
+```
+
+Or directly with Node.js:
+
+```bash
+node mcp-server-http.js
+```
+
+The HTTP server will start on `http://0.0.0.0:3001` by default (configurable via `MCP_PORT` and `MCP_HOST` environment variables).
+
+**Endpoints:**
+- `POST /mcp` - MCP protocol endpoint for tool calls
+- `DELETE /mcp` - Session termination endpoint
+- `GET /health` - Health check
+- `GET /` - Server information
+
+**Example HTTP MCP usage with curl:**
+
+```bash
+# Initialize a session
+curl -X POST http://localhost:3001/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"my-client","version":"1.0.0"}}}'
+
+# Extract session ID from the mcp-session-id header, then call a tool:
+curl -X POST http://localhost:3001/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "mcp-session-id: <session-id>" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_chain_by_id","arguments":{"chainId":1}}}'
+```
+
+#### MCP Server Configuration (Stdio Mode)
+
+To use the Chains API MCP server with Claude Desktop or other MCP clients, add it to your MCP settings configuration file:
+
+**For Claude Desktop (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):**
+
+```json
+{
+  "mcpServers": {
+    "chains-api": {
+      "command": "node",
+      "args": ["/path/to/chains-api/mcp-server.js"]
+    }
+  }
+}
+```
+
+Or if you've installed the package globally:
+
+```json
+{
+  "mcpServers": {
+    "chains-api": {
+      "command": "chains-api-mcp"
+    }
+  }
+}
+```
+
+#### Available MCP Tools
+
+The MCP server provides the following tools for querying blockchain chain data:
+
+- **get_chains**: Get all blockchain chains, optionally filtered by tag (Testnet, L2, or Beacon)
+- **get_chain_by_id**: Get detailed information about a specific blockchain chain by its chain ID
+- **search_chains**: Search for blockchain chains by name or other attributes
+- **get_endpoints**: Get RPC, firehose, and substreams endpoints for a specific chain or all chains
+- **get_relations**: Get chain relationships (testnet/mainnet, L2/L1, etc.) for a specific chain or all chains
+- **get_slip44**: Get SLIP-0044 coin type information by coin type ID or all coin types
+
+Each tool returns JSON data that can be used by AI assistants to answer questions about blockchain networks.
+
 ## Environment Variables
 
-- `PORT`: Server port (default: 3000)
-- `HOST`: Server host (default: 0.0.0.0)
+- `PORT`: REST API server port (default: 3000)
+- `HOST`: REST API server host (default: 0.0.0.0)
+- `MCP_PORT`: MCP HTTP server port (default: 3001)
+- `MCP_HOST`: MCP HTTP server host (default: 0.0.0.0)
 
 ## API Endpoints
 
