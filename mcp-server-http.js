@@ -582,14 +582,16 @@ app.get('/', (req, res) => {
 });
 
 // Start server
-app.listen(MCP_PORT, MCP_HOST, (error) => {
-  if (error) {
-    console.error('Failed to start MCP HTTP server:', error);
-    process.exit(1);
-  }
+const server = app.listen(MCP_PORT, MCP_HOST, () => {
   console.log(`Chains API MCP HTTP Server listening on http://${MCP_HOST}:${MCP_PORT}`);
   console.log(`MCP endpoint: http://${MCP_HOST}:${MCP_PORT}/mcp`);
   console.log(`Health check: http://${MCP_HOST}:${MCP_PORT}/health`);
+});
+
+// Handle server startup errors
+server.on('error', (error) => {
+  console.error('Failed to start MCP HTTP server:', error);
+  process.exit(1);
 });
 
 // Handle graceful shutdown
