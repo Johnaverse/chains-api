@@ -498,12 +498,31 @@ This endpoint creates a GitHub issue for each relation conflict (Rule 1) detecte
   "message": "Successfully created 3 issues for relation conflicts",
   "totalConflicts": 3,
   "issuesCreated": 3,
+  "issuesFailed": 0,
   "issues": [
     {
       "chainId": 1287,
       "chainName": "Moonbase Alpha",
       "issueNumber": 123,
       "issueUrl": "https://github.com/Johnaverse/chains-api/issues/123"
+    }
+  ]
+}
+```
+
+**Response (Partial Success with Failures):**
+```json
+{
+  "message": "Successfully created 2 issues for relation conflicts",
+  "totalConflicts": 3,
+  "issuesCreated": 2,
+  "issuesFailed": 1,
+  "issues": [...],
+  "failed": [
+    {
+      "chainId": 80069,
+      "chainName": "Berachain Bepolia",
+      "error": "API rate limit exceeded"
     }
   ]
 }

@@ -232,7 +232,8 @@ fastify.post('/validate/create-issues', async (request, reply) => {
     const octokit = new Octokit({ auth: githubToken });
     const validationResults = validateChainData();
     
-    if (!validationResults.errorsByRule || !validationResults.errorsByRule.rule1_relation_conflicts) {
+    if (!validationResults.errorsByRule?.rule1_relation_conflicts || 
+        validationResults.errorsByRule.rule1_relation_conflicts.length === 0) {
       return {
         message: 'No relation conflicts found',
         issuesCreated: 0
@@ -240,15 +241,8 @@ fastify.post('/validate/create-issues', async (request, reply) => {
     }
 
     const relationConflicts = validationResults.errorsByRule.rule1_relation_conflicts;
-    
-    if (relationConflicts.length === 0) {
-      return {
-        message: 'No relation conflicts found',
-        issuesCreated: 0
-      };
-    }
-
     const createdIssues = [];
+    const failedIssues = [];
 
     for (const conflict of relationConflicts) {
       // Create a detailed issue title
@@ -297,6 +291,11 @@ fastify.post('/validate/create-issues', async (request, reply) => {
         });
       } catch (error) {
         fastify.log.error(`Failed to create issue for chain ${conflict.chainId}: ${error.message}`);
+        failedIssues.push({
+          chainId: conflict.chainId,
+          chainName: conflict.chainName,
+          error: error.message
+        });
       }
     }
 
@@ -304,7 +303,9 @@ fastify.post('/validate/create-issues', async (request, reply) => {
       message: `Successfully created ${createdIssues.length} issues for relation conflicts`,
       totalConflicts: relationConflicts.length,
       issuesCreated: createdIssues.length,
-      issues: createdIssues
+      issuesFailed: failedIssues.length,
+      issues: createdIssues,
+      ...(failedIssues.length > 0 && { failed: failedIssues })
     };
   } catch (error) {
     fastify.log.error('Error creating issues:', error);
