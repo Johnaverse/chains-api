@@ -23,11 +23,105 @@ A Node.js API query service built with Fastify that indexes and provides access 
 
 ## Installation
 
+### Using npm
+
 ```bash
 npm install
 ```
 
+### Using Docker
+
+#### Pull from GitHub Container Registry
+
+Pre-built Docker images are automatically published to GitHub Container Registry (GHCR) on every push to the main branch:
+
+```bash
+# Pull the latest image
+docker pull ghcr.io/johnaverse/chains-api:latest
+
+# Or pull a specific version
+docker pull ghcr.io/johnaverse/chains-api:v1.0.0
+```
+
+#### Build Docker image locally
+
+```bash
+# Build the image
+docker build -t chains-api .
+
+# Or using docker compose
+docker compose build
+```
+
 ## Usage
+
+### Running with Docker
+
+#### Run the REST API server
+
+```bash
+# Using pre-built image from GHCR
+docker run -d -p 3000:3000 --name chains-api ghcr.io/johnaverse/chains-api:latest
+
+# Or using locally built image
+docker run -d -p 3000:3000 --name chains-api chains-api
+
+# With custom environment variables
+docker run -d -p 3000:3000 \
+  -e PORT=3000 \
+  -e HOST=0.0.0.0 \
+  --name chains-api \
+  ghcr.io/johnaverse/chains-api:latest
+```
+
+The API will be available at `http://localhost:3000`.
+
+#### Run the MCP HTTP server
+
+```bash
+docker run -d -p 3001:3001 \
+  --name chains-api-mcp \
+  ghcr.io/johnaverse/chains-api:latest \
+  node mcp-server-http.js
+```
+
+The MCP HTTP server will be available at `http://localhost:3001`.
+
+#### Using Docker Compose
+
+A `docker-compose.yml` file is included in the repository that runs both the REST API server on port 3000 and the MCP HTTP server on port 3001:
+
+```bash
+docker compose up -d
+```
+
+To use pre-built images from GHCR instead of building locally, modify the `docker-compose.yml` to use `image: ghcr.io/johnaverse/chains-api:latest` instead of `build: .`
+
+The default configuration:
+
+```yaml
+services:
+  chains-api:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - HOST=0.0.0.0
+    restart: unless-stopped
+
+  chains-api-mcp:
+    build: .
+    command: node mcp-server-http.js
+    ports:
+      - "3001:3001"
+    environment:
+      - MCP_PORT=3001
+      - MCP_HOST=0.0.0.0
+    restart: unless-stopped
+```
+
+### Running with npm
 
 ### REST API Server
 
