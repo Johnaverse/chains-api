@@ -89,14 +89,20 @@ The MCP HTTP server will be available at `http://localhost:3001`.
 
 #### Using Docker Compose
 
-Create a `docker-compose.yml` file:
+A `docker-compose.yml` file is included in the repository that runs both the REST API server on port 3000 and the MCP HTTP server on port 3001:
+
+```bash
+docker compose up -d
+```
+
+To use pre-built images from GHCR instead of building locally, modify the `docker-compose.yml` to use `image: ghcr.io/johnaverse/chains-api:latest` instead of `build: .`
+
+The default configuration:
 
 ```yaml
-version: '3.8'
-
 services:
   chains-api:
-    image: ghcr.io/johnaverse/chains-api:latest
+    build: .
     ports:
       - "3000:3000"
     environment:
@@ -105,7 +111,7 @@ services:
     restart: unless-stopped
 
   chains-api-mcp:
-    image: ghcr.io/johnaverse/chains-api:latest
+    build: .
     command: node mcp-server-http.js
     ports:
       - "3001:3001"
@@ -113,12 +119,6 @@ services:
       - MCP_PORT=3001
       - MCP_HOST=0.0.0.0
     restart: unless-stopped
-```
-
-Then run:
-
-```bash
-docker compose up -d
 ```
 
 ### Running with npm
