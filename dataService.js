@@ -123,6 +123,39 @@ function addBeaconTagToTargetChain(indexed, targetChainId) {
 }
 
 /**
+ * Helper function to get bridge URL from a bridge object or string
+ */
+function getBridgeUrl(bridge) {
+  return typeof bridge === 'string' ? bridge : bridge.url;
+}
+
+/**
+ * Helper function to merge bridge URLs into a chain's bridges array
+ */
+function mergeBridges(chain, newBridges) {
+  if (!newBridges || !Array.isArray(newBridges) || newBridges.length === 0) {
+    return;
+  }
+  
+  if (!chain.bridges) {
+    chain.bridges = [];
+  }
+  
+  // Build a set of existing bridge URLs for comparison
+  const existingBridgeUrls = new Set(
+    chain.bridges.map(getBridgeUrl)
+  );
+  
+  newBridges.forEach(bridge => {
+    const url = getBridgeUrl(bridge);
+    if (url && !existingBridgeUrls.has(url)) {
+      chain.bridges.push(bridge);
+      existingBridgeUrls.add(url);
+    }
+  });
+}
+
+/**
  * Index all data into a searchable structure
  */
 function indexData(theGraph, chainlist, chains, slip44) {
@@ -209,24 +242,7 @@ function indexData(theGraph, chainlist, chains, slip44) {
               }
               
               // Extract bridge URLs from parent.bridges
-              if (chain.parent.bridges && Array.isArray(chain.parent.bridges)) {
-                if (!indexed.byChainId[chainId].bridges) {
-                  indexed.byChainId[chainId].bridges = [];
-                }
-                
-                // Build a set of existing bridge URLs for comparison
-                const existingBridgeUrls = new Set(
-                  indexed.byChainId[chainId].bridges.map(b => typeof b === 'string' ? b : b.url)
-                );
-                
-                chain.parent.bridges.forEach(bridge => {
-                  const url = typeof bridge === 'string' ? bridge : bridge.url;
-                  if (url && !existingBridgeUrls.has(url)) {
-                    indexed.byChainId[chainId].bridges.push(bridge);
-                    existingBridgeUrls.add(url);
-                  }
-                });
-              }
+              mergeBridges(indexed.byChainId[chainId], chain.parent.bridges);
             }
           }
         }
@@ -347,25 +363,8 @@ function indexData(theGraph, chainlist, chains, slip44) {
       }
       
       // Extract bridge URLs from parent.bridges
-      if (chainData.parent && chainData.parent.bridges && Array.isArray(chainData.parent.bridges)) {
-        if (indexed.byChainId[chainId]) {
-          if (!indexed.byChainId[chainId].bridges) {
-            indexed.byChainId[chainId].bridges = [];
-          }
-          
-          // Build a set of existing bridge URLs for comparison
-          const existingBridgeUrls = new Set(
-            indexed.byChainId[chainId].bridges.map(b => typeof b === 'string' ? b : b.url)
-          );
-          
-          chainData.parent.bridges.forEach(bridge => {
-            const url = typeof bridge === 'string' ? bridge : bridge.url;
-            if (url && !existingBridgeUrls.has(url)) {
-              indexed.byChainId[chainId].bridges.push(bridge);
-              existingBridgeUrls.add(url);
-            }
-          });
-        }
+      if (indexed.byChainId[chainId] && chainData.parent && chainData.parent.bridges) {
+        mergeBridges(indexed.byChainId[chainId], chainData.parent.bridges);
       }
     });
   }
