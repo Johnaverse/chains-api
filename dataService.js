@@ -123,6 +123,42 @@ function addBeaconTagToTargetChain(indexed, targetChainId) {
 }
 
 /**
+ * Helper function to get bridge URL from a bridge object or string
+ */
+function getBridgeUrl(bridge) {
+  if (typeof bridge === 'string') {
+    return bridge;
+  }
+  return bridge && bridge.url ? bridge.url : null;
+}
+
+/**
+ * Helper function to merge bridge URLs into a chain's bridges array
+ */
+function mergeBridges(chain, newBridges) {
+  if (!newBridges || !Array.isArray(newBridges)) {
+    return;
+  }
+  
+  if (!chain.bridges) {
+    chain.bridges = [];
+  }
+  
+  // Build a set of existing bridge URLs for comparison
+  const existingBridgeUrls = new Set(
+    chain.bridges.map(getBridgeUrl).filter(url => url !== null)
+  );
+  
+  newBridges.forEach(bridge => {
+    const url = getBridgeUrl(bridge);
+    if (url && !existingBridgeUrls.has(url)) {
+      chain.bridges.push(bridge);
+      existingBridgeUrls.add(url);
+    }
+  });
+}
+
+/**
  * Index all data into a searchable structure
  */
 function indexData(theGraph, chainlist, chains, slip44) {
@@ -172,7 +208,7 @@ function indexData(theGraph, chainlist, chains, slip44) {
       }
     });
     
-    // Process L2 relations from parent field in chains.json
+    // Process L2 relations and bridge URLs from parent field in chains.json
     chains.forEach(chain => {
       const chainId = chain.chainId;
       
@@ -207,6 +243,9 @@ function indexData(theGraph, chainlist, chains, slip44) {
               if (!existingRelation) {
                 indexed.byChainId[chainId].relations.push(relation);
               }
+              
+              // Extract bridge URLs from parent.bridges
+              mergeBridges(indexed.byChainId[chainId], chain.parent.bridges);
             }
           }
         }
@@ -314,6 +353,21 @@ function indexData(theGraph, chainlist, chains, slip44) {
             indexed.byChainId[testnetChainId].relations.push(relation);
           }
         }
+      }
+    });
+    
+    // Third pass: Extract bridge URLs from parent.bridges in chainlist
+    chainlist.forEach(chainData => {
+      const chainId = chainData.chainId;
+      
+      // Skip if chainId is not valid
+      if (chainId === undefined || chainId === null || isNaN(chainId)) {
+        return;
+      }
+      
+      // Extract bridge URLs from parent.bridges
+      if (indexed.byChainId[chainId] && chainData.parent && chainData.parent.bridges) {
+        mergeBridges(indexed.byChainId[chainId], chainData.parent.bridges);
       }
     });
   }
@@ -661,6 +715,9 @@ function transformChain(chain) {
   }
   if (chain.status) {
     transformedChain.status = chain.status;
+  }
+  if (chain.bridges) {
+    transformedChain.bridges = chain.bridges;
   }
   
   return transformedChain;

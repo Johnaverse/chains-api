@@ -218,7 +218,12 @@ Get all indexed chains.
   "infoURL": "https://polygon.technology/",
   "sources": ["chains", "theGraph"],
   "tags": ["Testnet", "L2"],
-  "status": "active"
+  "status": "active",
+  "bridges": [
+    {
+      "url": "https://bridge.polygon.technology/"
+    }
+  ]
 }
 ```
 
@@ -254,7 +259,12 @@ Get a specific chain by its chain ID.
   "infoURL": "https://polygon.technology/",
   "sources": ["chains", "theGraph"],
   "tags": ["Testnet", "L2"],
-  "status": "active"
+  "status": "active",
+  "bridges": [
+    {
+      "url": "https://bridge.polygon.technology/"
+    }
+  ]
 }
 ```
 
@@ -499,6 +509,7 @@ Each chain object returned from `/chains` and `/chains/:id` contains:
 - `sources`: Array of data sources that provided this chain's data
 - `status`: Chain status - defaults to `"active"` when not present in any data source
 - `tags`: Array of tags (e.g., "Testnet", "L2", "Beacon")
+- `bridges`: Array of bridge URLs (if available from chainlist or chains.json `parent.bridges` field)
 
 **Note:** Chain objects no longer include `rpc` or `relations` fields. Use `/endpoints/:id` for RPC endpoints and `/relations/:id` for relations.
 
