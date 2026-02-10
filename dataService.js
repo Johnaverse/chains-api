@@ -126,14 +126,17 @@ function addBeaconTagToTargetChain(indexed, targetChainId) {
  * Helper function to get bridge URL from a bridge object or string
  */
 function getBridgeUrl(bridge) {
-  return typeof bridge === 'string' ? bridge : bridge.url;
+  if (typeof bridge === 'string') {
+    return bridge;
+  }
+  return bridge && bridge.url ? bridge.url : null;
 }
 
 /**
  * Helper function to merge bridge URLs into a chain's bridges array
  */
 function mergeBridges(chain, newBridges) {
-  if (!newBridges || !Array.isArray(newBridges) || newBridges.length === 0) {
+  if (!newBridges || !Array.isArray(newBridges)) {
     return;
   }
   
@@ -143,7 +146,7 @@ function mergeBridges(chain, newBridges) {
   
   // Build a set of existing bridge URLs for comparison
   const existingBridgeUrls = new Set(
-    chain.bridges.map(getBridgeUrl)
+    chain.bridges.map(getBridgeUrl).filter(url => url !== null)
   );
   
   newBridges.forEach(bridge => {
