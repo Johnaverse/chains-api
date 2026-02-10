@@ -172,7 +172,7 @@ function indexData(theGraph, chainlist, chains, slip44) {
       }
     });
     
-    // Process L2 relations from parent field in chains.json
+    // Process L2 relations and bridge URLs from parent field in chains.json
     chains.forEach(chain => {
       const chainId = chain.chainId;
       
@@ -206,6 +206,26 @@ function indexData(theGraph, chainlist, chains, slip44) {
               
               if (!existingRelation) {
                 indexed.byChainId[chainId].relations.push(relation);
+              }
+              
+              // Extract bridge URLs from parent.bridges
+              if (chain.parent.bridges && Array.isArray(chain.parent.bridges)) {
+                if (!indexed.byChainId[chainId].bridges) {
+                  indexed.byChainId[chainId].bridges = [];
+                }
+                
+                // Build a set of existing bridge URLs for comparison
+                const existingBridgeUrls = new Set(
+                  indexed.byChainId[chainId].bridges.map(b => typeof b === 'string' ? b : b.url)
+                );
+                
+                chain.parent.bridges.forEach(bridge => {
+                  const url = typeof bridge === 'string' ? bridge : bridge.url;
+                  if (url && !existingBridgeUrls.has(url)) {
+                    indexed.byChainId[chainId].bridges.push(bridge);
+                    existingBridgeUrls.add(url);
+                  }
+                });
               }
             }
           }
@@ -313,6 +333,38 @@ function indexData(theGraph, chainlist, chains, slip44) {
           if (!existingRelation) {
             indexed.byChainId[testnetChainId].relations.push(relation);
           }
+        }
+      }
+    });
+    
+    // Third pass: Extract bridge URLs from parent.bridges in chainlist
+    chainlist.forEach(chainData => {
+      const chainId = chainData.chainId;
+      
+      // Skip if chainId is not valid
+      if (chainId === undefined || chainId === null || isNaN(chainId)) {
+        return;
+      }
+      
+      // Extract bridge URLs from parent.bridges
+      if (chainData.parent && chainData.parent.bridges && Array.isArray(chainData.parent.bridges)) {
+        if (indexed.byChainId[chainId]) {
+          if (!indexed.byChainId[chainId].bridges) {
+            indexed.byChainId[chainId].bridges = [];
+          }
+          
+          // Build a set of existing bridge URLs for comparison
+          const existingBridgeUrls = new Set(
+            indexed.byChainId[chainId].bridges.map(b => typeof b === 'string' ? b : b.url)
+          );
+          
+          chainData.parent.bridges.forEach(bridge => {
+            const url = typeof bridge === 'string' ? bridge : bridge.url;
+            if (url && !existingBridgeUrls.has(url)) {
+              indexed.byChainId[chainId].bridges.push(bridge);
+              existingBridgeUrls.add(url);
+            }
+          });
         }
       }
     });
@@ -661,6 +713,9 @@ function transformChain(chain) {
   }
   if (chain.status) {
     transformedChain.status = chain.status;
+  }
+  if (chain.bridges) {
+    transformedChain.bridges = chain.bridges;
   }
   
   return transformedChain;
