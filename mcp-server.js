@@ -16,10 +16,12 @@ import {
   getRelationsById,
   getEndpointsById,
   getAllEndpoints,
+  startRpcHealthCheck,
 } from './dataService.js';
 
 // Load data on startup
 await loadData();
+startRpcHealthCheck();
 
 // Create MCP server instance
 const server = new Server(
