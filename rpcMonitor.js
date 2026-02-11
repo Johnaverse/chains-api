@@ -13,6 +13,9 @@ let monitoringResults = {
 // Flag to track if monitoring is running
 let isMonitoring = false;
 
+// Promise to track ongoing monitoring operation
+let monitoringPromise = null;
+
 /**
  * Extract URL from RPC endpoint (can be string or object)
  */
@@ -116,8 +119,17 @@ async function testRpcEndpoint(url) {
     // Get latest block number
     const blockNumberHex = await makeRpcCall(url, 'eth_blockNumber');
     
-    // Convert hex to decimal
+    // Convert hex to decimal with validation
+    if (!blockNumberHex || typeof blockNumberHex !== 'string') {
+      throw new Error('Invalid block number response');
+    }
+    
     const blockNumber = parseInt(blockNumberHex, 16);
+    
+    if (isNaN(blockNumber)) {
+      throw new Error('Failed to parse block number');
+    }
+    
     result.blockNumber = blockNumber;
     
     result.status = 'working';
@@ -209,20 +221,27 @@ async function testAllEndpoints() {
  * Start background monitoring (runs once at startup)
  */
 export async function startMonitoring() {
-  if (isMonitoring) {
-    console.log('Monitoring already in progress, skipping...');
-    return;
+  // If monitoring is already in progress, return the existing promise
+  if (monitoringPromise) {
+    console.log('Monitoring already in progress, returning existing operation...');
+    return monitoringPromise;
   }
   
-  isMonitoring = true;
+  // Create and store the monitoring promise
+  monitoringPromise = (async () => {
+    isMonitoring = true;
+    
+    try {
+      await testAllEndpoints();
+    } catch (error) {
+      console.error('Error during RPC monitoring:', error);
+    } finally {
+      isMonitoring = false;
+      monitoringPromise = null; // Clear promise when done
+    }
+  })();
   
-  try {
-    await testAllEndpoints();
-  } catch (error) {
-    console.error('Error during RPC monitoring:', error);
-  } finally {
-    isMonitoring = false;
-  }
+  return monitoringPromise;
 }
 
 /**
