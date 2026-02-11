@@ -163,6 +163,7 @@ async function testAllEndpoints() {
     }
     
     let chainTestedCount = 0;
+    let foundFailedEndpoint = false; // Track if we've encountered a failed endpoint
     
     for (const rpcEndpoint of rpc) {
       const url = extractUrl(rpcEndpoint);
@@ -177,6 +178,11 @@ async function testAllEndpoints() {
         continue;
       }
       
+      // Stop testing additional endpoints for this chain if we already found one that failed
+      if (foundFailedEndpoint) {
+        continue;
+      }
+      
       testedEndpoints++;
       chainTestedCount++;
       
@@ -185,6 +191,9 @@ async function testAllEndpoints() {
         
         if (testResult.status === 'working') {
           workingEndpoints++;
+        } else if (testResult.status === 'failed') {
+          // Mark that we found a failed endpoint for this chain
+          foundFailedEndpoint = true;
         }
         
         results.push({
