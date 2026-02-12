@@ -1,4 +1,5 @@
 import { getAllEndpoints } from './dataService.js';
+import { MAX_ENDPOINTS_PER_CHAIN } from './config.js';
 
 // Store monitoring results in memory
 let monitoringResults = {
@@ -160,7 +161,7 @@ async function testAllEndpoints() {
     results: []
   };
 
-  const MAX_ENDPOINTS_PER_CHAIN = 5; // Limit testing to first 5 valid endpoints per chain
+  // Limit testing per chain (from config)
 
   for (const chainEndpoints of allEndpoints) {
     const { chainId, name, rpc } = chainEndpoints;

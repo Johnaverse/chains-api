@@ -1,9 +1,45 @@
 import Fastify from 'fastify';
+import cors from '@fastify/cors';
+import rateLimit from '@fastify/rate-limit';
+import helmet from '@fastify/helmet';
 import { loadData, getCachedData, searchChains, getChainById, getAllChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints } from './dataService.js';
 import { getMonitoringResults, getMonitoringStatus, startRpcHealthCheck } from './rpcMonitor.js';
+import {
+  PORT, HOST, BODY_LIMIT, MAX_PARAM_LENGTH,
+  RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS,
+  RELOAD_RATE_LIMIT_MAX, SEARCH_RATE_LIMIT_MAX,
+  MAX_SEARCH_QUERY_LENGTH, CORS_ORIGIN,
+  DATA_SOURCE_THE_GRAPH, DATA_SOURCE_CHAINLIST,
+  DATA_SOURCE_CHAINS, DATA_SOURCE_SLIP44
+} from './config.js';
 
 const fastify = Fastify({
-  logger: true
+  logger: true,
+  bodyLimit: BODY_LIMIT,
+  maxParamLength: MAX_PARAM_LENGTH
+});
+
+// Security: CORS
+await fastify.register(cors, {
+  origin: CORS_ORIGIN === '*' ? true : CORS_ORIGIN.split(',').map(s => s.trim()),
+  credentials: false
+});
+
+// Security: Helmet (security headers)
+await fastify.register(helmet, {
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'"]
+    }
+  }
+});
+
+// Security: Rate limiting
+await fastify.register(rateLimit, {
+  max: RATE_LIMIT_MAX,
+  timeWindow: RATE_LIMIT_WINDOW_MS
 });
 
 // Load data on startup
@@ -29,12 +65,16 @@ fastify.get('/health', async (request, reply) => {
 fastify.get('/chains', async (request, reply) => {
   const { tag } = request.query;
   let chains = getAllChains();
-  
-  // Filter by tag if provided
+
+  // Filter by tag if provided (validate against known tags)
   if (tag) {
+    const validTags = ['Testnet', 'L2', 'Beacon'];
+    if (!validTags.includes(tag)) {
+      return reply.code(400).send({ error: `Invalid tag. Allowed: ${validTags.join(', ')}` });
+    }
     chains = chains.filter(chain => chain.tags && chain.tags.includes(tag));
   }
-  
+
   return {
     count: chains.length,
     chains
@@ -46,32 +86,43 @@ fastify.get('/chains', async (request, reply) => {
  */
 fastify.get('/chains/:id', async (request, reply) => {
   const chainId = parseInt(request.params.id);
-  
+
   if (isNaN(chainId)) {
     return reply.code(400).send({ error: 'Invalid chain ID' });
   }
-  
+
   const chain = getChainById(chainId);
-  
+
   if (!chain) {
     return reply.code(404).send({ error: 'Chain not found' });
   }
-  
+
   return chain;
 });
 
 /**
- * Search chains
+ * Search chains (tighter rate limit)
  */
-fastify.get('/search', async (request, reply) => {
+fastify.get('/search', {
+  config: {
+    rateLimit: {
+      max: SEARCH_RATE_LIMIT_MAX,
+      timeWindow: RATE_LIMIT_WINDOW_MS
+    }
+  }
+}, async (request, reply) => {
   const { q } = request.query;
-  
+
   if (!q) {
     return reply.code(400).send({ error: 'Query parameter "q" is required' });
   }
-  
+
+  if (q.length > MAX_SEARCH_QUERY_LENGTH) {
+    return reply.code(400).send({ error: `Query too long. Max length: ${MAX_SEARCH_QUERY_LENGTH}` });
+  }
+
   const results = searchChains(q);
-  
+
   return {
     query: q,
     count: results.length,
@@ -84,7 +135,7 @@ fastify.get('/search', async (request, reply) => {
  */
 fastify.get('/relations', async (request, reply) => {
   const relations = getAllRelations();
-  
+
   return relations;
 });
 
@@ -93,17 +144,17 @@ fastify.get('/relations', async (request, reply) => {
  */
 fastify.get('/relations/:id', async (request, reply) => {
   const chainId = parseInt(request.params.id);
-  
+
   if (isNaN(chainId)) {
     return reply.code(400).send({ error: 'Invalid chain ID' });
   }
-  
+
   const result = getRelationsById(chainId);
-  
+
   if (!result) {
     return reply.code(404).send({ error: 'Chain not found' });
   }
-  
+
   return result;
 });
 
@@ -112,7 +163,7 @@ fastify.get('/relations/:id', async (request, reply) => {
  */
 fastify.get('/endpoints', async (request, reply) => {
   const endpoints = getAllEndpoints();
-  
+
   return {
     count: endpoints.length,
     endpoints
@@ -124,17 +175,17 @@ fastify.get('/endpoints', async (request, reply) => {
  */
 fastify.get('/endpoints/:id', async (request, reply) => {
   const chainId = parseInt(request.params.id);
-  
+
   if (isNaN(chainId)) {
     return reply.code(400).send({ error: 'Invalid chain ID' });
   }
-  
+
   const result = getEndpointsById(chainId);
-  
+
   if (!result) {
     return reply.code(404).send({ error: 'Chain not found' });
   }
-  
+
   return result;
 });
 
@@ -159,11 +210,11 @@ fastify.get('/sources', async (request, reply) => {
  */
 fastify.get('/slip44', async (request, reply) => {
   const cachedData = getCachedData();
-  
+
   if (!cachedData.slip44) {
     return reply.code(503).send({ error: 'SLIP-0044 data not loaded' });
   }
-  
+
   return {
     count: Object.keys(cachedData.slip44).length,
     coinTypes: cachedData.slip44
@@ -175,24 +226,31 @@ fastify.get('/slip44', async (request, reply) => {
  */
 fastify.get('/slip44/:coinType', async (request, reply) => {
   const coinType = parseInt(request.params.coinType);
-  
+
   if (isNaN(coinType)) {
     return reply.code(400).send({ error: 'Invalid coin type' });
   }
-  
+
   const cachedData = getCachedData();
-  
+
   if (!cachedData.slip44 || !cachedData.slip44[coinType]) {
     return reply.code(404).send({ error: 'Coin type not found' });
   }
-  
+
   return cachedData.slip44[coinType];
 });
 
 /**
- * Reload data from sources
+ * Reload data from sources (tighter rate limit)
  */
-fastify.post('/reload', async (request, reply) => {
+fastify.post('/reload', {
+  config: {
+    rateLimit: {
+      max: RELOAD_RATE_LIMIT_MAX,
+      timeWindow: RATE_LIMIT_WINDOW_MS
+    }
+  }
+}, async (request, reply) => {
   try {
     await loadData();
     startRpcHealthCheck();
@@ -203,7 +261,8 @@ fastify.post('/reload', async (request, reply) => {
       totalChains: cachedData.indexed ? cachedData.indexed.all.length : 0
     };
   } catch (error) {
-    return reply.code(500).send({ error: 'Failed to reload data', message: error.message });
+    fastify.log.error(error, 'Failed to reload data');
+    return reply.code(500).send({ error: 'Failed to reload data' });
   }
 });
 
@@ -213,7 +272,7 @@ fastify.post('/reload', async (request, reply) => {
 fastify.get('/rpc-monitor', async (request, reply) => {
   const results = getMonitoringResults();
   const status = getMonitoringStatus();
-  
+
   return {
     ...status,
     ...results
@@ -225,20 +284,20 @@ fastify.get('/rpc-monitor', async (request, reply) => {
  */
 fastify.get('/rpc-monitor/:id', async (request, reply) => {
   const chainId = parseInt(request.params.id);
-  
+
   if (isNaN(chainId)) {
     return reply.code(400).send({ error: 'Invalid chain ID' });
   }
-  
+
   const results = getMonitoringResults();
   const chainResults = results.results.filter(r => r.chainId === chainId);
-  
+
   if (chainResults.length === 0) {
     return reply.code(404).send({ error: 'No monitoring results found for this chain' });
   }
-  
+
   const workingCount = chainResults.filter(r => r.status === 'working').length;
-  
+
   return {
     chainId,
     chainName: chainResults[0].chainName,
@@ -274,10 +333,10 @@ fastify.get('/', async (request, reply) => {
       '/rpc-monitor/:id': 'Get RPC monitoring results for a specific chain by ID'
     },
     dataSources: [
-      'https://raw.githubusercontent.com/Johnaverse/networks-registry/refs/heads/main/public/TheGraphNetworksRegistry.json',
-      'https://chainlist.org/rpcs.json',
-      'https://chainid.network/chains.json',
-      'https://github.com/satoshilabs/slips/blob/master/slip-0044.md'
+      DATA_SOURCE_THE_GRAPH,
+      DATA_SOURCE_CHAINLIST,
+      DATA_SOURCE_CHAINS,
+      DATA_SOURCE_SLIP44
     ]
   };
 });
@@ -285,11 +344,8 @@ fastify.get('/', async (request, reply) => {
 // Start server
 const start = async () => {
   try {
-    const port = process.env.PORT || 3000;
-    const host = process.env.HOST || '0.0.0.0';
-    
-    await fastify.listen({ port, host });
-    console.log(`Server is running at http://${host}:${port}`);
+    await fastify.listen({ port: PORT, host: HOST });
+    fastify.log.info(`Server is running at http://${HOST}:${PORT}`);
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);

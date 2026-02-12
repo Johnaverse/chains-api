@@ -1,9 +1,15 @@
-// Data source URLs
+import {
+  DATA_SOURCE_THE_GRAPH, DATA_SOURCE_CHAINLIST,
+  DATA_SOURCE_CHAINS, DATA_SOURCE_SLIP44,
+  RPC_CHECK_TIMEOUT_MS, RPC_CHECK_CONCURRENCY
+} from './config.js';
+
+// Data source URLs (from config, overridable via env)
 const DATA_SOURCES = {
-  theGraph: 'https://raw.githubusercontent.com/Johnaverse/networks-registry/refs/heads/main/public/TheGraphNetworksRegistry.json',
-  chainlist: 'https://chainlist.org/rpcs.json',
-  chains: 'https://chainid.network/chains.json',
-  slip44: 'https://raw.githubusercontent.com/satoshilabs/slips/master/slip-0044.md'
+  theGraph: DATA_SOURCE_THE_GRAPH,
+  chainlist: DATA_SOURCE_CHAINLIST,
+  chains: DATA_SOURCE_CHAINS,
+  slip44: DATA_SOURCE_SLIP44
 };
 
 // Cache for data
@@ -18,8 +24,6 @@ let cachedData = {
   lastRpcCheck: null
 };
 
-const RPC_CHECK_TIMEOUT_MS = 8000;
-const RPC_CHECK_CONCURRENCY = 8;
 let rpcCheckInProgress = false;
 let rpcCheckPending = false;
 
@@ -600,16 +604,29 @@ function indexData(theGraph, chainlist, chains, slip44) {
  */
 export async function loadData() {
   console.log('Loading data from all sources...');
-  
-  const [theGraph, chainlist, chains, slip44Text] = await Promise.all([
+
+  const results = await Promise.allSettled([
     fetchData(DATA_SOURCES.theGraph),
     fetchData(DATA_SOURCES.chainlist),
     fetchData(DATA_SOURCES.chains),
     fetchData(DATA_SOURCES.slip44, 'text')
   ]);
-  
+
+  const theGraph = results[0].status === 'fulfilled' ? results[0].value : null;
+  const chainlist = results[1].status === 'fulfilled' ? results[1].value : null;
+  const chains = results[2].status === 'fulfilled' ? results[2].value : null;
+  const slip44Text = results[3].status === 'fulfilled' ? results[3].value : null;
+
+  // Log any failed sources
+  const sourceNames = ['theGraph', 'chainlist', 'chains', 'slip44'];
+  results.forEach((result, i) => {
+    if (result.status === 'rejected') {
+      console.error(`Failed to load ${sourceNames[i]}: ${result.reason?.message || result.reason}`);
+    }
+  });
+
   const slip44 = parseSLIP44(slip44Text);
-  
+
   cachedData.theGraph = theGraph;
   cachedData.chainlist = chainlist;
   cachedData.chains = chains;
@@ -618,9 +635,9 @@ export async function loadData() {
   cachedData.lastUpdated = new Date().toISOString();
   cachedData.rpcHealth = {};
   cachedData.lastRpcCheck = null;
-  
+
   console.log(`Data loaded successfully. Total chains: ${cachedData.indexed.all.length}`);
-  
+
   return cachedData;
 }
 

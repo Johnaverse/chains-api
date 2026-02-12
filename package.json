@@ -13,7 +13,9 @@
     "dev": "node --watch index.js",
     "mcp": "node mcp-server.js",
     "mcp:http": "node mcp-server-http.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "repository": {
     "type": "git",
@@ -27,9 +29,17 @@
   },
   "homepage": "https://github.com/Johnaverse/chains-api#readme",
   "dependencies": {
+    "@fastify/cors": "^11.2.0",
+    "@fastify/helmet": "^13.0.2",
+    "@fastify/rate-limit": "^10.3.0",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "express": "^5.2.1",
-    "fastify": "^5.7.4",
-    "node-fetch": "^3.3.2"
+    "fastify": "^5.7.4"
+  },
+  "devDependencies": {
+    "@fast-check/vitest": "^0.2.4",
+    "@vitest/coverage-v8": "^2.1.8",
+    "fast-check": "^4.5.3",
+    "vitest": "^2.1.8"
   }
 }
