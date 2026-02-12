@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
-import { loadData, getCachedData, searchChains, getChainById, getAllChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints, validateChainData, startRpcHealthCheck } from './dataService.js';
+import { loadData, getCachedData, searchChains, getChainById, getAllChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints } from './dataService.js';
+import { startMonitoring, getMonitoringResults, getMonitoringStatus } from './rpcMonitor.js';
 
 const fastify = Fastify({
   logger: true
@@ -8,6 +9,11 @@ const fastify = Fastify({
 // Load data on startup
 await loadData();
 startRpcHealthCheck();
+
+// Start background RPC monitoring (runs async, doesn't block startup)
+startMonitoring().catch(error => {
+  console.error('Failed to start RPC monitoring:', error);
+});
 
 /**
  * Health check endpoint
@@ -207,11 +213,45 @@ fastify.post('/reload', async (request, reply) => {
 });
 
 /**
- * Validate chain data for potential human errors
+ * Get RPC monitoring results
  */
-fastify.get('/validate', async (request, reply) => {
-  const validationResults = validateChainData();
-  return validationResults;
+fastify.get('/rpc-monitor', async (request, reply) => {
+  const results = getMonitoringResults();
+  const status = getMonitoringStatus();
+  
+  return {
+    ...status,
+    ...results
+  };
+});
+
+/**
+ * Get RPC monitoring results for a specific chain
+ */
+fastify.get('/rpc-monitor/:id', async (request, reply) => {
+  const chainId = parseInt(request.params.id);
+  
+  if (isNaN(chainId)) {
+    return reply.code(400).send({ error: 'Invalid chain ID' });
+  }
+  
+  const results = getMonitoringResults();
+  const chainResults = results.results.filter(r => r.chainId === chainId);
+  
+  if (chainResults.length === 0) {
+    return reply.code(404).send({ error: 'No monitoring results found for this chain' });
+  }
+  
+  const workingCount = chainResults.filter(r => r.status === 'working').length;
+  
+  return {
+    chainId,
+    chainName: chainResults[0].chainName,
+    totalEndpoints: chainResults.length,
+    workingEndpoints: workingCount,
+    lastUpdated: results.lastUpdated,
+    endpoints: chainResults
+  };
 });
 
 /**
@@ -234,8 +274,9 @@ fastify.get('/', async (request, reply) => {
       '/sources': 'Get data sources status',
       '/slip44': 'Get all SLIP-0044 coin types as JSON',
       '/slip44/:coinType': 'Get specific SLIP-0044 coin type by ID',
-      '/validate': 'Validate chain data for potential human errors',
-      '/reload': 'Reload data from sources (POST)'
+      '/reload': 'Reload data from sources (POST)',
+      '/rpc-monitor': 'Get RPC endpoint monitoring results',
+      '/rpc-monitor/:id': 'Get RPC monitoring results for a specific chain by ID'
     },
     dataSources: [
       'https://raw.githubusercontent.com/Johnaverse/networks-registry/refs/heads/main/public/TheGraphNetworksRegistry.json',
