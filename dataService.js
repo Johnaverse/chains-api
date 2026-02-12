@@ -1,5 +1,3 @@
-import fetch from 'node-fetch';
-
 // Data source URLs
 const DATA_SOURCES = {
   theGraph: 'https://raw.githubusercontent.com/Johnaverse/networks-registry/refs/heads/main/public/TheGraphNetworksRegistry.json',

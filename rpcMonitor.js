@@ -1,4 +1,3 @@
-import fetch from 'node-fetch';
 import { getAllEndpoints } from './dataService.js';
 
 // Store monitoring results in memory
@@ -146,62 +145,77 @@ async function testRpcEndpoint(url) {
  */
 async function testAllEndpoints() {
   console.log('Starting RPC endpoint monitoring...');
-  
+
   const allEndpoints = getAllEndpoints();
-  const results = [];
   let totalEndpoints = 0;
   let testedEndpoints = 0;
   let workingEndpoints = 0;
-  
+
+  // Initialize monitoring results at the start
+  monitoringResults = {
+    lastUpdated: new Date().toISOString(),
+    totalEndpoints: 0,
+    testedEndpoints: 0,
+    workingEndpoints: 0,
+    results: []
+  };
+
   const MAX_ENDPOINTS_PER_CHAIN = 5; // Limit testing to first 5 valid endpoints per chain
-  
+
   for (const chainEndpoints of allEndpoints) {
     const { chainId, name, rpc } = chainEndpoints;
-    
+
     if (!rpc || rpc.length === 0) {
       continue;
     }
-    
+
     let chainTestedCount = 0;
     let foundFailedEndpoint = false; // Track if we've encountered a failed endpoint
-    
+
     for (const rpcEndpoint of rpc) {
       const url = extractUrl(rpcEndpoint);
       totalEndpoints++;
-      
+
       if (!isValidUrl(url)) {
         continue;
       }
-      
+
       // Skip if we've already tested enough endpoints for this chain
       if (chainTestedCount >= MAX_ENDPOINTS_PER_CHAIN) {
         continue;
       }
-      
+
       // Stop testing additional endpoints for this chain if we already found one that failed
       if (foundFailedEndpoint) {
         continue;
       }
-      
+
       testedEndpoints++;
       chainTestedCount++;
-      
+
       try {
         const testResult = await testRpcEndpoint(url);
-        
+
         if (testResult.status === 'working') {
           workingEndpoints++;
+
+          // Only add working endpoints to results
+          monitoringResults.results.push({
+            chainId,
+            chainName: name,
+            ...testResult
+          });
         } else if (testResult.status === 'failed') {
           // Mark that we found a failed endpoint for this chain
           foundFailedEndpoint = true;
         }
-        
-        results.push({
-          chainId,
-          chainName: name,
-          ...testResult
-        });
-        
+
+        // Update monitoring status in real-time
+        monitoringResults.lastUpdated = new Date().toISOString();
+        monitoringResults.totalEndpoints = totalEndpoints;
+        monitoringResults.testedEndpoints = testedEndpoints;
+        monitoringResults.workingEndpoints = workingEndpoints;
+
         // Log progress every 50 endpoints
         if (testedEndpoints % 50 === 0) {
           console.log(`Tested ${testedEndpoints} endpoints, ${workingEndpoints} working...`);
@@ -211,18 +225,9 @@ async function testAllEndpoints() {
       }
     }
   }
-  
-  // Update monitoring results
-  monitoringResults = {
-    lastUpdated: new Date().toISOString(),
-    totalEndpoints,
-    testedEndpoints,
-    workingEndpoints,
-    results
-  };
-  
+
   console.log(`RPC monitoring completed. Tested ${testedEndpoints}/${totalEndpoints} endpoints, ${workingEndpoints} working.`);
-  
+
   return monitoringResults;
 }
 
