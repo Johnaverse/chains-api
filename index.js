@@ -1,5 +1,5 @@
 import Fastify from 'fastify';
-import { loadData, getCachedData, searchChains, getChainById, getAllChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints, validateChainData } from './dataService.js';
+import { loadData, getCachedData, searchChains, getChainById, getAllChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints, validateChainData, startRpcHealthCheck } from './dataService.js';
 
 const fastify = Fastify({
   logger: true
@@ -7,6 +7,7 @@ const fastify = Fastify({
 
 // Load data on startup
 await loadData();
+startRpcHealthCheck();
 
 /**
  * Health check endpoint
@@ -193,6 +194,7 @@ fastify.get('/slip44/:coinType', async (request, reply) => {
 fastify.post('/reload', async (request, reply) => {
   try {
     await loadData();
+    startRpcHealthCheck();
     const cachedData = getCachedData();
     return {
       status: 'success',

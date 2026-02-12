@@ -15,8 +15,15 @@ let cachedData = {
   chains: null,
   slip44: null,
   indexed: null,
-  lastUpdated: null
+  lastUpdated: null,
+  rpcHealth: {},
+  lastRpcCheck: null
 };
+
+const RPC_CHECK_TIMEOUT_MS = 8000;
+const RPC_CHECK_CONCURRENCY = 8;
+let rpcCheckInProgress = false;
+let rpcCheckPending = false;
 
 /**
  * Fetch data from a URL with error handling
@@ -611,6 +618,8 @@ export async function loadData() {
   cachedData.slip44 = slip44;
   cachedData.indexed = indexData(theGraph, chainlist, chains, slip44);
   cachedData.lastUpdated = new Date().toISOString();
+  cachedData.rpcHealth = {};
+  cachedData.lastRpcCheck = null;
   
   console.log(`Data loaded successfully. Total chains: ${cachedData.indexed.all.length}`);
   
@@ -879,6 +888,205 @@ export function getAllEndpoints() {
   }
   
   return cachedData.indexed.all.map(extractEndpoints);
+}
+
+/**
+ * Normalize an RPC entry to a plain URL string
+ */
+function normalizeRpcUrl(rpcEntry) {
+  if (!rpcEntry) return null;
+  if (typeof rpcEntry === 'string') return rpcEntry;
+  if (typeof rpcEntry === 'object' && rpcEntry.url) return rpcEntry.url;
+  return null;
+}
+
+/**
+ * Convert a block height (hex or number) to a numeric value
+ */
+function parseBlockHeight(value) {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+  
+  if (typeof value === 'string') {
+    if (value.startsWith('0x')) {
+      const parsed = parseInt(value, 16);
+      return Number.isNaN(parsed) ? null : parsed;
+    }
+    
+    const parsed = Number(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  
+  return null;
+}
+
+/**
+ * Perform a JSON-RPC call with a timeout
+ */
+async function performJsonRpc(url, method) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), RPC_CHECK_TIMEOUT_MS);
+  
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method,
+        params: []
+      }),
+      signal: controller.signal
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    
+    const body = await response.json();
+    if (body.error) {
+      const message = body.error.message || 'RPC error';
+      throw new Error(message);
+    }
+    
+    return body.result;
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error('RPC request timed out');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+/**
+ * Check a single RPC endpoint for client version and latest block height
+ */
+async function checkRpcEndpoint(url) {
+  const result = {
+    url,
+    ok: false,
+    clientVersion: null,
+    blockHeight: null,
+    error: null
+  };
+  
+  if (!url || !url.startsWith('http')) {
+    result.error = 'Unsupported RPC URL';
+    return result;
+  }
+  
+  if (url.includes('${')) {
+    result.error = 'RPC URL requires API key substitution';
+    return result;
+  }
+  
+  try {
+    const [clientVersion, blockNumber] = await Promise.all([
+      performJsonRpc(url, 'web3_clientVersion'),
+      performJsonRpc(url, 'eth_blockNumber')
+    ]);
+    
+    result.clientVersion = clientVersion || null;
+    result.blockHeight = parseBlockHeight(blockNumber);
+    result.ok = Boolean(result.clientVersion) && result.blockHeight !== null;
+  } catch (error) {
+    result.error = error.message;
+  }
+  
+  return result;
+}
+
+/**
+ * Run RPC health checks across all endpoints
+ */
+export async function runRpcHealthCheck() {
+  if (!cachedData.indexed) {
+    console.warn('RPC health check skipped: data not loaded');
+    return;
+  }
+  
+  const dataVersion = cachedData.lastUpdated;
+  const endpoints = getAllEndpoints();
+  const tasks = [];
+  const results = {};
+  
+  endpoints.forEach(({ chainId, rpc }) => {
+    const normalizedUrls = (rpc || []).map(normalizeRpcUrl).filter(Boolean);
+    const validUrls = Array.from(new Set(normalizedUrls)).filter(url => url.startsWith('http'));
+    
+    if (validUrls.length === 0) {
+      return;
+    }
+    
+    validUrls.forEach(url => tasks.push({ chainId, url }));
+    if (!results[chainId]) {
+      results[chainId] = [];
+    }
+  });
+  
+  cachedData.rpcHealth = {};
+  cachedData.lastRpcCheck = null;
+  
+  if (tasks.length === 0) {
+    console.warn('RPC health check skipped: no RPC endpoints found');
+    return;
+  }
+  
+  let taskIndex = 0;
+  const worker = async () => {
+    while (taskIndex < tasks.length) {
+      const current = taskIndex++;
+      const task = tasks[current];
+      const status = await checkRpcEndpoint(task.url);
+      
+      if (!results[task.chainId]) {
+        results[task.chainId] = [];
+      }
+      
+      results[task.chainId].push(status);
+    }
+  };
+  
+  const workerCount = Math.min(RPC_CHECK_CONCURRENCY, tasks.length);
+  const workers = Array.from({ length: workerCount }, worker);
+  await Promise.all(workers);
+  
+  if (cachedData.lastUpdated !== dataVersion) {
+    console.warn('RPC health check skipped: data changed during run');
+    return;
+  }
+  
+  cachedData.rpcHealth = results;
+  cachedData.lastRpcCheck = new Date().toISOString();
+  console.log(`RPC health check completed: ${tasks.length} endpoints tested across ${Object.keys(results).length} chains`);
+}
+
+/**
+ * Start the RPC health check in the background (no-op if already running)
+ */
+export function startRpcHealthCheck() {
+  if (rpcCheckInProgress) {
+    rpcCheckPending = true;
+    return;
+  }
+  
+  rpcCheckInProgress = true;
+  rpcCheckPending = false;
+  runRpcHealthCheck()
+    .catch(error => {
+      console.error('RPC health check failed:', error.message || error);
+    })
+    .finally(() => {
+      rpcCheckInProgress = false;
+      
+      if (rpcCheckPending) {
+        startRpcHealthCheck();
+      }
+    });
 }
 
 /**

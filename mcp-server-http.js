@@ -19,10 +19,12 @@ import {
   getRelationsById,
   getEndpointsById,
   getAllEndpoints,
+  startRpcHealthCheck,
 } from './dataService.js';
 
 // Load data on startup
 await loadData();
+startRpcHealthCheck();
 
 // Get configuration from environment
 const MCP_PORT = parseInt(process.env.MCP_PORT || '3001');
