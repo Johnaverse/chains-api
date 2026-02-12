@@ -1,6 +1,6 @@
 import Fastify from 'fastify';
 import { loadData, getCachedData, searchChains, getChainById, getAllChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints } from './dataService.js';
-import { startMonitoring, getMonitoringResults, getMonitoringStatus } from './rpcMonitor.js';
+import { getMonitoringResults, getMonitoringStatus, startRpcHealthCheck } from './rpcMonitor.js';
 
 const fastify = Fastify({
   logger: true
@@ -9,11 +9,6 @@ const fastify = Fastify({
 // Load data on startup
 await loadData();
 startRpcHealthCheck();
-
-// Start background RPC monitoring (runs async, doesn't block startup)
-startMonitoring().catch(error => {
-  console.error('Failed to start RPC monitoring:', error);
-});
 
 /**
  * Health check endpoint
