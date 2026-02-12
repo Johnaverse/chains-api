@@ -15,8 +15,15 @@ let cachedData = {
   chains: null,
   slip44: null,
   indexed: null,
-  lastUpdated: null
+  lastUpdated: null,
+  rpcHealth: {},
+  lastRpcCheck: null
 };
+
+const RPC_CHECK_TIMEOUT_MS = 8000;
+const RPC_CHECK_CONCURRENCY = 8;
+let rpcCheckInProgress = false;
+let rpcCheckPending = false;
 
 /**
  * Fetch data from a URL with error handling
@@ -123,6 +130,42 @@ function addBeaconTagToTargetChain(indexed, targetChainId) {
 }
 
 /**
+ * Helper function to get bridge URL from a bridge object or string
+ */
+function getBridgeUrl(bridge) {
+  if (typeof bridge === 'string') {
+    return bridge;
+  }
+  return bridge && bridge.url ? bridge.url : null;
+}
+
+/**
+ * Helper function to merge bridge URLs into a chain's bridges array
+ */
+function mergeBridges(chain, newBridges) {
+  if (!newBridges || !Array.isArray(newBridges)) {
+    return;
+  }
+  
+  if (!chain.bridges) {
+    chain.bridges = [];
+  }
+  
+  // Build a set of existing bridge URLs for comparison
+  const existingBridgeUrls = new Set(
+    chain.bridges.map(getBridgeUrl).filter(url => url !== null)
+  );
+  
+  newBridges.forEach(bridge => {
+    const url = getBridgeUrl(bridge);
+    if (url && !existingBridgeUrls.has(url)) {
+      chain.bridges.push(bridge);
+      existingBridgeUrls.add(url);
+    }
+  });
+}
+
+/**
  * Index all data into a searchable structure
  */
 function indexData(theGraph, chainlist, chains, slip44) {
@@ -172,7 +215,7 @@ function indexData(theGraph, chainlist, chains, slip44) {
       }
     });
     
-    // Process L2 relations from parent field in chains.json
+    // Process L2 relations and bridge URLs from parent field in chains.json
     chains.forEach(chain => {
       const chainId = chain.chainId;
       
@@ -207,6 +250,9 @@ function indexData(theGraph, chainlist, chains, slip44) {
               if (!existingRelation) {
                 indexed.byChainId[chainId].relations.push(relation);
               }
+              
+              // Extract bridge URLs from parent.bridges
+              mergeBridges(indexed.byChainId[chainId], chain.parent.bridges);
             }
           }
         }
@@ -314,6 +360,21 @@ function indexData(theGraph, chainlist, chains, slip44) {
             indexed.byChainId[testnetChainId].relations.push(relation);
           }
         }
+      }
+    });
+    
+    // Third pass: Extract bridge URLs from parent.bridges in chainlist
+    chainlist.forEach(chainData => {
+      const chainId = chainData.chainId;
+      
+      // Skip if chainId is not valid
+      if (chainId === undefined || chainId === null || isNaN(chainId)) {
+        return;
+      }
+      
+      // Extract bridge URLs from parent.bridges
+      if (indexed.byChainId[chainId] && chainData.parent && chainData.parent.bridges) {
+        mergeBridges(indexed.byChainId[chainId], chainData.parent.bridges);
       }
     });
   }
@@ -557,6 +618,8 @@ export async function loadData() {
   cachedData.slip44 = slip44;
   cachedData.indexed = indexData(theGraph, chainlist, chains, slip44);
   cachedData.lastUpdated = new Date().toISOString();
+  cachedData.rpcHealth = {};
+  cachedData.lastRpcCheck = null;
   
   console.log(`Data loaded successfully. Total chains: ${cachedData.indexed.all.length}`);
   
@@ -662,6 +725,9 @@ function transformChain(chain) {
   if (chain.status) {
     transformedChain.status = chain.status;
   }
+  if (chain.bridges) {
+    transformedChain.bridges = chain.bridges;
+  }
   
   return transformedChain;
 }
@@ -688,22 +754,66 @@ export function getAllChains() {
 
 /**
  * Get all relations from all chains
+ * Returns relations with nested structure: { parentChainId: { childChainId: {...} } }
  */
 export function getAllRelations() {
   if (!cachedData.indexed) {
-    return [];
+    return {};
   }
   
-  const allRelations = [];
+  const allRelations = {};
+  
+  // Allowed relation kinds (parentOf will be renamed to l1Of in the output)
+  const allowedKinds = ['l2Of', 'parentOf', 'testnetOf', 'mainnetOf'];
   
   cachedData.indexed.all.forEach(chain => {
     if (chain.relations && Array.isArray(chain.relations) && chain.relations.length > 0) {
       chain.relations.forEach(relation => {
-        allRelations.push({
-          chainId: chain.chainId,
-          chainName: chain.name,
-          ...relation
-        });
+        // Only include allowed relation kinds and those with chainId
+        if (allowedKinds.includes(relation.kind) && relation.chainId !== undefined) {
+          let parentChainId, childChainId, parentName, childName;
+          
+          // Rename parentOf to l1Of
+          let kind = relation.kind;
+          if (kind === 'parentOf') {
+            kind = 'l1Of';
+          }
+          
+          // Determine parent and child based on relation type
+          if (kind === 'l1Of' || kind === 'mainnetOf') {
+            // For l1Of (parentOf) and mainnetOf: the chain having the relation is the parent
+            parentChainId = chain.chainId;
+            childChainId = relation.chainId;
+            parentName = chain.name;
+            const childChain = cachedData.indexed.byChainId[childChainId];
+            childName = childChain ? childChain.name : relation.network;
+          } else {
+            // For l2Of and testnetOf: the chain having the relation is the child
+            childChainId = chain.chainId;
+            parentChainId = relation.chainId;
+            childName = chain.name;
+            const parentChain = cachedData.indexed.byChainId[parentChainId];
+            parentName = parentChain ? parentChain.name : relation.network;
+          }
+          
+          // Use nested structure: parentChainId -> childChainId -> relation data
+          const parentKey = String(parentChainId);
+          const childKey = String(childChainId);
+          
+          // Initialize parent entry if it doesn't exist
+          if (!allRelations[parentKey]) {
+            allRelations[parentKey] = {};
+          }
+          
+          // Store relation under child chainId within parent's object
+          allRelations[parentKey][childKey] = {
+            parentName,
+            kind,
+            childName,
+            chainId: childChainId,
+            source: relation.source
+          };
+        }
       });
     }
   });
@@ -778,4 +888,428 @@ export function getAllEndpoints() {
   }
   
   return cachedData.indexed.all.map(extractEndpoints);
+}
+
+/**
+ * Normalize an RPC entry to a plain URL string
+ */
+function normalizeRpcUrl(rpcEntry) {
+  if (!rpcEntry) return null;
+  if (typeof rpcEntry === 'string') return rpcEntry;
+  if (typeof rpcEntry === 'object' && rpcEntry.url) return rpcEntry.url;
+  return null;
+}
+
+/**
+ * Convert a block height (hex or number) to a numeric value
+ */
+function parseBlockHeight(value) {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+  
+  if (typeof value === 'string') {
+    if (value.startsWith('0x')) {
+      const parsed = parseInt(value, 16);
+      return Number.isNaN(parsed) ? null : parsed;
+    }
+    
+    const parsed = Number(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  
+  return null;
+}
+
+/**
+ * Perform a JSON-RPC call with a timeout
+ */
+async function performJsonRpc(url, method) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), RPC_CHECK_TIMEOUT_MS);
+  
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method,
+        params: []
+      }),
+      signal: controller.signal
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    
+    const body = await response.json();
+    if (body.error) {
+      const message = body.error.message || 'RPC error';
+      throw new Error(message);
+    }
+    
+    return body.result;
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error('RPC request timed out');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+/**
+ * Check a single RPC endpoint for client version and latest block height
+ */
+async function checkRpcEndpoint(url) {
+  const result = {
+    url,
+    ok: false,
+    clientVersion: null,
+    blockHeight: null,
+    error: null
+  };
+  
+  if (!url || !url.startsWith('http')) {
+    result.error = 'Unsupported RPC URL';
+    return result;
+  }
+  
+  if (url.includes('${')) {
+    result.error = 'RPC URL requires API key substitution';
+    return result;
+  }
+  
+  try {
+    const [clientVersion, blockNumber] = await Promise.all([
+      performJsonRpc(url, 'web3_clientVersion'),
+      performJsonRpc(url, 'eth_blockNumber')
+    ]);
+    
+    result.clientVersion = clientVersion || null;
+    result.blockHeight = parseBlockHeight(blockNumber);
+    result.ok = Boolean(result.clientVersion) && result.blockHeight !== null;
+  } catch (error) {
+    result.error = error.message;
+  }
+  
+  return result;
+}
+
+/**
+ * Run RPC health checks across all endpoints
+ */
+export async function runRpcHealthCheck() {
+  if (!cachedData.indexed) {
+    console.warn('RPC health check skipped: data not loaded');
+    return;
+  }
+  
+  const dataVersion = cachedData.lastUpdated;
+  const endpoints = getAllEndpoints();
+  const tasks = [];
+  const results = {};
+  
+  endpoints.forEach(({ chainId, rpc }) => {
+    const normalizedUrls = (rpc || []).map(normalizeRpcUrl).filter(Boolean);
+    const validUrls = Array.from(new Set(normalizedUrls)).filter(url => url.startsWith('http'));
+    
+    if (validUrls.length === 0) {
+      return;
+    }
+    
+    validUrls.forEach(url => tasks.push({ chainId, url }));
+    if (!results[chainId]) {
+      results[chainId] = [];
+    }
+  });
+  
+  cachedData.rpcHealth = {};
+  cachedData.lastRpcCheck = null;
+  
+  if (tasks.length === 0) {
+    console.warn('RPC health check skipped: no RPC endpoints found');
+    return;
+  }
+  
+  let taskIndex = 0;
+  const worker = async () => {
+    while (taskIndex < tasks.length) {
+      const current = taskIndex++;
+      const task = tasks[current];
+      const status = await checkRpcEndpoint(task.url);
+      
+      if (!results[task.chainId]) {
+        results[task.chainId] = [];
+      }
+      
+      results[task.chainId].push(status);
+    }
+  };
+  
+  const workerCount = Math.min(RPC_CHECK_CONCURRENCY, tasks.length);
+  const workers = Array.from({ length: workerCount }, worker);
+  await Promise.all(workers);
+  
+  if (cachedData.lastUpdated !== dataVersion) {
+    console.warn('RPC health check skipped: data changed during run');
+    return;
+  }
+  
+  cachedData.rpcHealth = results;
+  cachedData.lastRpcCheck = new Date().toISOString();
+  console.log(`RPC health check completed: ${tasks.length} endpoints tested across ${Object.keys(results).length} chains`);
+}
+
+/**
+ * Start the RPC health check in the background (no-op if already running)
+ */
+export function startRpcHealthCheck() {
+  if (rpcCheckInProgress) {
+    rpcCheckPending = true;
+    return;
+  }
+  
+  rpcCheckInProgress = true;
+  rpcCheckPending = false;
+  runRpcHealthCheck()
+    .catch(error => {
+      console.error('RPC health check failed:', error.message || error);
+    })
+    .finally(() => {
+      rpcCheckInProgress = false;
+      
+      if (rpcCheckPending) {
+        startRpcHealthCheck();
+      }
+    });
+}
+
+/**
+ * Validate chain data for potential human errors
+ * Returns an object with validation results categorized by error type
+ */
+export function validateChainData() {
+  if (!cachedData.indexed || !cachedData.theGraph || !cachedData.chainlist || !cachedData.chains) {
+    return {
+      error: 'Data not loaded. Please reload data sources first.',
+      errors: []
+    };
+  }
+
+  const errors = [];
+  
+  // Helper function to get chain from different sources
+  const getChainFromSource = (chainId, source) => {
+    if (source === 'theGraph') {
+      return cachedData.theGraph.networks?.find(n => {
+        if (n.caip2Id) {
+          const match = n.caip2Id.match(/^eip155:(\d+)$/);
+          return match && parseInt(match[1]) === chainId;
+        }
+        return false;
+      });
+    } else if (source === 'chainlist') {
+      return cachedData.chainlist?.find(c => c.chainId === chainId);
+    } else if (source === 'chains') {
+      return cachedData.chains?.find(c => c.chainId === chainId);
+    }
+    return null;
+  };
+
+  // Build network ID to chain ID map for relation checking
+  const networkIdToChainId = buildNetworkIdToChainIdMap(cachedData.theGraph);
+
+  // Iterate through all indexed chains
+  Object.values(cachedData.indexed.byChainId).forEach(chain => {
+    const chainId = chain.chainId;
+    
+    // Rule 1: Conflicts between graph relations and other sources
+    // Assume graph relations are always true, check if other sources conflict
+    if (chain.relations && chain.relations.length > 0) {
+      const graphRelations = chain.relations.filter(r => r.source === 'theGraph');
+      
+      graphRelations.forEach(graphRel => {
+        // Check testnetOf relation
+        if (graphRel.kind === 'testnetOf' && graphRel.chainId) {
+          // Check if chain is marked as Testnet
+          if (!chain.tags.includes('Testnet')) {
+            errors.push({
+              rule: 1,
+              chainId: chainId,
+              chainName: chain.name,
+              type: 'relation_tag_conflict',
+              message: `Chain ${chainId} (${chain.name}) has testnetOf relation but is not tagged as Testnet`,
+              graphRelation: graphRel
+            });
+          }
+          
+          // Check if other sources have conflicting data
+          const chainlistChain = getChainFromSource(chainId, 'chainlist');
+          if (chainlistChain && chainlistChain.isTestnet === false) {
+            errors.push({
+              rule: 1,
+              chainId: chainId,
+              chainName: chain.name,
+              type: 'relation_source_conflict',
+              message: `Chain ${chainId} (${chain.name}) has testnetOf relation in theGraph but isTestnet=false in chainlist`,
+              graphRelation: graphRel,
+              chainlistData: { isTestnet: chainlistChain.isTestnet }
+            });
+          }
+        }
+        
+        // Check l2Of relation
+        if (graphRel.kind === 'l2Of' && graphRel.chainId) {
+          // Check if chain is marked as L2
+          if (!chain.tags.includes('L2')) {
+            errors.push({
+              rule: 1,
+              chainId: chainId,
+              chainName: chain.name,
+              type: 'relation_tag_conflict',
+              message: `Chain ${chainId} (${chain.name}) has l2Of relation but is not tagged as L2`,
+              graphRelation: graphRel
+            });
+          }
+        }
+      });
+    }
+    
+    // Rule 2: slip44 = 1 but isTestnet = false
+    const chainlistChain = getChainFromSource(chainId, 'chainlist');
+    const chainsChain = getChainFromSource(chainId, 'chains');
+    
+    if (chainlistChain && chainlistChain.slip44 === 1 && chainlistChain.isTestnet === false) {
+      errors.push({
+        rule: 2,
+        chainId: chainId,
+        chainName: chain.name,
+        type: 'slip44_testnet_mismatch',
+        message: `Chain ${chainId} (${chain.name}) has slip44=1 (testnet indicator) but isTestnet=false in chainlist`,
+        slip44: chainlistChain.slip44,
+        isTestnet: chainlistChain.isTestnet
+      });
+    }
+    
+    if (chainsChain && chainsChain.slip44 === 1 && !chain.tags.includes('Testnet')) {
+      errors.push({
+        rule: 2,
+        chainId: chainId,
+        chainName: chain.name,
+        type: 'slip44_testnet_mismatch',
+        message: `Chain ${chainId} (${chain.name}) has slip44=1 (testnet indicator) in chains.json but not tagged as Testnet`,
+        slip44: chainsChain.slip44,
+        tags: chain.tags
+      });
+    }
+    
+    // Rule 3: Chain full name includes "Testnet" or "Devnet" but identifying as Mainnet
+    const fullName = chain.theGraph?.fullName || chain.name || '';
+    const nameLower = fullName.toLowerCase();
+    
+    if ((nameLower.includes('testnet') || nameLower.includes('devnet')) && !chain.tags.includes('Testnet')) {
+      errors.push({
+        rule: 3,
+        chainId: chainId,
+        chainName: chain.name,
+        type: 'name_testnet_mismatch',
+        message: `Chain ${chainId} (${chain.name}) has "Testnet" or "Devnet" in full name "${fullName}" but not tagged as Testnet`,
+        fullName: fullName,
+        tags: chain.tags
+      });
+    }
+    
+    // Rule 4: Chain name contains "sepolia" or "hoodie" but not identifying as L2 or no relations with other networks
+    if (nameLower.includes('sepolia') || nameLower.includes('hoodie')) {
+      const hasL2Tag = chain.tags.includes('L2');
+      const hasRelations = chain.relations && chain.relations.length > 0;
+      
+      if (!hasL2Tag && !hasRelations) {
+        errors.push({
+          rule: 4,
+          chainId: chainId,
+          chainName: chain.name,
+          type: 'sepolia_hoodie_no_l2_or_relations',
+          message: `Chain ${chainId} (${chain.name}) contains "sepolia" or "hoodie" but not tagged as L2 and has no relations`,
+          fullName: fullName,
+          tags: chain.tags,
+          relations: chain.relations
+        });
+      }
+    }
+    
+    // Rule 5: Status "deprecated" conflicts in different sources
+    const statuses = [];
+    
+    if (chainlistChain && chainlistChain.status) {
+      statuses.push({ source: 'chainlist', status: chainlistChain.status });
+    }
+    if (chainsChain && chainsChain.status) {
+      statuses.push({ source: 'chains', status: chainsChain.status });
+    }
+    
+    // Check for conflicts
+    const deprecatedInSources = statuses.filter(s => s.status === 'deprecated');
+    const activeInSources = statuses.filter(s => s.status === 'active');
+    
+    if (deprecatedInSources.length > 0 && activeInSources.length > 0) {
+      errors.push({
+        rule: 5,
+        chainId: chainId,
+        chainName: chain.name,
+        type: 'status_conflict',
+        message: `Chain ${chainId} (${chain.name}) has conflicting status across sources`,
+        statuses: statuses
+      });
+    }
+    
+    // Rule 6: Chains containing "Goerli" not marked as deprecated
+    if (nameLower.includes('goerli')) {
+      const isDeprecated = chain.status === 'deprecated' || 
+                          (chainlistChain && chainlistChain.status === 'deprecated') ||
+                          (chainsChain && chainsChain.status === 'deprecated');
+      
+      if (!isDeprecated) {
+        errors.push({
+          rule: 6,
+          chainId: chainId,
+          chainName: chain.name,
+          type: 'goerli_not_deprecated',
+          message: `Chain ${chainId} (${chain.name}) contains "Goerli" but is not marked as deprecated`,
+          fullName: fullName,
+          status: chain.status,
+          statusInSources: statuses
+        });
+      }
+    }
+  });
+  
+  // Group errors by rule
+  const errorsByRule = {
+    rule1_relation_conflicts: errors.filter(e => e.rule === 1),
+    rule2_slip44_testnet_mismatch: errors.filter(e => e.rule === 2),
+    rule3_name_testnet_mismatch: errors.filter(e => e.rule === 3),
+    rule4_sepolia_hoodie_issues: errors.filter(e => e.rule === 4),
+    rule5_status_conflicts: errors.filter(e => e.rule === 5),
+    rule6_goerli_not_deprecated: errors.filter(e => e.rule === 6)
+  };
+  
+  return {
+    totalErrors: errors.length,
+    errorsByRule: errorsByRule,
+    summary: {
+      rule1: errorsByRule.rule1_relation_conflicts.length,
+      rule2: errorsByRule.rule2_slip44_testnet_mismatch.length,
+      rule3: errorsByRule.rule3_name_testnet_mismatch.length,
+      rule4: errorsByRule.rule4_sepolia_hoodie_issues.length,
+      rule5: errorsByRule.rule5_status_conflicts.length,
+      rule6: errorsByRule.rule6_goerli_not_deprecated.length
+    },
+    allErrors: errors
+  };
 }

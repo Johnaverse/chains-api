@@ -4,9 +4,15 @@
   "description": "API query service for blockchain chain data from multiple sources",
   "main": "index.js",
   "type": "module",
+  "bin": {
+    "chains-api-mcp": "./mcp-server.js",
+    "chains-api-mcp-http": "./mcp-server-http.js"
+  },
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js",
+    "mcp": "node mcp-server.js",
+    "mcp:http": "node mcp-server-http.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
@@ -21,6 +27,8 @@
   },
   "homepage": "https://github.com/Johnaverse/chains-api#readme",
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "express": "^5.2.1",
     "fastify": "^5.7.4",
     "node-fetch": "^3.3.2"
   }

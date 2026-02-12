@@ -1,6 +1,6 @@
 # Chains API
 
-A Node.js API query service built with Fastify that indexes and provides access to blockchain chain data from multiple sources.
+A Node.js API query service built with Fastify that indexes and provides access to blockchain chain data from multiple sources. Also available as an MCP (Model Context Protocol) server for AI assistants.
 
 ## Features
 
@@ -11,6 +11,7 @@ A Node.js API query service built with Fastify that indexes and provides access 
   - [SLIP-0044 Coin Types](https://github.com/satoshilabs/slips/blob/master/slip-0044.md)
 
 - **Fast API**: Built with Fastify for high performance
+- **MCP Server**: Available as a Model Context Protocol server for AI assistants
 - **Indexed Data**: Efficient querying with indexed chain data
 - **Search Capabilities**: Search chains by name, ID, or other attributes
 - **RESTful Endpoints**: Clean and intuitive API design
@@ -22,13 +23,109 @@ A Node.js API query service built with Fastify that indexes and provides access 
 
 ## Installation
 
+### Using npm
+
 ```bash
 npm install
 ```
 
+### Using Docker
+
+#### Pull from GitHub Container Registry
+
+Pre-built Docker images are automatically published to GitHub Container Registry (GHCR) on every push to the main branch:
+
+```bash
+# Pull the latest image
+docker pull ghcr.io/johnaverse/chains-api:latest
+
+# Or pull a specific version
+docker pull ghcr.io/johnaverse/chains-api:v1.0.0
+```
+
+#### Build Docker image locally
+
+```bash
+# Build the image
+docker build -t chains-api .
+
+# Or using docker compose
+docker compose build
+```
+
 ## Usage
 
-### Start the server
+### Running with Docker
+
+#### Run the REST API server
+
+```bash
+# Using pre-built image from GHCR
+docker run -d -p 3000:3000 --name chains-api ghcr.io/johnaverse/chains-api:latest
+
+# Or using locally built image
+docker run -d -p 3000:3000 --name chains-api chains-api
+
+# With custom environment variables
+docker run -d -p 3000:3000 \
+  -e PORT=3000 \
+  -e HOST=0.0.0.0 \
+  --name chains-api \
+  ghcr.io/johnaverse/chains-api:latest
+```
+
+The API will be available at `http://localhost:3000`.
+
+#### Run the MCP HTTP server
+
+```bash
+docker run -d -p 3001:3001 \
+  --name chains-api-mcp \
+  ghcr.io/johnaverse/chains-api:latest \
+  node mcp-server-http.js
+```
+
+The MCP HTTP server will be available at `http://localhost:3001`.
+
+#### Using Docker Compose
+
+A `docker-compose.yml` file is included in the repository that runs both the REST API server on port 3000 and the MCP HTTP server on port 3001:
+
+```bash
+docker compose up -d
+```
+
+To use pre-built images from GHCR instead of building locally, modify the `docker-compose.yml` to use `image: ghcr.io/johnaverse/chains-api:latest` instead of `build: .`
+
+The default configuration:
+
+```yaml
+services:
+  chains-api:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - HOST=0.0.0.0
+    restart: unless-stopped
+
+  chains-api-mcp:
+    build: .
+    command: node mcp-server-http.js
+    ports:
+      - "3001:3001"
+    environment:
+      - MCP_PORT=3001
+      - MCP_HOST=0.0.0.0
+    restart: unless-stopped
+```
+
+### Running with npm
+
+### REST API Server
+
+#### Start the server
 
 ```bash
 npm start
@@ -36,16 +133,120 @@ npm start
 
 The server will start on `http://localhost:3000` by default.
 
-### Development mode (with auto-reload)
+#### Development mode (with auto-reload)
 
 ```bash
 npm run dev
 ```
 
+### MCP Server (for AI Assistants)
+
+The Chains API can also be used as an MCP (Model Context Protocol) server, allowing AI assistants like Claude to query blockchain chain data directly. Two transport modes are supported:
+
+1. **Stdio Mode** (for local AI assistants like Claude Desktop)
+2. **HTTP Mode** (for external clients like n8n, Make.com, etc.)
+
+#### Running the MCP Server (Stdio Mode)
+
+For local use with Claude Desktop and similar applications:
+
+```bash
+npm run mcp
+```
+
+Or directly with Node.js:
+
+```bash
+node mcp-server.js
+```
+
+#### Running the MCP HTTP Server (Network Mode)
+
+For external clients that need HTTP access:
+
+```bash
+npm run mcp:http
+```
+
+Or directly with Node.js:
+
+```bash
+node mcp-server-http.js
+```
+
+The HTTP server will start on `http://0.0.0.0:3001` by default (configurable via `MCP_PORT` and `MCP_HOST` environment variables).
+
+**Endpoints:**
+- `POST /mcp` - MCP protocol endpoint for tool calls
+- `DELETE /mcp` - Session termination endpoint
+- `GET /health` - Health check
+- `GET /` - Server information
+
+**Example HTTP MCP usage with curl:**
+
+```bash
+# Initialize a session
+curl -X POST http://localhost:3001/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"my-client","version":"1.0.0"}}}'
+
+# Extract session ID from the mcp-session-id header, then call a tool:
+curl -X POST http://localhost:3001/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "mcp-session-id: <session-id>" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_chain_by_id","arguments":{"chainId":1}}}'
+```
+
+#### MCP Server Configuration (Stdio Mode)
+
+To use the Chains API MCP server with Claude Desktop or other MCP clients, add it to your MCP settings configuration file:
+
+**For Claude Desktop (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):**
+
+```json
+{
+  "mcpServers": {
+    "chains-api": {
+      "command": "node",
+      "args": ["/path/to/chains-api/mcp-server.js"]
+    }
+  }
+}
+```
+
+Or if you've installed the package globally:
+
+```json
+{
+  "mcpServers": {
+    "chains-api": {
+      "command": "chains-api-mcp"
+    }
+  }
+}
+```
+
+#### Available MCP Tools
+
+The MCP server provides the following tools for querying blockchain chain data:
+
+- **get_chains**: Get all blockchain chains, optionally filtered by tag (Testnet, L2, or Beacon)
+- **get_chain_by_id**: Get detailed information about a specific blockchain chain by its chain ID
+- **search_chains**: Search for blockchain chains by name or other attributes
+- **get_endpoints**: Get RPC, firehose, and substreams endpoints for a specific chain or all chains
+- **get_relations**: Get chain relationships (testnet/mainnet, L2/L1, etc.) for a specific chain or all chains
+- **get_slip44**: Get SLIP-0044 coin type information by coin type ID or all coin types
+
+Each tool returns JSON data that can be used by AI assistants to answer questions about blockchain networks.
+
 ## Environment Variables
 
-- `PORT`: Server port (default: 3000)
-- `HOST`: Server host (default: 0.0.0.0)
+- `PORT`: REST API server port (default: 3000)
+- `HOST`: REST API server host (default: 0.0.0.0)
+- `MCP_PORT`: MCP HTTP server port (default: 3001)
+- `MCP_HOST`: MCP HTTP server host (default: 0.0.0.0)
 
 ## API Endpoints
 
@@ -111,7 +312,12 @@ Get all indexed chains.
   "infoURL": "https://polygon.technology/",
   "sources": ["chains", "theGraph"],
   "tags": ["Testnet", "L2"],
-  "status": "active"
+  "status": "active",
+  "bridges": [
+    {
+      "url": "https://bridge.polygon.technology/"
+    }
+  ]
 }
 ```
 
@@ -147,7 +353,12 @@ Get a specific chain by its chain ID.
   "infoURL": "https://polygon.technology/",
   "sources": ["chains", "theGraph"],
   "tags": ["Testnet", "L2"],
-  "status": "active"
+  "status": "active",
+  "bridges": [
+    {
+      "url": "https://bridge.polygon.technology/"
+    }
+  ]
 }
 ```
 
@@ -323,6 +534,56 @@ Reload data from all sources.
 }
 ```
 
+### `GET /validate`
+Validate chain data for potential human errors across all three data sources.
+
+This endpoint analyzes the chain data and identifies potential inconsistencies or errors based on the following rules:
+
+1. **Rule 1 - Relation Conflicts**: Assumes graph relations are always true and finds conflicts with other sources
+2. **Rule 2 - slip44/Testnet Mismatch**: Chains with slip44=1 but isTestnet=false
+3. **Rule 3 - Name/Tag Mismatch**: Chain full names containing "Testnet" or "Devnet" but not tagged as Testnet
+4. **Rule 4 - Sepolia/Hoodie Networks**: Chains containing "sepolia" or "hoodie" keywords but not identifying as L2 or having no relations
+5. **Rule 5 - Status Conflicts**: Deprecated status conflicts across different sources
+6. **Rule 6 - Goerli Deprecation**: Chains containing "Goerli" keyword but not marked as deprecated
+
+**Response:**
+```json
+{
+  "totalErrors": 85,
+  "summary": {
+    "rule1": 3,
+    "rule2": 57,
+    "rule3": 16,
+    "rule4": 1,
+    "rule5": 1,
+    "rule6": 7
+  },
+  "errorsByRule": {
+    "rule1_relation_conflicts": [...],
+    "rule2_slip44_testnet_mismatch": [...],
+    "rule3_name_testnet_mismatch": [...],
+    "rule4_sepolia_hoodie_issues": [...],
+    "rule5_status_conflicts": [...],
+    "rule6_goerli_not_deprecated": [...]
+  },
+  "allErrors": [...]
+}
+```
+
+**Example Error Object:**
+```json
+{
+  "rule": 6,
+  "chainId": 5,
+  "chainName": "Goerli",
+  "type": "goerli_not_deprecated",
+  "message": "Chain 5 (Goerli) contains \"Goerli\" but is not marked as deprecated",
+  "fullName": "Goerli",
+  "status": "active",
+  "statusInSources": []
+}
+```
+
 ## Data Structure
 
 ### Chain Object (from `/chains` endpoints)
@@ -342,6 +603,7 @@ Each chain object returned from `/chains` and `/chains/:id` contains:
 - `sources`: Array of data sources that provided this chain's data
 - `status`: Chain status - defaults to `"active"` when not present in any data source
 - `tags`: Array of tags (e.g., "Testnet", "L2", "Beacon")
+- `bridges`: Array of bridge URLs (if available from chainlist or chains.json `parent.bridges` field)
 
 **Note:** Chain objects no longer include `rpc` or `relations` fields. Use `/endpoints/:id` for RPC endpoints and `/relations/:id` for relations.
 
