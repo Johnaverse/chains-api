@@ -269,3 +269,13 @@ export function getMonitoringStatus() {
     lastUpdated: monitoringResults.lastUpdated
   };
 }
+
+/**
+ * Start RPC health check without blocking
+ * This is a non-blocking wrapper around startMonitoring()
+ */
+export function startRpcHealthCheck() {
+  startMonitoring().catch(error => {
+    console.error('Failed to start RPC health check:', error);
+  });
+}

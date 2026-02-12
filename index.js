@@ -1,6 +1,6 @@
 import Fastify from 'fastify';
 import { loadData, getCachedData, searchChains, getChainById, getAllChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints } from './dataService.js';
-import { startMonitoring, getMonitoringResults, getMonitoringStatus } from './rpcMonitor.js';
+import { startMonitoring, getMonitoringResults, getMonitoringStatus, startRpcHealthCheck } from './rpcMonitor.js';
 
 const fastify = Fastify({
   logger: true
@@ -8,6 +8,7 @@ const fastify = Fastify({
 
 // Load data on startup
 await loadData();
+startRpcHealthCheck();
 
 // Start background RPC monitoring (runs async, doesn't block startup)
 startMonitoring().catch(error => {
@@ -199,6 +200,7 @@ fastify.get('/slip44/:coinType', async (request, reply) => {
 fastify.post('/reload', async (request, reply) => {
   try {
     await loadData();
+    startRpcHealthCheck();
     const cachedData = getCachedData();
     return {
       status: 'success',
