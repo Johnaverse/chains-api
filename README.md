@@ -21,6 +21,9 @@ A Node.js API query service built with Fastify that indexes and provides access 
   - Example: Base Sepolia (84532) is tagged as `Testnet` and `L2`, with relations to Base (8453) and Sepolia (11155111)
   - Reverse relations: Mainnets have `mainnetOf` relations pointing to testnets, L1s have `parentOf` relations pointing to L2s
 
+- **RPC Health Monitoring**: Automatic background monitoring of RPC endpoints to identify working and failed nodes.
+- **Data Validation**: Built-in validation tools to identify data inconsistencies between multiple sources (e.g., The Graph registry vs. Chainlist).
+
 ## Installation
 
 ### Using npm
@@ -103,15 +106,31 @@ The default configuration:
 services:
   chains-api:
     build: .
+    image: chains-api:latest
+    container_name: chains-api
     ports:
       - "3000:3000"
     environment:
       - PORT=3000
       - HOST=0.0.0.0
     restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://localhost:3000/health', (r) => { process.exit(r.statusCode === 200 ? 0 : 1) })",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
 
   chains-api-mcp:
     build: .
+    image: chains-api:latest
+    container_name: chains-api-mcp
     command: node mcp-server-http.js
     ports:
       - "3001:3001"
@@ -119,6 +138,18 @@ services:
       - MCP_PORT=3001
       - MCP_HOST=0.0.0.0
     restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://localhost:3001/health', (r) => { process.exit(r.statusCode === 200 ? 0 : 1) })",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
 ```
 
 ### Running with npm
@@ -274,6 +305,59 @@ Health check and data status.
   "dataLoaded": true,
   "lastUpdated": "2026-02-07T14:13:42.104Z",
   "totalChains": 1234
+}
+```
+
+### `GET /rpc-monitor`
+Get RPC endpoint monitoring results for all chains. At startup, a background process validates the health of the indexed RPC endpoints.
+
+**Response:**
+```json
+{
+  "isMonitoring": false,
+  "lastUpdated": "2026-02-07T14:13:42.104Z",
+  "totalEndpoints": 4236,
+  "testedEndpoints": 850,
+  "workingEndpoints": 782,
+  "results": [
+    {
+      "chainId": 1,
+      "chainName": "Ethereum Mainnet",
+      "url": "https://eth.rpc.pinax.network",
+      "status": "working",
+      "clientVersion": "geth/v1.14.0",
+      "blockNumber": 19123456,
+      "testedAt": "2026-02-07T14:13:42.104Z"
+    },
+    ...
+  ]
+}
+```
+
+### `GET /rpc-monitor/:id`
+Get RPC monitoring results for a specific chain by its chain ID.
+
+**Example:** `GET /rpc-monitor/1` (Ethereum)
+
+**Response:**
+```json
+{
+  "chainId": 1,
+  "chainName": "Ethereum Mainnet",
+  "totalEndpoints": 15,
+  "workingEndpoints": 12,
+  "lastUpdated": "2026-02-07T14:13:42.104Z",
+  "endpoints": [
+    {
+      "url": "https://eth.rpc.pinax.network",
+      "status": "working",
+      "clientVersion": "geth/v1.14.0",
+      "blockNumber": 19123456,
+      "error": null,
+      "testedAt": "2026-02-07T14:13:42.104Z"
+    },
+    ...
+  ]
 }
 ```
 
@@ -643,6 +727,13 @@ Each SLIP-0044 coin type object contains:
 - `symbol`: Coin symbol
 - `coin`: Full coin name
 
+## Documentation
+
+More detailed information about project internals and testing can be found in the `docs` folder:
+
+- [Project Structure](docs/PROJECT_STRUCTURE.md): Detailed explanation of files and directories
+- [Testing](docs/TESTING.md): Comprehensive guide to the testing strategy (Unit, Integration, and Fuzz testing)
+
 ## License
 
-ISC
+MIT
