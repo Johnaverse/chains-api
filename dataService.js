@@ -3,6 +3,7 @@ import {
   DATA_SOURCE_CHAINS, DATA_SOURCE_SLIP44,
   RPC_CHECK_TIMEOUT_MS, RPC_CHECK_CONCURRENCY
 } from './config.js';
+import { proxyFetch } from './fetchUtil.js';
 
 // Data source URLs (from config, overridable via env)
 const DATA_SOURCES = {
@@ -32,7 +33,7 @@ let rpcCheckPending = false;
  */
 async function fetchData(url, format = 'json') {
   try {
-    const response = await fetch(url);
+    const response = await proxyFetch(url);
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
@@ -944,7 +945,7 @@ async function performJsonRpc(url, method) {
   const timeoutId = setTimeout(() => controller.abort(), RPC_CHECK_TIMEOUT_MS);
   
   try {
-    const response = await fetch(url, {
+    const response = await proxyFetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

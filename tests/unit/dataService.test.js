@@ -7,7 +7,15 @@ vi.mock('../../config.js', () => ({
   DATA_SOURCE_CHAINS: 'https://example.com/chains.json',
   DATA_SOURCE_SLIP44: 'https://example.com/slip44.md',
   RPC_CHECK_TIMEOUT_MS: 8000,
-  RPC_CHECK_CONCURRENCY: 8
+  RPC_CHECK_CONCURRENCY: 8,
+  PROXY_URL: '',
+  PROXY_ENABLED: false
+}));
+
+// Mock fetchUtil to use standard fetch
+vi.mock('../../fetchUtil.js', () => ({
+  proxyFetch: vi.fn((...args) => fetch(...args)),
+  getProxyStatus: vi.fn(() => ({ enabled: false, url: null }))
 }));
 
 import {

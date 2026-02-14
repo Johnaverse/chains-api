@@ -2,7 +2,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock config before importing rpcMonitor
 vi.mock('../../config.js', () => ({
-  MAX_ENDPOINTS_PER_CHAIN: 5
+  MAX_ENDPOINTS_PER_CHAIN: 5,
+  PROXY_URL: '',
+  PROXY_ENABLED: false
+}));
+
+// Mock fetchUtil to use standard fetch
+vi.mock('../../fetchUtil.js', () => ({
+  proxyFetch: vi.fn((...args) => fetch(...args)),
+  getProxyStatus: vi.fn(() => ({ enabled: false, url: null }))
 }));
 
 import { getMonitoringResults, getMonitoringStatus, startRpcHealthCheck } from '../../rpcMonitor.js';

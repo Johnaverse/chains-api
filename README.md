@@ -170,6 +170,24 @@ The server will start on `http://localhost:3000` by default.
 npm run dev
 ```
 
+#### Using a Proxy (Optional)
+
+To route all outbound requests through a proxy server, set the `PROXY_URL` environment variable:
+
+```bash
+# Using a proxy without authentication
+PROXY_URL=http://proxy.example.com:8080 npm start
+
+# Using a proxy with authentication
+PROXY_URL=http://user:pass@proxy.example.com:8080 npm start
+```
+
+When configured, the proxy will be used for:
+- All RPC endpoint health checks and monitoring
+- Fetching data from external sources (The Graph, Chainlist, etc.)
+
+The proxy configuration is optional and disabled by default. See the [Environment Variables](#environment-variables) section for more details.
+
 ### MCP Server (for AI Assistants)
 
 The Chains API can also be used as an MCP (Model Context Protocol) server, allowing AI assistants like Claude to query blockchain chain data directly. Two transport modes are supported:
@@ -274,10 +292,37 @@ Each tool returns JSON data that can be used by AI assistants to answer question
 
 ## Environment Variables
 
+### Server Configuration
 - `PORT`: REST API server port (default: 3000)
 - `HOST`: REST API server host (default: 0.0.0.0)
 - `MCP_PORT`: MCP HTTP server port (default: 3001)
 - `MCP_HOST`: MCP HTTP server host (default: 0.0.0.0)
+
+### Proxy Configuration (Optional)
+- `PROXY_URL`: HTTP/HTTPS proxy URL for all outbound requests (default: empty/disabled)
+  - Example: `http://proxy.example.com:8080`
+  - With authentication: `http://user:pass@proxy.example.com:8080`
+  - When set, all RPC requests and data source fetching will route through this proxy
+  - Leave empty or unset to disable proxy support
+
+### Rate Limiting
+- `RATE_LIMIT_MAX`: Maximum requests per window for global endpoints (default: 100)
+- `RATE_LIMIT_WINDOW_MS`: Rate limit window in milliseconds (default: 60000 = 1 minute)
+- `RELOAD_RATE_LIMIT_MAX`: Maximum `/reload` requests per window (default: 5)
+- `SEARCH_RATE_LIMIT_MAX`: Maximum `/search` requests per window (default: 30)
+
+### RPC Health Check
+- `RPC_CHECK_TIMEOUT_MS`: Timeout per RPC health check call in milliseconds (default: 8000)
+- `RPC_CHECK_CONCURRENCY`: Number of parallel RPC health checks (default: 8)
+- `MAX_ENDPOINTS_PER_CHAIN`: Maximum RPC endpoints tested per chain (default: 5)
+
+### Other
+- `BODY_LIMIT`: Maximum request body size in bytes (default: 1048576 = 1 MB)
+- `MAX_PARAM_LENGTH`: Maximum URL parameter length (default: 200)
+- `MAX_SEARCH_QUERY_LENGTH`: Maximum search query length (default: 200)
+- `CORS_ORIGIN`: Allowed CORS origins (default: `*` for all origins)
+
+See `.env.example` for a complete list of environment variables with example values.
 
 ## API Endpoints
 
