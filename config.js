@@ -60,3 +60,7 @@ export const DATA_SOURCE_SLIP44 = parseStringEnv(
 
 // CORS
 export const CORS_ORIGIN = parseStringEnv('CORS_ORIGIN', '*');
+
+// Proxy (optional)
+export const PROXY_URL = parseStringEnv('PROXY_URL', '');
+export const PROXY_ENABLED = PROXY_URL !== '';

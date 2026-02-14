@@ -1,5 +1,6 @@
 import { getAllEndpoints } from './dataService.js';
 import { MAX_ENDPOINTS_PER_CHAIN } from './config.js';
+import { proxyFetch } from './fetchUtil.js';
 
 // Store monitoring results in memory
 let monitoringResults = {
@@ -60,7 +61,7 @@ async function makeRpcCall(url, method, params = []) {
   const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
   
   try {
-    const response = await fetch(url, {
+    const response = await proxyFetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

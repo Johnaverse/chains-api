@@ -34,7 +34,8 @@
     "@fastify/rate-limit": "^10.3.0",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "express": "^5.2.1",
-    "fastify": "^5.7.4"
+    "fastify": "^5.7.4",
+    "https-proxy-agent": "^7.0.6"
   },
   "devDependencies": {
     "@fast-check/vitest": "^0.2.4",
