@@ -182,9 +182,9 @@ describe('API Endpoints', () => {
     });
 
     fastify.get('/chains/:id', async (request, reply) => {
-      const chainId = parseInt(request.params.id);
+      const chainId = Number.parseInt(request.params.id, 10);
 
-      if (isNaN(chainId)) {
+      if (Number.isNaN(chainId)) {
         return reply.code(400).send({ error: 'Invalid chain ID' });
       }
 
@@ -214,9 +214,9 @@ describe('API Endpoints', () => {
     });
 
     fastify.get('/relations/:id', async (request, reply) => {
-      const chainId = parseInt(request.params.id);
+      const chainId = Number.parseInt(request.params.id, 10);
 
-      if (isNaN(chainId)) {
+      if (Number.isNaN(chainId)) {
         return reply.code(400).send({ error: 'Invalid chain ID' });
       }
 
@@ -235,9 +235,9 @@ describe('API Endpoints', () => {
     });
 
     fastify.get('/endpoints/:id', async (request, reply) => {
-      const chainId = parseInt(request.params.id);
+      const chainId = Number.parseInt(request.params.id, 10);
 
-      if (isNaN(chainId)) {
+      if (Number.isNaN(chainId)) {
         return reply.code(400).send({ error: 'Invalid chain ID' });
       }
 
@@ -271,9 +271,9 @@ describe('API Endpoints', () => {
     });
 
     fastify.get('/rpc-monitor/:id', async (request, reply) => {
-      const chainId = parseInt(request.params.id);
+      const chainId = Number.parseInt(request.params.id, 10);
 
-      if (isNaN(chainId)) {
+      if (Number.isNaN(chainId)) {
         return reply.code(400).send({ error: 'Invalid chain ID' });
       }
 

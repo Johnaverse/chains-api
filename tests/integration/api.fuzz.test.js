@@ -38,7 +38,7 @@ vi.mock('../../dataService.js', async () => {
       return [];
     }),
     getChainById: vi.fn((id) => {
-      const numId = parseInt(id);
+      const numId = Number.parseInt(id, 10);
       if (numId === 1) return { chainId: 1, name: 'Ethereum', tags: ['L1'] };
       return null;
     }),
@@ -50,12 +50,12 @@ vi.mock('../../dataService.js', async () => {
       '1': { '137': { parentName: 'Ethereum', kind: 'l1Of', childName: 'Polygon', chainId: 137 } }
     })),
     getRelationsById: vi.fn((id) => {
-      const numId = parseInt(id);
+      const numId = Number.parseInt(id, 10);
       if (numId === 137) return { chainId: 137, chainName: 'Polygon', relations: [{ kind: 'l2Of', chainId: 1 }] };
       return null;
     }),
     getEndpointsById: vi.fn((id) => {
-      const numId = parseInt(id);
+      const numId = Number.parseInt(id, 10);
       if (numId === 1) return { chainId: 1, name: 'Ethereum', rpc: ['https://eth.llamarpc.com'], firehose: [], substreams: [] };
       return null;
     }),
@@ -110,8 +110,8 @@ describe('Fuzz Testing - API Endpoints', () => {
     });
 
     fastify.get('/chains/:id', async (request, reply) => {
-      const chainId = parseInt(request.params.id);
-      if (isNaN(chainId)) {
+      const chainId = Number.parseInt(request.params.id, 10);
+      if (Number.isNaN(chainId)) {
         return reply.code(400).send({ error: 'Invalid chain ID' });
       }
       const chain = getChainById(chainId);
@@ -135,8 +135,8 @@ describe('Fuzz Testing - API Endpoints', () => {
     });
 
     fastify.get('/relations/:id', async (request, reply) => {
-      const chainId = parseInt(request.params.id);
-      if (isNaN(chainId)) {
+      const chainId = Number.parseInt(request.params.id, 10);
+      if (Number.isNaN(chainId)) {
         return reply.code(400).send({ error: 'Invalid chain ID' });
       }
       const result = getRelationsById(chainId);
@@ -152,8 +152,8 @@ describe('Fuzz Testing - API Endpoints', () => {
     });
 
     fastify.get('/endpoints/:id', async (request, reply) => {
-      const chainId = parseInt(request.params.id);
-      if (isNaN(chainId)) {
+      const chainId = Number.parseInt(request.params.id, 10);
+      if (Number.isNaN(chainId)) {
         return reply.code(400).send({ error: 'Invalid chain ID' });
       }
       const result = getEndpointsById(chainId);
@@ -183,8 +183,8 @@ describe('Fuzz Testing - API Endpoints', () => {
     });
 
     fastify.get('/rpc-monitor/:id', async (request, reply) => {
-      const chainId = parseInt(request.params.id);
-      if (isNaN(chainId)) {
+      const chainId = Number.parseInt(request.params.id, 10);
+      if (Number.isNaN(chainId)) {
         return reply.code(400).send({ error: 'Invalid chain ID' });
       }
       const results = getMonitoringResults();

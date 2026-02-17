@@ -27,7 +27,7 @@ await loadData();
 startRpcHealthCheck();
 
 // Get configuration from environment
-const MCP_PORT = parseInt(process.env.MCP_PORT || '3001');
+const MCP_PORT = Number.parseInt(process.env.MCP_PORT || '3001');
 const MCP_HOST = process.env.MCP_HOST || '0.0.0.0';
 
 // Create MCP server factory function
@@ -169,7 +169,7 @@ const createServer = () => {
         case 'get_chain_by_id': {
           const chainId = args.chainId;
 
-          if (typeof chainId !== 'number' || isNaN(chainId)) {
+          if (typeof chainId !== 'number' || Number.isNaN(chainId)) {
             return {
               content: [
                 {
@@ -244,7 +244,7 @@ const createServer = () => {
           if (args.chainId !== undefined) {
             const chainId = args.chainId;
 
-            if (typeof chainId !== 'number' || isNaN(chainId)) {
+            if (typeof chainId !== 'number' || Number.isNaN(chainId)) {
               return {
                 content: [
                   {
@@ -303,7 +303,7 @@ const createServer = () => {
           if (args.chainId !== undefined) {
             const chainId = args.chainId;
 
-            if (typeof chainId !== 'number' || isNaN(chainId)) {
+            if (typeof chainId !== 'number' || Number.isNaN(chainId)) {
               return {
                 content: [
                   {
@@ -369,7 +369,7 @@ const createServer = () => {
           if (args.coinType !== undefined) {
             const coinType = args.coinType;
 
-            if (typeof coinType !== 'number' || isNaN(coinType)) {
+            if (typeof coinType !== 'number' || Number.isNaN(coinType)) {
               return {
                 content: [
                   {
@@ -454,6 +454,9 @@ const createServer = () => {
 
 // Create Express app
 const app = express();
+
+// Avoid implicit framework/version disclosure
+app.disable('x-powered-by');
 
 // Parse JSON bodies
 app.use(express.json({ limit: '4mb' }));

@@ -4,8 +4,8 @@
 function parseIntEnv(name, defaultValue) {
   const raw = process.env[name];
   if (raw === undefined || raw === '') return defaultValue;
-  const parsed = parseInt(raw, 10);
-  if (isNaN(parsed)) {
+  const parsed = Number.parseInt(raw, 10);
+  if (Number.isNaN(parsed)) {
     console.error(`Invalid value for ${name}: "${raw}" (expected integer). Using default: ${defaultValue}`);
     process.exit(1);
   }

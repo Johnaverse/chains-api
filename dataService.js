@@ -78,8 +78,8 @@ function parseSLIP44(markdown) {
         const symbol = cells[2];
         const coin = cells[3];
         
-        if (coinType && !isNaN(coinType)) {
-          const coinTypeNum = parseInt(coinType);
+        const coinTypeNum = Number.parseInt(coinType, 10);
+        if (coinType && !Number.isNaN(coinTypeNum)) {
           slip44Data[coinTypeNum] = {
             coinType: coinTypeNum,
             pathComponent,
@@ -108,7 +108,7 @@ function buildNetworkIdToChainIdMap(theGraph) {
       if (network.caip2Id) {
         const match = network.caip2Id.match(/^(?:eip155|beacon):(\d+)$/);
         if (match) {
-          const chainId = parseInt(match[1]);
+          const chainId = Number.parseInt(match[1], 10);
           networkIdToChainId[network.id] = chainId;
         }
       }
@@ -228,7 +228,7 @@ function indexData(theGraph, chainlist, chains, slip44) {
         if (chain.parent.chain) {
           const match = chain.parent.chain.match(/^eip155-(\d+)$/);
           if (match) {
-            const parentChainId = parseInt(match[1]);
+            const parentChainId = Number.parseInt(match[1], 10);
             
             // Ensure the chain exists in indexed data
             if (indexed.byChainId[chainId]) {
@@ -270,7 +270,7 @@ function indexData(theGraph, chainlist, chains, slip44) {
       const chainId = chainData.chainId;
       
       // Skip if chainId is not valid
-      if (chainId === undefined || chainId === null || isNaN(chainId)) {
+      if (chainId === undefined || chainId === null || Number.isNaN(Number(chainId))) {
         return;
       }
       
@@ -330,7 +330,7 @@ function indexData(theGraph, chainlist, chains, slip44) {
       const testnetChainId = testnetData.chainId;
       
       // Skip if chainId is not valid (reusing same validation logic)
-      if (testnetChainId === undefined || testnetChainId === null || isNaN(testnetChainId)) {
+      if (testnetChainId === undefined || testnetChainId === null || Number.isNaN(Number(testnetChainId))) {
         return;
       }
       
@@ -371,7 +371,7 @@ function indexData(theGraph, chainlist, chains, slip44) {
       const chainId = chainData.chainId;
       
       // Skip if chainId is not valid
-      if (chainId === undefined || chainId === null || isNaN(chainId)) {
+      if (chainId === undefined || chainId === null || Number.isNaN(Number(chainId))) {
         return;
       }
       
@@ -392,7 +392,7 @@ function indexData(theGraph, chainlist, chains, slip44) {
       if (network.caip2Id) {
         const match = network.caip2Id.match(/^eip155:(\d+)$/);
         if (match) {
-          chainId = parseInt(match[1]);
+          chainId = Number.parseInt(match[1], 10);
         }
       }
       
@@ -557,14 +557,14 @@ function indexData(theGraph, chainlist, chains, slip44) {
           if (mainnetChain) {
             // Check if mainnetOf relation doesn't already exist
             const existingMainnetOf = mainnetChain.relations.find(
-              r => r.kind === 'mainnetOf' && r.chainId === parseInt(chainId)
+              r => r.kind === 'mainnetOf' && r.chainId === Number.parseInt(chainId, 10)
             );
             
             if (!existingMainnetOf) {
               mainnetChain.relations.push({
                 kind: 'mainnetOf',
                 network: chain.name || chain.shortName || chainId.toString(),
-                chainId: parseInt(chainId),
+                chainId: Number.parseInt(chainId, 10),
                 source: relation.source
               });
             }
@@ -577,14 +577,14 @@ function indexData(theGraph, chainlist, chains, slip44) {
           if (parentChain) {
             // Check if parentOf relation doesn't already exist
             const existingParentOf = parentChain.relations.find(
-              r => r.kind === 'parentOf' && r.chainId === parseInt(chainId)
+              r => r.kind === 'parentOf' && r.chainId === Number.parseInt(chainId, 10)
             );
             
             if (!existingParentOf) {
               parentChain.relations.push({
                 kind: 'parentOf',
                 network: chain.name || chain.shortName || chainId.toString(),
-                chainId: parseInt(chainId),
+                chainId: Number.parseInt(chainId, 10),
                 source: relation.source
               });
             }
@@ -661,9 +661,9 @@ export function searchChains(query) {
   const queryLower = query.toLowerCase();
   
   // Search by chain ID (exact match)
-  if (!isNaN(query)) {
-    const chainId = parseInt(query);
-    const chain = getChainById(chainId);
+  const parsedChainId = Number.parseInt(query, 10);
+  if (!Number.isNaN(parsedChainId)) {
+    const chain = getChainById(parsedChainId);
     if (chain) {
       results.push(chain);
     }
@@ -926,7 +926,7 @@ function parseBlockHeight(value) {
   
   if (typeof value === 'string') {
     if (value.startsWith('0x')) {
-      const parsed = parseInt(value, 16);
+      const parsed = Number.parseInt(value, 16);
       return Number.isNaN(parsed) ? null : parsed;
     }
     
@@ -1125,7 +1125,7 @@ export function validateChainData() {
       return cachedData.theGraph.networks?.find(n => {
         if (n.caip2Id) {
           const match = n.caip2Id.match(/^eip155:(\d+)$/);
-          return match && parseInt(match[1]) === chainId;
+          return match && Number.parseInt(match[1], 10) === chainId;
         }
         return false;
       });

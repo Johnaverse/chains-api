@@ -161,7 +161,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'get_chain_by_id': {
         const chainId = args.chainId;
 
-        if (typeof chainId !== 'number' || isNaN(chainId)) {
+        if (typeof chainId !== 'number' || Number.isNaN(chainId)) {
           return {
             content: [
               {
@@ -236,7 +236,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (args.chainId !== undefined) {
           const chainId = args.chainId;
 
-          if (typeof chainId !== 'number' || isNaN(chainId)) {
+          if (typeof chainId !== 'number' || Number.isNaN(chainId)) {
             return {
               content: [
                 {
@@ -295,7 +295,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (args.chainId !== undefined) {
           const chainId = args.chainId;
 
-          if (typeof chainId !== 'number' || isNaN(chainId)) {
+          if (typeof chainId !== 'number' || Number.isNaN(chainId)) {
             return {
               content: [
                 {
@@ -361,7 +361,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (args.coinType !== undefined) {
           const coinType = args.coinType;
 
-          if (typeof coinType !== 'number' || isNaN(coinType)) {
+          if (typeof coinType !== 'number' || Number.isNaN(coinType)) {
             return {
               content: [
                 {

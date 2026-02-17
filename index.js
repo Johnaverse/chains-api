@@ -85,9 +85,9 @@ fastify.get('/chains', async (request, reply) => {
  * Get chain by ID
  */
 fastify.get('/chains/:id', async (request, reply) => {
-  const chainId = parseInt(request.params.id);
+  const chainId = Number.parseInt(request.params.id, 10);
 
-  if (isNaN(chainId)) {
+  if (Number.isNaN(chainId)) {
     return reply.code(400).send({ error: 'Invalid chain ID' });
   }
 
@@ -143,9 +143,9 @@ fastify.get('/relations', async (request, reply) => {
  * Get relations for a specific chain by ID
  */
 fastify.get('/relations/:id', async (request, reply) => {
-  const chainId = parseInt(request.params.id);
+  const chainId = Number.parseInt(request.params.id, 10);
 
-  if (isNaN(chainId)) {
+  if (Number.isNaN(chainId)) {
     return reply.code(400).send({ error: 'Invalid chain ID' });
   }
 
@@ -174,9 +174,9 @@ fastify.get('/endpoints', async (request, reply) => {
  * Get endpoints for a specific chain by ID
  */
 fastify.get('/endpoints/:id', async (request, reply) => {
-  const chainId = parseInt(request.params.id);
+  const chainId = Number.parseInt(request.params.id, 10);
 
-  if (isNaN(chainId)) {
+  if (Number.isNaN(chainId)) {
     return reply.code(400).send({ error: 'Invalid chain ID' });
   }
 
@@ -225,9 +225,9 @@ fastify.get('/slip44', async (request, reply) => {
  * Get specific SLIP-0044 coin type by ID
  */
 fastify.get('/slip44/:coinType', async (request, reply) => {
-  const coinType = parseInt(request.params.coinType);
+  const coinType = Number.parseInt(request.params.coinType, 10);
 
-  if (isNaN(coinType)) {
+  if (Number.isNaN(coinType)) {
     return reply.code(400).send({ error: 'Invalid coin type' });
   }
 
@@ -283,9 +283,9 @@ fastify.get('/rpc-monitor', async (request, reply) => {
  * Get RPC monitoring results for a specific chain
  */
 fastify.get('/rpc-monitor/:id', async (request, reply) => {
-  const chainId = parseInt(request.params.id);
+  const chainId = Number.parseInt(request.params.id, 10);
 
-  if (isNaN(chainId)) {
+  if (Number.isNaN(chainId)) {
     return reply.code(400).send({ error: 'Invalid chain ID' });
   }
 

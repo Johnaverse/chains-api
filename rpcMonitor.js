@@ -125,9 +125,9 @@ async function testRpcEndpoint(url) {
       throw new Error('Invalid block number response');
     }
     
-    const blockNumber = parseInt(blockNumberHex, 16);
+    const blockNumber = Number.parseInt(blockNumberHex, 16);
     
-    if (isNaN(blockNumber)) {
+    if (Number.isNaN(blockNumber)) {
       throw new Error('Failed to parse block number');
     }
     
