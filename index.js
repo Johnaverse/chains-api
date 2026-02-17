@@ -89,7 +89,7 @@ export async function buildApp(options = {}) {
     if (tag) {
       const validTags = ['Testnet', 'L2', 'Beacon'];
       if (!validTags.includes(tag)) {
-        return reply.code(400).send({ error: `Invalid tag. Allowed: ${validTags.join(', ')}` });
+        return sendError(reply, 400, `Invalid tag. Allowed: ${validTags.join(', ')}`);
       }
       chains = chains.filter(chain => chain.tags && chain.tags.includes(tag));
     }
@@ -104,16 +104,14 @@ export async function buildApp(options = {}) {
    * Get chain by ID
    */
   fastify.get('/chains/:id', async (request, reply) => {
-    const chainId = Number.parseInt(request.params.id, 10);
-
-    if (Number.isNaN(chainId)) {
-      return reply.code(400).send({ error: 'Invalid chain ID' });
+    const chainId = parseIntParam(request.params.id);
+    if (chainId === null) {
+      return sendError(reply, 400, 'Invalid chain ID');
     }
 
     const chain = getChainById(chainId);
-
     if (!chain) {
-      return reply.code(404).send({ error: 'Chain not found' });
+      return sendError(reply, 404, 'Chain not found');
     }
 
     return chain;
@@ -133,11 +131,11 @@ export async function buildApp(options = {}) {
     const { q } = request.query;
 
     if (!q) {
-      return reply.code(400).send({ error: 'Query parameter "q" is required' });
+      return sendError(reply, 400, 'Query parameter "q" is required');
     }
 
     if (q.length > MAX_SEARCH_QUERY_LENGTH) {
-      return reply.code(400).send({ error: `Query too long. Max length: ${MAX_SEARCH_QUERY_LENGTH}` });
+      return sendError(reply, 400, `Query too long. Max length: ${MAX_SEARCH_QUERY_LENGTH}`);
     }
 
     const results = searchChains(q);
@@ -162,16 +160,14 @@ export async function buildApp(options = {}) {
    * Get relations for a specific chain by ID
    */
   fastify.get('/relations/:id', async (request, reply) => {
-    const chainId = Number.parseInt(request.params.id, 10);
-
-    if (Number.isNaN(chainId)) {
-      return reply.code(400).send({ error: 'Invalid chain ID' });
+    const chainId = parseIntParam(request.params.id);
+    if (chainId === null) {
+      return sendError(reply, 400, 'Invalid chain ID');
     }
 
     const result = getRelationsById(chainId);
-
     if (!result) {
-      return reply.code(404).send({ error: 'Chain not found' });
+      return sendError(reply, 404, 'Chain not found');
     }
 
     return result;
@@ -193,16 +189,14 @@ export async function buildApp(options = {}) {
    * Get endpoints for a specific chain by ID
    */
   fastify.get('/endpoints/:id', async (request, reply) => {
-    const chainId = Number.parseInt(request.params.id, 10);
-
-    if (Number.isNaN(chainId)) {
-      return reply.code(400).send({ error: 'Invalid chain ID' });
+    const chainId = parseIntParam(request.params.id);
+    if (chainId === null) {
+      return sendError(reply, 400, 'Invalid chain ID');
     }
 
     const result = getEndpointsById(chainId);
-
     if (!result) {
-      return reply.code(404).send({ error: 'Chain not found' });
+      return sendError(reply, 404, 'Chain not found');
     }
 
     return result;
@@ -231,7 +225,7 @@ export async function buildApp(options = {}) {
     const cachedData = getCachedData();
 
     if (!cachedData.slip44) {
-      return reply.code(503).send({ error: 'SLIP-0044 data not loaded' });
+      return sendError(reply, 503, 'SLIP-0044 data not loaded');
     }
 
     return {
@@ -244,16 +238,14 @@ export async function buildApp(options = {}) {
    * Get specific SLIP-0044 coin type by ID
    */
   fastify.get('/slip44/:coinType', async (request, reply) => {
-    const coinType = Number.parseInt(request.params.coinType, 10);
-
-    if (Number.isNaN(coinType)) {
-      return reply.code(400).send({ error: 'Invalid coin type' });
+    const coinType = parseIntParam(request.params.coinType);
+    if (coinType === null) {
+      return sendError(reply, 400, 'Invalid coin type');
     }
 
     const cachedData = getCachedData();
-
     if (!cachedData.slip44 || !cachedData.slip44[coinType]) {
-      return reply.code(404).send({ error: 'Coin type not found' });
+      return sendError(reply, 404, 'Coin type not found');
     }
 
     return cachedData.slip44[coinType];
@@ -281,7 +273,7 @@ export async function buildApp(options = {}) {
       };
     } catch (error) {
       fastify.log.error(error, 'Failed to reload data');
-      return reply.code(500).send({ error: 'Failed to reload data' });
+      return sendError(reply, 500, 'Failed to reload data');
     }
   });
 
@@ -302,17 +294,16 @@ export async function buildApp(options = {}) {
    * Get RPC monitoring results for a specific chain
    */
   fastify.get('/rpc-monitor/:id', async (request, reply) => {
-    const chainId = Number.parseInt(request.params.id, 10);
-
-    if (Number.isNaN(chainId)) {
-      return reply.code(400).send({ error: 'Invalid chain ID' });
+    const chainId = parseIntParam(request.params.id);
+    if (chainId === null) {
+      return sendError(reply, 400, 'Invalid chain ID');
     }
 
     const results = getMonitoringResults();
     const chainResults = results.results.filter(r => r.chainId === chainId);
 
     if (chainResults.length === 0) {
-      return reply.code(404).send({ error: 'No monitoring results found for this chain' });
+      return sendError(reply, 404, 'No monitoring results found for this chain');
     }
 
     const workingCount = chainResults.filter(r => r.status === 'working').length;
@@ -361,6 +352,29 @@ export async function buildApp(options = {}) {
   });
 
   return fastify;
+}
+
+// Helper functions for reducing duplication
+
+/**
+ * Parse and validate an integer parameter
+ * @param {string} param - Parameter value to parse
+ * @param {string} paramName - Name of the parameter for error message
+ * @returns {number|null} Parsed integer or null if invalid
+ */
+function parseIntParam(param, paramName = 'ID') {
+  const parsed = Number.parseInt(param, 10);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+/**
+ * Send a standardized error response
+ * @param {FastifyReply} reply - Fastify reply object
+ * @param {number} code - HTTP status code
+ * @param {string} message - Error message
+ */
+function sendError(reply, code, message) {
+  return reply.code(code).send({ error: message });
 }
 
 // Only run the server if this file is executed directly (CLI mode)
