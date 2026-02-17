@@ -84,6 +84,7 @@ const safeToString = (value) => {
   try {
     return String(value);
   } catch (error) {
+    console.error('Failed to stringify value:', error);
     return '[unstringifiable]';
   }
 };
