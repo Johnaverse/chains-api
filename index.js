@@ -379,7 +379,7 @@ function sendError(reply, code, message) {
 
 // Only run the server if this file is executed directly (CLI mode)
 // This allows the file to be imported for testing without starting the server
-import { fileURLToPath } from 'url';
+import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 

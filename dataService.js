@@ -174,7 +174,7 @@ function mergeBridges(chain, newBridges) {
  * Process L2 parent relation from chains.json
  */
 function processL2ParentRelation(chain, indexed) {
-  if (!chain.parent || chain.parent.type !== 'L2' || !chain.parent.chain) {
+  if (chain.parent?.type !== 'L2' || !chain.parent?.chain) {
     return;
   }
 
@@ -353,6 +353,89 @@ function processTheGraphRelation(relation, chainId, indexed, networkIdToChainId)
 }
 
 /**
+ * Create or merge The Graph chain entry
+ */
+function createOrMergeTheGraphChain(chainId, network, indexed) {
+  if (!indexed.byChainId[chainId]) {
+    indexed.byChainId[chainId] = createTheGraphChainEntry(chainId, network);
+  } else {
+    if (!indexed.byChainId[chainId].sources.includes('theGraph')) {
+      indexed.byChainId[chainId].sources.push('theGraph');
+    }
+    mergeTheGraphRpcUrls(indexed.byChainId[chainId], network);
+
+    // Ensure arrays exist
+    if (!indexed.byChainId[chainId].tags) indexed.byChainId[chainId].tags = [];
+    if (!indexed.byChainId[chainId].relations) indexed.byChainId[chainId].relations = [];
+  }
+}
+
+/**
+ * Add testnet tag if network is marked as testnet
+ */
+function addTestnetTagIfApplicable(chainId, network, indexed) {
+  if (network.networkType === 'testnet') {
+    if (!indexed.byChainId[chainId].tags.includes('Testnet')) {
+      indexed.byChainId[chainId].tags.push('Testnet');
+    }
+  }
+}
+
+/**
+ * Process all relations for a The Graph network
+ */
+function processTheGraphNetworkRelations(network, chainId, indexed, networkIdToChainId) {
+  if (network.relations && Array.isArray(network.relations)) {
+    network.relations.forEach(relation => {
+      processTheGraphRelation(relation, chainId, indexed, networkIdToChainId);
+    });
+  }
+}
+
+/**
+ * Add The Graph specific data to chain
+ */
+function addTheGraphSpecificData(chainId, network, indexed) {
+  indexed.byChainId[chainId].theGraph = {
+    id: network.id,
+    fullName: network.fullName,
+    shortName: network.shortName,
+    caip2Id: network.caip2Id,
+    aliases: network.aliases,
+    networkType: network.networkType,
+    services: network.services,
+    nativeToken: network.nativeToken
+  };
+}
+
+/**
+ * Add chain to name index
+ */
+function addChainToNameIndex(chainId, network, indexed) {
+  const nameLower = (network.fullName || network.shortName || '').toLowerCase();
+  if (nameLower && !indexed.byName[nameLower]) {
+    indexed.byName[nameLower] = [];
+  }
+  if (nameLower && !indexed.byName[nameLower].includes(chainId)) {
+    indexed.byName[nameLower].push(chainId);
+  }
+}
+
+/**
+ * Process beacon chain relations
+ */
+function processBeaconChainRelations(network, networkIdToChainId, indexed) {
+  if (network.relations && Array.isArray(network.relations)) {
+    network.relations.forEach(relation => {
+      if (relation.kind === 'beaconOf') {
+        const targetChainId = networkIdToChainId[relation.network];
+        addBeaconTagToTargetChain(indexed, targetChainId);
+      }
+    });
+  }
+}
+
+/**
  * Process The Graph network entry
  */
 function processTheGraphNetwork(network, indexed, networkIdToChainId) {
@@ -360,64 +443,13 @@ function processTheGraphNetwork(network, indexed, networkIdToChainId) {
   const isBeaconChain = network.caip2Id && network.caip2Id.startsWith('beacon:');
 
   if (chainId !== null) {
-    // Create or merge chain entry
-    if (!indexed.byChainId[chainId]) {
-      indexed.byChainId[chainId] = createTheGraphChainEntry(chainId, network);
-    } else {
-      if (!indexed.byChainId[chainId].sources.includes('theGraph')) {
-        indexed.byChainId[chainId].sources.push('theGraph');
-      }
-      mergeTheGraphRpcUrls(indexed.byChainId[chainId], network);
-
-      // Ensure arrays exist
-      if (!indexed.byChainId[chainId].tags) indexed.byChainId[chainId].tags = [];
-      if (!indexed.byChainId[chainId].relations) indexed.byChainId[chainId].relations = [];
-    }
-
-    // Mark as testnet if applicable
-    if (network.networkType === 'testnet') {
-      if (!indexed.byChainId[chainId].tags.includes('Testnet')) {
-        indexed.byChainId[chainId].tags.push('Testnet');
-      }
-    }
-
-    // Process relations
-    if (network.relations && Array.isArray(network.relations)) {
-      network.relations.forEach(relation => {
-        processTheGraphRelation(relation, chainId, indexed, networkIdToChainId);
-      });
-    }
-
-    // Add The Graph specific data
-    indexed.byChainId[chainId].theGraph = {
-      id: network.id,
-      fullName: network.fullName,
-      shortName: network.shortName,
-      caip2Id: network.caip2Id,
-      aliases: network.aliases,
-      networkType: network.networkType,
-      services: network.services,
-      nativeToken: network.nativeToken
-    };
-
-    // Add to name index
-    const nameLower = (network.fullName || network.shortName || '').toLowerCase();
-    if (nameLower && !indexed.byName[nameLower]) {
-      indexed.byName[nameLower] = [];
-    }
-    if (nameLower && !indexed.byName[nameLower].includes(chainId)) {
-      indexed.byName[nameLower].push(chainId);
-    }
+    createOrMergeTheGraphChain(chainId, network, indexed);
+    addTestnetTagIfApplicable(chainId, network, indexed);
+    processTheGraphNetworkRelations(network, chainId, indexed, networkIdToChainId);
+    addTheGraphSpecificData(chainId, network, indexed);
+    addChainToNameIndex(chainId, network, indexed);
   } else if (isBeaconChain) {
-    // Process beacon chains to add "Beacon" tag to their target chains
-    if (network.relations && Array.isArray(network.relations)) {
-      network.relations.forEach(relation => {
-        if (relation.kind === 'beaconOf') {
-          const targetChainId = networkIdToChainId[relation.network];
-          addBeaconTagToTargetChain(indexed, targetChainId);
-        }
-      });
-    }
+    processBeaconChainRelations(network, networkIdToChainId, indexed);
   }
 }
 
