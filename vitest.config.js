@@ -10,9 +10,7 @@ export default defineConfig({
       exclude: [
         'node_modules/',
         '**/*.test.js',
-        '**/*.config.js',
-        'mcp-server.js',
-        'mcp-server-http.js'
+        '**/*.config.js'
       ]
     },
     testTimeout: 30000,

@@ -1,13 +1,7 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import Fastify from 'fastify';
-
-// Create a test server
-let fastify;
-let serverAddress;
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { buildApp } from '../../index.js';
 
 // Mock the modules before importing
-import { vi } from 'vitest';
-
 vi.mock('../../dataService.js', async () => {
   const actual = await vi.importActual('../../dataService.js');
   return {
@@ -33,6 +27,12 @@ vi.mock('../../dataService.js', async () => {
             name: 'Polygon',
             tags: ['L2'],
             sources: ['chainlist']
+          },
+          {
+            chainId: 11155111,
+            name: 'Sepolia',
+            tags: ['Testnet'],
+            sources: ['chainlist']
           }
         ],
         byChainId: {
@@ -49,13 +49,23 @@ vi.mock('../../dataService.js', async () => {
             tags: ['L2'],
             sources: ['chainlist'],
             relations: [{ kind: 'l2Of', chainId: 1 }]
+          },
+          11155111: {
+            chainId: 11155111,
+            name: 'Sepolia',
+            tags: ['Testnet'],
+            sources: ['chainlist'],
+            relations: []
           }
         }
       },
       theGraph: { status: 'loaded' },
       chainlist: { status: 'loaded' },
       chains: { status: 'loaded' },
-      slip44: {},
+      slip44: {
+        60: { symbol: 'ETH', name: 'Ether' },
+        966: { symbol: 'MATIC', name: 'Polygon' }
+      },
       lastUpdated: new Date().toISOString()
     })),
     searchChains: vi.fn((query) => {
@@ -90,6 +100,11 @@ vi.mock('../../dataService.js', async () => {
         chainId: 137,
         name: 'Polygon',
         tags: ['L2']
+      },
+      {
+        chainId: 11155111,
+        name: 'Sepolia',
+        tags: ['Testnet']
       }
     ]),
     getAllRelations: vi.fn(() => ({
@@ -142,7 +157,16 @@ vi.mock('../../rpcMonitor.js', () => ({
     totalEndpoints: 100,
     testedEndpoints: 50,
     workingEndpoints: 30,
-    results: []
+    results: [
+      {
+        chainId: 1,
+        chainName: 'Ethereum Mainnet',
+        endpoint: 'https://eth.llamarpc.com',
+        status: 'working',
+        blockNumber: 12345678,
+        responseTime: 150
+      }
+    ]
   })),
   getMonitoringStatus: vi.fn(() => ({
     isMonitoring: false,
@@ -152,159 +176,38 @@ vi.mock('../../rpcMonitor.js', () => ({
 }));
 
 describe('API Endpoints', () => {
+  let app;
+
   beforeAll(async () => {
-    // Import after mocks are set up
-    const { getCachedData, getAllChains, getChainById, searchChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints } = await import('../../dataService.js');
-    const { getMonitoringResults, getMonitoringStatus } = await import('../../rpcMonitor.js');
-
-    fastify = Fastify({ logger: false });
-
-    // Register routes (simplified version of index.js routes)
-    fastify.get('/health', async () => {
-      const cachedData = getCachedData();
-      return {
-        status: 'ok',
-        dataLoaded: cachedData.indexed !== null,
-        lastUpdated: cachedData.lastUpdated,
-        totalChains: cachedData.indexed ? cachedData.indexed.all.length : 0
-      };
-    });
-
-    fastify.get('/chains', async (request) => {
-      const { tag } = request.query;
-      let chains = getAllChains();
-
-      if (tag) {
-        chains = chains.filter(chain => chain.tags && chain.tags.includes(tag));
-      }
-
-      return { count: chains.length, chains };
-    });
-
-    fastify.get('/chains/:id', async (request, reply) => {
-      const chainId = Number.parseInt(request.params.id, 10);
-
-      if (Number.isNaN(chainId)) {
-        return reply.code(400).send({ error: 'Invalid chain ID' });
-      }
-
-      const chain = getChainById(chainId);
-
-      if (!chain) {
-        return reply.code(404).send({ error: 'Chain not found' });
-      }
-
-      return chain;
-    });
-
-    fastify.get('/search', async (request, reply) => {
-      const { q } = request.query;
-
-      if (!q) {
-        return reply.code(400).send({ error: 'Query parameter "q" is required' });
-      }
-
-      const results = searchChains(q);
-
-      return { query: q, count: results.length, results };
-    });
-
-    fastify.get('/relations', async () => {
-      return getAllRelations();
-    });
-
-    fastify.get('/relations/:id', async (request, reply) => {
-      const chainId = Number.parseInt(request.params.id, 10);
-
-      if (Number.isNaN(chainId)) {
-        return reply.code(400).send({ error: 'Invalid chain ID' });
-      }
-
-      const result = getRelationsById(chainId);
-
-      if (!result) {
-        return reply.code(404).send({ error: 'Chain not found' });
-      }
-
-      return result;
-    });
-
-    fastify.get('/endpoints', async () => {
-      const endpoints = getAllEndpoints();
-      return { count: endpoints.length, endpoints };
-    });
-
-    fastify.get('/endpoints/:id', async (request, reply) => {
-      const chainId = Number.parseInt(request.params.id, 10);
-
-      if (Number.isNaN(chainId)) {
-        return reply.code(400).send({ error: 'Invalid chain ID' });
-      }
-
-      const result = getEndpointsById(chainId);
-
-      if (!result) {
-        return reply.code(404).send({ error: 'Chain not found' });
-      }
-
-      return result;
-    });
-
-    fastify.get('/sources', async () => {
-      const cachedData = getCachedData();
-      return {
-        lastUpdated: cachedData.lastUpdated,
-        sources: {
-          theGraph: cachedData.theGraph ? 'loaded' : 'not loaded',
-          chainlist: cachedData.chainlist ? 'loaded' : 'not loaded',
-          chains: cachedData.chains ? 'loaded' : 'not loaded',
-          slip44: cachedData.slip44 ? 'loaded' : 'not loaded'
-        }
-      };
-    });
-
-    fastify.get('/rpc-monitor', async () => {
-      const results = getMonitoringResults();
-      const status = getMonitoringStatus();
-
-      return { ...status, ...results };
-    });
-
-    fastify.get('/rpc-monitor/:id', async (request, reply) => {
-      const chainId = Number.parseInt(request.params.id, 10);
-
-      if (Number.isNaN(chainId)) {
-        return reply.code(400).send({ error: 'Invalid chain ID' });
-      }
-
-      const results = getMonitoringResults();
-      const chainResults = results.results.filter(r => r.chainId === chainId);
-
-      if (chainResults.length === 0) {
-        return reply.code(404).send({ error: 'No monitoring results found for this chain' });
-      }
-
-      return {
-        chainId,
-        chainName: chainResults[0].chainName,
-        totalEndpoints: chainResults.length,
-        workingEndpoints: chainResults.filter(r => r.status === 'working').length,
-        lastUpdated: results.lastUpdated,
-        endpoints: chainResults
-      };
-    });
-
-    await fastify.listen({ port: 0 }); // Random available port
-    serverAddress = `http://localhost:${fastify.server.address().port}`;
+    // Build the app without loading data (we're using mocks)
+    app = await buildApp({ logger: false, loadDataOnStartup: false });
   });
 
   afterAll(async () => {
-    await fastify.close();
+    await app.close();
+  });
+
+  describe('GET /', () => {
+    it('should return API information', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/'
+      });
+
+      expect(response.statusCode).toBe(200);
+      const data = JSON.parse(response.payload);
+      expect(data).toHaveProperty('name', 'Chains API');
+      expect(data).toHaveProperty('version', '1.0.0');
+      expect(data).toHaveProperty('description');
+      expect(data).toHaveProperty('endpoints');
+      expect(data).toHaveProperty('dataSources');
+      expect(Array.isArray(data.dataSources)).toBe(true);
+    });
   });
 
   describe('GET /health', () => {
     it('should return health status', async () => {
-      const response = await fastify.inject({
+      const response = await app.inject({
         method: 'GET',
         url: '/health'
       });
@@ -320,7 +223,7 @@ describe('API Endpoints', () => {
 
   describe('GET /chains', () => {
     it('should return all chains', async () => {
-      const response = await fastify.inject({
+      const response = await app.inject({
         method: 'GET',
         url: '/chains'
       });
@@ -331,10 +234,11 @@ describe('API Endpoints', () => {
       expect(data).toHaveProperty('chains');
       expect(Array.isArray(data.chains)).toBe(true);
       expect(data.count).toBe(data.chains.length);
+      expect(data.count).toBe(3);
     });
 
-    it('should filter chains by tag', async () => {
-      const response = await fastify.inject({
+    it('should filter chains by L2 tag', async () => {
+      const response = await app.inject({
         method: 'GET',
         url: '/chains?tag=L2'
       });
@@ -342,17 +246,42 @@ describe('API Endpoints', () => {
       expect(response.statusCode).toBe(200);
       const data = JSON.parse(response.payload);
       expect(data).toHaveProperty('chains');
+      expect(data.count).toBe(1);
 
       // All returned chains should have the L2 tag
       data.chains.forEach(chain => {
         expect(chain.tags).toContain('L2');
       });
     });
+
+    it('should filter chains by Testnet tag', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/chains?tag=Testnet'
+      });
+
+      expect(response.statusCode).toBe(200);
+      const data = JSON.parse(response.payload);
+      expect(data.count).toBe(1);
+      expect(data.chains[0].tags).toContain('Testnet');
+    });
+
+    it('should return 400 for invalid tag', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/chains?tag=InvalidTag'
+      });
+
+      expect(response.statusCode).toBe(400);
+      const data = JSON.parse(response.payload);
+      expect(data).toHaveProperty('error');
+      expect(data.error).toContain('Invalid tag');
+    });
   });
 
   describe('GET /chains/:id', () => {
     it('should return chain by ID', async () => {
-      const response = await fastify.inject({
+      const response = await app.inject({
         method: 'GET',
         url: '/chains/1'
       });
@@ -360,22 +289,22 @@ describe('API Endpoints', () => {
       expect(response.statusCode).toBe(200);
       const data = JSON.parse(response.payload);
       expect(data).toHaveProperty('chainId', 1);
-      expect(data).toHaveProperty('name');
+      expect(data).toHaveProperty('name', 'Ethereum Mainnet');
     });
 
     it('should return 404 for non-existent chain', async () => {
-      const response = await fastify.inject({
+      const response = await app.inject({
         method: 'GET',
         url: '/chains/999999'
       });
 
       expect(response.statusCode).toBe(404);
       const data = JSON.parse(response.payload);
-      expect(data).toHaveProperty('error');
+      expect(data).toHaveProperty('error', 'Chain not found');
     });
 
     it('should return 400 for invalid chain ID', async () => {
-      const response = await fastify.inject({
+      const response = await app.inject({
         method: 'GET',
         url: '/chains/invalid'
       });
@@ -384,11 +313,24 @@ describe('API Endpoints', () => {
       const data = JSON.parse(response.payload);
       expect(data).toHaveProperty('error', 'Invalid chain ID');
     });
+
+    it('should handle decimal chain ID by parsing as integer', async () => {
+      // Note: Fastify's URL parsing converts '1.5' to '1' before our handler sees it
+      const response = await app.inject({
+        method: 'GET',
+        url: '/chains/1.5'
+      });
+
+      // The request is handled as chain ID 1
+      expect(response.statusCode).toBe(200);
+      const data = JSON.parse(response.payload);
+      expect(data).toHaveProperty('chainId', 1);
+    });
   });
 
   describe('GET /search', () => {
     it('should search chains by query', async () => {
-      const response = await fastify.inject({
+      const response = await app.inject({
         method: 'GET',
         url: '/search?q=ethereum'
       });
@@ -402,7 +344,7 @@ describe('API Endpoints', () => {
     });
 
     it('should return 400 when query parameter is missing', async () => {
-      const response = await fastify.inject({
+      const response = await app.inject({
         method: 'GET',
         url: '/search'
       });
@@ -410,10 +352,11 @@ describe('API Endpoints', () => {
       expect(response.statusCode).toBe(400);
       const data = JSON.parse(response.payload);
       expect(data).toHaveProperty('error');
+      expect(data.error).toContain('required');
     });
 
     it('should return empty results for non-existent chain', async () => {
-      const response = await fastify.inject({
+      const response = await app.inject({
         method: 'GET',
         url: '/search?q=nonexistentchain'
       });
@@ -423,11 +366,24 @@ describe('API Endpoints', () => {
       expect(data.count).toBe(0);
       expect(data.results.length).toBe(0);
     });
+
+    it('should return 400 for query that is too long', async () => {
+      const longQuery = 'a'.repeat(201);
+      const response = await app.inject({
+        method: 'GET',
+        url: `/search?q=${longQuery}`
+      });
+
+      expect(response.statusCode).toBe(400);
+      const data = JSON.parse(response.payload);
+      expect(data).toHaveProperty('error');
+      expect(data.error).toContain('Query too long');
+    });
   });
 
   describe('GET /relations', () => {
     it('should return all relations', async () => {
-      const response = await fastify.inject({
+      const response = await app.inject({
         method: 'GET',
         url: '/relations'
       });
@@ -440,32 +396,45 @@ describe('API Endpoints', () => {
 
   describe('GET /relations/:id', () => {
     it('should return relations for a chain', async () => {
-      const response = await fastify.inject({
+      const response = await app.inject({
         method: 'GET',
         url: '/relations/137'
       });
 
       expect(response.statusCode).toBe(200);
       const data = JSON.parse(response.payload);
-      expect(data).toHaveProperty('chainId');
-      expect(data).toHaveProperty('chainName');
+      expect(data).toHaveProperty('chainId', 137);
+      expect(data).toHaveProperty('chainName', 'Polygon');
       expect(data).toHaveProperty('relations');
       expect(Array.isArray(data.relations)).toBe(true);
     });
 
     it('should return 404 for chain without relations', async () => {
-      const response = await fastify.inject({
+      const response = await app.inject({
         method: 'GET',
         url: '/relations/999999'
       });
 
       expect(response.statusCode).toBe(404);
+      const data = JSON.parse(response.payload);
+      expect(data).toHaveProperty('error', 'Chain not found');
+    });
+
+    it('should return 400 for invalid chain ID', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/relations/invalid'
+      });
+
+      expect(response.statusCode).toBe(400);
+      const data = JSON.parse(response.payload);
+      expect(data).toHaveProperty('error', 'Invalid chain ID');
     });
   });
 
   describe('GET /endpoints', () => {
     it('should return all endpoints', async () => {
-      const response = await fastify.inject({
+      const response = await app.inject({
         method: 'GET',
         url: '/endpoints'
       });
@@ -475,38 +444,53 @@ describe('API Endpoints', () => {
       expect(data).toHaveProperty('count');
       expect(data).toHaveProperty('endpoints');
       expect(Array.isArray(data.endpoints)).toBe(true);
+      expect(data.count).toBe(data.endpoints.length);
     });
   });
 
   describe('GET /endpoints/:id', () => {
     it('should return endpoints for a chain', async () => {
-      const response = await fastify.inject({
+      const response = await app.inject({
         method: 'GET',
         url: '/endpoints/1'
       });
 
       expect(response.statusCode).toBe(200);
       const data = JSON.parse(response.payload);
-      expect(data).toHaveProperty('chainId');
+      expect(data).toHaveProperty('chainId', 1);
       expect(data).toHaveProperty('name');
       expect(data).toHaveProperty('rpc');
       expect(data).toHaveProperty('firehose');
       expect(data).toHaveProperty('substreams');
+      expect(Array.isArray(data.rpc)).toBe(true);
     });
 
     it('should return 404 for non-existent chain', async () => {
-      const response = await fastify.inject({
+      const response = await app.inject({
         method: 'GET',
         url: '/endpoints/999999'
       });
 
       expect(response.statusCode).toBe(404);
+      const data = JSON.parse(response.payload);
+      expect(data).toHaveProperty('error', 'Chain not found');
+    });
+
+    it('should return 400 for invalid chain ID', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/endpoints/invalid'
+      });
+
+      expect(response.statusCode).toBe(400);
+      const data = JSON.parse(response.payload);
+      expect(data).toHaveProperty('error', 'Invalid chain ID');
     });
   });
 
   describe('GET /sources', () => {
     it('should return data sources status', async () => {
-      const response = await fastify.inject({
+      const response = await app.inject({
         method: 'GET',
         url: '/sources'
       });
@@ -522,9 +506,117 @@ describe('API Endpoints', () => {
     });
   });
 
+  describe('GET /slip44', () => {
+    it('should return all SLIP-0044 coin types', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/slip44'
+      });
+
+      expect(response.statusCode).toBe(200);
+      const data = JSON.parse(response.payload);
+      expect(data).toHaveProperty('count');
+      expect(data).toHaveProperty('coinTypes');
+      expect(typeof data.coinTypes).toBe('object');
+      expect(data.count).toBeGreaterThan(0);
+    });
+
+    it('should return 503 when SLIP-0044 data is not loaded', async () => {
+      const { getCachedData } = await import('../../dataService.js');
+      const originalImpl = getCachedData.getMockImplementation();
+
+      // Temporarily mock getCachedData to return null slip44
+      getCachedData.mockImplementationOnce(() => ({
+        indexed: { all: [], byChainId: {} },
+        theGraph: {},
+        chainlist: {},
+        chains: {},
+        slip44: null,
+        lastUpdated: new Date().toISOString()
+      }));
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/slip44'
+      });
+
+      expect(response.statusCode).toBe(503);
+      const data = JSON.parse(response.payload);
+      expect(data).toHaveProperty('error', 'SLIP-0044 data not loaded');
+
+      // Restore original implementation
+      getCachedData.mockImplementation(originalImpl);
+    });
+  });
+
+  describe('GET /slip44/:coinType', () => {
+    it('should return specific SLIP-0044 coin type', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/slip44/60'
+      });
+
+      expect(response.statusCode).toBe(200);
+      const data = JSON.parse(response.payload);
+      expect(data).toHaveProperty('symbol');
+      expect(data).toHaveProperty('name');
+    });
+
+    it('should return 404 for non-existent coin type', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/slip44/999999'
+      });
+
+      expect(response.statusCode).toBe(404);
+      const data = JSON.parse(response.payload);
+      expect(data).toHaveProperty('error', 'Coin type not found');
+    });
+
+    it('should return 400 for invalid coin type', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/slip44/invalid'
+      });
+
+      expect(response.statusCode).toBe(400);
+      const data = JSON.parse(response.payload);
+      expect(data).toHaveProperty('error', 'Invalid coin type');
+    });
+  });
+
+  describe('POST /reload', () => {
+    it('should reload data from sources', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/reload'
+      });
+
+      expect(response.statusCode).toBe(200);
+      const data = JSON.parse(response.payload);
+      expect(data).toHaveProperty('status', 'success');
+      expect(data).toHaveProperty('lastUpdated');
+      expect(data).toHaveProperty('totalChains');
+    });
+
+    it('should return 500 on reload error', async () => {
+      const { loadData } = await import('../../dataService.js');
+      loadData.mockRejectedValueOnce(new Error('Failed to load data'));
+
+      const response = await app.inject({
+        method: 'POST',
+        url: '/reload'
+      });
+
+      expect(response.statusCode).toBe(500);
+      const data = JSON.parse(response.payload);
+      expect(data).toHaveProperty('error', 'Failed to reload data');
+    });
+  });
+
   describe('GET /rpc-monitor', () => {
     it('should return RPC monitoring results', async () => {
-      const response = await fastify.inject({
+      const response = await app.inject({
         method: 'GET',
         url: '/rpc-monitor'
       });
@@ -537,26 +629,48 @@ describe('API Endpoints', () => {
       expect(data).toHaveProperty('testedEndpoints');
       expect(data).toHaveProperty('workingEndpoints');
       expect(data).toHaveProperty('results');
+      expect(Array.isArray(data.results)).toBe(true);
     });
   });
 
   describe('GET /rpc-monitor/:id', () => {
+    it('should return RPC monitoring results for a specific chain', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/rpc-monitor/1'
+      });
+
+      expect(response.statusCode).toBe(200);
+      const data = JSON.parse(response.payload);
+      expect(data).toHaveProperty('chainId', 1);
+      expect(data).toHaveProperty('chainName');
+      expect(data).toHaveProperty('totalEndpoints');
+      expect(data).toHaveProperty('workingEndpoints');
+      expect(data).toHaveProperty('lastUpdated');
+      expect(data).toHaveProperty('endpoints');
+      expect(Array.isArray(data.endpoints)).toBe(true);
+    });
+
     it('should return 400 for invalid chain ID', async () => {
-      const response = await fastify.inject({
+      const response = await app.inject({
         method: 'GET',
         url: '/rpc-monitor/invalid'
       });
 
       expect(response.statusCode).toBe(400);
+      const data = JSON.parse(response.payload);
+      expect(data).toHaveProperty('error', 'Invalid chain ID');
     });
 
     it('should return 404 when no results found', async () => {
-      const response = await fastify.inject({
+      const response = await app.inject({
         method: 'GET',
         url: '/rpc-monitor/999999'
       });
 
       expect(response.statusCode).toBe(404);
+      const data = JSON.parse(response.payload);
+      expect(data).toHaveProperty('error', 'No monitoring results found for this chain');
     });
   });
 });

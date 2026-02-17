@@ -31,7 +31,7 @@ let rpcCheckPending = false;
 /**
  * Fetch data from a URL with error handling
  */
-async function fetchData(url, format = 'json') {
+export async function fetchData(url, format = 'json') {
   try {
     const response = await proxyFetch(url);
     if (!response.ok) {
@@ -54,7 +54,7 @@ async function fetchData(url, format = 'json') {
  * Table structure: | Coin type | Path component | Symbol | Coin |
  * Uses "Coin type" as the key (id)
  */
-function parseSLIP44(markdown) {
+export function parseSLIP44(markdown) {
   if (!markdown) return {};
 
   const slip44Data = {};
@@ -173,7 +173,7 @@ function mergeBridges(chain, newBridges) {
 /**
  * Index all data into a searchable structure
  */
-function indexData(theGraph, chainlist, chains, slip44) {
+export function indexData(theGraph, chainlist, chains, slip44) {
   const indexed = {
     byChainId: {},
     byName: {},
