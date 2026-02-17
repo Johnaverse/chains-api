@@ -2,6 +2,24 @@
 
 A Node.js API query service built with Fastify that indexes and provides access to blockchain chain data from multiple sources. Also available as an MCP (Model Context Protocol) server for AI assistants.
 
+[![Quality Gate Status](https://sonarqube.johnaverse.cc/api/project_badges/measure?project=Johnaverse_chains-api_b1d9cb46-69c9-4113-87b4-a683c3719545&metric=alert_status&token=sqb_f811cddeb6638fae0a93734928f5b566e268f558)](https://sonarqube.johnaverse.cc/dashboard?id=Johnaverse_chains-api_b1d9cb46-69c9-4113-87b4-a683c3719545)
+
+## Code Quality & Testing
+
+This project maintains high code quality standards through:
+
+- **Comprehensive Testing**: Includes unit tests, integration tests, and fuzz testing
+  - 300+ test cases covering all core functionality
+  - Continuous integration with automated test runs on every push
+  - See [Testing Documentation](docs/TESTING.md) for details
+
+- **SonarQube Analysis**: Automated code quality scanning on every commit
+  - Enforces code coverage requirements (≥80%)
+  - Monitors code duplication (≤3%)
+  - Tracks cognitive complexity and code smells
+
+All changes are validated through GitHub Actions CI/CD pipeline, ensuring code quality and test coverage before deployment.
+
 ## Features
 
 - **Multi-Source Data Aggregation**: Combines data from multiple blockchain registries:
@@ -778,6 +796,43 @@ More detailed information about project internals and testing can be found in th
 
 - [Project Structure](docs/PROJECT_STRUCTURE.md): Detailed explanation of files and directories
 - [Testing](docs/TESTING.md): Comprehensive guide to the testing strategy (Unit, Integration, and Fuzz testing)
+
+## Contributing
+
+We welcome contributions to the Chains API project! Whether you're fixing bugs, improving documentation, or proposing new features, your contributions are appreciated.
+
+### How to Contribute
+
+1. **Fork the repository** and create your branch from `main`
+2. **Make your changes** with clear, descriptive commit messages
+3. **Add or update tests** to cover your changes
+4. **Ensure all tests pass** by running `npm test`
+5. **Verify code quality** - your changes will be automatically scanned by SonarQube
+6. **Submit a pull request** with a clear description of your changes
+
+### Code Quality Standards
+
+All contributions must meet our quality standards:
+- ✅ All tests must pass (300+ test cases)
+- ✅ Code coverage ≥ 80%
+- ✅ Code duplication ≤ 3%
+- ✅ No critical code smells or security vulnerabilities
+- ✅ Cognitive complexity within acceptable limits
+
+These standards are automatically enforced through our CI/CD pipeline and SonarQube analysis.
+
+### Areas for Contribution
+
+- 🐛 Bug fixes and issue resolution
+- 📚 Documentation improvements
+- ✨ New features and enhancements
+- 🧪 Additional test coverage
+- 🔍 Data validation and quality improvements
+- 🌐 Support for additional blockchain networks
+
+### Questions or Issues?
+
+If you have questions or encounter issues, please [open an issue](https://github.com/Johnaverse/chains-api/issues) on GitHub.
 
 ## License
 
