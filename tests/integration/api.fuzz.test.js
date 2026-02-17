@@ -80,6 +80,14 @@ vi.mock('../../rpcMonitor.js', () => ({
   startRpcHealthCheck: vi.fn()
 }));
 
+const safeToString = (value) => {
+  try {
+    return String(value);
+  } catch (error) {
+    return '[unstringifiable]';
+  }
+};
+
 let fastify;
 
 describe('Fuzz Testing - API Endpoints', () => {
@@ -425,7 +433,7 @@ describe('Fuzz Testing - API Endpoints', () => {
     test.prop([fc.anything()])('should handle any RPC monitor ID input', async (input) => {
       const response = await fastify.inject({
         method: 'GET',
-        url: `/rpc-monitor/${encodeURIComponent(String(input))}`
+        url: `/rpc-monitor/${encodeURIComponent(safeToString(input))}`
       });
 
       expect([200, 400, 404]).toContain(response.statusCode);

@@ -56,41 +56,43 @@ async function fetchData(url, format = 'json') {
  */
 function parseSLIP44(markdown) {
   if (!markdown) return {};
-  
+
   const slip44Data = {};
   const lines = markdown.split('\n');
   let inTable = false;
-  
+
   for (const line of lines) {
-    // Detect table rows (format: | Coin type | Path component | Symbol | Coin |)
-    if (line.trim().startsWith('|') && line.includes('|')) {
-      const cells = line.split('|').map(cell => cell.trim()).filter(cell => cell);
-      
-      // Skip header and separator rows
-      if (cells[0] === 'Coin type' || cells[0].includes('-')) {
-        inTable = true;
-        continue;
-      }
-      
-      if (inTable && cells.length >= 4) {
-        const coinType = cells[0];
-        const pathComponent = cells[1];
-        const symbol = cells[2];
-        const coin = cells[3];
-        
-        const coinTypeNum = Number.parseInt(coinType, 10);
-        if (coinType && !Number.isNaN(coinTypeNum)) {
-          slip44Data[coinTypeNum] = {
-            coinType: coinTypeNum,
-            pathComponent,
-            symbol,
-            coin
-          };
-        }
-      }
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('|') || !line.includes('|')) {
+      continue;
     }
+
+    // Detect table rows (format: | Coin type | Path component | Symbol | Coin |)
+    const cells = line.split('|').map(cell => cell.trim()).filter(Boolean);
+
+    // Skip header and separator rows
+    if (cells[0] === 'Coin type' || cells[0].includes('-')) {
+      inTable = true;
+      continue;
+    }
+
+    if (!inTable || cells.length < 4) {
+      continue;
+    }
+
+    const coinTypeNum = Number.parseInt(cells[0], 10);
+    if (Number.isNaN(coinTypeNum)) {
+      continue;
+    }
+
+    slip44Data[coinTypeNum] = {
+      coinType: coinTypeNum,
+      pathComponent: cells[1],
+      symbol: cells[2],
+      coin: cells[3]
+    };
   }
-  
+
   return slip44Data;
 }
 
