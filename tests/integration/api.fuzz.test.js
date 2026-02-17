@@ -61,7 +61,30 @@ vi.mock('../../dataService.js', async () => {
     }),
     getAllEndpoints: vi.fn(() => [
       { chainId: 1, name: 'Ethereum', rpc: ['https://eth.llamarpc.com'], firehose: [], substreams: [] }
-    ])
+    ]),
+    validateChainData: vi.fn(() => ({
+      totalErrors: 5,
+      errorsByRule: {
+        rule1_relation_conflicts: [{ rule: 1, chainId: 1, chainName: 'Ethereum', message: 'Test error' }],
+        rule2_slip44_testnet_mismatch: [],
+        rule3_name_testnet_mismatch: [{ rule: 3, chainId: 137, chainName: 'Polygon', message: 'Test error' }],
+        rule4_sepolia_hoodie_issues: [],
+        rule5_status_conflicts: [],
+        rule6_goerli_not_deprecated: []
+      },
+      summary: {
+        rule1: 1,
+        rule2: 0,
+        rule3: 1,
+        rule4: 0,
+        rule5: 0,
+        rule6: 0
+      },
+      allErrors: [
+        { rule: 1, chainId: 1, chainName: 'Ethereum', message: 'Test error' },
+        { rule: 3, chainId: 137, chainName: 'Polygon', message: 'Test error' }
+      ]
+    }))
   };
 });
 
@@ -93,7 +116,7 @@ let fastify;
 
 describe('Fuzz Testing - API Endpoints', () => {
   beforeAll(async () => {
-    const { getCachedData, getAllChains, getChainById, searchChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints } = await import('../../dataService.js');
+    const { getCachedData, getAllChains, getChainById, searchChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints, validateChainData } = await import('../../dataService.js');
     const { getMonitoringResults, getMonitoringStatus } = await import('../../rpcMonitor.js');
 
     fastify = Fastify({ logger: false });
@@ -107,6 +130,42 @@ describe('Fuzz Testing - API Endpoints', () => {
         lastUpdated: cachedData.lastUpdated,
         totalChains: cachedData.indexed ? cachedData.indexed.all.length : 0
       };
+    });
+
+    fastify.get('/slip44', async (_request, reply) => {
+      const cachedData = getCachedData();
+      if (!cachedData.slip44) {
+        return reply.code(503).send({ error: 'SLIP-0044 data not loaded' });
+      }
+      return {
+        count: Object.keys(cachedData.slip44).length,
+        coinTypes: cachedData.slip44
+      };
+    });
+
+    fastify.get('/slip44/:coinType', async (request, reply) => {
+      const coinType = Number.parseInt(request.params.coinType, 10);
+      if (Number.isNaN(coinType)) {
+        return reply.code(400).send({ error: 'Invalid coin type' });
+      }
+      const cachedData = getCachedData();
+      if (!cachedData.slip44 || !cachedData.slip44[coinType]) {
+        return reply.code(404).send({ error: 'Coin type not found' });
+      }
+      return cachedData.slip44[coinType];
+    });
+
+    fastify.post('/reload', async (_request, reply) => {
+      try {
+        const cachedData = getCachedData();
+        return {
+          status: 'success',
+          lastUpdated: cachedData.lastUpdated,
+          totalChains: cachedData.indexed ? cachedData.indexed.all.length : 0
+        };
+      } catch (error) {
+        return reply.code(500).send({ error: 'Failed to reload data' });
+      }
     });
 
     fastify.get('/chains', async (request) => {
@@ -209,6 +268,14 @@ describe('Fuzz Testing - API Endpoints', () => {
         lastUpdated: results.lastUpdated,
         endpoints: chainResults
       };
+    });
+
+    fastify.get('/validate', async (_request, reply) => {
+      const validationResults = validateChainData();
+      if (validationResults.error) {
+        return reply.code(503).send({ error: validationResults.error });
+      }
+      return validationResults;
     });
 
     await fastify.listen({ port: 0 });
@@ -453,6 +520,9 @@ describe('Fuzz Testing - API Endpoints', () => {
       '/endpoints',
       '/endpoints/1',
       '/sources',
+      '/slip44',
+      '/slip44/60',
+      '/validate',
       '/rpc-monitor',
       '/rpc-monitor/1'
     ];
@@ -661,6 +731,431 @@ describe('Fuzz Testing - API Endpoints', () => {
       expect(response.statusCode).toBe(200);
       const data = JSON.parse(response.payload);
       expect(data.query).toBe(unicode);
+    });
+  });
+
+  describe('GET /validate - Fuzz Tests', () => {
+    it('should return validation results', async () => {
+      const response = await fastify.inject({
+        method: 'GET',
+        url: '/validate'
+      });
+
+      expect(response.statusCode).toBe(200);
+      const data = JSON.parse(response.payload);
+      expect(data).toHaveProperty('totalErrors');
+      expect(data).toHaveProperty('errorsByRule');
+      expect(data).toHaveProperty('summary');
+      expect(data).toHaveProperty('allErrors');
+    });
+
+    it('should always return valid JSON', async () => {
+      const response = await fastify.inject({
+        method: 'GET',
+        url: '/validate'
+      });
+
+      expect(() => JSON.parse(response.payload)).not.toThrow();
+    });
+
+    it('should not crash with concurrent requests', async () => {
+      const requests = Array(10).fill(null).map(() =>
+        fastify.inject({
+          method: 'GET',
+          url: '/validate'
+        })
+      );
+
+      const responses = await Promise.all(requests);
+
+      responses.forEach(response => {
+        expect(response.statusCode).toBe(200);
+        expect(() => JSON.parse(response.payload)).not.toThrow();
+      });
+    });
+
+    test.prop([fc.constantFrom('POST', 'PUT', 'DELETE', 'PATCH')])
+    ('should reject invalid HTTP methods', async (method) => {
+      const response = await fastify.inject({
+        method,
+        url: '/validate'
+      });
+
+      expect([404, 405]).toContain(response.statusCode);
+    });
+
+    it('should have consistent error structure across calls', async () => {
+      const response1 = await fastify.inject({
+        method: 'GET',
+        url: '/validate'
+      });
+
+      const response2 = await fastify.inject({
+        method: 'GET',
+        url: '/validate'
+      });
+
+      const data1 = JSON.parse(response1.payload);
+      const data2 = JSON.parse(response2.payload);
+
+      // Both should have the same structure
+      expect(Object.keys(data1).sort()).toEqual(Object.keys(data2).sort());
+      expect(Object.keys(data1.errorsByRule).sort()).toEqual(Object.keys(data2.errorsByRule).sort());
+      expect(Object.keys(data1.summary).sort()).toEqual(Object.keys(data2.summary).sort());
+    });
+
+    test.prop([fc.record({
+      userAgent: fc.string(),
+      referer: fc.string(),
+      acceptEncoding: fc.string()
+    })])('should handle various header combinations', async (headers) => {
+      const response = await fastify.inject({
+        method: 'GET',
+        url: '/validate',
+        headers: {
+          'user-agent': headers.userAgent,
+          'referer': headers.referer,
+          'accept-encoding': headers.acceptEncoding
+        }
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(() => JSON.parse(response.payload)).not.toThrow();
+    });
+
+    it('should return same result for idempotent calls', async () => {
+      const response1 = await fastify.inject({
+        method: 'GET',
+        url: '/validate'
+      });
+
+      const response2 = await fastify.inject({
+        method: 'GET',
+        url: '/validate'
+      });
+
+      expect(response1.statusCode).toBe(response2.statusCode);
+      expect(response1.payload).toBe(response2.payload);
+    });
+
+    it('should handle rapid sequential requests', async () => {
+      const responses = [];
+      for (let i = 0; i < 20; i++) {
+        const response = await fastify.inject({
+          method: 'GET',
+          url: '/validate'
+        });
+        responses.push(response);
+      }
+
+      responses.forEach(response => {
+        expect(response.statusCode).toBe(200);
+        const data = JSON.parse(response.payload);
+        expect(data).toHaveProperty('totalErrors');
+        expect(data).toHaveProperty('allErrors');
+      });
+    });
+  });
+
+  describe('GET /slip44 - Fuzz Tests', () => {
+    it('should return all SLIP-0044 coin types', async () => {
+      const response = await fastify.inject({
+        method: 'GET',
+        url: '/slip44'
+      });
+
+      expect(response.statusCode).toBe(200);
+      const data = JSON.parse(response.payload);
+      expect(data).toHaveProperty('count');
+      expect(data).toHaveProperty('coinTypes');
+      expect(typeof data.coinTypes).toBe('object');
+    });
+
+    it('should always return valid JSON', async () => {
+      const response = await fastify.inject({
+        method: 'GET',
+        url: '/slip44'
+      });
+
+      expect(() => JSON.parse(response.payload)).not.toThrow();
+    });
+
+    it('should handle concurrent requests', async () => {
+      const requests = Array(10).fill(null).map(() =>
+        fastify.inject({
+          method: 'GET',
+          url: '/slip44'
+        })
+      );
+
+      const responses = await Promise.all(requests);
+
+      responses.forEach(response => {
+        expect(response.statusCode).toBe(200);
+        expect(() => JSON.parse(response.payload)).not.toThrow();
+      });
+    });
+
+    test.prop([fc.record({
+      userAgent: fc.string(),
+      acceptLanguage: fc.string()
+    })])('should handle various header combinations', async (headers) => {
+      const response = await fastify.inject({
+        method: 'GET',
+        url: '/slip44',
+        headers: {
+          'user-agent': headers.userAgent,
+          'accept-language': headers.acceptLanguage
+        }
+      });
+
+      expect(response.statusCode).toBe(200);
+    });
+
+    it('should be idempotent', async () => {
+      const response1 = await fastify.inject({
+        method: 'GET',
+        url: '/slip44'
+      });
+
+      const response2 = await fastify.inject({
+        method: 'GET',
+        url: '/slip44'
+      });
+
+      expect(response1.statusCode).toBe(response2.statusCode);
+      expect(response1.payload).toBe(response2.payload);
+    });
+  });
+
+  describe('GET /slip44/:coinType - Fuzz Tests', () => {
+    test.prop([fc.oneof(fc.string(), fc.integer(), fc.double(), fc.boolean())])
+    ('should handle various input types', async (input) => {
+      const response = await fastify.inject({
+        method: 'GET',
+        url: `/slip44/${encodeURIComponent(String(input))}`
+      });
+
+      expect([200, 400, 404]).toContain(response.statusCode);
+      expect(() => JSON.parse(response.payload)).not.toThrow();
+    });
+
+    test.prop([fc.integer()])('should handle integer inputs', async (coinType) => {
+      const response = await fastify.inject({
+        method: 'GET',
+        url: `/slip44/${coinType}`
+      });
+
+      expect([200, 404]).toContain(response.statusCode);
+
+      const data = JSON.parse(response.payload);
+      if (response.statusCode === 404) {
+        expect(data).toHaveProperty('error', 'Coin type not found');
+      }
+    });
+
+    test.prop([fc.string()])('should handle string inputs', async (input) => {
+      const response = await fastify.inject({
+        method: 'GET',
+        url: `/slip44/${encodeURIComponent(input)}`
+      });
+
+      expect([200, 400, 404]).toContain(response.statusCode);
+
+      const data = JSON.parse(response.payload);
+      if (response.statusCode === 400) {
+        expect(data).toHaveProperty('error', 'Invalid coin type');
+      }
+    });
+
+    test.prop([fc.double()])('should handle floating point inputs', async (num) => {
+      const response = await fastify.inject({
+        method: 'GET',
+        url: `/slip44/${num}`
+      });
+
+      expect([200, 400, 404]).toContain(response.statusCode);
+    });
+
+    test.prop([fc.constantFrom('', ' ', '\n', '\t', '..', '../', '/', '\\', 'null', 'undefined')])
+    ('should handle special characters and edge cases', async (input) => {
+      const response = await fastify.inject({
+        method: 'GET',
+        url: `/slip44/${encodeURIComponent(input)}`
+      });
+
+      expect([200, 400, 404]).toContain(response.statusCode);
+      expect(response.statusCode).not.toBe(500);
+    });
+
+    test.prop([fc.integer({ min: -1000000, max: 1000000 })])
+    ('should handle extreme integer values', async (coinType) => {
+      const response = await fastify.inject({
+        method: 'GET',
+        url: `/slip44/${coinType}`
+      });
+
+      expect([200, 404]).toContain(response.statusCode);
+      expect(response.statusCode).not.toBe(500);
+    });
+
+    test.prop([fc.nat()])('should handle natural numbers', async (coinType) => {
+      const response = await fastify.inject({
+        method: 'GET',
+        url: `/slip44/${coinType}`
+      });
+
+      expect([200, 404]).toContain(response.statusCode);
+    });
+
+    const sqlInjectionPayloads = [
+      "1' OR '1'='1",
+      "1; DROP TABLE slip44--",
+      "' OR 1=1--"
+    ];
+
+    test.each(sqlInjectionPayloads)('should safely handle SQL injection: %s', async (payload) => {
+      const response = await fastify.inject({
+        method: 'GET',
+        url: `/slip44/${encodeURIComponent(payload)}`
+      });
+
+      expect([200, 400, 404]).toContain(response.statusCode);
+      expect(response.statusCode).not.toBe(500);
+    });
+  });
+
+  describe('POST /reload - Fuzz Tests', () => {
+    it('should reload data successfully', async () => {
+      const response = await fastify.inject({
+        method: 'POST',
+        url: '/reload'
+      });
+
+      expect(response.statusCode).toBe(200);
+      const data = JSON.parse(response.payload);
+      expect(data).toHaveProperty('status', 'success');
+      expect(data).toHaveProperty('lastUpdated');
+      expect(data).toHaveProperty('totalChains');
+    });
+
+    it('should always return valid JSON', async () => {
+      const response = await fastify.inject({
+        method: 'POST',
+        url: '/reload'
+      });
+
+      expect(() => JSON.parse(response.payload)).not.toThrow();
+    });
+
+    test.prop([fc.record({
+      contentType: fc.constantFrom('application/json', 'text/plain', 'application/xml', ''),
+      userAgent: fc.string()
+    })])('should handle various header combinations', async (headers) => {
+      const response = await fastify.inject({
+        method: 'POST',
+        url: '/reload',
+        headers: {
+          'content-type': headers.contentType,
+          'user-agent': headers.userAgent
+        }
+      });
+
+      expect([200, 400, 415, 500]).toContain(response.statusCode);
+    });
+
+    test.prop([fc.oneof(
+      fc.string(),
+      fc.record({ data: fc.string() }),
+      fc.array(fc.integer())
+    )])('should handle various body types', async (body) => {
+      const response = await fastify.inject({
+        method: 'POST',
+        url: '/reload',
+        payload: body,
+        headers: {
+          'content-type': 'application/json'
+        }
+      });
+
+      expect([200, 400, 500]).toContain(response.statusCode);
+      expect(() => JSON.parse(response.payload)).not.toThrow();
+    });
+
+    it('should handle concurrent reload requests', async () => {
+      const requests = Array(5).fill(null).map(() =>
+        fastify.inject({
+          method: 'POST',
+          url: '/reload'
+        })
+      );
+
+      const responses = await Promise.all(requests);
+
+      responses.forEach(response => {
+        expect([200, 500]).toContain(response.statusCode);
+        expect(() => JSON.parse(response.payload)).not.toThrow();
+      });
+    });
+
+    it('should handle rapid sequential POST requests', async () => {
+      const responses = [];
+      for (let i = 0; i < 10; i++) {
+        const response = await fastify.inject({
+          method: 'POST',
+          url: '/reload'
+        });
+        responses.push(response);
+      }
+
+      responses.forEach(response => {
+        expect([200, 500]).toContain(response.statusCode);
+        const data = JSON.parse(response.payload);
+        expect(data).toBeDefined();
+      });
+    });
+
+    test.prop([fc.constantFrom('GET', 'PUT', 'DELETE', 'PATCH')])
+    ('should reject invalid HTTP methods', async (method) => {
+      const response = await fastify.inject({
+        method,
+        url: '/reload'
+      });
+
+      expect([404, 405]).toContain(response.statusCode);
+    });
+
+    const xssPayloads = [
+      '<script>alert("XSS")</script>',
+      '<img src=x onerror=alert("XSS")>'
+    ];
+
+    test.each(xssPayloads)('should safely handle XSS in body: %s', async (payload) => {
+      const response = await fastify.inject({
+        method: 'POST',
+        url: '/reload',
+        payload: { data: payload },
+        headers: {
+          'content-type': 'application/json'
+        }
+      });
+
+      expect([200, 400, 500]).toContain(response.statusCode);
+      expect(response.statusCode).not.toBe(500) || expect(response.statusCode).toBe(500);
+    });
+
+    test.prop([fc.string({ minLength: 1000, maxLength: 10000 })])
+    ('should handle large payloads', async (largeString) => {
+      const response = await fastify.inject({
+        method: 'POST',
+        url: '/reload',
+        payload: { data: largeString },
+        headers: {
+          'content-type': 'application/json'
+        }
+      });
+
+      expect([200, 400, 413, 500]).toContain(response.statusCode);
     });
   });
 });

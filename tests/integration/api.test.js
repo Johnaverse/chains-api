@@ -147,7 +147,54 @@ vi.mock('../../dataService.js', async () => {
         firehose: [],
         substreams: []
       }
-    ])
+    ]),
+    validateChainData: vi.fn(() => ({
+      totalErrors: 2,
+      errorsByRule: {
+        rule1_relation_conflicts: [
+          {
+            rule: 1,
+            chainId: 137,
+            chainName: 'Polygon',
+            message: 'Example validation error'
+          }
+        ],
+        rule2_slip44_testnet_mismatch: [],
+        rule3_name_testnet_mismatch: [
+          {
+            rule: 3,
+            chainId: 11155111,
+            chainName: 'Sepolia',
+            message: 'Name contains testnet keyword'
+          }
+        ],
+        rule4_sepolia_hoodie_issues: [],
+        rule5_status_conflicts: [],
+        rule6_goerli_not_deprecated: []
+      },
+      summary: {
+        rule1: 1,
+        rule2: 0,
+        rule3: 1,
+        rule4: 0,
+        rule5: 0,
+        rule6: 0
+      },
+      allErrors: [
+        {
+          rule: 1,
+          chainId: 137,
+          chainName: 'Polygon',
+          message: 'Example validation error'
+        },
+        {
+          rule: 3,
+          chainId: 11155111,
+          chainName: 'Sepolia',
+          message: 'Name contains testnet keyword'
+        }
+      ]
+    }))
   };
 });
 
@@ -671,6 +718,129 @@ describe('API Endpoints', () => {
       expect(response.statusCode).toBe(404);
       const data = JSON.parse(response.payload);
       expect(data).toHaveProperty('error', 'No monitoring results found for this chain');
+    });
+  });
+
+  describe('GET /validate', () => {
+    it('should return validation results for chain data', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/validate'
+      });
+
+      expect(response.statusCode).toBe(200);
+      const data = JSON.parse(response.payload);
+      expect(data).toHaveProperty('totalErrors');
+      expect(data).toHaveProperty('errorsByRule');
+      expect(data).toHaveProperty('summary');
+      expect(data).toHaveProperty('allErrors');
+      expect(typeof data.totalErrors).toBe('number');
+      expect(Array.isArray(data.allErrors)).toBe(true);
+    });
+
+    it('should have proper error structure with all rule categories', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/validate'
+      });
+
+      expect(response.statusCode).toBe(200);
+      const data = JSON.parse(response.payload);
+
+      // Check all rule categories exist
+      expect(data.errorsByRule).toHaveProperty('rule1_relation_conflicts');
+      expect(data.errorsByRule).toHaveProperty('rule2_slip44_testnet_mismatch');
+      expect(data.errorsByRule).toHaveProperty('rule3_name_testnet_mismatch');
+      expect(data.errorsByRule).toHaveProperty('rule4_sepolia_hoodie_issues');
+      expect(data.errorsByRule).toHaveProperty('rule5_status_conflicts');
+      expect(data.errorsByRule).toHaveProperty('rule6_goerli_not_deprecated');
+
+      // Check all arrays
+      expect(Array.isArray(data.errorsByRule.rule1_relation_conflicts)).toBe(true);
+      expect(Array.isArray(data.errorsByRule.rule2_slip44_testnet_mismatch)).toBe(true);
+      expect(Array.isArray(data.errorsByRule.rule3_name_testnet_mismatch)).toBe(true);
+      expect(Array.isArray(data.errorsByRule.rule4_sepolia_hoodie_issues)).toBe(true);
+      expect(Array.isArray(data.errorsByRule.rule5_status_conflicts)).toBe(true);
+      expect(Array.isArray(data.errorsByRule.rule6_goerli_not_deprecated)).toBe(true);
+    });
+
+    it('should have summary with counts for each rule', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/validate'
+      });
+
+      expect(response.statusCode).toBe(200);
+      const data = JSON.parse(response.payload);
+
+      expect(data.summary).toHaveProperty('rule1');
+      expect(data.summary).toHaveProperty('rule2');
+      expect(data.summary).toHaveProperty('rule3');
+      expect(data.summary).toHaveProperty('rule4');
+      expect(data.summary).toHaveProperty('rule5');
+      expect(data.summary).toHaveProperty('rule6');
+
+      // All should be numbers
+      Object.values(data.summary).forEach(count => {
+        expect(typeof count).toBe('number');
+      });
+    });
+
+    it('should match totalErrors with allErrors length', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/validate'
+      });
+
+      expect(response.statusCode).toBe(200);
+      const data = JSON.parse(response.payload);
+      expect(data.totalErrors).toBe(data.allErrors.length);
+    });
+
+    it('should return 503 when data is not loaded', async () => {
+      const { validateChainData } = await import('../../dataService.js');
+      const originalImpl = validateChainData.getMockImplementation();
+
+      // Mock validateChainData to return error
+      validateChainData.mockImplementationOnce(() => ({
+        error: 'Data not loaded. Please reload data sources first.',
+        errors: []
+      }));
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/validate'
+      });
+
+      expect(response.statusCode).toBe(503);
+      const data = JSON.parse(response.payload);
+      expect(data).toHaveProperty('error');
+      expect(data.error).toContain('Data not loaded');
+
+      // Restore original implementation
+      validateChainData.mockImplementation(originalImpl);
+    });
+
+    it('should have valid error objects with required fields', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/validate'
+      });
+
+      expect(response.statusCode).toBe(200);
+      const data = JSON.parse(response.payload);
+
+      // Check each error has required fields
+      data.allErrors.forEach(error => {
+        expect(error).toHaveProperty('rule');
+        expect(error).toHaveProperty('chainId');
+        expect(error).toHaveProperty('chainName');
+        expect(error).toHaveProperty('message');
+        expect(typeof error.rule).toBe('number');
+        expect(typeof error.chainId).toBe('number');
+        expect(typeof error.chainName).toBe('string');
+        expect(typeof error.message).toBe('string');
+      });
     });
   });
 });
