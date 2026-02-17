@@ -151,16 +151,16 @@ function mergeBridges(chain, newBridges) {
   if (!newBridges || !Array.isArray(newBridges)) {
     return;
   }
-  
+
   if (!chain.bridges) {
     chain.bridges = [];
   }
-  
+
   // Build a set of existing bridge URLs for comparison
   const existingBridgeUrls = new Set(
     chain.bridges.map(getBridgeUrl).filter(url => url !== null)
   );
-  
+
   newBridges.forEach(bridge => {
     const url = getBridgeUrl(bridge);
     if (url && !existingBridgeUrls.has(url)) {
@@ -168,6 +168,257 @@ function mergeBridges(chain, newBridges) {
       existingBridgeUrls.add(url);
     }
   });
+}
+
+/**
+ * Process L2 parent relation from chains.json
+ */
+function processL2ParentRelation(chain, indexed) {
+  if (!chain.parent || chain.parent.type !== 'L2' || !chain.parent.chain) {
+    return;
+  }
+
+  const match = chain.parent.chain.match(/^eip155-(\d+)$/);
+  if (!match) return;
+
+  const chainId = chain.chainId;
+  const parentChainId = Number.parseInt(match[1], 10);
+
+  if (!indexed.byChainId[chainId]) return;
+
+  // Add L2 tag
+  if (!indexed.byChainId[chainId].tags.includes('L2')) {
+    indexed.byChainId[chainId].tags.push('L2');
+  }
+
+  // Add l2Of relation if it doesn't exist
+  const existingRelation = indexed.byChainId[chainId].relations.find(
+    r => r.kind === 'l2Of' && r.chainId === parentChainId
+  );
+
+  if (!existingRelation) {
+    indexed.byChainId[chainId].relations.push({
+      kind: 'l2Of',
+      network: chain.parent.chain,
+      chainId: parentChainId,
+      source: 'chains'
+    });
+  }
+
+  // Extract bridge URLs
+  mergeBridges(indexed.byChainId[chainId], chain.parent.bridges);
+}
+
+/**
+ * Merge RPC URLs from chainData into existing chain
+ */
+function mergeRpcUrls(existingChain, chainData) {
+  if (!chainData.rpc || !Array.isArray(chainData.rpc)) {
+    return;
+  }
+
+  if (!existingChain.rpc) {
+    existingChain.rpc = [];
+  }
+
+  const existingRpcUrls = new Set();
+  existingChain.rpc.forEach(rpc => {
+    const url = typeof rpc === 'string' ? rpc : rpc.url;
+    if (url) existingRpcUrls.add(url);
+  });
+
+  chainData.rpc.forEach(rpc => {
+    const url = typeof rpc === 'string' ? rpc : rpc.url;
+    if (url && !existingRpcUrls.has(url)) {
+      existingChain.rpc.push(rpc);
+      existingRpcUrls.add(url);
+    }
+  });
+}
+
+/**
+ * Merge single chainlist entry into indexed data
+ */
+function mergeChainlistEntry(chainData, indexed) {
+  const chainId = chainData.chainId;
+
+  if (!indexed.byChainId[chainId]) {
+    indexed.byChainId[chainId] = {
+      chainId: Number(chainId),
+      name: chainData.name,
+      rpc: chainData.rpc || [],
+      sources: ['chainlist'],
+      tags: [],
+      relations: [],
+      status: chainData.status || 'active'
+    };
+  } else {
+    mergeRpcUrls(indexed.byChainId[chainId], chainData);
+
+    if (!indexed.byChainId[chainId].sources.includes('chainlist')) {
+      indexed.byChainId[chainId].sources.push('chainlist');
+    }
+
+    if (chainData.status && !indexed.byChainId[chainId].status) {
+      indexed.byChainId[chainId].status = chainData.status;
+    }
+  }
+
+  // Mark as testnet if applicable
+  if ((chainData.slip44 === 1 || chainData.isTestnet === true)) {
+    if (!indexed.byChainId[chainId].tags.includes('Testnet')) {
+      indexed.byChainId[chainId].tags.push('Testnet');
+    }
+  }
+}
+
+/**
+ * Extract chain ID from caip2Id format (e.g., "eip155:1")
+ */
+function extractChainIdFromCaip2Id(caip2Id) {
+  if (!caip2Id) return null;
+  const match = caip2Id.match(/^eip155:(\d+)$/);
+  return match ? Number.parseInt(match[1], 10) : null;
+}
+
+/**
+ * Create new chain entry from The Graph network data
+ */
+function createTheGraphChainEntry(chainId, network) {
+  return {
+    chainId,
+    name: network.fullName || network.shortName || network.id || 'Unknown',
+    shortName: network.shortName,
+    nativeCurrency: { symbol: network.nativeToken },
+    rpc: network.rpcUrls || [],
+    explorers: network.explorerUrls || [],
+    sources: ['theGraph'],
+    tags: [],
+    relations: [],
+    status: 'active'
+  };
+}
+
+/**
+ * Merge The Graph RPC URLs into existing chain
+ */
+function mergeTheGraphRpcUrls(existingChain, network) {
+  if (!network.rpcUrls || !Array.isArray(network.rpcUrls)) {
+    return;
+  }
+
+  if (!existingChain.rpc) {
+    existingChain.rpc = [];
+  }
+
+  const existingRpcUrls = new Set();
+  existingChain.rpc.forEach(rpc => {
+    const url = typeof rpc === 'string' ? rpc : rpc.url;
+    if (url) existingRpcUrls.add(url);
+  });
+
+  network.rpcUrls.forEach(rpc => {
+    const url = typeof rpc === 'string' ? rpc : rpc.url;
+    if (url && !existingRpcUrls.has(url)) {
+      existingChain.rpc.push(rpc);
+      existingRpcUrls.add(url);
+    }
+  });
+}
+
+/**
+ * Process a single The Graph relation
+ */
+function processTheGraphRelation(relation, chainId, indexed, networkIdToChainId) {
+  const { kind, network: targetNetworkId } = relation;
+  const targetChainId = networkIdToChainId[targetNetworkId];
+
+  const relationData = {
+    kind,
+    network: targetNetworkId,
+    ...(targetChainId !== undefined && { chainId: targetChainId }),
+    source: 'theGraph'
+  };
+
+  indexed.byChainId[chainId].relations.push(relationData);
+
+  // Add tags based on relation kind
+  if (kind === 'testnetOf' && !indexed.byChainId[chainId].tags.includes('Testnet')) {
+    indexed.byChainId[chainId].tags.push('Testnet');
+  } else if (kind === 'l2Of' && !indexed.byChainId[chainId].tags.includes('L2')) {
+    indexed.byChainId[chainId].tags.push('L2');
+  } else if (kind === 'beaconOf') {
+    addBeaconTagToTargetChain(indexed, targetChainId);
+  }
+}
+
+/**
+ * Process The Graph network entry
+ */
+function processTheGraphNetwork(network, indexed, networkIdToChainId) {
+  const chainId = extractChainIdFromCaip2Id(network.caip2Id);
+  const isBeaconChain = network.caip2Id && network.caip2Id.startsWith('beacon:');
+
+  if (chainId !== null) {
+    // Create or merge chain entry
+    if (!indexed.byChainId[chainId]) {
+      indexed.byChainId[chainId] = createTheGraphChainEntry(chainId, network);
+    } else {
+      if (!indexed.byChainId[chainId].sources.includes('theGraph')) {
+        indexed.byChainId[chainId].sources.push('theGraph');
+      }
+      mergeTheGraphRpcUrls(indexed.byChainId[chainId], network);
+
+      // Ensure arrays exist
+      if (!indexed.byChainId[chainId].tags) indexed.byChainId[chainId].tags = [];
+      if (!indexed.byChainId[chainId].relations) indexed.byChainId[chainId].relations = [];
+    }
+
+    // Mark as testnet if applicable
+    if (network.networkType === 'testnet') {
+      if (!indexed.byChainId[chainId].tags.includes('Testnet')) {
+        indexed.byChainId[chainId].tags.push('Testnet');
+      }
+    }
+
+    // Process relations
+    if (network.relations && Array.isArray(network.relations)) {
+      network.relations.forEach(relation => {
+        processTheGraphRelation(relation, chainId, indexed, networkIdToChainId);
+      });
+    }
+
+    // Add The Graph specific data
+    indexed.byChainId[chainId].theGraph = {
+      id: network.id,
+      fullName: network.fullName,
+      shortName: network.shortName,
+      caip2Id: network.caip2Id,
+      aliases: network.aliases,
+      networkType: network.networkType,
+      services: network.services,
+      nativeToken: network.nativeToken
+    };
+
+    // Add to name index
+    const nameLower = (network.fullName || network.shortName || '').toLowerCase();
+    if (nameLower && !indexed.byName[nameLower]) {
+      indexed.byName[nameLower] = [];
+    }
+    if (nameLower && !indexed.byName[nameLower].includes(chainId)) {
+      indexed.byName[nameLower].push(chainId);
+    }
+  } else if (isBeaconChain) {
+    // Process beacon chains to add "Beacon" tag to their target chains
+    if (network.relations && Array.isArray(network.relations)) {
+      network.relations.forEach(relation => {
+        if (relation.kind === 'beaconOf') {
+          const targetChainId = networkIdToChainId[relation.network];
+          addBeaconTagToTargetChain(indexed, targetChainId);
+        }
+      });
+    }
+  }
 }
 
 /**
@@ -222,45 +473,8 @@ export function indexData(theGraph, chainlist, chains, slip44) {
     
     // Process L2 relations and bridge URLs from parent field in chains.json
     chains.forEach(chain => {
-      const chainId = chain.chainId;
-      
-      // Check for L2 parent relation
-      if (chainId !== undefined && chain.parent && chain.parent.type === 'L2') {
-        // Extract parent chain ID from format like "eip155-11155111"
-        if (chain.parent.chain) {
-          const match = chain.parent.chain.match(/^eip155-(\d+)$/);
-          if (match) {
-            const parentChainId = Number.parseInt(match[1], 10);
-            
-            // Ensure the chain exists in indexed data
-            if (indexed.byChainId[chainId]) {
-              // Add L2 tag
-              if (!indexed.byChainId[chainId].tags.includes('L2')) {
-                indexed.byChainId[chainId].tags.push('L2');
-              }
-              
-              // Add l2Of relation
-              const relation = {
-                kind: 'l2Of',
-                network: chain.parent.chain,
-                chainId: parentChainId,
-                source: 'chains'
-              };
-              
-              // Check if relation doesn't already exist
-              const existingRelation = indexed.byChainId[chainId].relations.find(
-                r => r.kind === 'l2Of' && r.chainId === parentChainId
-              );
-              
-              if (!existingRelation) {
-                indexed.byChainId[chainId].relations.push(relation);
-              }
-              
-              // Extract bridge URLs from parent.bridges
-              mergeBridges(indexed.byChainId[chainId], chain.parent.bridges);
-            }
-          }
-        }
+      if (chain.chainId !== undefined) {
+        processL2ParentRelation(chain, indexed);
       }
     });
   }
@@ -270,60 +484,13 @@ export function indexData(theGraph, chainlist, chains, slip44) {
   if (chainlist && Array.isArray(chainlist)) {
     chainlist.forEach(chainData => {
       const chainId = chainData.chainId;
-      
+
       // Skip if chainId is not valid
       if (chainId === undefined || chainId === null || Number.isNaN(Number(chainId))) {
         return;
       }
-      
-      if (!indexed.byChainId[chainId]) {
-        indexed.byChainId[chainId] = {
-          chainId: Number(chainId),
-          name: chainData.name,
-          rpc: chainData.rpc || [],
-          sources: ['chainlist'],
-          tags: [],
-          relations: [],
-          status: chainData.status || 'active' // Default to 'active' if not present
-        };
-      } else {
-        // Merge RPC data
-        if (chainData.rpc && Array.isArray(chainData.rpc)) {
-          if (!indexed.byChainId[chainId].rpc) {
-            indexed.byChainId[chainId].rpc = [];
-          }
-          
-          // Build a set of existing RPCs for comparison
-          // Need to handle both string and object formats
-          const existingRpcUrls = new Set();
-          indexed.byChainId[chainId].rpc.forEach(rpc => {
-            const url = typeof rpc === 'string' ? rpc : rpc.url;
-            if (url) existingRpcUrls.add(url);
-          });
-          
-          chainData.rpc.forEach(rpc => {
-            const url = typeof rpc === 'string' ? rpc : rpc.url;
-            if (url && !existingRpcUrls.has(url)) {
-              indexed.byChainId[chainId].rpc.push(rpc);
-              existingRpcUrls.add(url);
-            }
-          });
-        }
-        if (!indexed.byChainId[chainId].sources.includes('chainlist')) {
-          indexed.byChainId[chainId].sources.push('chainlist');
-        }
-        // Merge status if not already present
-        if (chainData.status && !indexed.byChainId[chainId].status) {
-          indexed.byChainId[chainId].status = chainData.status;
-        }
-      }
-      
-      // Check for testnet based on slip44 and isTestnet flag
-      if ((chainData.slip44 === 1 || chainData.isTestnet === true) && indexed.byChainId[chainId]) {
-        if (!indexed.byChainId[chainId].tags.includes('Testnet')) {
-          indexed.byChainId[chainId].tags.push('Testnet');
-        }
-      }
+
+      mergeChainlistEntry(chainData, indexed);
     });
     
     // Second pass: Find mainnet relations for testnets from chainlist
@@ -388,144 +555,7 @@ export function indexData(theGraph, chainlist, chains, slip44) {
   // The Graph uses caip2Id format (e.g., "eip155:1" for Ethereum mainnet)
   if (theGraph && theGraph.networks && Array.isArray(theGraph.networks)) {
     theGraph.networks.forEach(network => {
-      let chainId = null;
-      
-      // Extract chain ID from caip2Id (format: "eip155:1")
-      if (network.caip2Id) {
-        const match = network.caip2Id.match(/^eip155:(\d+)$/);
-        if (match) {
-          chainId = Number.parseInt(match[1], 10);
-        }
-      }
-      
-      // Process beacon chains separately (they don't get their own chain entry)
-      const isBeaconChain = network.caip2Id && network.caip2Id.startsWith('beacon:');
-      
-      if (chainId !== null) {
-        if (!indexed.byChainId[chainId]) {
-          indexed.byChainId[chainId] = {
-            chainId,
-            // Use fullName for display, fallback to shortName, then id (The Graph network identifier)
-            name: network.fullName || network.shortName || network.id || 'Unknown',
-            shortName: network.shortName,
-            nativeCurrency: { symbol: network.nativeToken },
-            rpc: network.rpcUrls || [],
-            explorers: network.explorerUrls || [],
-            sources: ['theGraph'],
-            tags: [],
-            relations: [],
-            status: 'active' // Default to 'active' for The Graph chains
-          };
-        } else {
-          if (!indexed.byChainId[chainId].sources.includes('theGraph')) {
-            indexed.byChainId[chainId].sources.push('theGraph');
-          }
-          // Merge RPC URLs - ensure rpc array exists
-          if (network.rpcUrls && Array.isArray(network.rpcUrls)) {
-            if (!indexed.byChainId[chainId].rpc) {
-              indexed.byChainId[chainId].rpc = [];
-            }
-            
-            // Build a set of existing RPC URLs for comparison
-            // Need to handle both string and object formats
-            const existingRpcUrls = new Set();
-            indexed.byChainId[chainId].rpc.forEach(rpc => {
-              const url = typeof rpc === 'string' ? rpc : rpc.url;
-              if (url) existingRpcUrls.add(url);
-            });
-            
-            network.rpcUrls.forEach(rpc => {
-              const url = typeof rpc === 'string' ? rpc : rpc.url;
-              if (url && !existingRpcUrls.has(url)) {
-                indexed.byChainId[chainId].rpc.push(rpc);
-                existingRpcUrls.add(url);
-              }
-            });
-          }
-          
-          // Ensure tags and relations arrays exist for chains from other sources
-          if (!indexed.byChainId[chainId].tags) {
-            indexed.byChainId[chainId].tags = [];
-          }
-          if (!indexed.byChainId[chainId].relations) {
-            indexed.byChainId[chainId].relations = [];
-          }
-        }
-        
-        // Process network type for testnet marking
-        if (network.networkType === 'testnet') {
-          if (!indexed.byChainId[chainId].tags.includes('Testnet')) {
-            indexed.byChainId[chainId].tags.push('Testnet');
-          }
-        }
-        
-        // Process relations
-        if (network.relations && Array.isArray(network.relations)) {
-          network.relations.forEach(relation => {
-            const { kind, network: targetNetworkId } = relation;
-            
-            // Convert network ID to chain ID
-            const targetChainId = networkIdToChainId[targetNetworkId];
-            
-            // Store relation with chain ID if available, otherwise with network ID
-            const relationData = {
-              kind,
-              network: targetNetworkId,
-              ...(targetChainId !== undefined && { chainId: targetChainId }),
-              source: 'theGraph'
-            };
-            
-            indexed.byChainId[chainId].relations.push(relationData);
-            
-            // Add tags based on relation kind
-            if (kind === 'testnetOf') {
-              if (!indexed.byChainId[chainId].tags.includes('Testnet')) {
-                indexed.byChainId[chainId].tags.push('Testnet');
-              }
-            } else if (kind === 'l2Of') {
-              if (!indexed.byChainId[chainId].tags.includes('L2')) {
-                indexed.byChainId[chainId].tags.push('L2');
-              }
-            } else if (kind === 'beaconOf') {
-              // Add "Beacon" tag to the target chain
-              addBeaconTagToTargetChain(indexed, targetChainId);
-            }
-          });
-        }
-        
-        // Add The Graph specific data
-        indexed.byChainId[chainId].theGraph = {
-          id: network.id,
-          fullName: network.fullName,
-          shortName: network.shortName,
-          caip2Id: network.caip2Id,
-          aliases: network.aliases,
-          networkType: network.networkType,
-          services: network.services,
-          nativeToken: network.nativeToken
-        };
-        
-        // Add to name index
-        const nameLower = (network.fullName || network.shortName || '').toLowerCase();
-        if (nameLower && !indexed.byName[nameLower]) {
-          indexed.byName[nameLower] = [];
-        }
-        if (nameLower && !indexed.byName[nameLower].includes(chainId)) {
-          indexed.byName[nameLower].push(chainId);
-        }
-      } else if (isBeaconChain) {
-        // Process beacon chains to add "Beacon" tag to their target chains
-        if (network.relations && Array.isArray(network.relations)) {
-          network.relations.forEach(relation => {
-            const { kind, network: targetNetworkId } = relation;
-            
-            if (kind === 'beaconOf') {
-              const targetChainId = networkIdToChainId[targetNetworkId];
-              addBeaconTagToTargetChain(indexed, targetChainId);
-            }
-          });
-        }
-      }
+      processTheGraphNetwork(network, indexed, networkIdToChainId);
     });
   }
   
@@ -1107,6 +1137,212 @@ export function startRpcHealthCheck() {
     });
 }
 
+// Helper function to get chain from different sources
+function getChainFromSource(chainId, source) {
+  if (source === 'theGraph') {
+    return cachedData.theGraph.networks?.find(n => {
+      if (n.caip2Id) {
+        const match = n.caip2Id.match(/^eip155:(\d+)$/);
+        return match && Number.parseInt(match[1], 10) === chainId;
+      }
+      return false;
+    });
+  } else if (source === 'chainlist') {
+    return cachedData.chainlist?.find(c => c.chainId === chainId);
+  } else if (source === 'chains') {
+    return cachedData.chains?.find(c => c.chainId === chainId);
+  }
+  return null;
+}
+
+// Rule 1: Check for relation conflicts
+function validateRule1RelationConflicts(chain, errors) {
+  if (!chain.relations || chain.relations.length === 0) return;
+
+  const graphRelations = chain.relations.filter(r => r.source === 'theGraph');
+
+  graphRelations.forEach(graphRel => {
+    if (graphRel.kind === 'testnetOf' && graphRel.chainId) {
+      if (!chain.tags.includes('Testnet')) {
+        errors.push({
+          rule: 1,
+          chainId: chain.chainId,
+          chainName: chain.name,
+          type: 'relation_tag_conflict',
+          message: `Chain ${chain.chainId} (${chain.name}) has testnetOf relation but is not tagged as Testnet`,
+          graphRelation: graphRel
+        });
+      }
+
+      const chainlistChain = getChainFromSource(chain.chainId, 'chainlist');
+      if (chainlistChain && chainlistChain.isTestnet === false) {
+        errors.push({
+          rule: 1,
+          chainId: chain.chainId,
+          chainName: chain.name,
+          type: 'relation_source_conflict',
+          message: `Chain ${chain.chainId} (${chain.name}) has testnetOf relation in theGraph but isTestnet=false in chainlist`,
+          graphRelation: graphRel,
+          chainlistData: { isTestnet: chainlistChain.isTestnet }
+        });
+      }
+    }
+
+    if (graphRel.kind === 'l2Of' && graphRel.chainId) {
+      if (!chain.tags.includes('L2')) {
+        errors.push({
+          rule: 1,
+          chainId: chain.chainId,
+          chainName: chain.name,
+          type: 'relation_tag_conflict',
+          message: `Chain ${chain.chainId} (${chain.name}) has l2Of relation but is not tagged as L2`,
+          graphRelation: graphRel
+        });
+      }
+    }
+  });
+}
+
+// Rule 2: Check slip44 testnet mismatch
+function validateRule2Slip44Mismatch(chain, errors) {
+  const chainlistChain = getChainFromSource(chain.chainId, 'chainlist');
+  const chainsChain = getChainFromSource(chain.chainId, 'chains');
+
+  if (chainlistChain && chainlistChain.slip44 === 1 && chainlistChain.isTestnet === false) {
+    errors.push({
+      rule: 2,
+      chainId: chain.chainId,
+      chainName: chain.name,
+      type: 'slip44_testnet_mismatch',
+      message: `Chain ${chain.chainId} (${chain.name}) has slip44=1 (testnet indicator) but isTestnet=false in chainlist`,
+      slip44: chainlistChain.slip44,
+      isTestnet: chainlistChain.isTestnet
+    });
+  }
+
+  if (chainsChain && chainsChain.slip44 === 1 && !chain.tags.includes('Testnet')) {
+    errors.push({
+      rule: 2,
+      chainId: chain.chainId,
+      chainName: chain.name,
+      type: 'slip44_testnet_mismatch',
+      message: `Chain ${chain.chainId} (${chain.name}) has slip44=1 (testnet indicator) in chains.json but not tagged as Testnet`,
+      slip44: chainsChain.slip44,
+      tags: chain.tags
+    });
+  }
+}
+
+// Rule 3: Check name testnet mismatch
+function validateRule3NameTestnetMismatch(chain, errors) {
+  const fullName = chain.theGraph?.fullName || chain.name || '';
+  const nameLower = fullName.toLowerCase();
+
+  if ((nameLower.includes('testnet') || nameLower.includes('devnet')) && !chain.tags.includes('Testnet')) {
+    errors.push({
+      rule: 3,
+      chainId: chain.chainId,
+      chainName: chain.name,
+      type: 'name_testnet_mismatch',
+      message: `Chain ${chain.chainId} (${chain.name}) has "Testnet" or "Devnet" in full name "${fullName}" but not tagged as Testnet`,
+      fullName: fullName,
+      tags: chain.tags
+    });
+  }
+}
+
+// Rule 4: Check sepolia/hoodie without L2 tag or relations
+function validateRule4SepoliaHoodie(chain, errors) {
+  const fullName = chain.theGraph?.fullName || chain.name || '';
+  const nameLower = fullName.toLowerCase();
+
+  if (nameLower.includes('sepolia') || nameLower.includes('hoodie')) {
+    const hasL2Tag = chain.tags.includes('L2');
+    const hasRelations = chain.relations && chain.relations.length > 0;
+
+    if (!hasL2Tag && !hasRelations) {
+      errors.push({
+        rule: 4,
+        chainId: chain.chainId,
+        chainName: chain.name,
+        type: 'sepolia_hoodie_no_l2_or_relations',
+        message: `Chain ${chain.chainId} (${chain.name}) contains "sepolia" or "hoodie" but not tagged as L2 and has no relations`,
+        fullName: fullName,
+        tags: chain.tags,
+        relations: chain.relations
+      });
+    }
+  }
+}
+
+// Rule 5: Check status conflicts across sources
+function validateRule5StatusConflicts(chain, errors) {
+  const chainlistChain = getChainFromSource(chain.chainId, 'chainlist');
+  const chainsChain = getChainFromSource(chain.chainId, 'chains');
+
+  const statuses = [];
+  if (chainlistChain && chainlistChain.status) {
+    statuses.push({ source: 'chainlist', status: chainlistChain.status });
+  }
+  if (chainsChain && chainsChain.status) {
+    statuses.push({ source: 'chains', status: chainsChain.status });
+  }
+
+  const deprecatedInSources = statuses.filter(s => s.status === 'deprecated');
+  const activeInSources = statuses.filter(s => s.status === 'active');
+
+  if (deprecatedInSources.length > 0 && activeInSources.length > 0) {
+    errors.push({
+      rule: 5,
+      chainId: chain.chainId,
+      chainName: chain.name,
+      type: 'status_conflict',
+      message: `Chain ${chain.chainId} (${chain.name}) has conflicting status across sources`,
+      statuses: statuses
+    });
+  }
+
+  return statuses;
+}
+
+// Rule 6: Check Goerli not deprecated
+function validateRule6GoerliDeprecated(chain, statuses, errors) {
+  const fullName = chain.theGraph?.fullName || chain.name || '';
+  const nameLower = fullName.toLowerCase();
+
+  if (nameLower.includes('goerli')) {
+    const chainlistChain = getChainFromSource(chain.chainId, 'chainlist');
+    const chainsChain = getChainFromSource(chain.chainId, 'chains');
+
+    const isDeprecated = chain.status === 'deprecated' ||
+      (chainlistChain && chainlistChain.status === 'deprecated') ||
+      (chainsChain && chainsChain.status === 'deprecated');
+
+    if (!isDeprecated) {
+      errors.push({
+        rule: 6,
+        chainId: chain.chainId,
+        chainName: chain.name,
+        type: 'goerli_not_deprecated',
+        message: `Chain ${chain.chainId} (${chain.name}) contains "Goerli" but is not marked as deprecated`,
+        fullName: fullName,
+        status: chain.status,
+        statusInSources: statuses
+      });
+    }
+  }
+}
+
+// Validate a single chain
+function validateChain(chain, errors) {
+  validateRule1RelationConflicts(chain, errors);
+  validateRule2Slip44Mismatch(chain, errors);
+  validateRule3NameTestnetMismatch(chain, errors);
+  validateRule4SepoliaHoodie(chain, errors);
+  const statuses = validateRule5StatusConflicts(chain, errors);
+  validateRule6GoerliDeprecated(chain, statuses, errors);
+}
+
 /**
  * Validate chain data for potential human errors
  * Returns an object with validation results categorized by error type
@@ -1120,191 +1356,10 @@ export function validateChainData() {
   }
 
   const errors = [];
-  
-  // Helper function to get chain from different sources
-  const getChainFromSource = (chainId, source) => {
-    if (source === 'theGraph') {
-      return cachedData.theGraph.networks?.find(n => {
-        if (n.caip2Id) {
-          const match = n.caip2Id.match(/^eip155:(\d+)$/);
-          return match && Number.parseInt(match[1], 10) === chainId;
-        }
-        return false;
-      });
-    } else if (source === 'chainlist') {
-      return cachedData.chainlist?.find(c => c.chainId === chainId);
-    } else if (source === 'chains') {
-      return cachedData.chains?.find(c => c.chainId === chainId);
-    }
-    return null;
-  };
-
-  // Build network ID to chain ID map for relation checking
-  const networkIdToChainId = buildNetworkIdToChainIdMap(cachedData.theGraph);
 
   // Iterate through all indexed chains
   Object.values(cachedData.indexed.byChainId).forEach(chain => {
-    const chainId = chain.chainId;
-    
-    // Rule 1: Conflicts between graph relations and other sources
-    // Assume graph relations are always true, check if other sources conflict
-    if (chain.relations && chain.relations.length > 0) {
-      const graphRelations = chain.relations.filter(r => r.source === 'theGraph');
-      
-      graphRelations.forEach(graphRel => {
-        // Check testnetOf relation
-        if (graphRel.kind === 'testnetOf' && graphRel.chainId) {
-          // Check if chain is marked as Testnet
-          if (!chain.tags.includes('Testnet')) {
-            errors.push({
-              rule: 1,
-              chainId: chainId,
-              chainName: chain.name,
-              type: 'relation_tag_conflict',
-              message: `Chain ${chainId} (${chain.name}) has testnetOf relation but is not tagged as Testnet`,
-              graphRelation: graphRel
-            });
-          }
-          
-          // Check if other sources have conflicting data
-          const chainlistChain = getChainFromSource(chainId, 'chainlist');
-          if (chainlistChain && chainlistChain.isTestnet === false) {
-            errors.push({
-              rule: 1,
-              chainId: chainId,
-              chainName: chain.name,
-              type: 'relation_source_conflict',
-              message: `Chain ${chainId} (${chain.name}) has testnetOf relation in theGraph but isTestnet=false in chainlist`,
-              graphRelation: graphRel,
-              chainlistData: { isTestnet: chainlistChain.isTestnet }
-            });
-          }
-        }
-        
-        // Check l2Of relation
-        if (graphRel.kind === 'l2Of' && graphRel.chainId) {
-          // Check if chain is marked as L2
-          if (!chain.tags.includes('L2')) {
-            errors.push({
-              rule: 1,
-              chainId: chainId,
-              chainName: chain.name,
-              type: 'relation_tag_conflict',
-              message: `Chain ${chainId} (${chain.name}) has l2Of relation but is not tagged as L2`,
-              graphRelation: graphRel
-            });
-          }
-        }
-      });
-    }
-    
-    // Rule 2: slip44 = 1 but isTestnet = false
-    const chainlistChain = getChainFromSource(chainId, 'chainlist');
-    const chainsChain = getChainFromSource(chainId, 'chains');
-    
-    if (chainlistChain && chainlistChain.slip44 === 1 && chainlistChain.isTestnet === false) {
-      errors.push({
-        rule: 2,
-        chainId: chainId,
-        chainName: chain.name,
-        type: 'slip44_testnet_mismatch',
-        message: `Chain ${chainId} (${chain.name}) has slip44=1 (testnet indicator) but isTestnet=false in chainlist`,
-        slip44: chainlistChain.slip44,
-        isTestnet: chainlistChain.isTestnet
-      });
-    }
-    
-    if (chainsChain && chainsChain.slip44 === 1 && !chain.tags.includes('Testnet')) {
-      errors.push({
-        rule: 2,
-        chainId: chainId,
-        chainName: chain.name,
-        type: 'slip44_testnet_mismatch',
-        message: `Chain ${chainId} (${chain.name}) has slip44=1 (testnet indicator) in chains.json but not tagged as Testnet`,
-        slip44: chainsChain.slip44,
-        tags: chain.tags
-      });
-    }
-    
-    // Rule 3: Chain full name includes "Testnet" or "Devnet" but identifying as Mainnet
-    const fullName = chain.theGraph?.fullName || chain.name || '';
-    const nameLower = fullName.toLowerCase();
-    
-    if ((nameLower.includes('testnet') || nameLower.includes('devnet')) && !chain.tags.includes('Testnet')) {
-      errors.push({
-        rule: 3,
-        chainId: chainId,
-        chainName: chain.name,
-        type: 'name_testnet_mismatch',
-        message: `Chain ${chainId} (${chain.name}) has "Testnet" or "Devnet" in full name "${fullName}" but not tagged as Testnet`,
-        fullName: fullName,
-        tags: chain.tags
-      });
-    }
-    
-    // Rule 4: Chain name contains "sepolia" or "hoodie" but not identifying as L2 or no relations with other networks
-    if (nameLower.includes('sepolia') || nameLower.includes('hoodie')) {
-      const hasL2Tag = chain.tags.includes('L2');
-      const hasRelations = chain.relations && chain.relations.length > 0;
-      
-      if (!hasL2Tag && !hasRelations) {
-        errors.push({
-          rule: 4,
-          chainId: chainId,
-          chainName: chain.name,
-          type: 'sepolia_hoodie_no_l2_or_relations',
-          message: `Chain ${chainId} (${chain.name}) contains "sepolia" or "hoodie" but not tagged as L2 and has no relations`,
-          fullName: fullName,
-          tags: chain.tags,
-          relations: chain.relations
-        });
-      }
-    }
-    
-    // Rule 5: Status "deprecated" conflicts in different sources
-    const statuses = [];
-    
-    if (chainlistChain && chainlistChain.status) {
-      statuses.push({ source: 'chainlist', status: chainlistChain.status });
-    }
-    if (chainsChain && chainsChain.status) {
-      statuses.push({ source: 'chains', status: chainsChain.status });
-    }
-    
-    // Check for conflicts
-    const deprecatedInSources = statuses.filter(s => s.status === 'deprecated');
-    const activeInSources = statuses.filter(s => s.status === 'active');
-    
-    if (deprecatedInSources.length > 0 && activeInSources.length > 0) {
-      errors.push({
-        rule: 5,
-        chainId: chainId,
-        chainName: chain.name,
-        type: 'status_conflict',
-        message: `Chain ${chainId} (${chain.name}) has conflicting status across sources`,
-        statuses: statuses
-      });
-    }
-    
-    // Rule 6: Chains containing "Goerli" not marked as deprecated
-    if (nameLower.includes('goerli')) {
-      const isDeprecated = chain.status === 'deprecated' || 
-                          (chainlistChain && chainlistChain.status === 'deprecated') ||
-                          (chainsChain && chainsChain.status === 'deprecated');
-      
-      if (!isDeprecated) {
-        errors.push({
-          rule: 6,
-          chainId: chainId,
-          chainName: chain.name,
-          type: 'goerli_not_deprecated',
-          message: `Chain ${chainId} (${chain.name}) contains "Goerli" but is not marked as deprecated`,
-          fullName: fullName,
-          status: chain.status,
-          statusInSources: statuses
-        });
-      }
-    }
+    validateChain(chain, errors);
   });
   
   // Group errors by rule
