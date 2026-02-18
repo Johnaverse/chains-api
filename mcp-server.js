@@ -6,8 +6,12 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import { createRequire } from 'node:module';
 import { loadData, startRpcHealthCheck } from './dataService.js';
 import { getToolDefinitions, handleToolCall } from './mcp-tools.js';
+
+const require = createRequire(import.meta.url);
+const { version } = require('./package.json');
 
 // Load data on startup
 await loadData();
@@ -17,7 +21,7 @@ startRpcHealthCheck();
 const server = new Server(
   {
     name: 'chains-api',
-    version: '1.0.0',
+    version,
   },
   {
     capabilities: {

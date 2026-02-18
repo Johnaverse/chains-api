@@ -9,8 +9,12 @@ import {
   isInitializeRequest,
 } from '@modelcontextprotocol/sdk/types.js';
 import express from 'express';
+import { createRequire } from 'node:module';
 import { loadData, getCachedData, startRpcHealthCheck } from './dataService.js';
 import { getToolDefinitions, handleToolCall } from './mcp-tools.js';
+
+const require = createRequire(import.meta.url);
+const { version } = require('./package.json');
 
 // Load data on startup
 await loadData();
@@ -25,7 +29,7 @@ const createServer = () => {
   const server = new Server(
     {
       name: 'chains-api',
-      version: '1.0.0',
+      version,
     },
     {
       capabilities: {
@@ -171,7 +175,7 @@ app.get('/health', (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     name: 'Chains API - MCP HTTP Server',
-    version: '1.0.0',
+    version,
     description: 'HTTP-based MCP server for blockchain chain data',
     endpoints: {
       '/mcp': 'MCP protocol endpoint (POST for requests, DELETE for session termination)',
