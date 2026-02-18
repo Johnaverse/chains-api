@@ -1,0 +1,588 @@
+import {
+  getCachedData,
+  searchChains,
+  getChainById,
+  getAllChains,
+  getAllRelations,
+  getRelationsById,
+  getEndpointsById,
+  getAllEndpoints,
+  validateChainData,
+} from './dataService.js';
+import { getMonitoringResults, getMonitoringStatus } from './rpcMonitor.js';
+
+/**
+ * Get the list of MCP tool definitions (schemas)
+ * @returns {Array} Array of tool definition objects
+ */
+export function getToolDefinitions() {
+  return [
+    {
+      name: 'get_chains',
+      description: 'Get all blockchain chains, optionally filtered by tag (Testnet, L2, or Beacon)',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          tag: {
+            type: 'string',
+            description: 'Optional tag to filter chains (e.g., "Testnet", "L2", "Beacon")',
+            enum: ['Testnet', 'L2', 'Beacon'],
+          },
+        },
+      },
+    },
+    {
+      name: 'get_chain_by_id',
+      description: 'Get detailed information about a specific blockchain chain by its chain ID',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          chainId: {
+            type: 'number',
+            description: 'The chain ID to query (e.g., 1 for Ethereum mainnet, 137 for Polygon)',
+          },
+        },
+        required: ['chainId'],
+      },
+    },
+    {
+      name: 'search_chains',
+      description: 'Search for blockchain chains by name or other attributes',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'Search query string (e.g., "ethereum", "polygon")',
+          },
+        },
+        required: ['query'],
+      },
+    },
+    {
+      name: 'get_endpoints',
+      description: 'Get RPC, firehose, and substreams endpoints for a specific chain or all chains',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          chainId: {
+            type: 'number',
+            description: 'Optional chain ID. If provided, returns endpoints for that chain only. If omitted, returns all endpoints.',
+          },
+        },
+      },
+    },
+    {
+      name: 'get_relations',
+      description: 'Get chain relationships (testnet/mainnet, L2/L1, etc.) for a specific chain or all chains',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          chainId: {
+            type: 'number',
+            description: 'Optional chain ID. If provided, returns relations for that chain only. If omitted, returns all relations.',
+          },
+        },
+      },
+    },
+    {
+      name: 'get_slip44',
+      description: 'Get SLIP-0044 coin type information by coin type ID or all coin types',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          coinType: {
+            type: 'number',
+            description: 'Optional coin type ID (e.g., 0 for Bitcoin, 60 for Ethereum). If omitted, returns all coin types.',
+          },
+        },
+      },
+    },
+    {
+      name: 'get_sources',
+      description: 'Get the status of all data sources (theGraph, chainlist, chains, slip44)',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+      },
+    },
+    {
+      name: 'validate_chains',
+      description: 'Validate chain data for potential quality issues across 6 validation rules (relation conflicts, slip44 mismatches, name/testnet mismatches, sepolia/hoodie issues, status conflicts, goerli deprecation)',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+      },
+    },
+    {
+      name: 'get_rpc_monitor',
+      description: 'Get RPC endpoint health check and monitoring results for all chains',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+      },
+    },
+    {
+      name: 'get_rpc_monitor_by_id',
+      description: 'Get RPC endpoint monitoring results for a specific chain by its chain ID',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          chainId: {
+            type: 'number',
+            description: 'The chain ID to get RPC monitoring results for (e.g., 1 for Ethereum mainnet)',
+          },
+        },
+        required: ['chainId'],
+      },
+    },
+  ];
+}
+
+/**
+ * Handle an MCP tool call by name and arguments
+ * @param {string} name - Tool name
+ * @param {Object} args - Tool arguments
+ * @returns {Promise<Object>} MCP response with content array
+ */
+export async function handleToolCall(name, args) {
+  try {
+    switch (name) {
+      case 'get_chains': {
+        let chains = getAllChains();
+
+        // Filter by tag if provided
+        if (args.tag) {
+          chains = chains.filter(
+            (chain) => chain.tags && chain.tags.includes(args.tag)
+          );
+        }
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  count: chains.length,
+                  chains,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+
+      case 'get_chain_by_id': {
+        const chainId = args.chainId;
+
+        if (typeof chainId !== 'number' || Number.isNaN(chainId)) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({ error: 'Invalid chain ID' }),
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        const chain = getChainById(chainId);
+
+        if (!chain) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({ error: 'Chain not found' }),
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(chain, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'search_chains': {
+        const query = args.query;
+
+        if (!query) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({ error: 'Query is required' }),
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        const results = searchChains(query);
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  query,
+                  count: results.length,
+                  results,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+
+      case 'get_endpoints': {
+        if (args.chainId !== undefined) {
+          const chainId = args.chainId;
+
+          if (typeof chainId !== 'number' || Number.isNaN(chainId)) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({ error: 'Invalid chain ID' }),
+                },
+              ],
+              isError: true,
+            };
+          }
+
+          const result = getEndpointsById(chainId);
+
+          if (!result) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({ error: 'Chain not found' }),
+                },
+              ],
+              isError: true,
+            };
+          }
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(result, null, 2),
+              },
+            ],
+          };
+        } else {
+          const endpoints = getAllEndpoints();
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(
+                  {
+                    count: endpoints.length,
+                    endpoints,
+                  },
+                  null,
+                  2
+                ),
+              },
+            ],
+          };
+        }
+      }
+
+      case 'get_relations': {
+        if (args.chainId !== undefined) {
+          const chainId = args.chainId;
+
+          if (typeof chainId !== 'number' || Number.isNaN(chainId)) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({ error: 'Invalid chain ID' }),
+                },
+              ],
+              isError: true,
+            };
+          }
+
+          const result = getRelationsById(chainId);
+
+          if (!result) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({ error: 'Chain not found' }),
+                },
+              ],
+              isError: true,
+            };
+          }
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(result, null, 2),
+              },
+            ],
+          };
+        } else {
+          const relations = getAllRelations();
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(relations, null, 2),
+              },
+            ],
+          };
+        }
+      }
+
+      case 'get_slip44': {
+        const cachedData = getCachedData();
+
+        if (!cachedData.slip44) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({ error: 'SLIP-0044 data not loaded' }),
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        if (args.coinType !== undefined) {
+          const coinType = args.coinType;
+
+          if (typeof coinType !== 'number' || Number.isNaN(coinType)) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({ error: 'Invalid coin type' }),
+                },
+              ],
+              isError: true,
+            };
+          }
+
+          const coinTypeData = cachedData.slip44[coinType];
+
+          if (!coinTypeData) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({ error: 'Coin type not found' }),
+                },
+              ],
+              isError: true,
+            };
+          }
+
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(coinTypeData, null, 2),
+              },
+            ],
+          };
+        } else {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(
+                  {
+                    count: Object.keys(cachedData.slip44).length,
+                    coinTypes: cachedData.slip44,
+                  },
+                  null,
+                  2
+                ),
+              },
+            ],
+          };
+        }
+      }
+
+      case 'get_sources': {
+        const cachedData = getCachedData();
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  lastUpdated: cachedData.lastUpdated,
+                  sources: {
+                    theGraph: cachedData.theGraph ? 'loaded' : 'not loaded',
+                    chainlist: cachedData.chainlist ? 'loaded' : 'not loaded',
+                    chains: cachedData.chains ? 'loaded' : 'not loaded',
+                    slip44: cachedData.slip44 ? 'loaded' : 'not loaded',
+                  },
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+
+      case 'validate_chains': {
+        const validationResults = validateChainData();
+
+        if (validationResults.error) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({ error: validationResults.error }),
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(validationResults, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'get_rpc_monitor': {
+        const results = getMonitoringResults();
+        const status = getMonitoringStatus();
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  ...status,
+                  ...results,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+
+      case 'get_rpc_monitor_by_id': {
+        const chainId = args.chainId;
+
+        if (typeof chainId !== 'number' || Number.isNaN(chainId)) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({ error: 'Invalid chain ID' }),
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        const results = getMonitoringResults();
+        const chainResults = results.results.filter(
+          (r) => r.chainId === chainId
+        );
+
+        if (chainResults.length === 0) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  error: 'No monitoring results found for this chain',
+                }),
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        const workingCount = chainResults.filter(
+          (r) => r.status === 'working'
+        ).length;
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  chainId,
+                  chainName: chainResults[0].chainName,
+                  totalEndpoints: chainResults.length,
+                  workingEndpoints: workingCount,
+                  lastUpdated: results.lastUpdated,
+                  endpoints: chainResults,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+
+      default:
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({ error: `Unknown tool: ${name}` }),
+            },
+          ],
+          isError: true,
+        };
+    }
+  } catch (error) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            error: 'Internal error',
+            message: error.message,
+          }),
+        },
+      ],
+      isError: true,
+    };
+  }
+}
