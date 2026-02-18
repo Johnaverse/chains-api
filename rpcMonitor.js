@@ -193,29 +193,31 @@ async function testAllEndpoints() {
 }
 
 /**
- * Start background monitoring (runs once at startup)
+ * Start monitoring. Loops continuously if RPC_MONITOR_LOOP=true, otherwise runs once.
  */
 export async function startMonitoring() {
+  const loop = process.env.RPC_MONITOR_LOOP === 'true';
+
   // If monitoring is already in progress, return the existing promise
   if (monitoringPromise) {
     console.log('Monitoring already in progress, returning existing operation...');
     return monitoringPromise;
   }
-  
+
   // Create and store the monitoring promise
   monitoringPromise = (async () => {
     isMonitoring = true;
-    
-    try {
-      await testAllEndpoints();
-    } catch (error) {
-      console.error('Error during RPC monitoring:', error);
-    } finally {
-      isMonitoring = false;
-      monitoringPromise = null; // Clear promise when done
-    }
+
+    do {
+      try {
+        await testAllEndpoints();
+      } catch (error) {
+        console.error('Error during RPC monitoring:', error);
+      }
+      if (loop) console.log('RPC monitoring cycle complete. Restarting...');
+    } while (loop);
   })();
-  
+
   return monitoringPromise;
 }
 
