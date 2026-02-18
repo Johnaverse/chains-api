@@ -218,6 +218,12 @@ export async function startMonitoring() {
     } while (loop);
   })();
 
+  // Reset state when monitoring completes (even on error)
+  monitoringPromise.finally(() => {
+    isMonitoring = false;
+    monitoringPromise = null;
+  });
+
   return monitoringPromise;
 }
 
