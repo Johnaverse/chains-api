@@ -17,7 +17,9 @@ import {
   getEndpointsById,
   getAllEndpoints,
   startRpcHealthCheck,
+  validateChainData,
 } from './dataService.js';
+import { getMonitoringResults, getMonitoringStatus } from './rpcMonitor.js';
 
 // Load data on startup
 await loadData();
@@ -119,6 +121,44 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description: 'Optional coin type ID (e.g., 0 for Bitcoin, 60 for Ethereum). If omitted, returns all coin types.',
             },
           },
+        },
+      },
+      {
+        name: 'get_sources',
+        description: 'Get the status of all data sources (theGraph, chainlist, chains, slip44)',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+      },
+      {
+        name: 'validate_chains',
+        description: 'Validate chain data for potential quality issues across 6 validation rules (relation conflicts, slip44 mismatches, name/testnet mismatches, sepolia/hoodie issues, status conflicts, goerli deprecation)',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+      },
+      {
+        name: 'get_rpc_monitor',
+        description: 'Get RPC endpoint health check and monitoring results for all chains',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+      },
+      {
+        name: 'get_rpc_monitor_by_id',
+        description: 'Get RPC endpoint monitoring results for a specific chain by its chain ID',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            chainId: {
+              type: 'number',
+              description: 'The chain ID to get RPC monitoring results for (e.g., 1 for Ethereum mainnet)',
+            },
+          },
+          required: ['chainId'],
         },
       },
     ],
@@ -412,6 +452,135 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             ],
           };
         }
+      }
+
+      case 'get_sources': {
+        const cachedData = getCachedData();
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  lastUpdated: cachedData.lastUpdated,
+                  sources: {
+                    theGraph: cachedData.theGraph ? 'loaded' : 'not loaded',
+                    chainlist: cachedData.chainlist ? 'loaded' : 'not loaded',
+                    chains: cachedData.chains ? 'loaded' : 'not loaded',
+                    slip44: cachedData.slip44 ? 'loaded' : 'not loaded',
+                  },
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+
+      case 'validate_chains': {
+        const validationResults = validateChainData();
+
+        if (validationResults.error) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({ error: validationResults.error }),
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(validationResults, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'get_rpc_monitor': {
+        const results = getMonitoringResults();
+        const status = getMonitoringStatus();
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  ...status,
+                  ...results,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+
+      case 'get_rpc_monitor_by_id': {
+        const chainId = args.chainId;
+
+        if (typeof chainId !== 'number' || Number.isNaN(chainId)) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({ error: 'Invalid chain ID' }),
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        const results = getMonitoringResults();
+        const chainResults = results.results.filter(
+          (r) => r.chainId === chainId
+        );
+
+        if (chainResults.length === 0) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  error: 'No monitoring results found for this chain',
+                }),
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        const workingCount = chainResults.filter(
+          (r) => r.status === 'working'
+        ).length;
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(
+                {
+                  chainId,
+                  chainName: chainResults[0].chainName,
+                  totalEndpoints: chainResults.length,
+                  workingEndpoints: workingCount,
+                  lastUpdated: results.lastUpdated,
+                  endpoints: chainResults,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
       }
 
       default:
