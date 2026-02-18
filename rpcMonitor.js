@@ -1,6 +1,6 @@
 import { getAllEndpoints } from './dataService.js';
 import { MAX_ENDPOINTS_PER_CHAIN } from './config.js';
-import { proxyFetch } from './fetchUtil.js';
+import { jsonRpcCall } from './rpcUtil.js';
 
 // Store monitoring results in memory
 let monitoringResults = {
@@ -54,47 +54,6 @@ function isValidUrl(url) {
 }
 
 /**
- * Make JSON-RPC call to endpoint
- */
-async function makeRpcCall(url, method, params = []) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-  
-  try {
-    const response = await proxyFetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        method: method,
-        params: params,
-        id: 1
-      }),
-      signal: controller.signal
-    });
-    
-    clearTimeout(timeoutId);
-    
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    
-    const data = await response.json();
-    
-    if (data.error) {
-      throw new Error(`RPC error: ${data.error.message || JSON.stringify(data.error)}`);
-    }
-    
-    return data.result;
-  } catch (error) {
-    clearTimeout(timeoutId);
-    throw error;
-  }
-}
-
-/**
  * Test a single RPC endpoint
  */
 async function testRpcEndpoint(url) {
@@ -110,7 +69,7 @@ async function testRpcEndpoint(url) {
   try {
     // Get client version
     try {
-      const clientVersion = await makeRpcCall(url, 'web3_clientVersion');
+      const clientVersion = await jsonRpcCall(url, 'web3_clientVersion');
       result.clientVersion = clientVersion;
     } catch (error) {
       // Some RPC endpoints might not support web3_clientVersion, continue anyway
@@ -118,7 +77,7 @@ async function testRpcEndpoint(url) {
     }
     
     // Get latest block number
-    const blockNumberHex = await makeRpcCall(url, 'eth_blockNumber');
+    const blockNumberHex = await jsonRpcCall(url, 'eth_blockNumber');
     
     // Convert hex to decimal with validation
     if (!blockNumberHex || typeof blockNumberHex !== 'string') {

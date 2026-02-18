@@ -22,183 +22,29 @@ vi.mock('../../dataService.js', () => ({
   getEndpointsById: vi.fn(() => null),
   getAllEndpoints: vi.fn(() => []),
   startRpcHealthCheck: vi.fn(),
+  validateChainData: vi.fn(() => ({ totalErrors: 0, errorsByRule: {}, summary: {}, allErrors: [] })),
 }));
 
-// Import mocked functions
+// Mock rpcMonitor before importing
+vi.mock('../../rpcMonitor.js', () => ({
+  getMonitoringResults: vi.fn(() => ({
+    lastUpdated: null,
+    totalEndpoints: 0,
+    testedEndpoints: 0,
+    workingEndpoints: 0,
+    results: [],
+  })),
+  getMonitoringStatus: vi.fn(() => ({
+    isMonitoring: false,
+    lastUpdated: null,
+  })),
+}));
+
+// Import mocked functions and the real shared handler
 import * as dataService from '../../dataService.js';
-
-// Recreate the handler logic from mcp-server.js
-const createCallToolHandler = () => async (request) => {
-  const { name, arguments: args } = request.params;
-
-  try {
-    switch (name) {
-      case 'get_chains': {
-        let chains = dataService.getAllChains();
-        if (args.tag) {
-          chains = chains.filter((chain) => chain.tags && chain.tags.includes(args.tag));
-        }
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({ count: chains.length, chains }, null, 2),
-          }],
-        };
-      }
-
-      case 'get_chain_by_id': {
-        const chainId = args.chainId;
-        if (typeof chainId !== 'number' || Number.isNaN(chainId)) {
-          return {
-            content: [{ type: 'text', text: JSON.stringify({ error: 'Invalid chain ID' }) }],
-            isError: true,
-          };
-        }
-        const chain = dataService.getChainById(chainId);
-        if (!chain) {
-          return {
-            content: [{ type: 'text', text: JSON.stringify({ error: 'Chain not found' }) }],
-            isError: true,
-          };
-        }
-        return {
-          content: [{ type: 'text', text: JSON.stringify(chain, null, 2) }],
-        };
-      }
-
-      case 'search_chains': {
-        const query = args.query;
-        if (!query) {
-          return {
-            content: [{ type: 'text', text: JSON.stringify({ error: 'Query is required' }) }],
-            isError: true,
-          };
-        }
-        const results = dataService.searchChains(query);
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({ query, count: results.length, results }, null, 2),
-          }],
-        };
-      }
-
-      case 'get_endpoints': {
-        if (args.chainId !== undefined) {
-          const chainId = args.chainId;
-          if (typeof chainId !== 'number' || Number.isNaN(chainId)) {
-            return {
-              content: [{ type: 'text', text: JSON.stringify({ error: 'Invalid chain ID' }) }],
-              isError: true,
-            };
-          }
-          const result = dataService.getEndpointsById(chainId);
-          if (!result) {
-            return {
-              content: [{ type: 'text', text: JSON.stringify({ error: 'Chain not found' }) }],
-              isError: true,
-            };
-          }
-          return {
-            content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-          };
-        } else {
-          const endpoints = dataService.getAllEndpoints();
-          return {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({ count: endpoints.length, endpoints }, null, 2),
-            }],
-          };
-        }
-      }
-
-      case 'get_relations': {
-        if (args.chainId !== undefined) {
-          const chainId = args.chainId;
-          if (typeof chainId !== 'number' || Number.isNaN(chainId)) {
-            return {
-              content: [{ type: 'text', text: JSON.stringify({ error: 'Invalid chain ID' }) }],
-              isError: true,
-            };
-          }
-          const result = dataService.getRelationsById(chainId);
-          if (!result) {
-            return {
-              content: [{ type: 'text', text: JSON.stringify({ error: 'Chain not found' }) }],
-              isError: true,
-            };
-          }
-          return {
-            content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-          };
-        } else {
-          const relations = dataService.getAllRelations();
-          return {
-            content: [{ type: 'text', text: JSON.stringify(relations, null, 2) }],
-          };
-        }
-      }
-
-      case 'get_slip44': {
-        const cachedData = dataService.getCachedData();
-        if (!cachedData.slip44) {
-          return {
-            content: [{ type: 'text', text: JSON.stringify({ error: 'SLIP-0044 data not loaded' }) }],
-            isError: true,
-          };
-        }
-        if (args.coinType !== undefined) {
-          const coinType = args.coinType;
-          if (typeof coinType !== 'number' || Number.isNaN(coinType)) {
-            return {
-              content: [{ type: 'text', text: JSON.stringify({ error: 'Invalid coin type' }) }],
-              isError: true,
-            };
-          }
-          const coinTypeData = cachedData.slip44[coinType];
-          if (!coinTypeData) {
-            return {
-              content: [{ type: 'text', text: JSON.stringify({ error: 'Coin type not found' }) }],
-              isError: true,
-            };
-          }
-          return {
-            content: [{ type: 'text', text: JSON.stringify(coinTypeData, null, 2) }],
-          };
-        } else {
-          return {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                count: Object.keys(cachedData.slip44).length,
-                coinTypes: cachedData.slip44,
-              }, null, 2),
-            }],
-          };
-        }
-      }
-
-      default:
-        return {
-          content: [{ type: 'text', text: JSON.stringify({ error: `Unknown tool: ${name}` }) }],
-          isError: true,
-        };
-    }
-  } catch (error) {
-    return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({ error: 'Internal error', message: error.message }),
-      }],
-      isError: true,
-    };
-  }
-};
+import { handleToolCall } from '../../mcp-tools.js';
 
 describe('MCP Server Tool Handlers', () => {
-  let callToolHandler;
-
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(dataService.getCachedData).mockReturnValue({
@@ -219,8 +65,6 @@ describe('MCP Server Tool Handlers', () => {
     vi.mocked(dataService.getRelationsById).mockReturnValue(null);
     vi.mocked(dataService.getEndpointsById).mockReturnValue(null);
     vi.mocked(dataService.getAllEndpoints).mockReturnValue([]);
-
-    callToolHandler = createCallToolHandler();
   });
 
   describe('get_chains', () => {
@@ -230,7 +74,7 @@ describe('MCP Server Tool Handlers', () => {
         { chainId: 137, name: 'Polygon', tags: ['L2'] },
       ]);
 
-      const result = await callToolHandler({ params: { name: 'get_chains', arguments: {} } });
+      const result = await handleToolCall('get_chains', {});
       const data = JSON.parse(result.content[0].text);
       expect(data.count).toBe(2);
       expect(data.chains.length).toBe(2);
@@ -243,7 +87,7 @@ describe('MCP Server Tool Handlers', () => {
         { chainId: 10, name: 'Optimism', tags: ['L2'] },
       ]);
 
-      const result = await callToolHandler({ params: { name: 'get_chains', arguments: { tag: 'L2' } } });
+      const result = await handleToolCall('get_chains', { tag: 'L2' });
       const data = JSON.parse(result.content[0].text);
       expect(data.count).toBe(2);
       expect(data.chains.every((c) => c.tags.includes('L2'))).toBe(true);
@@ -254,7 +98,7 @@ describe('MCP Server Tool Handlers', () => {
         { chainId: 1, name: 'Ethereum', tags: [] },
       ]);
 
-      const result = await callToolHandler({ params: { name: 'get_chains', arguments: { tag: 'Beacon' } } });
+      const result = await handleToolCall('get_chains', { tag: 'Beacon' });
       const data = JSON.parse(result.content[0].text);
       expect(data.count).toBe(0);
       expect(data.chains).toEqual([]);
@@ -269,7 +113,7 @@ describe('MCP Server Tool Handlers', () => {
         nativeCurrency: { symbol: 'ETH' },
       });
 
-      const result = await callToolHandler({ params: { name: 'get_chain_by_id', arguments: { chainId: 1 } } });
+      const result = await handleToolCall('get_chain_by_id', { chainId: 1 });
       expect(result.isError).toBeUndefined();
       const data = JSON.parse(result.content[0].text);
       expect(data.chainId).toBe(1);
@@ -277,14 +121,14 @@ describe('MCP Server Tool Handlers', () => {
     });
 
     it('should return error for invalid chain ID type', async () => {
-      const result = await callToolHandler({ params: { name: 'get_chain_by_id', arguments: { chainId: 'invalid' } } });
+      const result = await handleToolCall('get_chain_by_id', { chainId: 'invalid' });
       expect(result.isError).toBe(true);
       const data = JSON.parse(result.content[0].text);
       expect(data.error).toBe('Invalid chain ID');
     });
 
     it('should return error for NaN chain ID', async () => {
-      const result = await callToolHandler({ params: { name: 'get_chain_by_id', arguments: { chainId: NaN } } });
+      const result = await handleToolCall('get_chain_by_id', { chainId: NaN });
       expect(result.isError).toBe(true);
       const data = JSON.parse(result.content[0].text);
       expect(data.error).toBe('Invalid chain ID');
@@ -292,7 +136,7 @@ describe('MCP Server Tool Handlers', () => {
 
     it('should return error for non-existent chain', async () => {
       vi.mocked(dataService.getChainById).mockReturnValue(null);
-      const result = await callToolHandler({ params: { name: 'get_chain_by_id', arguments: { chainId: 999999 } } });
+      const result = await handleToolCall('get_chain_by_id', { chainId: 999999 });
       expect(result.isError).toBe(true);
       const data = JSON.parse(result.content[0].text);
       expect(data.error).toBe('Chain not found');
@@ -306,7 +150,7 @@ describe('MCP Server Tool Handlers', () => {
         { chainId: 5, name: 'Ethereum Goerli' },
       ]);
 
-      const result = await callToolHandler({ params: { name: 'search_chains', arguments: { query: 'ethereum' } } });
+      const result = await handleToolCall('search_chains', { query: 'ethereum' });
       expect(result.isError).toBeUndefined();
       const data = JSON.parse(result.content[0].text);
       expect(data.query).toBe('ethereum');
@@ -315,7 +159,7 @@ describe('MCP Server Tool Handlers', () => {
     });
 
     it('should return error when query is missing', async () => {
-      const result = await callToolHandler({ params: { name: 'search_chains', arguments: {} } });
+      const result = await handleToolCall('search_chains', {});
       expect(result.isError).toBe(true);
       const data = JSON.parse(result.content[0].text);
       expect(data.error).toBe('Query is required');
@@ -329,7 +173,7 @@ describe('MCP Server Tool Handlers', () => {
         { chainId: 137, rpc: ['https://polygon.rpc'] },
       ]);
 
-      const result = await callToolHandler({ params: { name: 'get_endpoints', arguments: {} } });
+      const result = await handleToolCall('get_endpoints', {});
       expect(result.isError).toBeUndefined();
       const data = JSON.parse(result.content[0].text);
       expect(data.count).toBe(2);
@@ -342,7 +186,7 @@ describe('MCP Server Tool Handlers', () => {
         rpc: ['https://eth.rpc'],
       });
 
-      const result = await callToolHandler({ params: { name: 'get_endpoints', arguments: { chainId: 1 } } });
+      const result = await handleToolCall('get_endpoints', { chainId: 1 });
       expect(result.isError).toBeUndefined();
       const data = JSON.parse(result.content[0].text);
       expect(data.chainId).toBe(1);
@@ -350,7 +194,7 @@ describe('MCP Server Tool Handlers', () => {
     });
 
     it('should return error for invalid chain ID', async () => {
-      const result = await callToolHandler({ params: { name: 'get_endpoints', arguments: { chainId: 'invalid' } } });
+      const result = await handleToolCall('get_endpoints', { chainId: 'invalid' });
       expect(result.isError).toBe(true);
       const data = JSON.parse(result.content[0].text);
       expect(data.error).toBe('Invalid chain ID');
@@ -358,7 +202,7 @@ describe('MCP Server Tool Handlers', () => {
 
     it('should return error when chain not found', async () => {
       vi.mocked(dataService.getEndpointsById).mockReturnValue(null);
-      const result = await callToolHandler({ params: { name: 'get_endpoints', arguments: { chainId: 999999 } } });
+      const result = await handleToolCall('get_endpoints', { chainId: 999999 });
       expect(result.isError).toBe(true);
       const data = JSON.parse(result.content[0].text);
       expect(data.error).toBe('Chain not found');
@@ -372,7 +216,7 @@ describe('MCP Server Tool Handlers', () => {
         { chainId: 5, relations: [{ type: 'testnet', chainId: 1 }] },
       ]);
 
-      const result = await callToolHandler({ params: { name: 'get_relations', arguments: {} } });
+      const result = await handleToolCall('get_relations', {});
       expect(result.isError).toBeUndefined();
       const data = JSON.parse(result.content[0].text);
       expect(Array.isArray(data)).toBe(true);
@@ -380,7 +224,7 @@ describe('MCP Server Tool Handlers', () => {
     });
 
     it('should return error for invalid chain ID', async () => {
-      const result = await callToolHandler({ params: { name: 'get_relations', arguments: { chainId: 'invalid' } } });
+      const result = await handleToolCall('get_relations', { chainId: 'invalid' });
       expect(result.isError).toBe(true);
       const data = JSON.parse(result.content[0].text);
       expect(data.error).toBe('Invalid chain ID');
@@ -389,7 +233,7 @@ describe('MCP Server Tool Handlers', () => {
 
   describe('get_slip44', () => {
     it('should return all coin types', async () => {
-      const result = await callToolHandler({ params: { name: 'get_slip44', arguments: {} } });
+      const result = await handleToolCall('get_slip44', {});
       expect(result.isError).toBeUndefined();
       const data = JSON.parse(result.content[0].text);
       expect(data.count).toBe(2);
@@ -397,7 +241,7 @@ describe('MCP Server Tool Handlers', () => {
     });
 
     it('should return specific coin type', async () => {
-      const result = await callToolHandler({ params: { name: 'get_slip44', arguments: { coinType: 60 } } });
+      const result = await handleToolCall('get_slip44', { coinType: 60 });
       expect(result.isError).toBeUndefined();
       const data = JSON.parse(result.content[0].text);
       expect(data.symbol).toBe('ETH');
@@ -405,7 +249,7 @@ describe('MCP Server Tool Handlers', () => {
     });
 
     it('should return error for invalid coin type', async () => {
-      const result = await callToolHandler({ params: { name: 'get_slip44', arguments: { coinType: 'invalid' } } });
+      const result = await handleToolCall('get_slip44', { coinType: 'invalid' });
       expect(result.isError).toBe(true);
       const data = JSON.parse(result.content[0].text);
       expect(data.error).toBe('Invalid coin type');
@@ -413,7 +257,7 @@ describe('MCP Server Tool Handlers', () => {
 
     it('should return error when slip44 data not loaded', async () => {
       vi.mocked(dataService.getCachedData).mockReturnValue({ slip44: null });
-      const result = await callToolHandler({ params: { name: 'get_slip44', arguments: {} } });
+      const result = await handleToolCall('get_slip44', {});
       expect(result.isError).toBe(true);
       const data = JSON.parse(result.content[0].text);
       expect(data.error).toBe('SLIP-0044 data not loaded');
@@ -422,7 +266,7 @@ describe('MCP Server Tool Handlers', () => {
 
   describe('error handling', () => {
     it('should return error for unknown tool', async () => {
-      const result = await callToolHandler({ params: { name: 'unknown_tool', arguments: {} } });
+      const result = await handleToolCall('unknown_tool', {});
       expect(result.isError).toBe(true);
       const data = JSON.parse(result.content[0].text);
       expect(data.error).toBe('Unknown tool: unknown_tool');
@@ -433,7 +277,7 @@ describe('MCP Server Tool Handlers', () => {
         throw new Error('Database error');
       });
 
-      const result = await callToolHandler({ params: { name: 'get_chains', arguments: {} } });
+      const result = await handleToolCall('get_chains', {});
       expect(result.isError).toBe(true);
       const data = JSON.parse(result.content[0].text);
       expect(data.error).toBe('Internal error');

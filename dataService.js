@@ -4,6 +4,7 @@ import {
   RPC_CHECK_TIMEOUT_MS, RPC_CHECK_CONCURRENCY
 } from './config.js';
 import { proxyFetch } from './fetchUtil.js';
+import { jsonRpcCall } from './rpcUtil.js';
 
 // Data source URLs (from config, overridable via env)
 const DATA_SOURCES = {
@@ -210,10 +211,13 @@ function processL2ParentRelation(chain, indexed) {
 }
 
 /**
- * Merge RPC URLs from chainData into existing chain
+ * Merge RPC URLs from a source array into an existing chain's rpc array,
+ * deduplicating by URL string.
+ * @param {Object} existingChain - The chain object to merge into
+ * @param {Array} newRpcUrls - Array of RPC entries (string or {url: string})
  */
-function mergeRpcUrls(existingChain, chainData) {
-  if (!chainData.rpc || !Array.isArray(chainData.rpc)) {
+function mergeRpcUrlsFromArray(existingChain, newRpcUrls) {
+  if (!newRpcUrls || !Array.isArray(newRpcUrls)) {
     return;
   }
 
@@ -227,7 +231,7 @@ function mergeRpcUrls(existingChain, chainData) {
     if (url) existingRpcUrls.add(url);
   });
 
-  chainData.rpc.forEach(rpc => {
+  newRpcUrls.forEach(rpc => {
     const url = typeof rpc === 'string' ? rpc : rpc.url;
     if (url && !existingRpcUrls.has(url)) {
       existingChain.rpc.push(rpc);
@@ -253,7 +257,7 @@ function mergeChainlistEntry(chainData, indexed) {
       status: chainData.status || 'active'
     };
   } else {
-    mergeRpcUrls(indexed.byChainId[chainId], chainData);
+    mergeRpcUrlsFromArray(indexed.byChainId[chainId], chainData.rpc);
 
     if (!indexed.byChainId[chainId].sources.includes('chainlist')) {
       indexed.byChainId[chainId].sources.push('chainlist');
@@ -299,32 +303,6 @@ function createTheGraphChainEntry(chainId, network) {
   };
 }
 
-/**
- * Merge The Graph RPC URLs into existing chain
- */
-function mergeTheGraphRpcUrls(existingChain, network) {
-  if (!network.rpcUrls || !Array.isArray(network.rpcUrls)) {
-    return;
-  }
-
-  if (!existingChain.rpc) {
-    existingChain.rpc = [];
-  }
-
-  const existingRpcUrls = new Set();
-  existingChain.rpc.forEach(rpc => {
-    const url = typeof rpc === 'string' ? rpc : rpc.url;
-    if (url) existingRpcUrls.add(url);
-  });
-
-  network.rpcUrls.forEach(rpc => {
-    const url = typeof rpc === 'string' ? rpc : rpc.url;
-    if (url && !existingRpcUrls.has(url)) {
-      existingChain.rpc.push(rpc);
-      existingRpcUrls.add(url);
-    }
-  });
-}
 
 /**
  * Process a single The Graph relation
@@ -362,7 +340,7 @@ function createOrMergeTheGraphChain(chainId, network, indexed) {
     if (!indexed.byChainId[chainId].sources.includes('theGraph')) {
       indexed.byChainId[chainId].sources.push('theGraph');
     }
-    mergeTheGraphRpcUrls(indexed.byChainId[chainId], network);
+    mergeRpcUrlsFromArray(indexed.byChainId[chainId], network.rpcUrls);
 
     // Ensure arrays exist
     if (!indexed.byChainId[chainId].tags) indexed.byChainId[chainId].tags = [];
@@ -1002,47 +980,6 @@ function parseBlockHeight(value) {
 }
 
 /**
- * Perform a JSON-RPC call with a timeout
- */
-async function performJsonRpc(url, method) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), RPC_CHECK_TIMEOUT_MS);
-  
-  try {
-    const response = await proxyFetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method,
-        params: []
-      }),
-      signal: controller.signal
-    });
-    
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-    
-    const body = await response.json();
-    if (body.error) {
-      const message = body.error.message || 'RPC error';
-      throw new Error(message);
-    }
-    
-    return body.result;
-  } catch (error) {
-    if (error.name === 'AbortError') {
-      throw new Error('RPC request timed out');
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
-
-/**
  * Check a single RPC endpoint for client version and latest block height
  */
 async function checkRpcEndpoint(url) {
@@ -1066,8 +1003,8 @@ async function checkRpcEndpoint(url) {
   
   try {
     const [clientVersion, blockNumber] = await Promise.all([
-      performJsonRpc(url, 'web3_clientVersion'),
-      performJsonRpc(url, 'eth_blockNumber')
+      jsonRpcCall(url, 'web3_clientVersion', { timeoutMs: RPC_CHECK_TIMEOUT_MS }),
+      jsonRpcCall(url, 'eth_blockNumber', { timeoutMs: RPC_CHECK_TIMEOUT_MS })
     ]);
     
     result.clientVersion = clientVersion || null;

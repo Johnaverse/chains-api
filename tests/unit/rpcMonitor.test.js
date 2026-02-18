@@ -7,13 +7,12 @@ vi.mock('../../config.js', () => ({
   PROXY_ENABLED: false
 }));
 
-// Mock fetchUtil to use standard fetch
-vi.mock('../../fetchUtil.js', () => ({
-  proxyFetch: vi.fn((...args) => fetch(...args)),
-  getProxyStatus: vi.fn(() => ({ enabled: false, url: null }))
+// Mock rpcUtil (replaces direct fetchUtil usage)
+vi.mock('../../rpcUtil.js', () => ({
+  jsonRpcCall: vi.fn(),
 }));
 
-import { getMonitoringResults, getMonitoringStatus, startRpcHealthCheck } from '../../rpcMonitor.js';
+import { jsonRpcCall } from '../../rpcUtil.js';
 
 // Mock dataService
 vi.mock('../../dataService.js', () => ({
@@ -37,16 +36,26 @@ vi.mock('../../dataService.js', () => ({
   ])
 }));
 
-// Mock global fetch
-global.fetch = vi.fn();
+import { getMonitoringResults, getMonitoringStatus, startRpcHealthCheck, startMonitoring } from '../../rpcMonitor.js';
+import { getAllEndpoints } from '../../dataService.js';
 
 describe('RPC Monitor', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    // Set a default resolving mock so any lingering background monitoring completes quickly
+    vi.mocked(jsonRpcCall).mockResolvedValue('0x1');
+    // Wait for any pending monitoring from previous tests to settle
+    await new Promise(resolve => setTimeout(resolve, 50));
     vi.clearAllMocks();
+    // Re-set default mock after clearing (for tests that don't set their own)
+    vi.mocked(jsonRpcCall).mockResolvedValue('0x1');
   });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
+  afterEach(async () => {
+    // Ensure any background monitoring completes before next test
+    // Use resolving mock so background work finishes fast (do NOT restoreAllMocks
+    // as that would restore real implementations that make network calls)
+    vi.mocked(jsonRpcCall).mockResolvedValue('0x1');
+    await new Promise(resolve => setTimeout(resolve, 100));
   });
 
   describe('getMonitoringResults', () => {
@@ -74,139 +83,269 @@ describe('RPC Monitor', () => {
     });
   });
 
+  describe('startMonitoring', () => {
+    it('should test endpoints and update results', async () => {
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      vi.mocked(jsonRpcCall).mockResolvedValue('0x123456');
+
+      await startMonitoring();
+
+      const results = getMonitoringResults();
+      expect(results.lastUpdated).not.toBeNull();
+      expect(results.totalEndpoints).toBeGreaterThan(0);
+
+      consoleSpy.mockRestore();
+    });
+
+    it('should handle failed endpoints', async () => {
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      vi.mocked(jsonRpcCall).mockRejectedValue(new Error('Connection refused'));
+
+      await startMonitoring();
+
+      const results = getMonitoringResults();
+      expect(results).toHaveProperty('results');
+
+      consoleSpy.mockRestore();
+      consoleErrorSpy.mockRestore();
+    });
+
+    it('should log message when monitoring is already running', async () => {
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      // Use minimal endpoints so monitoring resolves quickly once unblocked
+      vi.mocked(getAllEndpoints).mockReturnValue([
+        { chainId: 1, name: 'Test', rpc: ['https://test.rpc.com'] }
+      ]);
+
+      // First call hangs (creates the overlap window), all subsequent calls resolve immediately
+      let firstResolve;
+      vi.mocked(jsonRpcCall)
+        .mockImplementationOnce(() => new Promise((resolve) => { firstResolve = resolve; }))
+        .mockResolvedValue('0x1');
+
+      // Start first monitoring (will hang on first jsonRpcCall)
+      const promise1 = startMonitoring();
+
+      // Second call should detect monitoring in progress
+      const promise2 = startMonitoring();
+
+      expect(promise1).toBeInstanceOf(Promise);
+      expect(promise2).toBeInstanceOf(Promise);
+
+      // The log message should indicate monitoring is already in progress
+      expect(consoleSpy).toHaveBeenCalledWith(
+        'Monitoring already in progress, returning existing operation...'
+      );
+
+      // Resolve the first call so monitoring can complete (remaining calls use mockResolvedValue)
+      firstResolve('geth/v1.0');
+      await promise1;
+
+      consoleSpy.mockRestore();
+    });
+  });
+
+  describe('URL validation (indirect)', () => {
+    it('should skip invalid URLs with templates', async () => {
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      vi.mocked(getAllEndpoints).mockReturnValue([
+        {
+          chainId: 1,
+          name: 'Test Chain',
+          rpc: [
+            'https://valid.rpc.com',
+            'https://eth-mainnet.g.alchemy.com/v2/${API_KEY}',
+            'wss://ws.rpc.com',
+          ]
+        }
+      ]);
+
+      vi.mocked(jsonRpcCall).mockResolvedValue('0x1');
+
+      await startMonitoring();
+
+      // jsonRpcCall should only be called for the valid HTTP URL
+      expect(vi.mocked(jsonRpcCall).mock.calls.length).toBeGreaterThan(0);
+      // All calls should be for valid URLs only
+      for (const call of vi.mocked(jsonRpcCall).mock.calls) {
+        expect(call[0]).not.toContain('${');
+        expect(call[0]).not.toMatch(/^wss?:\/\//);
+      }
+
+      consoleSpy.mockRestore();
+    });
+
+    it('should handle object RPC entries with url property', async () => {
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      vi.mocked(getAllEndpoints).mockReturnValue([
+        {
+          chainId: 1,
+          name: 'Test Chain',
+          rpc: [
+            { url: 'https://rpc.example.com' },
+          ]
+        }
+      ]);
+
+      vi.mocked(jsonRpcCall).mockResolvedValue('0x1');
+      await startMonitoring();
+
+      expect(vi.mocked(jsonRpcCall)).toHaveBeenCalled();
+
+      consoleSpy.mockRestore();
+    });
+
+    it('should skip chains with no RPC endpoints', async () => {
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      vi.mocked(getAllEndpoints).mockReturnValue([
+        { chainId: 1, name: 'Empty Chain', rpc: [] },
+      ]);
+
+      vi.mocked(jsonRpcCall).mockResolvedValue('0x1');
+      await startMonitoring();
+
+      // No calls should be made for chains without RPCs
+      expect(vi.mocked(jsonRpcCall)).not.toHaveBeenCalled();
+
+      consoleSpy.mockRestore();
+    });
+  });
+
+  describe('RPC call handling', () => {
+    it('should mark endpoints as working when eth_blockNumber succeeds', async () => {
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      vi.mocked(getAllEndpoints).mockReturnValue([
+        { chainId: 1, name: 'Ethereum', rpc: ['https://eth.rpc.com'] }
+      ]);
+
+      vi.mocked(jsonRpcCall)
+        .mockResolvedValueOnce('geth/v1.13.0')
+        .mockResolvedValueOnce('0x12345');
+
+      await startMonitoring();
+
+      const results = getMonitoringResults();
+      const workingResults = results.results.filter(r => r.status === 'working');
+      expect(workingResults.length).toBeGreaterThanOrEqual(1);
+
+      consoleSpy.mockRestore();
+    });
+
+    it('should handle endpoints where web3_clientVersion fails but eth_blockNumber succeeds', async () => {
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      vi.mocked(getAllEndpoints).mockReturnValue([
+        { chainId: 1, name: 'Ethereum', rpc: ['https://eth.rpc.com'] }
+      ]);
+
+      vi.mocked(jsonRpcCall)
+        .mockRejectedValueOnce(new Error('Method not supported'))
+        .mockResolvedValueOnce('0x12345');
+
+      await startMonitoring();
+
+      const results = getMonitoringResults();
+      const ethResults = results.results.filter(r => r.chainId === 1);
+      if (ethResults.length > 0) {
+        expect(ethResults[0].clientVersion).toBe('unavailable');
+      }
+
+      consoleSpy.mockRestore();
+    });
+
+    it('should handle invalid block number response', async () => {
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      vi.mocked(getAllEndpoints).mockReturnValue([
+        { chainId: 1, name: 'Ethereum', rpc: ['https://eth.rpc.com'] }
+      ]);
+
+      vi.mocked(jsonRpcCall)
+        .mockResolvedValueOnce('geth/v1.0')
+        .mockResolvedValueOnce(null);
+
+      await startMonitoring();
+
+      // Should not crash, endpoint should be marked as failed
+      const results = getMonitoringResults();
+      expect(results).toBeDefined();
+
+      consoleSpy.mockRestore();
+    });
+  });
+
+  describe('Chain endpoint limiting', () => {
+    it('should stop testing after first failed endpoint for a chain', async () => {
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      vi.mocked(getAllEndpoints).mockReturnValue([
+        {
+          chainId: 1,
+          name: 'Test Chain',
+          rpc: [
+            'https://rpc1.example.com',
+            'https://rpc2.example.com',
+            'https://rpc3.example.com',
+          ]
+        }
+      ]);
+
+      vi.mocked(jsonRpcCall)
+        .mockResolvedValueOnce('geth/v1.0')
+        .mockRejectedValueOnce(new Error('Block number failed'));
+
+      await startMonitoring();
+
+      // After first endpoint fails, should not test rpc2 and rpc3
+      expect(vi.mocked(jsonRpcCall).mock.calls.length).toBe(2);
+
+      consoleSpy.mockRestore();
+    });
+
+    it('should respect MAX_ENDPOINTS_PER_CHAIN limit', async () => {
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      const manyRpcs = Array.from({ length: 10 }, (_, i) => `https://rpc${i}.example.com`);
+      vi.mocked(getAllEndpoints).mockReturnValue([
+        { chainId: 1, name: 'Test Chain', rpc: manyRpcs }
+      ]);
+
+      vi.mocked(jsonRpcCall).mockResolvedValue('0x1');
+
+      await startMonitoring();
+
+      // MAX_ENDPOINTS_PER_CHAIN is 5, so max 5 * 2 calls
+      expect(vi.mocked(jsonRpcCall).mock.calls.length).toBeLessThanOrEqual(10);
+
+      consoleSpy.mockRestore();
+    });
+  });
+
   describe('startRpcHealthCheck', () => {
     it('should start health check without throwing', () => {
+      vi.mocked(jsonRpcCall).mockResolvedValue('0x1');
+
       expect(() => {
         startRpcHealthCheck();
       }).not.toThrow();
     });
 
-    it('should handle errors gracefully', () => {
+    it('should handle errors gracefully', async () => {
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-
-      // This should not throw even if there are errors
-      startRpcHealthCheck();
-
-      // Wait a bit for async operations
-      return new Promise(resolve => setTimeout(resolve, 100)).then(() => {
-        consoleSpy.mockRestore();
-      });
-    });
-  });
-
-  describe('URL validation', () => {
-    // These are internal functions, but we can test them indirectly
-    it('should handle valid HTTP URLs', async () => {
-      global.fetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({ jsonrpc: '2.0', result: '0x1', id: 1 })
-      });
-
-      // Test indirectly through the monitoring
-      startRpcHealthCheck();
-
-      // Allow some time for async operations
-      await new Promise(resolve => setTimeout(resolve, 100));
-    });
-
-    it('should skip invalid URLs with templates', () => {
-      // The system should skip URLs with ${API_KEY} or similar templates
-      // This is tested indirectly through the monitoring logic
-      expect(true).toBe(true); // Placeholder for now
-    });
-
-    it('should skip WebSocket URLs', () => {
-      // The system should skip ws:// and wss:// URLs
-      expect(true).toBe(true); // Placeholder for now
-    });
-  });
-
-  describe('RPC call handling', () => {
-    it('should handle successful RPC responses', async () => {
-      global.fetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          jsonrpc: '2.0',
-          result: '0x123456',
-          id: 1
-        })
-      });
-
-      // Test through the monitoring system
-      startRpcHealthCheck();
-      await new Promise(resolve => setTimeout(resolve, 100));
-    });
-
-    it('should handle RPC errors', async () => {
-      global.fetch.mockResolvedValueOnce({
-        ok: true,
-        json: async () => ({
-          jsonrpc: '2.0',
-          error: { code: -32600, message: 'Invalid request' },
-          id: 1
-        })
-      });
-
-      startRpcHealthCheck();
-      await new Promise(resolve => setTimeout(resolve, 100));
-    });
-
-    it('should handle HTTP errors', async () => {
-      global.fetch.mockResolvedValueOnce({
-        ok: false,
-        status: 500
-      });
-
-      startRpcHealthCheck();
-      await new Promise(resolve => setTimeout(resolve, 100));
-    });
-
-    it('should handle network timeouts', async () => {
-      global.fetch.mockRejectedValueOnce(new Error('Network timeout'));
-
-      startRpcHealthCheck();
-      await new Promise(resolve => setTimeout(resolve, 100));
-    });
-  });
-
-  describe('Real-time updates', () => {
-    it('should update results incrementally', async () => {
-      const initialResults = getMonitoringResults();
-      const initialCount = initialResults.testedEndpoints;
-
-      // Mock successful responses
-      global.fetch.mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          jsonrpc: '2.0',
-          result: '0x123',
-          id: 1
-        })
-      });
+      vi.mocked(jsonRpcCall).mockRejectedValue(new Error('Network error'));
 
       startRpcHealthCheck();
 
-      // Wait for some tests to complete
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      const updatedResults = getMonitoringResults();
-
-      // Results should be updated (or at least structure should be correct)
-      expect(updatedResults).toHaveProperty('testedEndpoints');
-      expect(updatedResults).toHaveProperty('workingEndpoints');
-    });
-  });
-
-  describe('Chain endpoint limiting', () => {
-    it('should limit endpoints per chain to MAX_ENDPOINTS_PER_CHAIN', () => {
-      // The system should test max 5 endpoints per chain
-      // This is tested indirectly through the monitoring behavior
-      expect(true).toBe(true);
-    });
-
-    it('should stop testing after first failed endpoint for a chain', () => {
-      // The system should not test additional endpoints after finding a failed one
-      expect(true).toBe(true);
+      await new Promise(resolve => setTimeout(resolve, 200));
+      consoleSpy.mockRestore();
     });
   });
 });
