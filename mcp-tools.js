@@ -139,6 +139,180 @@ export function getToolDefinitions() {
   ];
 }
 
+// --- Response helpers ---
+
+function textResponse(data) {
+  return {
+    content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
+  };
+}
+
+function errorResponse(error, message) {
+  const payload = message ? { error, message } : { error };
+  return {
+    content: [{ type: 'text', text: JSON.stringify(payload) }],
+    isError: true,
+  };
+}
+
+function isValidChainId(chainId) {
+  return typeof chainId === 'number' && !Number.isNaN(chainId);
+}
+
+// --- Individual tool handlers ---
+
+function handleGetChains(args) {
+  let chains = getAllChains();
+  if (args.tag) {
+    chains = chains.filter((chain) => chain.tags?.includes(args.tag));
+  }
+  return textResponse({ count: chains.length, chains });
+}
+
+function handleGetChainById(args) {
+  const { chainId } = args;
+  if (!isValidChainId(chainId)) {
+    return errorResponse('Invalid chain ID');
+  }
+  const chain = getChainById(chainId);
+  if (!chain) {
+    return errorResponse('Chain not found');
+  }
+  return textResponse(chain);
+}
+
+function handleSearchChains(args) {
+  const { query } = args;
+  if (!query) {
+    return errorResponse('Query is required');
+  }
+  const results = searchChains(query);
+  return textResponse({ query, count: results.length, results });
+}
+
+function handleGetEndpoints(args) {
+  if (args.chainId === undefined) {
+    const endpoints = getAllEndpoints();
+    return textResponse({ count: endpoints.length, endpoints });
+  }
+
+  const { chainId } = args;
+  if (!isValidChainId(chainId)) {
+    return errorResponse('Invalid chain ID');
+  }
+  const result = getEndpointsById(chainId);
+  if (!result) {
+    return errorResponse('Chain not found');
+  }
+  return textResponse(result);
+}
+
+function handleGetRelations(args) {
+  if (args.chainId === undefined) {
+    return textResponse(getAllRelations());
+  }
+
+  const { chainId } = args;
+  if (!isValidChainId(chainId)) {
+    return errorResponse('Invalid chain ID');
+  }
+  const result = getRelationsById(chainId);
+  if (!result) {
+    return errorResponse('Chain not found');
+  }
+  return textResponse(result);
+}
+
+function handleGetSlip44(args) {
+  const cachedData = getCachedData();
+  if (!cachedData.slip44) {
+    return errorResponse('SLIP-0044 data not loaded');
+  }
+
+  if (args.coinType === undefined) {
+    return textResponse({
+      count: Object.keys(cachedData.slip44).length,
+      coinTypes: cachedData.slip44,
+    });
+  }
+
+  const { coinType } = args;
+  if (typeof coinType !== 'number' || Number.isNaN(coinType)) {
+    return errorResponse('Invalid coin type');
+  }
+  const coinTypeData = cachedData.slip44[coinType];
+  if (!coinTypeData) {
+    return errorResponse('Coin type not found');
+  }
+  return textResponse(coinTypeData);
+}
+
+function handleGetSources() {
+  const cachedData = getCachedData();
+  return textResponse({
+    lastUpdated: cachedData.lastUpdated,
+    sources: {
+      theGraph: cachedData.theGraph ? 'loaded' : 'not loaded',
+      chainlist: cachedData.chainlist ? 'loaded' : 'not loaded',
+      chains: cachedData.chains ? 'loaded' : 'not loaded',
+      slip44: cachedData.slip44 ? 'loaded' : 'not loaded',
+    },
+  });
+}
+
+function handleValidateChains() {
+  const validationResults = validateChainData();
+  if (validationResults.error) {
+    return errorResponse(validationResults.error);
+  }
+  return textResponse(validationResults);
+}
+
+function handleGetRpcMonitor() {
+  const results = getMonitoringResults();
+  const status = getMonitoringStatus();
+  return textResponse({ ...status, ...results });
+}
+
+function handleGetRpcMonitorById(args) {
+  const { chainId } = args;
+  if (!isValidChainId(chainId)) {
+    return errorResponse('Invalid chain ID');
+  }
+
+  const results = getMonitoringResults();
+  const chainResults = results.results.filter((r) => r.chainId === chainId);
+
+  if (chainResults.length === 0) {
+    return errorResponse('No monitoring results found for this chain');
+  }
+
+  const workingCount = chainResults.filter((r) => r.status === 'working').length;
+  return textResponse({
+    chainId,
+    chainName: chainResults[0].chainName,
+    totalEndpoints: chainResults.length,
+    workingEndpoints: workingCount,
+    lastUpdated: results.lastUpdated,
+    endpoints: chainResults,
+  });
+}
+
+// --- Dispatch map ---
+
+const toolHandlers = {
+  get_chains: handleGetChains,
+  get_chain_by_id: handleGetChainById,
+  search_chains: handleSearchChains,
+  get_endpoints: handleGetEndpoints,
+  get_relations: handleGetRelations,
+  get_slip44: handleGetSlip44,
+  get_sources: handleGetSources,
+  validate_chains: handleValidateChains,
+  get_rpc_monitor: handleGetRpcMonitor,
+  get_rpc_monitor_by_id: handleGetRpcMonitorById,
+};
+
 /**
  * Handle an MCP tool call by name and arguments
  * @param {string} name - Tool name
@@ -147,442 +321,12 @@ export function getToolDefinitions() {
  */
 export async function handleToolCall(name, args) {
   try {
-    switch (name) {
-      case 'get_chains': {
-        let chains = getAllChains();
-
-        // Filter by tag if provided
-        if (args.tag) {
-          chains = chains.filter(
-            (chain) => chain.tags && chain.tags.includes(args.tag)
-          );
-        }
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(
-                {
-                  count: chains.length,
-                  chains,
-                },
-                null,
-                2
-              ),
-            },
-          ],
-        };
-      }
-
-      case 'get_chain_by_id': {
-        const chainId = args.chainId;
-
-        if (typeof chainId !== 'number' || Number.isNaN(chainId)) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({ error: 'Invalid chain ID' }),
-              },
-            ],
-            isError: true,
-          };
-        }
-
-        const chain = getChainById(chainId);
-
-        if (!chain) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({ error: 'Chain not found' }),
-              },
-            ],
-            isError: true,
-          };
-        }
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(chain, null, 2),
-            },
-          ],
-        };
-      }
-
-      case 'search_chains': {
-        const query = args.query;
-
-        if (!query) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({ error: 'Query is required' }),
-              },
-            ],
-            isError: true,
-          };
-        }
-
-        const results = searchChains(query);
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(
-                {
-                  query,
-                  count: results.length,
-                  results,
-                },
-                null,
-                2
-              ),
-            },
-          ],
-        };
-      }
-
-      case 'get_endpoints': {
-        if (args.chainId !== undefined) {
-          const chainId = args.chainId;
-
-          if (typeof chainId !== 'number' || Number.isNaN(chainId)) {
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify({ error: 'Invalid chain ID' }),
-                },
-              ],
-              isError: true,
-            };
-          }
-
-          const result = getEndpointsById(chainId);
-
-          if (!result) {
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify({ error: 'Chain not found' }),
-                },
-              ],
-              isError: true,
-            };
-          }
-
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(result, null, 2),
-              },
-            ],
-          };
-        } else {
-          const endpoints = getAllEndpoints();
-
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(
-                  {
-                    count: endpoints.length,
-                    endpoints,
-                  },
-                  null,
-                  2
-                ),
-              },
-            ],
-          };
-        }
-      }
-
-      case 'get_relations': {
-        if (args.chainId !== undefined) {
-          const chainId = args.chainId;
-
-          if (typeof chainId !== 'number' || Number.isNaN(chainId)) {
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify({ error: 'Invalid chain ID' }),
-                },
-              ],
-              isError: true,
-            };
-          }
-
-          const result = getRelationsById(chainId);
-
-          if (!result) {
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify({ error: 'Chain not found' }),
-                },
-              ],
-              isError: true,
-            };
-          }
-
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(result, null, 2),
-              },
-            ],
-          };
-        } else {
-          const relations = getAllRelations();
-
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(relations, null, 2),
-              },
-            ],
-          };
-        }
-      }
-
-      case 'get_slip44': {
-        const cachedData = getCachedData();
-
-        if (!cachedData.slip44) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({ error: 'SLIP-0044 data not loaded' }),
-              },
-            ],
-            isError: true,
-          };
-        }
-
-        if (args.coinType !== undefined) {
-          const coinType = args.coinType;
-
-          if (typeof coinType !== 'number' || Number.isNaN(coinType)) {
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify({ error: 'Invalid coin type' }),
-                },
-              ],
-              isError: true,
-            };
-          }
-
-          const coinTypeData = cachedData.slip44[coinType];
-
-          if (!coinTypeData) {
-            return {
-              content: [
-                {
-                  type: 'text',
-                  text: JSON.stringify({ error: 'Coin type not found' }),
-                },
-              ],
-              isError: true,
-            };
-          }
-
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(coinTypeData, null, 2),
-              },
-            ],
-          };
-        } else {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(
-                  {
-                    count: Object.keys(cachedData.slip44).length,
-                    coinTypes: cachedData.slip44,
-                  },
-                  null,
-                  2
-                ),
-              },
-            ],
-          };
-        }
-      }
-
-      case 'get_sources': {
-        const cachedData = getCachedData();
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(
-                {
-                  lastUpdated: cachedData.lastUpdated,
-                  sources: {
-                    theGraph: cachedData.theGraph ? 'loaded' : 'not loaded',
-                    chainlist: cachedData.chainlist ? 'loaded' : 'not loaded',
-                    chains: cachedData.chains ? 'loaded' : 'not loaded',
-                    slip44: cachedData.slip44 ? 'loaded' : 'not loaded',
-                  },
-                },
-                null,
-                2
-              ),
-            },
-          ],
-        };
-      }
-
-      case 'validate_chains': {
-        const validationResults = validateChainData();
-
-        if (validationResults.error) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({ error: validationResults.error }),
-              },
-            ],
-            isError: true,
-          };
-        }
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(validationResults, null, 2),
-            },
-          ],
-        };
-      }
-
-      case 'get_rpc_monitor': {
-        const results = getMonitoringResults();
-        const status = getMonitoringStatus();
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(
-                {
-                  ...status,
-                  ...results,
-                },
-                null,
-                2
-              ),
-            },
-          ],
-        };
-      }
-
-      case 'get_rpc_monitor_by_id': {
-        const chainId = args.chainId;
-
-        if (typeof chainId !== 'number' || Number.isNaN(chainId)) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({ error: 'Invalid chain ID' }),
-              },
-            ],
-            isError: true,
-          };
-        }
-
-        const results = getMonitoringResults();
-        const chainResults = results.results.filter(
-          (r) => r.chainId === chainId
-        );
-
-        if (chainResults.length === 0) {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({
-                  error: 'No monitoring results found for this chain',
-                }),
-              },
-            ],
-            isError: true,
-          };
-        }
-
-        const workingCount = chainResults.filter(
-          (r) => r.status === 'working'
-        ).length;
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(
-                {
-                  chainId,
-                  chainName: chainResults[0].chainName,
-                  totalEndpoints: chainResults.length,
-                  workingEndpoints: workingCount,
-                  lastUpdated: results.lastUpdated,
-                  endpoints: chainResults,
-                },
-                null,
-                2
-              ),
-            },
-          ],
-        };
-      }
-
-      default:
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify({ error: `Unknown tool: ${name}` }),
-            },
-          ],
-          isError: true,
-        };
+    const handler = toolHandlers[name];
+    if (!handler) {
+      return errorResponse(`Unknown tool: ${name}`);
     }
+    return handler(args);
   } catch (error) {
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            error: 'Internal error',
-            message: error.message,
-          }),
-        },
-      ],
-      isError: true,
-    };
+    return errorResponse('Internal error', error.message);
   }
 }
