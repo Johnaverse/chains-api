@@ -796,6 +796,7 @@ More detailed information about project internals and testing can be found in th
 
 - [Project Structure](docs/PROJECT_STRUCTURE.md): Detailed explanation of files and directories
 - [Testing](docs/TESTING.md): Comprehensive guide to the testing strategy (Unit, Integration, and Fuzz testing)
+- [GitHub Actions Setup](docs/GITHUB_ACTIONS_SETUP.md): Guide for setting up GitHub Actions workflows and required secrets
 
 ## Contributing
 
