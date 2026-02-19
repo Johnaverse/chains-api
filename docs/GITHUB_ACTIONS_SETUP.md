@@ -124,4 +124,4 @@ git tag v1.0.5
 git push origin v1.0.5
 ```
 
-This will trigger the Docker build workflow directly, as long as you're using a Personal Access Token with appropriate permissions for authentication.
+This will trigger the Docker build workflow directly. Manual tag pushes will trigger the workflow regardless of the authentication method you use (SSH keys, HTTPS with PAT, etc.), as the workflow is triggered by the tag push event itself.
