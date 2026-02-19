@@ -439,10 +439,10 @@ describe('MCP Tools - Shared Module', () => {
 
       const result = await handleToolCall('get_rpc_monitor', {});
       expect(result.isError).toBeUndefined();
-      const data = JSON.parse(result.content[0].text);
-      expect(data.isMonitoring).toBe(true);
-      expect(data.totalEndpoints).toBe(100);
-      expect(data.workingEndpoints).toBe(45);
+      const text = result.content[0].text;
+      expect(text).toContain('Running');
+      expect(text).toContain('100');
+      expect(text).toContain('45');
     });
   });
 
@@ -462,12 +462,12 @@ describe('MCP Tools - Shared Module', () => {
 
       const result = await handleToolCall('get_rpc_monitor_by_id', { chainId: 1 });
       expect(result.isError).toBeUndefined();
-      const data = JSON.parse(result.content[0].text);
-      expect(data.chainId).toBe(1);
-      expect(data.chainName).toBe('Ethereum');
-      expect(data.totalEndpoints).toBe(2);
-      expect(data.workingEndpoints).toBe(1);
-      expect(data.endpoints.length).toBe(2);
+      const text = result.content[0].text;
+      expect(text).toContain('Ethereum');
+      expect(text).toContain('chain 1');
+      expect(text).toContain('1 / 2');
+      expect(text).toContain('https://eth.rpc');
+      expect(text).toContain('https://eth2.rpc');
     });
 
     it('should return error for invalid chain ID', async () => {
@@ -489,9 +489,8 @@ describe('MCP Tools - Shared Module', () => {
       });
 
       const result = await handleToolCall('get_rpc_monitor_by_id', { chainId: 999 });
-      expect(result.isError).toBe(true);
-      const data = JSON.parse(result.content[0].text);
-      expect(data.error).toBe('No monitoring results found for this chain');
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0].text).toContain('No monitoring data available yet for chain 999');
     });
   });
 
