@@ -7,7 +7,8 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { createRequire } from 'node:module';
-import { loadData, startRpcHealthCheck } from './dataService.js';
+import { loadData } from './dataService.js';
+import { startRpcHealthCheck } from './rpcMonitor.js';
 import { getToolDefinitions, handleToolCall } from './mcp-tools.js';
 
 const require = createRequire(import.meta.url);
