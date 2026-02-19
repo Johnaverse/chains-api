@@ -116,7 +116,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_rpc_monitor',
-      description: 'Get RPC endpoint health check and monitoring results for all chains',
+      description: 'Get RPC monitor status (isMonitoring, lastUpdated) and endpoint health check results (working/total counts, per-endpoint latency and status) for all chains',
       inputSchema: {
         type: 'object',
         properties: {},
@@ -268,10 +268,57 @@ function handleValidateChains() {
   return textResponse(validationResults);
 }
 
+function formatRpcMonitorStatus(status, results) {
+  let statusLabel;
+  if (status.isMonitoring) {
+    statusLabel = 'Running';
+  } else if (results.testedEndpoints > 0) {
+    statusLabel = 'Completed';
+  } else {
+    statusLabel = 'Starting up…';
+  }
+
+  const lines = ['## RPC Monitoring Status'];
+  lines.push('');
+  lines.push(`**Status:** ${statusLabel}`);
+  lines.push(`**Last Updated:** ${results.lastUpdated ?? 'N/A'}`);
+  lines.push('');
+  lines.push('### Summary');
+  lines.push(`- Total endpoints discovered: ${results.totalEndpoints}`);
+  lines.push(`- Endpoints tested: ${results.testedEndpoints}`);
+  lines.push(`- Working endpoints: ${results.workingEndpoints}`);
+
+  if (!status.isMonitoring && results.testedEndpoints === 0) {
+    lines.push('');
+    lines.push('> Monitoring has been started but has not completed a run yet. Check back shortly.');
+    lines.push('> Use `get_rpc_monitor_by_id` with a chain ID once data is available.');
+    return lines.join('\n');
+  }
+
+  if (results.results.length > 0) {
+    lines.push('');
+    lines.push('### Working Endpoints by Chain');
+    const byChain = {};
+    for (const r of results.results) {
+      if (!byChain[r.chainId]) byChain[r.chainId] = { name: r.chainName, endpoints: [] };
+      byChain[r.chainId].endpoints.push(r);
+    }
+    for (const [id, chain] of Object.entries(byChain)) {
+      lines.push(`\n**${chain.name}** (chain ${id})`);
+      for (const ep of chain.endpoints) {
+        const block = ep.blockNumber != null ? ` — block #${ep.blockNumber}` : '';
+        lines.push(`  - ${ep.url}${block}`);
+      }
+    }
+  }
+
+  return lines.join('\n');
+}
+
 function handleGetRpcMonitor() {
   const results = getMonitoringResults();
   const status = getMonitoringStatus();
-  return textResponse({ ...status, ...results });
+  return { content: [{ type: 'text', text: formatRpcMonitorStatus(status, results) }] };
 }
 
 function handleGetRpcMonitorById(args) {
@@ -281,21 +328,33 @@ function handleGetRpcMonitorById(args) {
   }
 
   const results = getMonitoringResults();
+  const status = getMonitoringStatus();
   const chainResults = results.results.filter((r) => r.chainId === chainId);
 
   if (chainResults.length === 0) {
-    return errorResponse('No monitoring results found for this chain');
+    const notRunYet = results.testedEndpoints === 0 && !status.isMonitoring;
+    const message = notRunYet
+      ? `No monitoring data available yet for chain ${chainId}. Monitoring has not completed a full run.`
+      : `No working RPC endpoints found for chain ${chainId}.`;
+    return { content: [{ type: 'text', text: message }] };
   }
 
   const workingCount = chainResults.filter((r) => r.status === 'working').length;
-  return textResponse({
-    chainId,
-    chainName: chainResults[0].chainName,
-    totalEndpoints: chainResults.length,
-    workingEndpoints: workingCount,
-    lastUpdated: results.lastUpdated,
-    endpoints: chainResults,
-  });
+  const lines = [
+    `## RPC Monitor — ${chainResults[0].chainName} (chain ${chainId})`,
+    '',
+    `**Last Updated:** ${results.lastUpdated ?? 'Never'}`,
+    `**Working endpoints:** ${workingCount} / ${chainResults.length}`,
+    '',
+    '### Endpoints',
+  ];
+  for (const ep of chainResults) {
+    const block = ep.blockNumber != null ? ` — block #${ep.blockNumber}` : '';
+    const client = ep.clientVersion && ep.clientVersion !== 'unavailable' ? ` (${ep.clientVersion})` : '';
+    lines.push(`- **${ep.status}** ${ep.url}${block}${client}`);
+    if (ep.error) lines.push(`  - Error: ${ep.error}`);
+  }
+  return { content: [{ type: 'text', text: lines.join('\n') }] };
 }
 
 // --- Dispatch map ---

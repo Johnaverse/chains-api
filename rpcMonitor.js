@@ -208,14 +208,15 @@ export async function startMonitoring() {
   monitoringPromise = (async () => {
     isMonitoring = true;
 
-    do {
+    while (true) {
       try {
         await testAllEndpoints();
       } catch (error) {
         console.error('Error during RPC monitoring:', error);
       }
-      if (loop) console.log('RPC monitoring cycle complete. Restarting...');
-    } while (loop);
+      if (!loop) break;
+      console.log('RPC monitoring cycle complete. Restarting...');
+    }
   })();
 
   // Reset state when monitoring completes (even on error)
