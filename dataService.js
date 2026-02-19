@@ -246,17 +246,7 @@ function mergeRpcUrlsFromArray(existingChain, newRpcUrls) {
 function mergeChainlistEntry(chainData, indexed) {
   const chainId = chainData.chainId;
 
-  if (!indexed.byChainId[chainId]) {
-    indexed.byChainId[chainId] = {
-      chainId: Number(chainId),
-      name: chainData.name,
-      rpc: chainData.rpc || [],
-      sources: ['chainlist'],
-      tags: [],
-      relations: [],
-      status: chainData.status || 'active'
-    };
-  } else {
+  if (indexed.byChainId[chainId]) {
     mergeRpcUrlsFromArray(indexed.byChainId[chainId], chainData.rpc);
 
     if (!indexed.byChainId[chainId].sources.includes('chainlist')) {
@@ -266,6 +256,16 @@ function mergeChainlistEntry(chainData, indexed) {
     if (chainData.status && !indexed.byChainId[chainId].status) {
       indexed.byChainId[chainId].status = chainData.status;
     }
+  } else {
+    indexed.byChainId[chainId] = {
+      chainId: Number(chainId),
+      name: chainData.name,
+      rpc: chainData.rpc || [],
+      sources: ['chainlist'],
+      tags: [],
+      relations: [],
+      status: chainData.status || 'active'
+    };
   }
 
   // Mark as testnet if applicable
@@ -334,9 +334,7 @@ function processTheGraphRelation(relation, chainId, indexed, networkIdToChainId)
  * Create or merge The Graph chain entry
  */
 function createOrMergeTheGraphChain(chainId, network, indexed) {
-  if (!indexed.byChainId[chainId]) {
-    indexed.byChainId[chainId] = createTheGraphChainEntry(chainId, network);
-  } else {
+  if (indexed.byChainId[chainId]) {
     if (!indexed.byChainId[chainId].sources.includes('theGraph')) {
       indexed.byChainId[chainId].sources.push('theGraph');
     }
@@ -345,6 +343,8 @@ function createOrMergeTheGraphChain(chainId, network, indexed) {
     // Ensure arrays exist
     if (!indexed.byChainId[chainId].tags) indexed.byChainId[chainId].tags = [];
     if (!indexed.byChainId[chainId].relations) indexed.byChainId[chainId].relations = [];
+  } else {
+    indexed.byChainId[chainId] = createTheGraphChainEntry(chainId, network);
   }
 }
 

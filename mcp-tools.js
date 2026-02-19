@@ -268,48 +268,53 @@ function handleValidateChains() {
   return textResponse(validationResults);
 }
 
-function formatRpcMonitorStatus(status, results) {
-  let statusLabel;
-  if (status.isMonitoring) {
-    statusLabel = 'Running';
-  } else if (results.testedEndpoints > 0) {
-    statusLabel = 'Completed';
-  } else {
-    statusLabel = 'Starting up…';
-  }
+function getStatusLabel(status, results) {
+  if (status.isMonitoring) return 'Running';
+  if (results.testedEndpoints > 0) return 'Completed';
+  return 'Starting up…';
+}
 
-  const lines = ['## RPC Monitoring Status'];
-  lines.push('');
-  lines.push(`**Status:** ${statusLabel}`);
-  lines.push(`**Last Updated:** ${results.lastUpdated ?? 'N/A'}`);
-  lines.push('');
-  lines.push('### Summary');
-  lines.push(`- Total endpoints discovered: ${results.totalEndpoints}`);
-  lines.push(`- Endpoints tested: ${results.testedEndpoints}`);
-  lines.push(`- Working endpoints: ${results.workingEndpoints}`);
+function buildWorkingEndpointsSection(results) {
+  const byChain = {};
+  for (const r of results.results) {
+    if (!byChain[r.chainId]) byChain[r.chainId] = { name: r.chainName, endpoints: [] };
+    byChain[r.chainId].endpoints.push(r);
+  }
+  const lines = ['', '### Working Endpoints by Chain'];
+  for (const [id, chain] of Object.entries(byChain)) {
+    lines.push(`\n**${chain.name}** (chain ${id})`);
+    for (const ep of chain.endpoints) {
+      const block = ep.blockNumber == null ? '' : ` — block #${ep.blockNumber}`;
+      lines.push(`  - ${ep.url}${block}`);
+    }
+  }
+  return lines;
+}
+
+function formatRpcMonitorStatus(status, results) {
+  const lines = [
+    '## RPC Monitoring Status',
+    '',
+    `**Status:** ${getStatusLabel(status, results)}`,
+    `**Last Updated:** ${results.lastUpdated ?? 'N/A'}`,
+    '',
+    '### Summary',
+    `- Total endpoints discovered: ${results.totalEndpoints}`,
+    `- Endpoints tested: ${results.testedEndpoints}`,
+    `- Working endpoints: ${results.workingEndpoints}`,
+  ];
 
   if (!status.isMonitoring && results.testedEndpoints === 0) {
-    lines.push('');
-    lines.push('> Monitoring has been started but has not completed a run yet. Check back shortly.');
-    lines.push('> Use `get_rpc_monitor_by_id` with a chain ID once data is available.');
+    lines.push(
+      '',
+      '> Monitoring has been started but has not completed a run yet. Check back shortly.',
+      '> Use `get_rpc_monitor_by_id` with a chain ID once data is available.'
+    );
     return lines.join('\n');
   }
 
   if (results.results.length > 0) {
-    lines.push('');
-    lines.push('### Working Endpoints by Chain');
-    const byChain = {};
-    for (const r of results.results) {
-      if (!byChain[r.chainId]) byChain[r.chainId] = { name: r.chainName, endpoints: [] };
-      byChain[r.chainId].endpoints.push(r);
-    }
-    for (const [id, chain] of Object.entries(byChain)) {
-      lines.push(`\n**${chain.name}** (chain ${id})`);
-      for (const ep of chain.endpoints) {
-        const block = ep.blockNumber != null ? ` — block #${ep.blockNumber}` : '';
-        lines.push(`  - ${ep.url}${block}`);
-      }
-    }
+    lines.push(...buildWorkingEndpointsSection(results));
   }
 
   return lines.join('\n');
@@ -349,10 +354,12 @@ function handleGetRpcMonitorById(args) {
     '### Endpoints',
   ];
   for (const ep of chainResults) {
-    const block = ep.blockNumber != null ? ` — block #${ep.blockNumber}` : '';
+    const block = ep.blockNumber == null ? '' : ` — block #${ep.blockNumber}`;
     const client = ep.clientVersion && ep.clientVersion !== 'unavailable' ? ` (${ep.clientVersion})` : '';
-    lines.push(`- **${ep.status}** ${ep.url}${block}${client}`);
-    if (ep.error) lines.push(`  - Error: ${ep.error}`);
+    lines.push(
+      `- **${ep.status}** ${ep.url}${block}${client}`,
+      ...(ep.error ? [`  - Error: ${ep.error}`] : [])
+    );
   }
   return { content: [{ type: 'text', text: lines.join('\n') }] };
 }
