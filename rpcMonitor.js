@@ -102,17 +102,67 @@ async function testRpcEndpoint(url) {
 }
 
 /**
+ * Record a working endpoint result and update counters
+ * Returns true if the endpoint failed (to signal chain should stop testing)
+ */
+function recordEndpointResult(testResult, chainId, name, counters) {
+  if (testResult.status === 'working') {
+    counters.working++;
+    monitoringResults.results.push({ chainId, chainName: name, ...testResult });
+  }
+
+  monitoringResults.lastUpdated = new Date().toISOString();
+  monitoringResults.totalEndpoints = counters.total;
+  monitoringResults.testedEndpoints = counters.tested;
+  monitoringResults.workingEndpoints = counters.working;
+
+  if (counters.tested % 50 === 0) {
+    console.log(`Tested ${counters.tested} endpoints, ${counters.working} working...`);
+  }
+
+  return testResult.status === 'failed';
+}
+
+/**
+ * Test all RPC endpoints for a single chain
+ */
+async function testChainEndpoints(chainEndpoints, counters) {
+  const { chainId, name, rpc } = chainEndpoints;
+
+  if (!rpc || rpc.length === 0) return;
+
+  let chainTestedCount = 0;
+  let foundFailedEndpoint = false;
+
+  for (const rpcEndpoint of rpc) {
+    const url = extractUrl(rpcEndpoint);
+    counters.total++;
+
+    if (!isValidUrl(url) || chainTestedCount >= MAX_ENDPOINTS_PER_CHAIN || foundFailedEndpoint) {
+      continue;
+    }
+
+    counters.tested++;
+    chainTestedCount++;
+
+    try {
+      const testResult = await testRpcEndpoint(url);
+      foundFailedEndpoint = recordEndpointResult(testResult, chainId, name, counters);
+    } catch (error) {
+      console.error(`Error testing ${url}:`, error.message);
+    }
+  }
+}
+
+/**
  * Test all RPC endpoints for all chains
  */
 async function testAllEndpoints() {
   console.log('Starting RPC endpoint monitoring...');
 
   const allEndpoints = getAllEndpoints();
-  let totalEndpoints = 0;
-  let testedEndpoints = 0;
-  let workingEndpoints = 0;
+  const counters = { total: 0, tested: 0, working: 0 };
 
-  // Initialize monitoring results at the start
   monitoringResults = {
     lastUpdated: new Date().toISOString(),
     totalEndpoints: 0,
@@ -121,73 +171,11 @@ async function testAllEndpoints() {
     results: []
   };
 
-  // Limit testing per chain (from config)
-
   for (const chainEndpoints of allEndpoints) {
-    const { chainId, name, rpc } = chainEndpoints;
-
-    if (!rpc || rpc.length === 0) {
-      continue;
-    }
-
-    let chainTestedCount = 0;
-    let foundFailedEndpoint = false; // Track if we've encountered a failed endpoint
-
-    for (const rpcEndpoint of rpc) {
-      const url = extractUrl(rpcEndpoint);
-      totalEndpoints++;
-
-      if (!isValidUrl(url)) {
-        continue;
-      }
-
-      // Skip if we've already tested enough endpoints for this chain
-      if (chainTestedCount >= MAX_ENDPOINTS_PER_CHAIN) {
-        continue;
-      }
-
-      // Stop testing additional endpoints for this chain if we already found one that failed
-      if (foundFailedEndpoint) {
-        continue;
-      }
-
-      testedEndpoints++;
-      chainTestedCount++;
-
-      try {
-        const testResult = await testRpcEndpoint(url);
-
-        if (testResult.status === 'working') {
-          workingEndpoints++;
-
-          // Only add working endpoints to results
-          monitoringResults.results.push({
-            chainId,
-            chainName: name,
-            ...testResult
-          });
-        } else if (testResult.status === 'failed') {
-          // Mark that we found a failed endpoint for this chain
-          foundFailedEndpoint = true;
-        }
-
-        // Update monitoring status in real-time
-        monitoringResults.lastUpdated = new Date().toISOString();
-        monitoringResults.totalEndpoints = totalEndpoints;
-        monitoringResults.testedEndpoints = testedEndpoints;
-        monitoringResults.workingEndpoints = workingEndpoints;
-
-        // Log progress every 50 endpoints
-        if (testedEndpoints % 50 === 0) {
-          console.log(`Tested ${testedEndpoints} endpoints, ${workingEndpoints} working...`);
-        }
-      } catch (error) {
-        console.error(`Error testing ${url}:`, error.message);
-      }
-    }
+    await testChainEndpoints(chainEndpoints, counters);
   }
 
-  console.log(`RPC monitoring completed. Tested ${testedEndpoints}/${totalEndpoints} endpoints, ${workingEndpoints} working.`);
+  console.log(`RPC monitoring completed. Tested ${counters.tested}/${counters.total} endpoints, ${counters.working} working.`);
 
   return monitoringResults;
 }

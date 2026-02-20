@@ -49,7 +49,9 @@ async function main() {
   console.error('Chains API MCP server running on stdio');
 }
 
-main().catch((error) => {
+try {
+  await main();
+} catch (error) {
   console.error('Server error:', error);
   process.exit(1);
-});
+}

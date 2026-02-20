@@ -103,10 +103,10 @@ export function parseSLIP44(markdown) {
 function buildNetworkIdToChainIdMap(theGraph) {
   const networkIdToChainId = {};
   
-  if (theGraph && theGraph.networks && Array.isArray(theGraph.networks)) {
+  if (Array.isArray(theGraph?.networks)) {
     theGraph.networks.forEach(network => {
       // Extract chain ID from caip2Id (format: "eip155:1" or "beacon:11155111")
-      // Note: Only numeric chain IDs are supported; named beacon chains (e.g., "beacon:mainnet") 
+      // Note: Only numeric chain IDs are supported; named beacon chains (e.g., "beacon:mainnet")
       // won't be mapped but will still add tags to their target chains if relations exist
       if (network.caip2Id) {
         const match = network.caip2Id.match(/^(?:eip155|beacon):(\d+)$/);
@@ -142,7 +142,7 @@ function getBridgeUrl(bridge) {
   if (typeof bridge === 'string') {
     return bridge;
   }
-  return bridge && bridge.url ? bridge.url : null;
+  return bridge?.url ?? null;
 }
 
 /**
@@ -418,7 +418,7 @@ function processBeaconChainRelations(network, networkIdToChainId, indexed) {
  */
 function processTheGraphNetwork(network, indexed, networkIdToChainId) {
   const chainId = extractChainIdFromCaip2Id(network.caip2Id);
-  const isBeaconChain = network.caip2Id && network.caip2Id.startsWith('beacon:');
+  const isBeaconChain = network.caip2Id?.startsWith('beacon:');
 
   if (chainId !== null) {
     createOrMergeTheGraphChain(chainId, network, indexed);
@@ -555,7 +555,7 @@ export function indexData(theGraph, chainlist, chains, slip44) {
       }
       
       // Extract bridge URLs from parent.bridges
-      if (indexed.byChainId[chainId] && chainData.parent && chainData.parent.bridges) {
+      if (indexed.byChainId[chainId] && chainData.parent?.bridges) {
         mergeBridges(indexed.byChainId[chainId], chainData.parent.bridges);
       }
     });
@@ -563,7 +563,7 @@ export function indexData(theGraph, chainlist, chains, slip44) {
   
   // Merge The Graph registry data
   // The Graph uses caip2Id format (e.g., "eip155:1" for Ethereum mainnet)
-  if (theGraph && theGraph.networks && Array.isArray(theGraph.networks)) {
+  if (Array.isArray(theGraph?.networks)) {
     theGraph.networks.forEach(network => {
       processTheGraphNetwork(network, indexed, networkIdToChainId);
     });
@@ -713,13 +713,13 @@ export function searchChains(query) {
   
   // Search by name (partial match)
   cachedData.indexed.all.forEach(chain => {
-    if (chain.name && chain.name.toLowerCase().includes(queryLower)) {
-      if (!results.find(r => r.chainId === chain.chainId)) {
+    if (chain.name?.toLowerCase().includes(queryLower)) {
+      if (!results.some(r => r.chainId === chain.chainId)) {
         results.push(getChainById(chain.chainId));
       }
     }
-    if (chain.shortName && chain.shortName.toLowerCase().includes(queryLower)) {
-      if (!results.find(r => r.chainId === chain.chainId)) {
+    if (chain.shortName?.toLowerCase().includes(queryLower)) {
+      if (!results.some(r => r.chainId === chain.chainId)) {
         results.push(getChainById(chain.chainId));
       }
     }
@@ -822,13 +822,13 @@ export function getAllRelations() {
   const allRelations = {};
   
   // Allowed relation kinds (parentOf will be renamed to l1Of in the output)
-  const allowedKinds = ['l2Of', 'parentOf', 'testnetOf', 'mainnetOf'];
+  const allowedKinds = new Set(['l2Of', 'parentOf', 'testnetOf', 'mainnetOf']);
   
   cachedData.indexed.all.forEach(chain => {
-    if (chain.relations && Array.isArray(chain.relations) && chain.relations.length > 0) {
+    if (chain.relations?.length > 0) {
       chain.relations.forEach(relation => {
         // Only include allowed relation kinds and those with chainId
-        if (allowedKinds.includes(relation.kind) && relation.chainId !== undefined) {
+        if (allowedKinds.has(relation.kind) && relation.chainId !== undefined) {
           let parentChainId, childChainId, parentName, childName;
           
           // Rename parentOf to l1Of
@@ -917,7 +917,7 @@ function extractEndpoints(chain) {
   };
   
   // Extract firehose and substreams from theGraph services
-  if (chain.theGraph && chain.theGraph.services) {
+  if (chain.theGraph?.services) {
     if (chain.theGraph.services.firehose) {
       endpoints.firehose = chain.theGraph.services.firehose;
     }
@@ -991,7 +991,7 @@ async function checkRpcEndpoint(url) {
     error: null
   };
   
-  if (!url || !url.startsWith('http')) {
+  if (!url?.startsWith('http')) {
     result.error = 'Unsupported RPC URL';
     return result;
   }
@@ -1144,7 +1144,7 @@ function validateRule1RelationConflicts(chain, errors) {
       }
 
       const chainlistChain = getChainFromSource(chain.chainId, 'chainlist');
-      if (chainlistChain && chainlistChain.isTestnet === false) {
+      if (chainlistChain?.isTestnet === false) {
         errors.push({
           rule: 1,
           chainId: chain.chainId,
@@ -1177,7 +1177,7 @@ function validateRule2Slip44Mismatch(chain, errors) {
   const chainlistChain = getChainFromSource(chain.chainId, 'chainlist');
   const chainsChain = getChainFromSource(chain.chainId, 'chains');
 
-  if (chainlistChain && chainlistChain.slip44 === 1 && chainlistChain.isTestnet === false) {
+  if (chainlistChain?.slip44 === 1 && chainlistChain.isTestnet === false) {
     errors.push({
       rule: 2,
       chainId: chain.chainId,
@@ -1189,7 +1189,7 @@ function validateRule2Slip44Mismatch(chain, errors) {
     });
   }
 
-  if (chainsChain && chainsChain.slip44 === 1 && !chain.tags.includes('Testnet')) {
+  if (chainsChain?.slip44 === 1 && !chain.tags.includes('Testnet')) {
     errors.push({
       rule: 2,
       chainId: chain.chainId,
@@ -1250,10 +1250,10 @@ function validateRule5StatusConflicts(chain, errors) {
   const chainsChain = getChainFromSource(chain.chainId, 'chains');
 
   const statuses = [];
-  if (chainlistChain && chainlistChain.status) {
+  if (chainlistChain?.status) {
     statuses.push({ source: 'chainlist', status: chainlistChain.status });
   }
-  if (chainsChain && chainsChain.status) {
+  if (chainsChain?.status) {
     statuses.push({ source: 'chains', status: chainsChain.status });
   }
 
@@ -1284,8 +1284,8 @@ function validateRule6GoerliDeprecated(chain, statuses, errors) {
     const chainsChain = getChainFromSource(chain.chainId, 'chains');
 
     const isDeprecated = chain.status === 'deprecated' ||
-      (chainlistChain && chainlistChain.status === 'deprecated') ||
-      (chainsChain && chainsChain.status === 'deprecated');
+      chainlistChain?.status === 'deprecated' ||
+      chainsChain?.status === 'deprecated';
 
     if (!isDeprecated) {
       errors.push({

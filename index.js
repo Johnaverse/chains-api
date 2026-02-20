@@ -91,7 +91,7 @@ export async function buildApp(options = {}) {
       if (!validTags.includes(tag)) {
         return sendError(reply, 400, `Invalid tag. Allowed: ${validTags.join(', ')}`);
       }
-      chains = chains.filter(chain => chain.tags && chain.tags.includes(tag));
+      chains = chains.filter(chain => chain.tags?.includes(tag));
     }
 
     return {
@@ -244,7 +244,7 @@ export async function buildApp(options = {}) {
     }
 
     const cachedData = getCachedData();
-    if (!cachedData.slip44 || !cachedData.slip44[coinType]) {
+    if (!cachedData.slip44?.[coinType]) {
       return sendError(reply, 404, 'Coin type not found');
     }
 
