@@ -194,6 +194,20 @@ vi.mock('../../dataService.js', async () => {
           message: 'Name contains testnet keyword'
         }
       ]
+    })),
+    getAllKeywords: vi.fn(() => ({
+      totalKeywords: 13,
+      keywords: {
+        blockchainNames: ['Ethereum Mainnet', 'Polygon'],
+        networkNames: ['eth', 'matic'],
+        softwareClients: ['Geth'],
+        currencySymbols: ['ETH', 'MATIC'],
+        tags: ['L2', 'Testnet'],
+        relationKinds: ['l2Of'],
+        sources: ['chainlist', 'chains'],
+        statuses: ['active'],
+        generic: ['ethereum', 'geth']
+      }
     }))
   };
 });
@@ -677,6 +691,32 @@ describe('API Endpoints', () => {
       expect(data).toHaveProperty('workingEndpoints');
       expect(data).toHaveProperty('results');
       expect(Array.isArray(data.results)).toBe(true);
+    });
+  });
+
+  describe('GET /keywords', () => {
+    it('should return extracted keyword data', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/keywords'
+      });
+
+      expect(response.statusCode).toBe(200);
+      const data = JSON.parse(response.payload);
+      expect(data).toHaveProperty('lastUpdated');
+      expect(data).toHaveProperty('totalKeywords');
+      expect(data).toHaveProperty('keywords');
+      expect(data.keywords).toHaveProperty('blockchainNames');
+      expect(data.keywords).toHaveProperty('networkNames');
+      expect(data.keywords).toHaveProperty('softwareClients');
+      expect(data.keywords).toHaveProperty('currencySymbols');
+      expect(data.keywords).toHaveProperty('tags');
+      expect(data.keywords).toHaveProperty('relationKinds');
+      expect(data.keywords).toHaveProperty('sources');
+      expect(data.keywords).toHaveProperty('statuses');
+      expect(data.keywords).toHaveProperty('generic');
+      expect(Array.isArray(data.keywords.blockchainNames)).toBe(true);
+      expect(Array.isArray(data.keywords.softwareClients)).toBe(true);
     });
   });
 

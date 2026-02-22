@@ -2,7 +2,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import helmet from '@fastify/helmet';
-import { loadData, getCachedData, searchChains, getChainById, getAllChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints, validateChainData } from './dataService.js';
+import { loadData, getCachedData, searchChains, getChainById, getAllChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints, getAllKeywords, validateChainData } from './dataService.js';
 import { getMonitoringResults, getMonitoringStatus, startRpcHealthCheck } from './rpcMonitor.js';
 import {
   PORT, HOST, BODY_LIMIT, MAX_PARAM_LENGTH,
@@ -291,6 +291,19 @@ export async function buildApp(options = {}) {
   });
 
   /**
+   * Get extracted keywords from indexed chain and RPC monitor data
+   */
+  fastify.get('/keywords', async () => {
+    const keywordResults = getAllKeywords();
+    const cachedData = getCachedData();
+
+    return {
+      lastUpdated: cachedData.lastUpdated,
+      ...keywordResults
+    };
+  });
+
+  /**
    * Get RPC monitoring results
    */
   fastify.get('/rpc-monitor', async (request, reply) => {
@@ -353,6 +366,7 @@ export async function buildApp(options = {}) {
         '/slip44/:coinType': 'Get specific SLIP-0044 coin type by ID',
         '/reload': 'Reload data from sources (POST)',
         '/validate': 'Validate chain data for potential human errors',
+        '/keywords': 'Get extracted keywords (blockchain names, network names, client names, etc.)',
         '/rpc-monitor': 'Get RPC endpoint monitoring results',
         '/rpc-monitor/:id': 'Get RPC monitoring results for a specific chain by ID'
       },

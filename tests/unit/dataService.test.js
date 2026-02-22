@@ -26,7 +26,8 @@ import {
   getAllRelations,
   getRelationsById,
   getEndpointsById,
-  getAllEndpoints
+  getAllEndpoints,
+  getAllKeywords
 } from '../../dataService.js';
 
 // Mock fetch globally
@@ -127,6 +128,77 @@ describe('Data Service', () => {
         expect(chain).toHaveProperty('chainId');
         expect(chain).toHaveProperty('name');
       }
+    });
+  });
+
+  describe('getAllKeywords', () => {
+    it('should return empty keyword categories when data is not loaded', () => {
+      const cache = getCachedData();
+      const originalIndexed = cache.indexed;
+      const originalRpcHealth = cache.rpcHealth;
+
+      cache.indexed = null;
+      cache.rpcHealth = {};
+
+      const result = getAllKeywords();
+
+      expect(result.totalKeywords).toBe(0);
+      expect(result).toHaveProperty('keywords');
+      expect(result.keywords).toHaveProperty('blockchainNames');
+      expect(result.keywords).toHaveProperty('networkNames');
+      expect(result.keywords).toHaveProperty('softwareClients');
+      expect(Array.isArray(result.keywords.generic)).toBe(true);
+
+      cache.indexed = originalIndexed;
+      cache.rpcHealth = originalRpcHealth;
+    });
+
+    it('should extract and deduplicate keyword categories', () => {
+      const cache = getCachedData();
+      const originalIndexed = cache.indexed;
+      const originalRpcHealth = cache.rpcHealth;
+
+      cache.indexed = {
+        byChainId: {},
+        byName: {},
+        all: [
+          {
+            chainId: 1,
+            name: 'Ethereum Mainnet',
+            network: 'mainnet',
+            shortName: 'eth',
+            nativeCurrency: { symbol: 'ETH' },
+            sources: ['chains', 'chainlist'],
+            tags: ['L2'],
+            relations: [{ kind: 'l2Of', network: 'Ethereum Mainnet', chainId: 1 }],
+            status: 'active',
+            theGraph: { id: 'ethereum', caip2Id: 'eip155:1', fullName: 'Ethereum Mainnet' }
+          }
+        ]
+      };
+      cache.rpcHealth = {
+        1: [
+          { clientVersion: 'Geth/v1.14.0' },
+          { clientVersion: 'Geth/v1.14.0' },
+          { clientVersion: 'Nethermind/v1.23.0' }
+        ]
+      };
+
+      const result = getAllKeywords();
+
+      expect(result.keywords.blockchainNames).toContain('Ethereum Mainnet');
+      expect(result.keywords.networkNames).toContain('eip155:1');
+      expect(result.keywords.softwareClients).toEqual(['Geth', 'Nethermind']);
+      expect(result.keywords.currencySymbols).toContain('ETH');
+      expect(result.keywords.tags).toContain('L2');
+      expect(result.keywords.relationKinds).toContain('l2Of');
+      expect(result.keywords.sources).toContain('chains');
+      expect(result.keywords.statuses).toContain('active');
+      expect(result.keywords.generic).toContain('ethereum');
+      expect(result.totalKeywords).toBeGreaterThan(0);
+
+      cache.indexed = originalIndexed;
+      cache.rpcHealth = originalRpcHealth;
     });
   });
 

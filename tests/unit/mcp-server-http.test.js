@@ -18,6 +18,20 @@ vi.mock('../../dataService.js', () => ({
   getRelationsById: vi.fn(() => null),
   getEndpointsById: vi.fn(() => null),
   getAllEndpoints: vi.fn(() => []),
+  getAllKeywords: vi.fn(() => ({
+    totalKeywords: 0,
+    keywords: {
+      blockchainNames: [],
+      networkNames: [],
+      softwareClients: [],
+      currencySymbols: [],
+      tags: [],
+      relationKinds: [],
+      sources: [],
+      statuses: [],
+      generic: [],
+    },
+  })),
   startRpcHealthCheck: vi.fn(),
 }));
 

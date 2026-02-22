@@ -7,6 +7,7 @@ import {
   getRelationsById,
   getEndpointsById,
   getAllEndpoints,
+  getAllKeywords,
   validateChainData,
 } from './dataService.js';
 import { getMonitoringResults, getMonitoringStatus } from './rpcMonitor.js';
@@ -101,6 +102,14 @@ export function getToolDefinitions() {
     {
       name: 'get_sources',
       description: 'Get the status of all data sources (theGraph, chainlist, chains, slip44)',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+      },
+    },
+    {
+      name: 'get_keywords',
+      description: 'Get extracted keywords such as blockchain names, network names, software client names, tags, and relation kinds',
       inputSchema: {
         type: 'object',
         properties: {},
@@ -260,6 +269,16 @@ function handleGetSources() {
   });
 }
 
+function handleGetKeywords() {
+  const cachedData = getCachedData();
+  const keywordResults = getAllKeywords();
+
+  return textResponse({
+    lastUpdated: cachedData.lastUpdated,
+    ...keywordResults,
+  });
+}
+
 function handleValidateChains() {
   const validationResults = validateChainData();
   if (validationResults.error) {
@@ -374,6 +393,7 @@ const toolHandlers = {
   get_relations: handleGetRelations,
   get_slip44: handleGetSlip44,
   get_sources: handleGetSources,
+  get_keywords: handleGetKeywords,
   validate_chains: handleValidateChains,
   get_rpc_monitor: handleGetRpcMonitor,
   get_rpc_monitor_by_id: handleGetRpcMonitorById,

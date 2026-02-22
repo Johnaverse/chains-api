@@ -62,6 +62,20 @@ vi.mock('../../dataService.js', async () => {
     getAllEndpoints: vi.fn(() => [
       { chainId: 1, name: 'Ethereum', rpc: ['https://eth.llamarpc.com'], firehose: [], substreams: [] }
     ]),
+    getAllKeywords: vi.fn(() => ({
+      totalKeywords: 7,
+      keywords: {
+        blockchainNames: ['Ethereum', 'Polygon'],
+        networkNames: ['eth', 'matic'],
+        softwareClients: ['Geth'],
+        currencySymbols: ['ETH'],
+        tags: ['L2'],
+        relationKinds: ['l2Of'],
+        sources: ['chains'],
+        statuses: ['active'],
+        generic: ['ethereum', 'geth']
+      }
+    })),
     validateChainData: vi.fn(() => ({
       totalErrors: 5,
       errorsByRule: {
@@ -116,7 +130,7 @@ let fastify;
 
 describe('Fuzz Testing - API Endpoints', () => {
   beforeAll(async () => {
-    const { getCachedData, getAllChains, getChainById, searchChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints, validateChainData } = await import('../../dataService.js');
+    const { getCachedData, getAllChains, getChainById, searchChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints, getAllKeywords, validateChainData } = await import('../../dataService.js');
     const { getMonitoringResults, getMonitoringStatus } = await import('../../rpcMonitor.js');
 
     fastify = Fastify({ logger: false });
@@ -244,6 +258,15 @@ describe('Fuzz Testing - API Endpoints', () => {
       };
     });
 
+    fastify.get('/keywords', async () => {
+      const keywordResults = getAllKeywords();
+      const cachedData = getCachedData();
+      return {
+        lastUpdated: cachedData.lastUpdated,
+        ...keywordResults
+      };
+    });
+
     fastify.get('/rpc-monitor', async () => {
       const results = getMonitoringResults();
       const status = getMonitoringStatus();
@@ -353,6 +376,40 @@ describe('Fuzz Testing - API Endpoints', () => {
 
       expect([200, 400, 404]).toContain(response.statusCode);
       expect(response.statusCode).not.toBe(500); // Should not crash
+    });
+  });
+
+  describe('GET /keywords - Fuzz Tests', () => {
+    it('should return keyword collections', async () => {
+      const response = await fastify.inject({
+        method: 'GET',
+        url: '/keywords'
+      });
+
+      expect(response.statusCode).toBe(200);
+      const data = JSON.parse(response.payload);
+      expect(data).toHaveProperty('lastUpdated');
+      expect(data).toHaveProperty('totalKeywords');
+      expect(data).toHaveProperty('keywords');
+      expect(Array.isArray(data.keywords.blockchainNames)).toBe(true);
+      expect(Array.isArray(data.keywords.softwareClients)).toBe(true);
+    });
+
+    test.prop([fc.record({
+      userAgent: fc.string(),
+      acceptLanguage: fc.string()
+    })])('should handle arbitrary headers', async (headers) => {
+      const response = await fastify.inject({
+        method: 'GET',
+        url: '/keywords',
+        headers: {
+          'user-agent': headers.userAgent,
+          'accept-language': headers.acceptLanguage
+        }
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(() => JSON.parse(response.payload)).not.toThrow();
     });
   });
 
@@ -523,6 +580,7 @@ describe('Fuzz Testing - API Endpoints', () => {
       '/slip44',
       '/slip44/60',
       '/validate',
+      '/keywords',
       '/rpc-monitor',
       '/rpc-monitor/1'
     ];

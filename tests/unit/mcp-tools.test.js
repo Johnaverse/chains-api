@@ -20,6 +20,20 @@ vi.mock('../../dataService.js', () => ({
   getRelationsById: vi.fn(() => null),
   getEndpointsById: vi.fn(() => null),
   getAllEndpoints: vi.fn(() => []),
+  getAllKeywords: vi.fn(() => ({
+    totalKeywords: 0,
+    keywords: {
+      blockchainNames: [],
+      networkNames: [],
+      softwareClients: [],
+      currencySymbols: [],
+      tags: [],
+      relationKinds: [],
+      sources: [],
+      statuses: [],
+      generic: [],
+    },
+  })),
   validateChainData: vi.fn(() => ({ totalErrors: 0, errorsByRule: {}, summary: {}, allErrors: [] })),
 }));
 
@@ -63,6 +77,20 @@ describe('MCP Tools - Shared Module', () => {
     vi.mocked(dataService.getRelationsById).mockReturnValue(null);
     vi.mocked(dataService.getEndpointsById).mockReturnValue(null);
     vi.mocked(dataService.getAllEndpoints).mockReturnValue([]);
+    vi.mocked(dataService.getAllKeywords).mockReturnValue({
+      totalKeywords: 0,
+      keywords: {
+        blockchainNames: [],
+        networkNames: [],
+        softwareClients: [],
+        currencySymbols: [],
+        tags: [],
+        relationKinds: [],
+        sources: [],
+        statuses: [],
+        generic: [],
+      },
+    });
     vi.mocked(dataService.validateChainData).mockReturnValue({
       totalErrors: 0, errorsByRule: {}, summary: {}, allErrors: [],
     });
@@ -80,10 +108,10 @@ describe('MCP Tools - Shared Module', () => {
   });
 
   describe('getToolDefinitions', () => {
-    it('should return an array of 10 tools', () => {
+    it('should return an array of 11 tools', () => {
       const tools = getToolDefinitions();
       expect(Array.isArray(tools)).toBe(true);
-      expect(tools.length).toBe(10);
+      expect(tools.length).toBe(11);
     });
 
     it('should include all expected tool names', () => {
@@ -96,6 +124,7 @@ describe('MCP Tools - Shared Module', () => {
       expect(names).toContain('get_relations');
       expect(names).toContain('get_slip44');
       expect(names).toContain('get_sources');
+      expect(names).toContain('get_keywords');
       expect(names).toContain('validate_chains');
       expect(names).toContain('get_rpc_monitor');
       expect(names).toContain('get_rpc_monitor_by_id');
@@ -392,6 +421,40 @@ describe('MCP Tools - Shared Module', () => {
       expect(data.sources.chainlist).toBe('not loaded');
       expect(data.sources.chains).toBe('not loaded');
       expect(data.sources.slip44).toBe('not loaded');
+    });
+  });
+
+  describe('handleToolCall - get_keywords', () => {
+    it('should return extracted keyword data', async () => {
+      vi.mocked(dataService.getCachedData).mockReturnValue({
+        theGraph: {},
+        chainlist: [],
+        chains: [],
+        slip44: {},
+        indexed: { all: [] },
+        lastUpdated: '2024-01-01T00:00:00.000Z',
+      });
+      vi.mocked(dataService.getAllKeywords).mockReturnValue({
+        totalKeywords: 3,
+        keywords: {
+          blockchainNames: ['Ethereum'],
+          networkNames: ['mainnet'],
+          softwareClients: ['Geth'],
+          currencySymbols: [],
+          tags: [],
+          relationKinds: [],
+          sources: [],
+          statuses: [],
+          generic: [],
+        },
+      });
+
+      const result = await handleToolCall('get_keywords', {});
+      expect(result.isError).toBeUndefined();
+      const data = JSON.parse(result.content[0].text);
+      expect(data.lastUpdated).toBe('2024-01-01T00:00:00.000Z');
+      expect(data.totalKeywords).toBe(3);
+      expect(data.keywords.softwareClients).toContain('Geth');
     });
   });
 
