@@ -334,6 +334,10 @@ Each tool returns JSON data that can be used by AI assistants to answer question
 - `RPC_CHECK_CONCURRENCY`: Number of parallel RPC health checks (default: 8)
 - `MAX_ENDPOINTS_PER_CHAIN`: Maximum RPC endpoints tested per chain (default: 5)
 
+### Data Cache
+- `DATA_CACHE_ENABLED`: Enable disk-backed startup cache (default: `true`)
+- `DATA_CACHE_FILE`: Snapshot file path used for stale-first startup (default: `.cache/chains-api-data.json`)
+
 ### Other
 - `BODY_LIMIT`: Maximum request body size in bytes (default: 1048576 = 1 MB)
 - `MAX_PARAM_LENGTH`: Maximum URL parameter length (default: 200)
@@ -626,6 +630,30 @@ Get status of data sources.
     "chainlist": "loaded",
     "chains": "loaded",
     "slip44": "loaded"
+  }
+}
+```
+
+### `GET /export`
+Export the disk cache snapshot file (`DATA_CACHE_FILE`) as JSON.
+
+Returns:
+- `200` with JSON snapshot content when the file exists
+- `404` when the cache file does not exist
+- `503` when cache is disabled (`DATA_CACHE_ENABLED=false`)
+
+**Response (example):**
+```json
+{
+  "schemaVersion": 1,
+  "writtenAt": "2026-02-23T12:34:56.000Z",
+  "data": {
+    "lastUpdated": "2026-02-23T12:34:56.000Z",
+    "indexed": {
+      "byChainId": {},
+      "byName": {},
+      "all": []
+    }
   }
 }
 ```

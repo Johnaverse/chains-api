@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { resolve } from 'node:path';
 
 // Mock config before importing dataService
 vi.mock('../../config.js', () => ({
@@ -6,6 +7,8 @@ vi.mock('../../config.js', () => ({
   DATA_SOURCE_CHAINLIST: 'https://example.com/chainlist.json',
   DATA_SOURCE_CHAINS: 'https://example.com/chains.json',
   DATA_SOURCE_SLIP44: 'https://example.com/slip44.md',
+  DATA_CACHE_ENABLED: false,
+  DATA_CACHE_FILE: '.cache/test-data-cache.json',
   RPC_CHECK_TIMEOUT_MS: 8000,
   RPC_CHECK_CONCURRENCY: 8,
   PROXY_URL: '',
@@ -2089,5 +2092,211 @@ describe('validateChainData', () => {
 
     // Rule 5: status conflict
     expect(result.errorsByRule.rule5_status_conflicts.length).toBeGreaterThan(0);
+  });
+});
+
+describe('initializeDataOnStartup with disk cache', () => {
+  function buildSnapshot(chainId = 1, name = 'Snapshot Chain') {
+    const chain = {
+      chainId,
+      name,
+      sources: ['chainlist'],
+      tags: [],
+      relations: [],
+      status: 'active'
+    };
+
+    return {
+      schemaVersion: 1,
+      writtenAt: '2024-01-01T00:00:00.000Z',
+      data: {
+        theGraph: { networks: [] },
+        chainlist: [{ chainId, name }],
+        chains: [],
+        slip44: {},
+        indexed: {
+          byChainId: { [chainId]: chain },
+          byName: { [name.toLowerCase()]: [chainId] },
+          all: [chain]
+        },
+        lastUpdated: '2024-01-01T00:00:00.000Z',
+        rpcHealth: {},
+        lastRpcCheck: null
+      }
+    };
+  }
+
+  async function importWithDiskCacheEnabled() {
+    vi.resetModules();
+
+    const fsMock = {
+      mkdir: vi.fn().mockResolvedValue(undefined),
+      readFile: vi.fn(),
+      rename: vi.fn().mockResolvedValue(undefined),
+      rm: vi.fn().mockResolvedValue(undefined),
+      writeFile: vi.fn().mockResolvedValue(undefined)
+    };
+
+    vi.doMock('node:fs/promises', () => fsMock);
+    vi.doMock('../../config.js', () => ({
+      DATA_SOURCE_THE_GRAPH: 'https://example.com/thegraph.json',
+      DATA_SOURCE_CHAINLIST: 'https://example.com/chainlist.json',
+      DATA_SOURCE_CHAINS: 'https://example.com/chains.json',
+      DATA_SOURCE_SLIP44: 'https://example.com/slip44.md',
+      DATA_CACHE_ENABLED: true,
+      DATA_CACHE_FILE: '.cache/test-startup-cache.json',
+      RPC_CHECK_TIMEOUT_MS: 8000,
+      RPC_CHECK_CONCURRENCY: 8,
+      PROXY_URL: '',
+      PROXY_ENABLED: false
+    }));
+    vi.doMock('../../fetchUtil.js', () => ({
+      proxyFetch: vi.fn((...args) => fetch(...args)),
+      getProxyStatus: vi.fn(() => ({ enabled: false, url: null }))
+    }));
+
+    const mod = await import('../../dataService.js');
+    return { mod, fsMock };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    global.fetch = vi.fn();
+  });
+
+  it('loads valid snapshot from disk and returns immediately without waiting for network', async () => {
+    const { mod, fsMock } = await importWithDiskCacheEnabled();
+    fsMock.readFile.mockResolvedValueOnce(JSON.stringify(buildSnapshot(1, 'Stale Chain')));
+
+    let resolveFetch;
+    global.fetch.mockImplementation(() => new Promise(resolve => {
+      resolveFetch = resolve;
+    }));
+
+    const result = await mod.initializeDataOnStartup();
+
+    expect(result.indexed.all).toHaveLength(1);
+    expect(result.indexed.all[0].name).toBe('Stale Chain');
+    expect(global.fetch).toHaveBeenCalled();
+
+    resolveFetch({ ok: true, json: async () => ({}), text: async () => '' });
+  });
+
+  it('falls back to blocking load when snapshot file is missing', async () => {
+    const { mod, fsMock } = await importWithDiskCacheEnabled();
+    fsMock.readFile.mockRejectedValueOnce(Object.assign(new Error('missing'), { code: 'ENOENT' }));
+
+    global.fetch
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ networks: [] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => [{ chainId: 10, name: 'Fresh Chain' }] })
+      .mockResolvedValueOnce({ ok: true, json: async () => [] })
+      .mockResolvedValueOnce({ ok: true, text: async () => '' });
+
+    const result = await mod.initializeDataOnStartup();
+
+    expect(global.fetch).toHaveBeenCalledTimes(4);
+    expect(result.indexed).toBeDefined();
+    expect(fsMock.writeFile).toHaveBeenCalled();
+    expect(fsMock.rename).toHaveBeenCalled();
+  });
+
+  it('ignores invalid snapshot and falls back to remote load', async () => {
+    const { mod, fsMock } = await importWithDiskCacheEnabled();
+    fsMock.readFile.mockResolvedValueOnce(JSON.stringify({ invalid: true }));
+
+    global.fetch
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ networks: [] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => [{ chainId: 11, name: 'Fallback Chain' }] })
+      .mockResolvedValueOnce({ ok: true, json: async () => [] })
+      .mockResolvedValueOnce({ ok: true, text: async () => '' });
+
+    const result = await mod.initializeDataOnStartup();
+
+    expect(global.fetch).toHaveBeenCalledTimes(4);
+    expect(result.indexed).toBeDefined();
+  });
+
+  it('runs background refresh after warm load and replaces stale data on success', async () => {
+    const { mod, fsMock } = await importWithDiskCacheEnabled();
+    fsMock.readFile.mockResolvedValueOnce(JSON.stringify(buildSnapshot(1, 'Stale Chain')));
+
+    global.fetch
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ networks: [] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => [{ chainId: 25, name: 'Fresh Chain' }] })
+      .mockResolvedValueOnce({ ok: true, json: async () => [] })
+      .mockResolvedValueOnce({ ok: true, text: async () => '' });
+
+    await mod.initializeDataOnStartup();
+
+    const initialCache = mod.getCachedData();
+    expect(initialCache.indexed.byChainId[1].name).toBe('Stale Chain');
+
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    const refreshedCache = mod.getCachedData();
+    expect(refreshedCache.indexed.byChainId[25].name).toBe('Fresh Chain');
+    expect(fsMock.writeFile).toHaveBeenCalled();
+    expect(fsMock.rename).toHaveBeenCalled();
+  });
+
+  it('keeps stale data when background refresh fails', async () => {
+    const { mod, fsMock } = await importWithDiskCacheEnabled();
+    fsMock.readFile.mockResolvedValueOnce(JSON.stringify(buildSnapshot(1, 'Stale Chain')));
+    global.fetch.mockRejectedValue(new Error('network down'));
+
+    await mod.initializeDataOnStartup();
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    const cache = mod.getCachedData();
+    expect(cache.indexed.byChainId[1].name).toBe('Stale Chain');
+  });
+
+  it('deduplicates concurrent startup initialization and refresh operations', async () => {
+    const { mod, fsMock } = await importWithDiskCacheEnabled();
+    fsMock.readFile.mockResolvedValueOnce(JSON.stringify(buildSnapshot(1, 'Stale Chain')));
+
+    const deferredResponses = [
+      { ok: true, json: async () => ({ networks: [] }) },
+      { ok: true, json: async () => [{ chainId: 30, name: 'Fresh Chain' }] },
+      { ok: true, json: async () => [] },
+      { ok: true, text: async () => '' }
+    ];
+
+    let pending = 0;
+    global.fetch.mockImplementation(() => new Promise(resolve => {
+      const response = deferredResponses[pending++];
+      setTimeout(() => resolve(response), 10);
+    }));
+
+    await Promise.all([
+      mod.initializeDataOnStartup(),
+      mod.initializeDataOnStartup()
+    ]);
+
+    await new Promise(resolve => setTimeout(resolve, 20));
+
+    expect(global.fetch).toHaveBeenCalledTimes(4);
+  });
+
+  it('writes snapshots atomically with temp file + rename', async () => {
+    const { mod, fsMock } = await importWithDiskCacheEnabled();
+    fsMock.readFile.mockRejectedValueOnce(Object.assign(new Error('missing'), { code: 'ENOENT' }));
+
+    global.fetch
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ networks: [] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => [{ chainId: 40, name: 'Atomic Chain' }] })
+      .mockResolvedValueOnce({ ok: true, json: async () => [] })
+      .mockResolvedValueOnce({ ok: true, text: async () => '' });
+
+    await mod.initializeDataOnStartup();
+
+    const resolvedPath = resolve('.cache/test-startup-cache.json');
+    expect(fsMock.mkdir).toHaveBeenCalled();
+    expect(fsMock.writeFile).toHaveBeenCalledTimes(1);
+    expect(fsMock.rename).toHaveBeenCalledTimes(1);
+
+    const tempPath = fsMock.writeFile.mock.calls[0][0];
+    expect(tempPath).toContain('.tmp-');
+    expect(fsMock.rename).toHaveBeenCalledWith(tempPath, resolvedPath);
   });
 });

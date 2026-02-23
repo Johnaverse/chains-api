@@ -16,6 +16,18 @@ function parseStringEnv(name, defaultValue) {
   return process.env[name] || defaultValue;
 }
 
+function parseBooleanEnv(name, defaultValue) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return defaultValue;
+
+  const normalized = raw.trim().toLowerCase();
+  if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+  if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+
+  console.error(`Invalid value for ${name}: "${raw}" (expected boolean). Using default: ${defaultValue}`);
+  process.exit(1);
+}
+
 // Server
 export const PORT = parseIntEnv('PORT', 3000);
 export const HOST = parseStringEnv('HOST', '0.0.0.0');
@@ -57,6 +69,10 @@ export const DATA_SOURCE_SLIP44 = parseStringEnv(
   'DATA_SOURCE_SLIP44',
   'https://raw.githubusercontent.com/satoshilabs/slips/master/slip-0044.md'
 );
+
+// Disk cache
+export const DATA_CACHE_ENABLED = parseBooleanEnv('DATA_CACHE_ENABLED', true);
+export const DATA_CACHE_FILE = parseStringEnv('DATA_CACHE_FILE', '.cache/chains-api-data.json');
 
 // CORS
 export const CORS_ORIGIN = parseStringEnv('CORS_ORIGIN', '*');

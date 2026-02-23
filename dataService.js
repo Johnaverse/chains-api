@@ -1,8 +1,11 @@
 import {
   DATA_SOURCE_THE_GRAPH, DATA_SOURCE_CHAINLIST,
   DATA_SOURCE_CHAINS, DATA_SOURCE_SLIP44,
-  RPC_CHECK_TIMEOUT_MS, RPC_CHECK_CONCURRENCY
+  RPC_CHECK_TIMEOUT_MS, RPC_CHECK_CONCURRENCY,
+  DATA_CACHE_ENABLED, DATA_CACHE_FILE
 } from './config.js';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
 import { proxyFetch } from './fetchUtil.js';
 import { jsonRpcCall } from './rpcUtil.js';
 
@@ -28,6 +31,217 @@ let cachedData = {
 
 let rpcCheckInProgress = false;
 let rpcCheckPending = false;
+let dataRefreshPromise = null;
+let startupInitializationPromise = null;
+let startupInitialized = false;
+
+const SNAPSHOT_SCHEMA_VERSION = 1;
+const DATA_CACHE_PATH = resolve(DATA_CACHE_FILE);
+
+function applyDataToCache(data) {
+  cachedData.theGraph = data.theGraph ?? null;
+  cachedData.chainlist = data.chainlist ?? null;
+  cachedData.chains = data.chains ?? null;
+  cachedData.slip44 = data.slip44 ?? {};
+  cachedData.indexed = data.indexed ?? null;
+  cachedData.lastUpdated = data.lastUpdated ?? null;
+  cachedData.rpcHealth = data.rpcHealth ?? {};
+  cachedData.lastRpcCheck = data.lastRpcCheck ?? null;
+}
+
+function countLoadedSources(data) {
+  let loaded = 0;
+
+  if (data.theGraph !== null) loaded++;
+  if (data.chainlist !== null) loaded++;
+  if (data.chains !== null) loaded++;
+  if (data.slip44Text !== null) loaded++;
+
+  return loaded;
+}
+
+function isValidIndexedData(indexed) {
+  if (!indexed || typeof indexed !== 'object') {
+    return false;
+  }
+
+  return (
+    Array.isArray(indexed.all) &&
+    indexed.byChainId &&
+    typeof indexed.byChainId === 'object' &&
+    indexed.byName &&
+    typeof indexed.byName === 'object'
+  );
+}
+
+function isValidSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') {
+    return false;
+  }
+
+  if (snapshot.schemaVersion !== SNAPSHOT_SCHEMA_VERSION) {
+    return false;
+  }
+
+  if (typeof snapshot.writtenAt !== 'string') {
+    return false;
+  }
+
+  const data = snapshot.data;
+  if (!data || typeof data !== 'object') {
+    return false;
+  }
+
+  if (!isValidIndexedData(data.indexed)) {
+    return false;
+  }
+
+  if (typeof data.lastUpdated !== 'string') {
+    return false;
+  }
+
+  return true;
+}
+
+function createSnapshotPayload(data) {
+  return {
+    schemaVersion: SNAPSHOT_SCHEMA_VERSION,
+    writtenAt: new Date().toISOString(),
+    data: {
+      theGraph: data.theGraph ?? null,
+      chainlist: data.chainlist ?? null,
+      chains: data.chains ?? null,
+      slip44: data.slip44 ?? {},
+      indexed: data.indexed ?? { byChainId: {}, byName: {}, all: [] },
+      lastUpdated: data.lastUpdated ?? new Date().toISOString(),
+      rpcHealth: data.rpcHealth ?? {},
+      lastRpcCheck: data.lastRpcCheck ?? null
+    }
+  };
+}
+
+async function readSnapshotFromDisk() {
+  if (!DATA_CACHE_ENABLED) {
+    return null;
+  }
+
+  try {
+    const raw = await readFile(DATA_CACHE_PATH, 'utf8');
+    const parsed = JSON.parse(raw);
+
+    if (!isValidSnapshot(parsed)) {
+      console.warn(`Ignoring invalid cache snapshot at ${DATA_CACHE_PATH}`);
+      return null;
+    }
+
+    return parsed.data;
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return null;
+    }
+
+    console.warn(`Failed to read cache snapshot at ${DATA_CACHE_PATH}: ${error.message}`);
+    return null;
+  }
+}
+
+async function writeSnapshotToDiskAtomic(data) {
+  if (!DATA_CACHE_ENABLED) {
+    return;
+  }
+
+  const snapshot = createSnapshotPayload(data);
+  const tempPath = `${DATA_CACHE_PATH}.tmp-${process.pid}-${Date.now()}`;
+
+  try {
+    await mkdir(dirname(DATA_CACHE_PATH), { recursive: true });
+    await writeFile(tempPath, JSON.stringify(snapshot), 'utf8');
+    await rename(tempPath, DATA_CACHE_PATH);
+  } catch (error) {
+    try {
+      await rm(tempPath, { force: true });
+    } catch {
+      // Best effort cleanup for temp file.
+    }
+
+    console.warn(`Failed to persist cache snapshot at ${DATA_CACHE_PATH}: ${error.message}`);
+  }
+}
+
+async function fetchAndBuildData() {
+  console.log('Loading data from all sources...');
+
+  const results = await Promise.allSettled([
+    fetchData(DATA_SOURCES.theGraph),
+    fetchData(DATA_SOURCES.chainlist),
+    fetchData(DATA_SOURCES.chains),
+    fetchData(DATA_SOURCES.slip44, 'text')
+  ]);
+
+  const theGraph = results[0].status === 'fulfilled' ? results[0].value : null;
+  const chainlist = results[1].status === 'fulfilled' ? results[1].value : null;
+  const chains = results[2].status === 'fulfilled' ? results[2].value : null;
+  const slip44Text = results[3].status === 'fulfilled' ? results[3].value : null;
+
+  // Log any failed sources
+  const sourceNames = ['theGraph', 'chainlist', 'chains', 'slip44'];
+  results.forEach((result, i) => {
+    if (result.status === 'rejected') {
+      console.error(`Failed to load ${sourceNames[i]}: ${result.reason?.message || result.reason}`);
+    }
+  });
+
+  const slip44 = parseSLIP44(slip44Text);
+  const indexed = indexData(theGraph, chainlist, chains, slip44);
+
+  return {
+    data: {
+      theGraph,
+      chainlist,
+      chains,
+      slip44,
+      indexed,
+      lastUpdated: new Date().toISOString(),
+      rpcHealth: {},
+      lastRpcCheck: null
+    },
+    loadedSourceCount: countLoadedSources({ theGraph, chainlist, chains, slip44Text })
+  };
+}
+
+async function refreshDataWithGuard(options = {}) {
+  const {
+    requireAtLeastOneSource = false,
+    logSuccessMessage = true
+  } = options;
+
+  if (dataRefreshPromise) {
+    return dataRefreshPromise;
+  }
+
+  dataRefreshPromise = (async () => {
+    const { data, loadedSourceCount } = await fetchAndBuildData();
+
+    if (requireAtLeastOneSource && loadedSourceCount === 0) {
+      throw new Error('All data sources failed during background refresh');
+    }
+
+    applyDataToCache(data);
+    await writeSnapshotToDiskAtomic(cachedData);
+
+    if (logSuccessMessage) {
+      console.log(`Data loaded successfully. Total chains: ${cachedData.indexed.all.length}`);
+    }
+
+    return cachedData;
+  })();
+
+  try {
+    return await dataRefreshPromise;
+  } finally {
+    dataRefreshPromise = null;
+  }
+}
 
 /**
  * Fetch data from a URL with error handling
@@ -646,42 +860,59 @@ export function indexData(theGraph, chainlist, chains, slip44) {
  * Load and cache all data sources
  */
 export async function loadData() {
-  console.log('Loading data from all sources...');
+  return refreshDataWithGuard();
+}
 
-  const results = await Promise.allSettled([
-    fetchData(DATA_SOURCES.theGraph),
-    fetchData(DATA_SOURCES.chainlist),
-    fetchData(DATA_SOURCES.chains),
-    fetchData(DATA_SOURCES.slip44, 'text')
-  ]);
+/**
+ * Initialize data on startup using a stale-first strategy:
+ * 1. Load valid snapshot from disk if available.
+ * 2. Trigger background refresh and keep serving stale data on failures.
+ * 3. Fallback to blocking load if no valid snapshot exists.
+ */
+export async function initializeDataOnStartup(options = {}) {
+  const { onBackgroundRefreshSuccess } = options;
 
-  const theGraph = results[0].status === 'fulfilled' ? results[0].value : null;
-  const chainlist = results[1].status === 'fulfilled' ? results[1].value : null;
-  const chains = results[2].status === 'fulfilled' ? results[2].value : null;
-  const slip44Text = results[3].status === 'fulfilled' ? results[3].value : null;
+  if (startupInitialized) {
+    return cachedData;
+  }
 
-  // Log any failed sources
-  const sourceNames = ['theGraph', 'chainlist', 'chains', 'slip44'];
-  results.forEach((result, i) => {
-    if (result.status === 'rejected') {
-      console.error(`Failed to load ${sourceNames[i]}: ${result.reason?.message || result.reason}`);
+  if (startupInitializationPromise) {
+    return startupInitializationPromise;
+  }
+
+  startupInitializationPromise = (async () => {
+    const snapshotData = await readSnapshotFromDisk();
+
+    if (snapshotData) {
+      applyDataToCache(snapshotData);
+      startupInitialized = true;
+      console.log(`Loaded cached snapshot from ${DATA_CACHE_PATH}. Total chains: ${cachedData.indexed.all.length}`);
+
+      refreshDataWithGuard({ requireAtLeastOneSource: true })
+        .then(() => {
+          console.log('Background refresh completed successfully.');
+          if (typeof onBackgroundRefreshSuccess === 'function') {
+            onBackgroundRefreshSuccess();
+          }
+        })
+        .catch(error => {
+          console.error(`Background refresh failed; continuing with cached data: ${error.message || error}`);
+        });
+
+      return cachedData;
     }
-  });
 
-  const slip44 = parseSLIP44(slip44Text);
+    console.log('No valid cache snapshot found. Loading data from remote sources...');
+    const loadedData = await loadData();
+    startupInitialized = true;
+    return loadedData;
+  })();
 
-  cachedData.theGraph = theGraph;
-  cachedData.chainlist = chainlist;
-  cachedData.chains = chains;
-  cachedData.slip44 = slip44;
-  cachedData.indexed = indexData(theGraph, chainlist, chains, slip44);
-  cachedData.lastUpdated = new Date().toISOString();
-  cachedData.rpcHealth = {};
-  cachedData.lastRpcCheck = null;
-
-  console.log(`Data loaded successfully. Total chains: ${cachedData.indexed.all.length}`);
-
-  return cachedData;
+  try {
+    return await startupInitializationPromise;
+  } finally {
+    startupInitializationPromise = null;
+  }
 }
 
 /**

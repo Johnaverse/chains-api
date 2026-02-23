@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // Mock dataService before importing
 vi.mock('../../dataService.js', () => ({
   loadData: vi.fn().mockResolvedValue(undefined),
+  initializeDataOnStartup: vi.fn().mockResolvedValue(undefined),
   getCachedData: vi.fn(() => ({
     theGraph: null,
     chainlist: null,

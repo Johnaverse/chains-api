@@ -12,6 +12,10 @@ vi.mock('../../dataService.js', async () => {
       indexed: { all: [], byChainId: {} },
       lastUpdated: new Date().toISOString()
     }),
+    initializeDataOnStartup: vi.fn().mockResolvedValue({
+      indexed: { all: [], byChainId: {} },
+      lastUpdated: new Date().toISOString()
+    }),
     getCachedData: vi.fn(() => ({
       indexed: {
         all: [

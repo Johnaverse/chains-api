@@ -1,5 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { buildApp } from '../../index.js';
+import * as dataService from '../../dataService.js';
+import * as rpcMonitor from '../../rpcMonitor.js';
+import * as fsPromises from 'node:fs/promises';
+
+vi.mock('node:fs/promises', () => ({
+  readFile: vi.fn()
+}));
 
 // Mock the modules before importing
 vi.mock('../../dataService.js', async () => {
@@ -7,6 +14,13 @@ vi.mock('../../dataService.js', async () => {
   return {
     ...actual,
     loadData: vi.fn().mockResolvedValue({
+      indexed: {
+        all: [],
+        byChainId: {}
+      },
+      lastUpdated: new Date().toISOString()
+    }),
+    initializeDataOnStartup: vi.fn().mockResolvedValue({
       indexed: {
         all: [],
         byChainId: {}
@@ -246,6 +260,29 @@ describe('API Endpoints', () => {
 
   afterAll(async () => {
     await app.close();
+  });
+
+  describe('Startup Initialization', () => {
+    it('should warm-start using initializeDataOnStartup and serve endpoints immediately', async () => {
+      vi.mocked(dataService.initializeDataOnStartup).mockClear();
+      vi.mocked(rpcMonitor.startRpcHealthCheck).mockClear();
+
+      const startupApp = await buildApp({ logger: false, loadDataOnStartup: true });
+      const response = await startupApp.inject({
+        method: 'GET',
+        url: '/health'
+      });
+
+      expect(response.statusCode).toBe(200);
+      const payload = JSON.parse(response.payload);
+      expect(payload).toHaveProperty('status', 'ok');
+      expect(payload).toHaveProperty('dataLoaded');
+      expect(payload).toHaveProperty('totalChains');
+      expect(vi.mocked(dataService.initializeDataOnStartup)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(rpcMonitor.startRpcHealthCheck)).toHaveBeenCalled();
+
+      await startupApp.close();
+    });
   });
 
   describe('GET /', () => {
@@ -564,6 +601,58 @@ describe('API Endpoints', () => {
       expect(data.sources).toHaveProperty('chainlist');
       expect(data.sources).toHaveProperty('chains');
       expect(data.sources).toHaveProperty('slip44');
+    });
+  });
+
+  describe('GET /export', () => {
+    it('should return cached snapshot export when file exists', async () => {
+      const mockExport = {
+        schemaVersion: 1,
+        writtenAt: '2026-02-23T00:00:00.000Z',
+        data: {
+          indexed: { all: [{ chainId: 1 }], byChainId: { 1: { chainId: 1 } }, byName: {} },
+          lastUpdated: '2026-02-23T00:00:00.000Z'
+        }
+      };
+
+      vi.mocked(fsPromises.readFile).mockResolvedValueOnce(JSON.stringify(mockExport));
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/export'
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['content-disposition']).toContain('attachment; filename=');
+      const data = JSON.parse(response.payload);
+      expect(data).toHaveProperty('schemaVersion', 1);
+      expect(data).toHaveProperty('data');
+    });
+
+    it('should return 404 when export file does not exist', async () => {
+      vi.mocked(fsPromises.readFile).mockRejectedValueOnce(Object.assign(new Error('missing'), { code: 'ENOENT' }));
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/export'
+      });
+
+      expect(response.statusCode).toBe(404);
+      const data = JSON.parse(response.payload);
+      expect(data).toHaveProperty('error', 'Export file not found');
+    });
+
+    it('should return 500 when export file contains invalid JSON', async () => {
+      vi.mocked(fsPromises.readFile).mockResolvedValueOnce('{invalid-json');
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/export'
+      });
+
+      expect(response.statusCode).toBe(500);
+      const data = JSON.parse(response.payload);
+      expect(data).toHaveProperty('error', 'Export file is not valid JSON');
     });
   });
 

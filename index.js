@@ -2,7 +2,9 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import helmet from '@fastify/helmet';
-import { loadData, getCachedData, searchChains, getChainById, getAllChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints, getAllKeywords, validateChainData } from './dataService.js';
+import { readFile } from 'node:fs/promises';
+import { basename, resolve } from 'node:path';
+import { loadData, initializeDataOnStartup, getCachedData, searchChains, getChainById, getAllChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints, getAllKeywords, validateChainData } from './dataService.js';
 import { getMonitoringResults, getMonitoringStatus, startRpcHealthCheck } from './rpcMonitor.js';
 import {
   PORT, HOST, BODY_LIMIT, MAX_PARAM_LENGTH,
@@ -10,7 +12,8 @@ import {
   RELOAD_RATE_LIMIT_MAX, SEARCH_RATE_LIMIT_MAX,
   MAX_SEARCH_QUERY_LENGTH, CORS_ORIGIN,
   DATA_SOURCE_THE_GRAPH, DATA_SOURCE_CHAINLIST,
-  DATA_SOURCE_CHAINS, DATA_SOURCE_SLIP44
+  DATA_SOURCE_CHAINS, DATA_SOURCE_SLIP44,
+  DATA_CACHE_ENABLED, DATA_CACHE_FILE
 } from './config.js';
 
 /**
@@ -61,7 +64,11 @@ export async function buildApp(options = {}) {
 
   // Load data on startup
   if (loadDataOnStartup) {
-    await loadData();
+    await initializeDataOnStartup({
+      onBackgroundRefreshSuccess: () => {
+        startRpcHealthCheck();
+      }
+    });
     startRpcHealthCheck();
   }
 
@@ -219,6 +226,37 @@ export async function buildApp(options = {}) {
   });
 
   /**
+   * Export cached snapshot file
+   */
+  fastify.get('/export', async (_request, reply) => {
+    if (!DATA_CACHE_ENABLED) {
+      return sendError(reply, 503, 'Data cache export is disabled');
+    }
+
+    const filePath = resolve(DATA_CACHE_FILE);
+
+    try {
+      const raw = await readFile(filePath, 'utf8');
+      const exportData = JSON.parse(raw);
+
+      reply.header('Content-Type', 'application/json; charset=utf-8');
+      reply.header('Content-Disposition', `attachment; filename="${basename(filePath)}"`);
+      return exportData;
+    } catch (error) {
+      if (error?.code === 'ENOENT') {
+        return sendError(reply, 404, 'Export file not found');
+      }
+
+      if (error instanceof SyntaxError) {
+        return sendError(reply, 500, 'Export file is not valid JSON');
+      }
+
+      fastify.log.error(error, 'Failed to export cache file');
+      return sendError(reply, 500, 'Failed to export cache file');
+    }
+  });
+
+  /**
    * Get SLIP-0044 coin types as JSON
    */
   fastify.get('/slip44', async (request, reply) => {
@@ -362,6 +400,7 @@ export async function buildApp(options = {}) {
         '/endpoints': 'Get all chain endpoints (RPC, firehose, substreams)',
         '/endpoints/:id': 'Get endpoints for a specific chain by ID',
         '/sources': 'Get data sources status',
+        '/export': 'Export cached snapshot file',
         '/slip44': 'Get all SLIP-0044 coin types as JSON',
         '/slip44/:coinType': 'Get specific SLIP-0044 coin type by ID',
         '/reload': 'Reload data from sources (POST)',

@@ -10,7 +10,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import express from 'express';
 import { createRequire } from 'node:module';
-import { loadData, getCachedData } from './dataService.js';
+import { initializeDataOnStartup, getCachedData } from './dataService.js';
 import { startRpcHealthCheck } from './rpcMonitor.js';
 import { getToolDefinitions, handleToolCall } from './mcp-tools.js';
 
@@ -18,7 +18,11 @@ const require = createRequire(import.meta.url);
 const { version } = require('./package.json');
 
 // Load data on startup
-await loadData();
+await initializeDataOnStartup({
+  onBackgroundRefreshSuccess: () => {
+    startRpcHealthCheck();
+  }
+});
 startRpcHealthCheck();
 
 // Get configuration from environment
