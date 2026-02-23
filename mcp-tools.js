@@ -125,7 +125,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_rpc_monitor',
-      description: 'Get RPC monitor status (isMonitoring, lastUpdated) and endpoint health check results (working/total counts, per-endpoint latency and status) for all chains',
+      description: 'Get RPC monitor status and summary endpoint health counts across all chains (without per-chain endpoint listing)',
       inputSchema: {
         type: 'object',
         properties: {},
@@ -290,24 +290,7 @@ function handleValidateChains() {
 function getStatusLabel(status, results) {
   if (status.isMonitoring) return 'Running';
   if (results.testedEndpoints > 0) return 'Completed';
-  return 'Starting up…';
-}
-
-function buildWorkingEndpointsSection(results) {
-  const byChain = {};
-  for (const r of results.results) {
-    if (!byChain[r.chainId]) byChain[r.chainId] = { name: r.chainName, endpoints: [] };
-    byChain[r.chainId].endpoints.push(r);
-  }
-  const lines = ['', '### Working Endpoints by Chain'];
-  for (const [id, chain] of Object.entries(byChain)) {
-    lines.push(`\n**${chain.name}** (chain ${id})`);
-    for (const ep of chain.endpoints) {
-      const block = ep.blockNumber == null ? '' : ` — block #${ep.blockNumber}`;
-      lines.push(`  - ${ep.url}${block}`);
-    }
-  }
-  return lines;
+  return 'Starting up...';
 }
 
 function formatRpcMonitorStatus(status, results) {
@@ -321,6 +304,7 @@ function formatRpcMonitorStatus(status, results) {
     `- Total endpoints discovered: ${results.totalEndpoints}`,
     `- Endpoints tested: ${results.testedEndpoints}`,
     `- Working endpoints: ${results.workingEndpoints}`,
+    '- Use `get_rpc_monitor_by_id` for per-chain endpoint details.',
   ];
 
   if (!status.isMonitoring && results.testedEndpoints === 0) {
@@ -329,11 +313,8 @@ function formatRpcMonitorStatus(status, results) {
       '> Monitoring has been started but has not completed a run yet. Check back shortly.',
       '> Use `get_rpc_monitor_by_id` with a chain ID once data is available.'
     );
-    return lines.join('\n');
-  }
-
-  if (results.results.length > 0) {
-    lines.push(...buildWorkingEndpointsSection(results));
+  } else {
+    lines.push('', '> Per-chain endpoint lists are available via `get_rpc_monitor_by_id`.');
   }
 
   return lines.join('\n');

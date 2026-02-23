@@ -493,7 +493,10 @@ describe('MCP Tools - Shared Module', () => {
         totalEndpoints: 100,
         testedEndpoints: 50,
         workingEndpoints: 45,
-        results: [],
+        results: [
+          { chainId: 1, chainName: 'Ethereum', url: 'https://eth.rpc', status: 'working' },
+          { chainId: 137, chainName: 'Polygon', url: 'https://polygon.rpc', status: 'working' },
+        ],
       });
       vi.mocked(rpcMonitor.getMonitoringStatus).mockReturnValue({
         isMonitoring: true,
@@ -506,6 +509,9 @@ describe('MCP Tools - Shared Module', () => {
       expect(text).toContain('Running');
       expect(text).toContain('100');
       expect(text).toContain('45');
+      expect(text).toContain('per-chain endpoint details');
+      expect(text).not.toContain('https://eth.rpc');
+      expect(text).not.toContain('https://polygon.rpc');
     });
   });
 
