@@ -1071,6 +1071,15 @@ function addTokenKeywords(set, value) {
   tokens.forEach(token => set.add(token));
 }
 
+const keywordSortCollator = new Intl.Collator('en', {
+  numeric: true,
+  sensitivity: 'base'
+});
+
+function sortKeywordSet(set) {
+  return Array.from(set).sort((a, b) => keywordSortCollator.compare(a, b));
+}
+
 /**
  * Extract software client name from a client version string.
  * Example: "Geth/v1.13.0" -> "Geth"
@@ -1171,15 +1180,15 @@ export function getAllKeywords() {
   });
 
   const keywords = {
-    blockchainNames: Array.from(blockchainNames).sort(),
-    networkNames: Array.from(networkNames).sort(),
-    softwareClients: Array.from(softwareClients).sort(),
-    currencySymbols: Array.from(currencySymbols).sort(),
-    tags: Array.from(tags).sort(),
-    relationKinds: Array.from(relationKinds).sort(),
-    sources: Array.from(sources).sort(),
-    statuses: Array.from(statuses).sort(),
-    generic: Array.from(generic).sort()
+    blockchainNames: sortKeywordSet(blockchainNames),
+    networkNames: sortKeywordSet(networkNames),
+    softwareClients: sortKeywordSet(softwareClients),
+    currencySymbols: sortKeywordSet(currencySymbols),
+    tags: sortKeywordSet(tags),
+    relationKinds: sortKeywordSet(relationKinds),
+    sources: sortKeywordSet(sources),
+    statuses: sortKeywordSet(statuses),
+    generic: sortKeywordSet(generic)
   };
 
   const totalKeywords = Object.values(keywords).reduce(
