@@ -773,30 +773,26 @@ describe('indexData', () => {
     expect(result.byChainId[5].tags).toContain('Testnet');
   });
 
-  it('should create testnetOf relations using tvl matching', () => {
-    const chainlist = [
-      {
-        chainId: 1,
-        name: 'Ethereum Mainnet',
-        isTestnet: false,
-        tvl: 100
-      },
+  it('should create testnetOf relations using parent.type testnet from chains.json', () => {
+    const chains = [
+      { chainId: 1, name: 'Ethereum Mainnet' },
       {
         chainId: 11155111,
         name: 'Sepolia',
-        isTestnet: true,
-        slip44: 1,
-        tvl: 100
+        parent: {
+          type: 'testnet',
+          chain: 'eip155-1'
+        }
       }
     ];
 
-    const result = indexData(null, chainlist, null, null);
+    const result = indexData(null, null, chains, null);
 
     expect(result.byChainId[11155111].relations).toContainEqual(
       expect.objectContaining({
         kind: 'testnetOf',
         chainId: 1,
-        source: 'chainlist'
+        source: 'chains'
       })
     );
   });
@@ -934,32 +930,23 @@ describe('indexData', () => {
   it('should create reverse mainnetOf relations', () => {
     const chains = [
       { chainId: 1, name: 'Ethereum Mainnet' },
-      { chainId: 11155111, name: 'Sepolia' }
-    ];
-
-    const chainlist = [
-      {
-        chainId: 1,
-        name: 'Ethereum Mainnet',
-        isTestnet: false,
-        tvl: 100
-      },
       {
         chainId: 11155111,
         name: 'Sepolia',
-        isTestnet: true,
-        slip44: 1,
-        tvl: 100
+        parent: {
+          type: 'testnet',
+          chain: 'eip155-1'
+        }
       }
     ];
 
-    const result = indexData(null, chainlist, chains, null);
+    const result = indexData(null, null, chains, null);
 
     expect(result.byChainId[1].relations).toContainEqual(
       expect.objectContaining({
         kind: 'mainnetOf',
         chainId: 11155111,
-        source: 'chainlist'
+        source: 'chains'
       })
     );
   });

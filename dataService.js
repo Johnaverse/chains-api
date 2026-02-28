@@ -425,6 +425,38 @@ function processL2ParentRelation(chain, indexed) {
 }
 
 /**
+ * Process testnet parent relation from chains.json
+ * Chains with parent.type === "testnet" have a parent.chain like "eip155-1" pointing to their mainnet
+ */
+function processTestnetParentRelation(chain, indexed) {
+  if (chain.parent?.type !== 'testnet' || !chain.parent?.chain) {
+    return;
+  }
+
+  const match = chain.parent.chain.match(/^eip155-(\d+)$/);
+  if (!match) return;
+
+  const chainId = chain.chainId;
+  const mainnetChainId = Number.parseInt(match[1], 10);
+
+  if (!indexed.byChainId[chainId]) return;
+
+  // Add testnetOf relation if it doesn't exist
+  const existingRelation = indexed.byChainId[chainId].relations.find(
+    r => r.kind === 'testnetOf' && r.chainId === mainnetChainId
+  );
+
+  if (!existingRelation) {
+    indexed.byChainId[chainId].relations.push({
+      kind: 'testnetOf',
+      network: chain.parent.chain,
+      chainId: mainnetChainId,
+      source: 'chains'
+    });
+  }
+}
+
+/**
  * Merge RPC URLs from a source array into an existing chain's rpc array,
  * deduplicating by URL string.
  * @param {Object} existingChain - The chain object to merge into
@@ -695,10 +727,11 @@ export function indexData(theGraph, chainlist, chains, slip44) {
       }
     });
     
-    // Process L2 relations and bridge URLs from parent field in chains.json
+    // Process L2 and testnet relations and bridge URLs from parent field in chains.json
     chains.forEach(chain => {
       if (chain.chainId !== undefined) {
         processL2ParentRelation(chain, indexed);
+        processTestnetParentRelation(chain, indexed);
       }
     });
   }
@@ -717,49 +750,7 @@ export function indexData(theGraph, chainlist, chains, slip44) {
       mergeChainlistEntry(chainData, indexed);
     });
     
-    // Second pass: Find mainnet relations for testnets from chainlist
-    // Use tvl value and isTestnet flag
-    chainlist.forEach(testnetData => {
-      const testnetChainId = testnetData.chainId;
-      
-      // Skip if chainId is not valid (reusing same validation logic)
-      if (testnetChainId === undefined || testnetChainId === null || Number.isNaN(Number(testnetChainId))) {
-        return;
-      }
-      
-      // Check if it's a testnet
-      if ((testnetData.slip44 === 1 || testnetData.isTestnet === true) && testnetData.tvl !== undefined) {
-        // Find mainnet with same tvl but isTestnet: false
-        const mainnetData = chainlist.find(chain => {
-          return chain.tvl === testnetData.tvl &&
-                 chain.isTestnet === false &&
-                 chain.chainId !== testnetChainId;
-        });
-        
-        if (mainnetData && indexed.byChainId[testnetChainId]) {
-          const mainnetChainId = mainnetData.chainId;
-          
-          // Add testnetOf relation
-          const relation = {
-            kind: 'testnetOf',
-            network: mainnetData.name,
-            chainId: Number(mainnetChainId),
-            source: 'chainlist'
-          };
-          
-          // Check if relation doesn't already exist
-          const existingRelation = indexed.byChainId[testnetChainId].relations.find(
-            r => r.kind === 'testnetOf' && r.chainId === Number(mainnetChainId)
-          );
-          
-          if (!existingRelation) {
-            indexed.byChainId[testnetChainId].relations.push(relation);
-          }
-        }
-      }
-    });
-    
-    // Third pass: Extract bridge URLs from parent.bridges in chainlist
+    // Second pass: Extract bridge URLs from parent.bridges in chainlist
     chainlist.forEach(chainData => {
       const chainId = chainData.chainId;
       
