@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blockchain Networks Relationships</title>
+
+    <!-- 3D Force Graph Library -->
+    <script src="https://unpkg.com/3d-force-graph"></script>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <!-- Main UI Overlay -->
+    <div id="ui-container">
+        <!-- Header & Search -->
+        <header class="glass-panel">
+            <h1>Blockchain Networks Relationships</h1>
+            <div class="search-box">
+                <input type="text" id="searchInput" placeholder="Search Chain ID or Name..." autocomplete="off">
+                <button id="searchBtn">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                </button>
+                <div id="searchDropdown" class="search-dropdown hidden"></div>
+            </div>
+
+            <!-- Filters -->
+            <div class="filters">
+                <button class="filter-btn active" data-filter="all">All Chains</button>
+                <button class="filter-btn" data-filter="Mainnet">Mainnets</button>
+                <button class="filter-btn" data-filter="Testnet">Testnets</button>
+                <button class="filter-btn" data-filter="L2">L2 Networks</button>
+                <button class="filter-btn" data-filter="Beacon">Beacons</button>
+            </div>
+        </header>
+
+        <!-- Selected Node Details Panel -->
+        <aside id="detailsPanel" class="glass-panel hidden">
+            <button id="closeDetails" class="close-btn">&times;</button>
+            <div id="chainIcon" class="chain-icon"></div>
+            <h2 id="chainName">Chain Name</h2>
+            <div class="chain-meta">
+                <span class="badge" id="chainIdBadge">ID: --</span>
+                <span class="badge tag-badge" id="chainTags">Tags: --</span>
+            </div>
+
+            <div class="details-content">
+                <div class="detail-row">
+                    <span class="label">Native Currency</span>
+                    <span class="value" id="chainCurrency">--</span>
+                </div>
+                <div class="detail-row">
+                    <span class="label">Status</span>
+                    <span class="value" id="chainStatus">--</span>
+                </div>
+                <div class="detail-row" id="rowL1Parent" style="display: none;">
+                    <span class="label">L1</span>
+                    <span class="value" id="chainL1Parent">--</span>
+                </div>
+                <div class="detail-row" id="rowMainnet" style="display: none;">
+                    <span class="label">Mainnet</span>
+                    <span class="value" id="chainMainnet">--</span>
+                </div>
+                <div class="detail-row">
+                    <span class="label" id="labelL2Children">L2 / L3</span>
+                    <div class="value links-list" id="chainL2Children">--</div>
+                </div>
+                <div class="detail-row" id="rowTestnetChildren">
+                    <span class="label" id="labelTestnetChildren">Testnets</span>
+                    <div class="value links-list" id="chainTestnetChildren">--</div>
+                </div>
+                <div class="detail-row">
+                    <span class="label">RPC Endpoints</span>
+                    <div class="value links-list" id="chainRPCs">--</div>
+                </div>
+                <div class="detail-row">
+                    <span class="label">Explorers</span>
+                    <div class="value links-list" id="chainExplorers">--</div>
+                </div>
+                <div class="detail-row">
+                    <span class="label">Website</span>
+                    <span class="value" id="chainWebsite">--</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Loading state -->
+        <div id="loadingOverlay" class="glass-panel">
+            <div class="spinner"></div>
+            <p>Loading networks...</p>
+        </div>
+    </div>
+
+    <!-- The 3D Graph Container -->
+    <div id="3d-graph"></div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>
