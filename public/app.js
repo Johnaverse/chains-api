@@ -155,7 +155,7 @@ function initUI() {
 
 async function fetchData() {
     try {
-        const res = await fetch('/export.json');
+        const res = await fetch('./export.json');
         const exportData = await res.json();
 
         const chains = exportData.data.indexed.all;
