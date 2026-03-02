@@ -71,7 +71,7 @@ async function testRpcEndpoint(url) {
     try {
       const clientVersion = await jsonRpcCall(url, 'web3_clientVersion');
       result.clientVersion = clientVersion;
-    } catch (error) {
+    } catch (clientVersionError) {
       // Some RPC endpoints might not support web3_clientVersion, continue anyway
       result.clientVersion = 'unavailable';
     }
@@ -87,7 +87,7 @@ async function testRpcEndpoint(url) {
     const blockNumber = Number.parseInt(blockNumberHex, 16);
     
     if (Number.isNaN(blockNumber)) {
-      throw new Error('Failed to parse block number');
+      throw new TypeError('Failed to parse block number');
     }
     
     result.blockNumber = blockNumber;

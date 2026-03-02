@@ -35,15 +35,15 @@ function initUI() {
     const searchInput = document.getElementById('searchInput');
     const searchDropdown = document.getElementById('searchDropdown');
 
-    window.searchAndFocus = (query) => {
+    globalThis.searchAndFocus = (query) => {
         const q = String(query).toLowerCase().trim();
         if (!q) return;
 
         const node = graphData.nodes.find(n =>
             n.id.toString() === q ||
             n.name.toLowerCase() === q ||
-            (n.data.shortName && n.data.shortName.toLowerCase() === q) ||
-            (n.data.chain && n.data.chain.toLowerCase() === q) ||
+            (n.data.shortName?.toLowerCase() === q) ||
+            (n.data.chain?.toLowerCase() === q) ||
             n.name.toLowerCase().includes(q)
         );
 
@@ -75,9 +75,9 @@ function initUI() {
         const matches = graphData.nodes.filter(n =>
             n.name.toLowerCase().includes(query) ||
             n.id.toString().includes(query) ||
-            (n.data.shortName && n.data.shortName.toLowerCase().includes(query)) ||
-            (n.data.chain && n.data.chain.toLowerCase().includes(query)) ||
-            (n.data.tags && n.data.tags.some(t => t.toLowerCase().includes(query)))
+            (n.data.shortName?.toLowerCase().includes(query)) ||
+            (n.data.chain?.toLowerCase().includes(query)) ||
+            (n.data.tags?.some(t => t.toLowerCase().includes(query)))
         );
 
         // Sort matches to prioritize exact/closer matches
@@ -205,17 +205,17 @@ function processGraphData(chains, relations) {
         // Determine node type/color based on tags
         let type = 'Mainnet';
         let color = COLORS.MAINNET;
-        let val = 2; // Default size
+        let val;
 
-        if (c.tags && c.tags.includes('Beacon')) {
+        if (c.tags?.includes('Beacon')) {
             type = 'Beacon';
             color = COLORS.BEACON;
             val = 1.5;
-        } else if (c.tags && c.tags.includes('L2')) {
+        } else if (c.tags?.includes('L2')) {
             type = 'L2';
             color = COLORS.L2;
             val = 1.8;
-        } else if (c.tags && c.tags.includes('Testnet')) {
+        } else if (c.tags?.includes('Testnet')) {
             type = 'Testnet';
             color = COLORS.TESTNET;
             val = 1;
@@ -227,7 +227,7 @@ function processGraphData(chains, relations) {
         }
 
         let displayName = c.name || `Chain ${c.chainId}`;
-        if (c.tags && c.tags.includes('Testnet') && !displayName.toLowerCase().includes('testnet')) {
+        if (c.tags?.includes('Testnet') && !displayName.toLowerCase().includes('testnet')) {
             displayName += ' Testnet';
         }
 
@@ -253,11 +253,11 @@ function processGraphData(chains, relations) {
 
     // Second pass: Use relations API maps format { "parentID": { "childID": { ... } } }
     Object.keys(relations).forEach(parentIdStr => {
-        const parentId = parseInt(parentIdStr);
+        const parentId = Number.parseInt(parentIdStr);
         const childrenObj = relations[parentIdStr];
 
         Object.keys(childrenObj).forEach(childIdStr => {
-            const childId = parseInt(childIdStr);
+            const childId = Number.parseInt(childIdStr);
             const relationInfo = childrenObj[childIdStr]; // e.g. { kind: "l2Of", ... }
 
             const parentNode = nodeMap.get(parentId);
@@ -302,7 +302,7 @@ function applyFilters() {
         function addL2Tree(node) {
             if (node.l2Children) {
                 node.l2Children.forEach(child => {
-                    const isTestnet = child.data.tags && child.data.tags.includes('Testnet');
+                    const isTestnet = child.data.tags?.includes('Testnet');
                     if (!visibleNodesSet.has(child) && !isTestnet) {
                         visibleNodesSet.add(child);
                         addL2Tree(child);
@@ -418,133 +418,72 @@ function focusNode(node) {
     showNodeDetails(node);
 }
 
-function showNodeDetails(node) {
-    const panel = document.getElementById('detailsPanel');
-    const data = node.data;
-
-    // Set Icon char
-    const iconElem = document.getElementById('chainIcon');
-    iconElem.textContent = node.name ? node.name.charAt(0).toUpperCase() : '?';
-    iconElem.style.background = `linear-gradient(135deg, ${node.color}, #000)`;
-
-    document.getElementById('chainName').textContent = node.name || 'Unknown Chain';
-    document.getElementById('chainIdBadge').textContent = `ID: ${data.chainId}`;
-
-    // Tags
-    const tagsElem = document.getElementById('chainTags');
-    if (data.tags && data.tags.length > 0) {
-        tagsElem.textContent = `Tags: ${data.tags.join(', ')}`;
-        tagsElem.style.display = 'inline-block';
+function showParentRow(rowId, elemId, parentNode) {
+    const row = document.getElementById(rowId);
+    const elem = document.getElementById(elemId);
+    if (parentNode) {
+        row.style.display = 'flex';
+        const a = document.createElement('a');
+        a.href = "#";
+        a.textContent = parentNode.name;
+        a.onclick = (e) => { e.preventDefault(); searchAndFocus(parentNode.id); };
+        elem.textContent = '';
+        elem.appendChild(a);
     } else {
-        tagsElem.style.display = 'none';
+        row.style.display = 'none';
+        elem.textContent = '--';
     }
+    return { row, elem };
+}
 
-    // Currency
-    const curElem = document.getElementById('chainCurrency');
-    if (data.nativeCurrency) {
-        curElem.textContent = `${data.nativeCurrency.name} (${data.nativeCurrency.symbol})`;
+function populateChildLinks(container, children) {
+    children.forEach(child => {
+        const a = document.createElement('a');
+        a.href = "#";
+        a.textContent = child.name;
+        a.onclick = (e) => { e.preventDefault(); searchAndFocus(child.id); };
+        container.appendChild(a);
+    });
+}
+
+function showChildrenSection(containerId, labelId, children, label) {
+    const container = document.getElementById(containerId);
+    const labelElem = document.getElementById(labelId);
+    container.textContent = '';
+    if (children && children.length > 0) {
+        labelElem.textContent = `${label} (${children.length})`;
+        populateChildLinks(container, children);
     } else {
-        curElem.textContent = 'None';
+        labelElem.textContent = label;
+        container.textContent = 'None';
     }
+}
 
-    // Status
-    document.getElementById('chainStatus').textContent = data.status ?
-        data.status.charAt(0).toUpperCase() + data.status.slice(1) : 'Unknown';
-
-    // L1/Parent
-    const rowL1 = document.getElementById('rowL1Parent');
-    const l1Elem = document.getElementById('chainL1Parent');
-    if (node.l2Parent) {
-        rowL1.style.display = 'flex';
-        l1Elem.innerHTML = `<a href="#" onclick="searchAndFocus('${node.l2Parent.id}')">${node.l2Parent.name}</a>`;
-    } else {
-        rowL1.style.display = 'none';
-        l1Elem.textContent = '--';
-    }
-
-    // Mainnet
-    const rowMainnet = document.getElementById('rowMainnet');
-    const mainnetElem = document.getElementById('chainMainnet');
-    if (node.mainnetParent) {
-        rowMainnet.style.display = 'flex';
-        mainnetElem.innerHTML = `<a href="#" onclick="searchAndFocus('${node.mainnetParent.id}')">${node.mainnetParent.name}</a>`;
-    } else {
-        rowMainnet.style.display = 'none';
-        mainnetElem.textContent = '--';
-    }
-
-    // If both are missing, just show L1 as "None"
-    if (!node.l2Parent && !node.mainnetParent) {
-        rowL1.style.display = 'flex';
-        l1Elem.textContent = 'None';
-    }
-
-    // L2 / L3 Children
-    const l2Container = document.getElementById('chainL2Children');
-    const labelL2Children = document.getElementById('labelL2Children');
-    l2Container.innerHTML = '';
-    if (node.l2Children && node.l2Children.length > 0) {
-        labelL2Children.textContent = `L2 / L3 (${node.l2Children.length})`;
-        node.l2Children.forEach(child => {
-            const a = document.createElement('a');
-            a.href = "#";
-            a.textContent = child.name;
-            a.onclick = (e) => { e.preventDefault(); searchAndFocus(child.id); };
-            l2Container.appendChild(a);
-        });
-    } else {
-        labelL2Children.textContent = 'L2 / L3';
-        l2Container.textContent = 'None';
-    }
-
-    // Testnets (Children)
-    const rowTestnetChildren = document.getElementById('rowTestnetChildren');
-    const labelTestnetChildren = document.getElementById('labelTestnetChildren');
-    if (node.data.tags && node.data.tags.includes('Testnet')) {
-        rowTestnetChildren.style.display = 'none';
-    } else {
-        rowTestnetChildren.style.display = 'flex';
-        const testnetContainer = document.getElementById('chainTestnetChildren');
-        testnetContainer.innerHTML = '';
-        if (node.testnetChildren && node.testnetChildren.length > 0) {
-            labelTestnetChildren.textContent = `Testnets (${node.testnetChildren.length})`;
-            node.testnetChildren.forEach(child => {
-                const a = document.createElement('a');
-                a.href = "#";
-                a.textContent = child.name;
-                a.onclick = (e) => { e.preventDefault(); searchAndFocus(child.id); };
-                testnetContainer.appendChild(a);
-            });
-        } else {
-            labelTestnetChildren.textContent = 'Testnets';
-            testnetContainer.textContent = 'None';
-        }
-    }
-
-    // RPCs
+function showRpcEndpoints(data) {
     const rpcContainer = document.getElementById('chainRPCs');
-    rpcContainer.innerHTML = '';
-    if (data.rpc && data.rpc.length > 0) {
-        let shown = 0;
-        for (const entry of data.rpc) {
-            if (shown >= 5) break; // Show up to 5 RPCs
-            const url = typeof entry === 'string' ? entry : entry?.url;
-            if (!url || url.includes('${')) continue; // filter out template strings and missing urls
-            const a = document.createElement('a');
-            a.href = url;
-            a.target = "_blank";
-            a.textContent = url.replace('https://', '');
-            rpcContainer.appendChild(a);
-            shown++;
-        }
-        if (shown === 0) rpcContainer.textContent = 'None available';
-    } else {
+    rpcContainer.textContent = '';
+    if (!data.rpc || data.rpc.length === 0) {
         rpcContainer.textContent = 'None available';
+        return;
     }
+    let shown = 0;
+    for (const entry of data.rpc) {
+        if (shown >= 5) break;
+        const url = typeof entry === 'string' ? entry : entry?.url;
+        if (!url || url.includes('${')) continue;
+        const a = document.createElement('a');
+        a.href = url;
+        a.target = "_blank";
+        a.textContent = url.replace('https://', '');
+        rpcContainer.appendChild(a);
+        shown++;
+    }
+    if (shown === 0) rpcContainer.textContent = 'None available';
+}
 
-    // Explorers
+function showExplorers(data) {
     const expContainer = document.getElementById('chainExplorers');
-    expContainer.innerHTML = '';
+    expContainer.textContent = '';
     if (data.explorers && data.explorers.length > 0) {
         data.explorers.forEach(e => {
             const a = document.createElement('a');
@@ -556,11 +495,65 @@ function showNodeDetails(node) {
     } else {
         expContainer.textContent = 'None available';
     }
+}
 
-    // Website
+function showNodeDetails(node) {
+    const panel = document.getElementById('detailsPanel');
+    const data = node.data;
+
+    const iconElem = document.getElementById('chainIcon');
+    iconElem.textContent = node.name ? node.name.charAt(0).toUpperCase() : '?';
+    iconElem.style.background = `linear-gradient(135deg, ${node.color}, #000)`;
+
+    document.getElementById('chainName').textContent = node.name || 'Unknown Chain';
+    document.getElementById('chainIdBadge').textContent = `ID: ${data.chainId}`;
+
+    const tagsElem = document.getElementById('chainTags');
+    if (data.tags?.length > 0) {
+        tagsElem.textContent = `Tags: ${data.tags.join(', ')}`;
+        tagsElem.style.display = 'inline-block';
+    } else {
+        tagsElem.style.display = 'none';
+    }
+
+    const curElem = document.getElementById('chainCurrency');
+    curElem.textContent = data.nativeCurrency
+        ? `${data.nativeCurrency.name} (${data.nativeCurrency.symbol})`
+        : 'None';
+
+    document.getElementById('chainStatus').textContent = data.status
+        ? data.status.charAt(0).toUpperCase() + data.status.slice(1)
+        : 'Unknown';
+
+    const { row: rowL1, elem: l1Elem } = showParentRow('rowL1Parent', 'chainL1Parent', node.l2Parent);
+    showParentRow('rowMainnet', 'chainMainnet', node.mainnetParent);
+
+    if (!node.l2Parent && !node.mainnetParent) {
+        rowL1.style.display = 'flex';
+        l1Elem.textContent = 'None';
+    }
+
+    showChildrenSection('chainL2Children', 'labelL2Children', node.l2Children, 'L2 / L3');
+
+    const rowTestnetChildren = document.getElementById('rowTestnetChildren');
+    if (node.data.tags?.includes('Testnet')) {
+        rowTestnetChildren.style.display = 'none';
+    } else {
+        rowTestnetChildren.style.display = 'flex';
+        showChildrenSection('chainTestnetChildren', 'labelTestnetChildren', node.testnetChildren, 'Testnets');
+    }
+
+    showRpcEndpoints(data);
+    showExplorers(data);
+
     const webElem = document.getElementById('chainWebsite');
     if (data.infoURL) {
-        webElem.innerHTML = `<a href="${data.infoURL}" target="_blank">${new URL(data.infoURL).hostname}</a>`;
+        const a = document.createElement('a');
+        a.href = data.infoURL;
+        a.target = "_blank";
+        a.textContent = new URL(data.infoURL).hostname;
+        webElem.textContent = '';
+        webElem.appendChild(a);
     } else {
         webElem.textContent = 'None available';
     }

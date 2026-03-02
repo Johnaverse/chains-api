@@ -146,13 +146,13 @@ h1 {
 }
 
 .filter-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
-    color: white;
+    background: rgba(255, 255, 255, 0.18);
+    color: #ffffff;
 }
 
 .filter-btn.active {
-    background: rgba(255, 255, 255, 0.15);
-    color: white;
+    background: rgba(255, 255, 255, 0.22);
+    color: #ffffff;
     border-color: rgba(255, 255, 255, 0.3);
 }
 
