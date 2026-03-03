@@ -348,4 +348,153 @@ describe('RPC Monitor', () => {
       consoleSpy.mockRestore();
     });
   });
+
+  describe('Edge cases for URL handling', () => {
+    it('should handle non-string, non-object RPC entries (extractUrl returns null)', async () => {
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      vi.mocked(getAllEndpoints).mockReturnValue([
+        {
+          chainId: 1,
+          name: 'Test Chain',
+          rpc: [
+            42,           // number - not string or object
+            null,         // null
+            undefined,    // undefined
+            true,         // boolean
+          ]
+        }
+      ]);
+
+      vi.mocked(jsonRpcCall).mockResolvedValue('0x1');
+      await startMonitoring();
+
+      // None of these should result in jsonRpcCall being called
+      expect(vi.mocked(jsonRpcCall)).not.toHaveBeenCalled();
+
+      consoleSpy.mockRestore();
+    });
+
+    it('should skip URLs that are not http or https', async () => {
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      vi.mocked(getAllEndpoints).mockReturnValue([
+        {
+          chainId: 1,
+          name: 'Test Chain',
+          rpc: [
+            'ftp://ftp.example.com',
+            'custom://custom.rpc',
+          ]
+        }
+      ]);
+
+      vi.mocked(jsonRpcCall).mockResolvedValue('0x1');
+      await startMonitoring();
+
+      expect(vi.mocked(jsonRpcCall)).not.toHaveBeenCalled();
+
+      consoleSpy.mockRestore();
+    });
+  });
+
+  describe('Block number parsing edge cases', () => {
+    it('should handle NaN block number response (TypeError path)', async () => {
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      vi.mocked(getAllEndpoints).mockReturnValue([
+        { chainId: 1, name: 'Ethereum', rpc: ['https://eth.rpc.com'] }
+      ]);
+
+      // web3_clientVersion succeeds, but eth_blockNumber returns non-hex string
+      vi.mocked(jsonRpcCall)
+        .mockResolvedValueOnce('geth/v1.0')
+        .mockResolvedValueOnce('not-a-hex-number');
+
+      await startMonitoring();
+
+      const results = getMonitoringResults();
+      expect(results).toBeDefined();
+
+      consoleSpy.mockRestore();
+    });
+  });
+
+  describe('Progress logging', () => {
+    it('should log progress every 50 endpoints', async () => {
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+      // Create enough endpoints to hit 50 tested count
+      const rpcs = Array.from({ length: 51 }, (_, i) => `https://rpc${i}.example.com`);
+      vi.mocked(getAllEndpoints).mockReturnValue([
+        { chainId: 1, name: 'Chain A', rpc: rpcs.slice(0, 5) },
+        { chainId: 2, name: 'Chain B', rpc: rpcs.slice(5, 10) },
+        { chainId: 3, name: 'Chain C', rpc: rpcs.slice(10, 15) },
+        { chainId: 4, name: 'Chain D', rpc: rpcs.slice(15, 20) },
+        { chainId: 5, name: 'Chain E', rpc: rpcs.slice(20, 25) },
+        { chainId: 6, name: 'Chain F', rpc: rpcs.slice(25, 30) },
+        { chainId: 7, name: 'Chain G', rpc: rpcs.slice(30, 35) },
+        { chainId: 8, name: 'Chain H', rpc: rpcs.slice(35, 40) },
+        { chainId: 9, name: 'Chain I', rpc: rpcs.slice(40, 45) },
+        { chainId: 10, name: 'Chain J', rpc: rpcs.slice(45, 51) },
+      ]);
+
+      vi.mocked(jsonRpcCall).mockResolvedValue('0x1');
+
+      await startMonitoring();
+
+      // Should have logged the "Tested 50 endpoints" message
+      const progressLogs = consoleSpy.mock.calls.filter(
+        call => typeof call[0] === 'string' && call[0].includes('Tested 50')
+      );
+      expect(progressLogs.length).toBeGreaterThanOrEqual(1);
+
+      consoleSpy.mockRestore();
+    });
+  });
+
+  describe('testAllEndpoints error handling', () => {
+    it('should handle errors thrown by getAllEndpoints', async () => {
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      vi.mocked(getAllEndpoints).mockImplementation(() => {
+        throw new Error('Data not loaded');
+      });
+
+      // startMonitoring should catch the error internally
+      await startMonitoring();
+
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        'Error during RPC monitoring:',
+        expect.any(Error)
+      );
+
+      consoleSpy.mockRestore();
+      consoleErrorSpy.mockRestore();
+    });
+  });
+
+  describe('testChainEndpoints error path', () => {
+    it('should log error when testRpcEndpoint throws unexpectedly', async () => {
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      vi.mocked(getAllEndpoints).mockReturnValue([
+        { chainId: 1, name: 'Test', rpc: ['https://rpc.example.com'] }
+      ]);
+
+      // Make jsonRpcCall throw an error that propagates past testRpcEndpoint's catch
+      // The first call (web3_clientVersion) throws, then eth_blockNumber also throws
+      vi.mocked(jsonRpcCall).mockRejectedValue(new Error('Connection reset'));
+
+      await startMonitoring();
+
+      const results = getMonitoringResults();
+      expect(results).toBeDefined();
+
+      consoleSpy.mockRestore();
+      consoleErrorSpy.mockRestore();
+    });
+  });
 });

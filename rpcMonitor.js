@@ -72,7 +72,7 @@ async function testRpcEndpoint(url) {
       const clientVersion = await jsonRpcCall(url, 'web3_clientVersion');
       result.clientVersion = clientVersion;
     } catch (clientVersionError) {
-      // Some RPC endpoints might not support web3_clientVersion, continue anyway
+      console.debug(`web3_clientVersion not supported for ${url}: ${clientVersionError.message}`);
       result.clientVersion = 'unavailable';
     }
     

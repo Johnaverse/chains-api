@@ -139,4 +139,23 @@ describe('rpcUtil - jsonRpcCall', () => {
     const fetchOptions = vi.mocked(proxyFetch).mock.calls[0][1];
     expect(fetchOptions.signal).toBeInstanceOf(AbortSignal);
   });
+
+  it('should trigger setTimeout abort callback on actual timeout', async () => {
+    // Mock proxyFetch to never resolve (simulating a hung request)
+    vi.mocked(proxyFetch).mockImplementation(() =>
+      new Promise((_, reject) => {
+        // Listen for abort signal
+        const signal = vi.mocked(proxyFetch).mock.calls[0]?.[1]?.signal;
+        if (signal) {
+          signal.addEventListener('abort', () => {
+            reject(Object.assign(new Error('The operation was aborted'), { name: 'AbortError' }));
+          });
+        }
+      })
+    );
+
+    await expect(
+      jsonRpcCall('https://rpc.example.com', 'eth_blockNumber', { timeoutMs: 50 })
+    ).rejects.toThrow('RPC request timed out');
+  }, 5000);
 });

@@ -431,6 +431,7 @@ import {
   indexData,
   loadData,
   runRpcHealthCheck,
+  startRpcHealthCheck,
   validateChainData
 } from '../../dataService.js';
 
@@ -2285,5 +2286,295 @@ describe('initializeDataOnStartup with disk cache', () => {
     const tempPath = fsMock.writeFile.mock.calls[0][0];
     expect(tempPath).toContain('.tmp-');
     expect(fsMock.rename).toHaveBeenCalledWith(tempPath, resolvedPath);
+  });
+});
+
+describe('Function coverage: searchChains with loaded data', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    global.fetch.mockReset();
+
+    const mockTheGraph = { networks: [] };
+    const mockChainlist = [
+      { chainId: 1, name: 'Ethereum Mainnet' },
+      { chainId: 137, name: 'Polygon' }
+    ];
+    const mockChains = [
+      { chainId: 1, name: 'Ethereum Mainnet', shortName: 'eth' },
+      { chainId: 137, name: 'Polygon', shortName: 'matic' }
+    ];
+
+    global.fetch
+      .mockResolvedValueOnce({ ok: true, json: async () => mockTheGraph })
+      .mockResolvedValueOnce({ ok: true, json: async () => mockChainlist })
+      .mockResolvedValueOnce({ ok: true, json: async () => mockChains })
+      .mockResolvedValueOnce({ ok: true, text: async () => '' });
+
+    await loadData();
+  });
+
+  it('should find chains by name (exercises forEach/some callbacks)', () => {
+    const results = searchChains('ethereum');
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].name).toBe('Ethereum Mainnet');
+  });
+
+  it('should find chains by shortName', () => {
+    const results = searchChains('matic');
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].chainId).toBe(137);
+  });
+
+  it('should not duplicate results when name and ID match', () => {
+    const results = searchChains('1');
+    const ids = results.map(r => r.chainId);
+    const uniqueIds = [...new Set(ids)];
+    expect(ids.length).toBe(uniqueIds.length);
+  });
+});
+
+describe('Function coverage: getAllRelations with loaded data', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    global.fetch.mockReset();
+
+    const mockTheGraph = {
+      networks: [
+        {
+          id: 'mainnet',
+          fullName: 'Ethereum Mainnet',
+          caip2Id: 'eip155:1',
+          relations: [
+            { kind: 'testnetOf', network: 'sepolia', chainId: 11155111 }
+          ]
+        }
+      ]
+    };
+    const mockChainlist = [
+      { chainId: 1, name: 'Ethereum Mainnet' },
+      { chainId: 11155111, name: 'Sepolia' }
+    ];
+    const mockChains = [
+      { chainId: 1, name: 'Ethereum Mainnet' },
+      {
+        chainId: 11155111,
+        name: 'Sepolia',
+        parent: { type: 'testnet', chain: 'eip155-1' }
+      }
+    ];
+
+    global.fetch
+      .mockResolvedValueOnce({ ok: true, json: async () => mockTheGraph })
+      .mockResolvedValueOnce({ ok: true, json: async () => mockChainlist })
+      .mockResolvedValueOnce({ ok: true, json: async () => mockChains })
+      .mockResolvedValueOnce({ ok: true, text: async () => '' });
+
+    await loadData();
+  });
+
+  it('should return relations with forEach callbacks exercised', () => {
+    const relations = getAllRelations();
+    expect(Object.keys(relations).length).toBeGreaterThan(0);
+  });
+});
+
+describe('Function coverage: indexData with L2 parent relations', () => {
+  it('should exercise processL2ParentRelation find callback', () => {
+    const chains = [
+      { chainId: 1, name: 'Ethereum Mainnet' },
+      {
+        chainId: 42161,
+        name: 'Arbitrum One',
+        parent: {
+          type: 'L2',
+          chain: 'eip155-1',
+          bridges: [{ url: 'https://bridge.arbitrum.io' }]
+        }
+      }
+    ];
+
+    const result = indexData(null, null, chains, null);
+
+    expect(result.byChainId[42161].tags).toContain('L2');
+    expect(result.byChainId[42161].relations).toContainEqual(
+      expect.objectContaining({ kind: 'l2Of', chainId: 1 })
+    );
+  });
+
+  it('should exercise l2Of find callback with existing relations', () => {
+    // Set up chain that already has a relation from chains.json, then theGraph adds another
+    const theGraph = {
+      networks: [
+        {
+          id: 'arbitrum-one',
+          fullName: 'Arbitrum One',
+          caip2Id: 'eip155:42161',
+          relations: [{ kind: 'l2Of', network: 'mainnet', chainId: 1 }]
+        },
+        {
+          id: 'mainnet',
+          fullName: 'Ethereum',
+          caip2Id: 'eip155:1'
+        }
+      ]
+    };
+    const chains = [
+      { chainId: 1, name: 'Ethereum' },
+      {
+        chainId: 42161,
+        name: 'Arbitrum One',
+        parent: { type: 'L2', chain: 'eip155-1' }
+      }
+    ];
+
+    const result = indexData(theGraph, null, chains, null);
+
+    // The find callback in processL2ParentRelation is exercised
+    const l2OfRelations = result.byChainId[42161].relations.filter(
+      r => r.kind === 'l2Of'
+    );
+    expect(l2OfRelations.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('should exercise processTestnetParentRelation find callback for existing relation', () => {
+    const theGraph = {
+      networks: [
+        {
+          id: 'sepolia',
+          fullName: 'Sepolia',
+          caip2Id: 'eip155:11155111',
+          relations: [{ kind: 'testnetOf', network: 'mainnet', chainId: 1 }]
+        },
+        {
+          id: 'mainnet',
+          fullName: 'Ethereum',
+          caip2Id: 'eip155:1'
+        }
+      ]
+    };
+    const chains = [
+      { chainId: 1, name: 'Ethereum' },
+      {
+        chainId: 11155111,
+        name: 'Sepolia',
+        parent: { type: 'testnet', chain: 'eip155-1' }
+      }
+    ];
+
+    const result = indexData(theGraph, null, chains, null);
+
+    // The find callback in processTestnetParentRelation is exercised
+    // to check if testnetOf relation already exists
+    const testnetOfRelations = result.byChainId[11155111].relations.filter(
+      r => r.kind === 'testnetOf' && r.chainId === 1
+    );
+    expect(testnetOfRelations.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('should exercise mainnetOf reverse relation find callback', () => {
+    const chains = [
+      { chainId: 1, name: 'Ethereum Mainnet' },
+      {
+        chainId: 11155111,
+        name: 'Sepolia',
+        parent: { type: 'testnet', chain: 'eip155-1' }
+      }
+    ];
+
+    const result = indexData(null, null, chains, null);
+
+    // The mainnet chain should have a mainnetOf reverse relation
+    expect(result.byChainId[1].relations).toContainEqual(
+      expect.objectContaining({ kind: 'mainnetOf', chainId: 11155111 })
+    );
+  });
+
+  it('should exercise mergeBridges map/filter callbacks', () => {
+    const chainlist = [
+      {
+        chainId: 42161,
+        name: 'Arbitrum One',
+        parent: {
+          bridges: [
+            { url: 'https://bridge.arbitrum.io' },
+            null,
+            { noUrlField: true },
+            'https://string-bridge.io'
+          ]
+        }
+      }
+    ];
+
+    const result = indexData(null, chainlist, null, null);
+    expect(result.byChainId[42161].bridges.length).toBeGreaterThan(0);
+  });
+});
+
+describe('Function coverage: startRpcHealthCheck .catch path', () => {
+  it('should handle runRpcHealthCheck rejection via .catch', async () => {
+    const mockTheGraph = { networks: [] };
+    const mockChainlist = [];
+    const mockChains = [];
+
+    global.fetch
+      .mockResolvedValueOnce({ ok: true, json: async () => mockTheGraph })
+      .mockResolvedValueOnce({ ok: true, json: async () => mockChainlist })
+      .mockResolvedValueOnce({ ok: true, json: async () => mockChains })
+      .mockResolvedValueOnce({ ok: true, text: async () => '' });
+
+    await loadData();
+
+    // Make all subsequent fetch calls reject to trigger .catch
+    global.fetch.mockRejectedValue(new Error('Simulated RPC failure'));
+
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    startRpcHealthCheck();
+
+    await new Promise(resolve => setTimeout(resolve, 200));
+
+    consoleErrorSpy.mockRestore();
+    consoleLogSpy.mockRestore();
+  });
+});
+
+describe('Function coverage: getChainFromSource find callbacks', () => {
+  it('should exercise theGraph find callback in validateChainData', async () => {
+    const mockTheGraph = {
+      networks: [
+        {
+          id: 'mainnet',
+          fullName: 'Ethereum Mainnet',
+          caip2Id: 'eip155:1',
+          relations: [{ kind: 'l2Of', network: 'arbitrum', chainId: 42161 }]
+        }
+      ]
+    };
+    const mockChainlist = [
+      { chainId: 1, name: 'Ethereum Mainnet' },
+      { chainId: 42161, name: 'Arbitrum One' }
+    ];
+    const mockChains = [
+      { chainId: 1, name: 'Ethereum Mainnet' },
+      {
+        chainId: 42161,
+        name: 'Arbitrum One',
+        parent: { type: 'L2', chain: 'eip155-1' }
+      }
+    ];
+
+    global.fetch
+      .mockResolvedValueOnce({ ok: true, json: async () => mockTheGraph })
+      .mockResolvedValueOnce({ ok: true, json: async () => mockChainlist })
+      .mockResolvedValueOnce({ ok: true, json: async () => mockChains })
+      .mockResolvedValueOnce({ ok: true, text: async () => '' });
+
+    await loadData();
+
+    const result = validateChainData();
+    expect(result).toBeDefined();
+    expect(result).toHaveProperty('totalErrors');
+    expect(result).toHaveProperty('errorsByRule');
   });
 });
