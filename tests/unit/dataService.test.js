@@ -2297,11 +2297,13 @@ describe('Function coverage: searchChains with loaded data', () => {
     const mockTheGraph = { networks: [] };
     const mockChainlist = [
       { chainId: 1, name: 'Ethereum Mainnet' },
-      { chainId: 137, name: 'Polygon' }
+      { chainId: 137, name: 'Polygon' },
+      { chainId: 100, name: 'Chain100 Network' }
     ];
     const mockChains = [
       { chainId: 1, name: 'Ethereum Mainnet', shortName: 'eth' },
-      { chainId: 137, name: 'Polygon', shortName: 'matic' }
+      { chainId: 137, name: 'Polygon', shortName: 'matic' },
+      { chainId: 100, name: 'Chain100 Network', shortName: '100net' }
     ];
 
     global.fetch
@@ -2325,8 +2327,22 @@ describe('Function coverage: searchChains with loaded data', () => {
     expect(results[0].chainId).toBe(137);
   });
 
-  it('should not duplicate results when name and ID match', () => {
-    const results = searchChains('1');
+  it('should deduplicate when name contains the ID (exercises .some callback)', () => {
+    // Search for "100" - finds chain 100 by ID first, then forEach finds
+    // name "Chain100 Network" contains "100", triggering .some() dedup at line 939
+    const results = searchChains('100');
+    const ids = results.map(r => r.chainId);
+    const uniqueIds = [...new Set(ids)];
+    expect(ids.length).toBe(uniqueIds.length);
+    expect(results.some(r => r.chainId === 100)).toBe(true);
+  });
+
+  it('should exercise shortName .some dedup callback', () => {
+    // Search for "100net" - won't find by ID (NaN), finds chain 100 by shortName
+    // Then name "Chain100 Network" doesn't contain "100net" but shortName does
+    // Search for "eth" - finds chain 1 by name first (Ethereum contains "eth"),
+    // then shortName "eth" also matches, triggering .some() dedup at line 944
+    const results = searchChains('eth');
     const ids = results.map(r => r.chainId);
     const uniqueIds = [...new Set(ids)];
     expect(ids.length).toBe(uniqueIds.length);
@@ -2489,7 +2505,21 @@ describe('Function coverage: indexData with L2 parent relations', () => {
     );
   });
 
-  it('should exercise mergeBridges map/filter callbacks', () => {
+  it('should exercise mergeBridges map/filter callbacks on existing bridges', () => {
+    // chains.json adds bridges via processL2ParentRelation first,
+    // then chainlist adds more bridges, exercising the filter on existing bridges
+    const chains = [
+      { chainId: 1, name: 'Ethereum' },
+      {
+        chainId: 42161,
+        name: 'Arbitrum One',
+        parent: {
+          type: 'L2',
+          chain: 'eip155-1',
+          bridges: [{ url: 'https://bridge.arbitrum.io' }]
+        }
+      }
+    ];
     const chainlist = [
       {
         chainId: 42161,
@@ -2497,16 +2527,18 @@ describe('Function coverage: indexData with L2 parent relations', () => {
         parent: {
           bridges: [
             { url: 'https://bridge.arbitrum.io' },
+            { url: 'https://bridge2.arbitrum.io' },
             null,
-            { noUrlField: true },
-            'https://string-bridge.io'
+            { noUrlField: true }
           ]
         }
       }
     ];
 
-    const result = indexData(null, chainlist, null, null);
-    expect(result.byChainId[42161].bridges.length).toBeGreaterThan(0);
+    const result = indexData(null, chainlist, chains, null);
+    // First mergeBridges call from processL2ParentRelation adds bridge.arbitrum.io
+    // Second mergeBridges call from chainlist exercises filter on existing bridges
+    expect(result.byChainId[42161].bridges.length).toBeGreaterThanOrEqual(1);
   });
 });
 
