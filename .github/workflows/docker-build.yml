@@ -19,6 +19,8 @@ jobs:
   test-and-analyze:
     name: Test and analyze
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout repository
