@@ -1289,6 +1289,24 @@ export function getRelationsById(chainId) {
  * @param {number} maxDepth - Maximum traversal depth (default: 2)
  * @returns {Object|null} Traversal result with nodes and edges, or null if chain not found
  */
+function collectRelationEdges(chain, chainId, depth, visited, edges, queue) {
+  const relations = chain.relations || [];
+  for (const rel of relations) {
+    if (rel.chainId === undefined) continue;
+
+    edges.push({
+      from: chainId,
+      to: rel.chainId,
+      kind: rel.kind,
+      source: rel.source
+    });
+
+    if (!visited.has(rel.chainId)) {
+      queue.push({ chainId: rel.chainId, depth: depth + 1 });
+    }
+  }
+}
+
 export function traverseRelations(startChainId, maxDepth = 2) {
   if (!cachedData.indexed) return null;
 
@@ -1315,22 +1333,8 @@ export function traverseRelations(startChainId, maxDepth = 2) {
       depth
     });
 
-    if (depth >= maxDepth) continue;
-
-    const relations = chain.relations || [];
-    for (const rel of relations) {
-      if (rel.chainId === undefined) continue;
-
-      edges.push({
-        from: chainId,
-        to: rel.chainId,
-        kind: rel.kind,
-        source: rel.source
-      });
-
-      if (!visited.has(rel.chainId)) {
-        queue.push({ chainId: rel.chainId, depth: depth + 1 });
-      }
+    if (depth < maxDepth) {
+      collectRelationEdges(chain, chainId, depth, visited, edges, queue);
     }
   }
 

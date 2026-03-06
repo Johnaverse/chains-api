@@ -167,12 +167,12 @@ h1 {
 }
 
 .filter-btn:hover {
-    background: rgba(255, 255, 255, 0.08);
+    background: #1a1a1c;
     color: #ffffff;
 }
 
 .filter-btn.active {
-    background: rgba(255, 255, 255, 0.1);
+    background: #1f1f21;
     color: #ffffff;
     border-color: rgba(255, 255, 255, 0.2);
 }
@@ -283,7 +283,7 @@ h1 {
 
 .close-btn:hover {
     color: white;
-    background: rgba(255, 255, 255, 0.08);
+    background: #1a1a1c;
 }
 
 .details-header {
@@ -338,8 +338,8 @@ h1 {
 }
 
 .badge.status-deprecated {
-    background: rgba(239, 68, 68, 0.15);
-    color: #ef4444;
+    background: #290f11;
+    color: #f87171;
 }
 
 .badge.status-incubating {

@@ -189,7 +189,7 @@ export async function buildApp(options = {}) {
       return sendError(reply, 400, 'Invalid chain ID');
     }
 
-    const depth = request.query.depth !== undefined ? parseIntParam(request.query.depth) : 2;
+    const depth = request.query.depth === undefined ? 2 : parseIntParam(request.query.depth);
     if (depth === null || depth < 1 || depth > 5) {
       return sendError(reply, 400, 'Invalid depth. Must be between 1 and 5');
     }
