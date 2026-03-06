@@ -223,9 +223,12 @@ function initUI() {
     }
 
     // Close Details Panel
-    document.getElementById('closeDetails').addEventListener('click', () => {
-        document.getElementById('detailsPanel').classList.add('hidden');
-    });
+    const closeBtn = document.getElementById('closeDetails');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            document.getElementById('detailsPanel')?.classList.add('hidden');
+        });
+    }
 }
 
 async function fetchData() {
@@ -496,6 +499,7 @@ function focusNode(node) {
 function showParentRow(rowId, elemId, parentNode) {
     const row = document.getElementById(rowId);
     const elem = document.getElementById(elemId);
+    if (!row || !elem) return { row, elem };
     if (parentNode) {
         row.style.display = 'flex';
         const a = document.createElement('a');
@@ -524,6 +528,7 @@ function populateChildLinks(container, children) {
 function showChildrenSection(containerId, labelId, children, label) {
     const container = document.getElementById(containerId);
     const labelElem = document.getElementById(labelId);
+    if (!container || !labelElem) return;
     container.textContent = '';
     if (children && children.length > 0) {
         labelElem.textContent = `${label} (${children.length})`;
@@ -536,6 +541,7 @@ function showChildrenSection(containerId, labelId, children, label) {
 
 function showRpcEndpoints(data) {
     const rpcContainer = document.getElementById('chainRPCs');
+    if (!rpcContainer) return;
     rpcContainer.textContent = '';
     if (!data.rpc || data.rpc.length === 0) {
         rpcContainer.textContent = 'None available';
@@ -559,6 +565,7 @@ function showRpcEndpoints(data) {
 
 function showExplorers(data) {
     const expContainer = document.getElementById('chainExplorers');
+    if (!expContainer) return;
     expContainer.textContent = '';
     if (data.explorers && data.explorers.length > 0) {
         for (const e of data.explorers) {
@@ -585,42 +592,53 @@ function getStatusClass(status) {
 
 function showNodeDetails(node) {
     const panel = document.getElementById('detailsPanel');
+    if (!panel) return;
     const data = node.data;
 
     const iconElem = document.getElementById('chainIcon');
-    iconElem.textContent = node.name ? node.name.charAt(0).toUpperCase() : '?';
-    iconElem.style.background = `linear-gradient(135deg, ${node.color}, ${node.color}33)`;
+    if (iconElem) {
+        iconElem.textContent = node.name ? node.name.charAt(0).toUpperCase() : '?';
+        iconElem.style.background = `linear-gradient(135deg, ${node.color}, ${node.color}33)`;
+    }
 
-    document.getElementById('chainName').textContent = node.name || 'Unknown Chain';
-    document.getElementById('chainIdBadge').textContent = `ID: ${data.chainId}`;
+    const nameElem = document.getElementById('chainName');
+    if (nameElem) nameElem.textContent = node.name || 'Unknown Chain';
+    const idBadge = document.getElementById('chainIdBadge');
+    if (idBadge) idBadge.textContent = `ID: ${data.chainId}`;
 
     // Status badge
     const statusBadge = document.getElementById('chainStatusBadge');
-    if (data.status) {
-        statusBadge.textContent = data.status.charAt(0).toUpperCase() + data.status.slice(1);
-        statusBadge.className = `badge tag-badge ${getStatusClass(data.status)}`;
-        statusBadge.style.display = 'inline-block';
-    } else {
-        statusBadge.style.display = 'none';
+    if (statusBadge) {
+        if (data.status) {
+            statusBadge.textContent = data.status.charAt(0).toUpperCase() + data.status.slice(1);
+            statusBadge.className = `badge tag-badge ${getStatusClass(data.status)}`;
+            statusBadge.style.display = 'inline-block';
+        } else {
+            statusBadge.style.display = 'none';
+        }
     }
 
     const tagsElem = document.getElementById('chainTags');
-    if (data.tags?.length > 0) {
-        tagsElem.textContent = data.tags.join(', ');
-        tagsElem.style.display = 'inline-block';
-    } else {
-        tagsElem.style.display = 'none';
+    if (tagsElem) {
+        if (data.tags?.length > 0) {
+            tagsElem.textContent = data.tags.join(', ');
+            tagsElem.style.display = 'inline-block';
+        } else {
+            tagsElem.style.display = 'none';
+        }
     }
 
     const curElem = document.getElementById('chainCurrency');
-    curElem.textContent = data.nativeCurrency
-        ? `${data.nativeCurrency.name} (${data.nativeCurrency.symbol})`
-        : 'None';
+    if (curElem) {
+        curElem.textContent = data.nativeCurrency
+            ? `${data.nativeCurrency.name} (${data.nativeCurrency.symbol})`
+            : 'None';
+    }
 
     const { row: rowL1, elem: l1Elem } = showParentRow('rowL1Parent', 'chainL1Parent', node.l2Parent);
     showParentRow('rowMainnet', 'chainMainnet', node.mainnetParent);
 
-    if (!node.l2Parent && !node.mainnetParent) {
+    if (!node.l2Parent && !node.mainnetParent && rowL1 && l1Elem) {
         rowL1.style.display = 'flex';
         l1Elem.textContent = 'None';
     }
@@ -628,31 +646,35 @@ function showNodeDetails(node) {
     showChildrenSection('chainL2Children', 'labelL2Children', node.l2Children, 'L2 / L3');
 
     const rowTestnetChildren = document.getElementById('rowTestnetChildren');
-    if (node.data.tags?.includes('Testnet')) {
-        rowTestnetChildren.style.display = 'none';
-    } else {
-        rowTestnetChildren.style.display = 'flex';
-        showChildrenSection('chainTestnetChildren', 'labelTestnetChildren', node.testnetChildren, 'Testnets');
+    if (rowTestnetChildren) {
+        if (node.data.tags?.includes('Testnet')) {
+            rowTestnetChildren.style.display = 'none';
+        } else {
+            rowTestnetChildren.style.display = 'flex';
+            showChildrenSection('chainTestnetChildren', 'labelTestnetChildren', node.testnetChildren, 'Testnets');
+        }
     }
 
     showRpcEndpoints(data);
     showExplorers(data);
 
     const webElem = document.getElementById('chainWebsite');
-    if (data.infoURL) {
-        try {
-            const a = document.createElement('a');
-            a.href = data.infoURL;
-            a.target = "_blank";
-            a.rel = "noopener";
-            a.textContent = new URL(data.infoURL).hostname;
-            webElem.textContent = '';
-            webElem.appendChild(a);
-        } catch {
-            webElem.textContent = data.infoURL;
+    if (webElem) {
+        if (data.infoURL) {
+            try {
+                const a = document.createElement('a');
+                a.href = data.infoURL;
+                a.target = "_blank";
+                a.rel = "noopener";
+                a.textContent = new URL(data.infoURL).hostname;
+                webElem.textContent = '';
+                webElem.appendChild(a);
+            } catch {
+                webElem.textContent = data.infoURL;
+            }
+        } else {
+            webElem.textContent = 'None available';
         }
-    } else {
-        webElem.textContent = 'None available';
     }
 
     panel.classList.remove('hidden');
