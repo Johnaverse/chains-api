@@ -1039,10 +1039,22 @@ export function getAllChains() {
  */
 export function countChainsByTag(chains) {
   const totalChains = chains.length;
-  const totalTestnets = chains.filter(c => c.tags?.includes('Testnet')).length;
-  const totalL2s = chains.filter(c => c.tags?.includes('L2')).length;
-  const totalBeacons = chains.filter(c => c.tags?.includes('Beacon')).length;
-  const totalMainnets = chains.filter(c => !c.tags?.includes('Testnet') && !c.tags?.includes('L2') && !c.tags?.includes('Beacon')).length;
+  let totalTestnets = 0;
+  let totalL2s = 0;
+  let totalBeacons = 0;
+  let totalMainnets = 0;
+
+  for (const chain of chains) {
+    const tags = chain.tags || [];
+    const isTestnet = tags.includes('Testnet');
+    const isL2 = tags.includes('L2');
+    const isBeacon = tags.includes('Beacon');
+
+    if (isTestnet) totalTestnets += 1;
+    if (isL2) totalL2s += 1;
+    if (isBeacon) totalBeacons += 1;
+    if (!isTestnet && !isL2 && !isBeacon) totalMainnets += 1;
+  }
 
   return { totalChains, totalMainnets, totalTestnets, totalL2s, totalBeacons };
 }

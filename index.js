@@ -52,10 +52,10 @@ export async function buildApp(options = {}) {
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "https://unpkg.com"],
-        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-        fontSrc: ["'self'", "https://fonts.gstatic.com"],
-        connectSrc: ["'self'", "https://raw.githubusercontent.com"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'"],
+        fontSrc: ["'self'"],
+        connectSrc: ["'self'"],
         imgSrc: ["'self'", "data:"]
       }
     }

@@ -233,13 +233,13 @@ function initUI() {
 
 async function fetchData() {
     try {
-        // Try local API first (/export), fall back to GitHub raw
+        // Try local API first (/export), fall back to bundled export.json
         let res;
         try {
             res = await fetch('/export');
             if (!res.ok) throw new Error('Local export unavailable');
         } catch {
-            res = await fetch('https://raw.githubusercontent.com/Johnaverse/chains-api/refs/heads/main/public/export.json');
+            res = await fetch('export.json');
         }
         const exportData = await res.json();
 
