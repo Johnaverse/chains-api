@@ -1,5 +1,5 @@
 import { getAllEndpoints } from './dataService.js';
-import { MAX_ENDPOINTS_PER_CHAIN } from './config.js';
+import { MAX_ENDPOINTS_PER_CHAIN, RPC_CHECK_CONCURRENCY } from './config.js';
 import { jsonRpcCall } from './rpcUtil.js';
 
 // Store monitoring results in memory
@@ -8,6 +8,7 @@ let monitoringResults = {
   totalEndpoints: 0,
   testedEndpoints: 0,
   workingEndpoints: 0,
+  failedEndpoints: 0,
   results: []
 };
 
@@ -62,10 +63,13 @@ async function testRpcEndpoint(url) {
     status: 'unknown',
     clientVersion: null,
     blockNumber: null,
+    latencyMs: null,
     error: null,
     testedAt: new Date().toISOString()
   };
-  
+
+  const start = Date.now();
+
   try {
     // Get client version
     try {
@@ -75,52 +79,53 @@ async function testRpcEndpoint(url) {
       console.debug(`web3_clientVersion not supported for ${url}: ${clientVersionError.message}`);
       result.clientVersion = 'unavailable';
     }
-    
+
     // Get latest block number
     const blockNumberHex = await jsonRpcCall(url, 'eth_blockNumber');
-    
+
     // Convert hex to decimal with validation
     if (!blockNumberHex || typeof blockNumberHex !== 'string') {
       throw new Error('Invalid block number response');
     }
-    
+
     const blockNumber = Number.parseInt(blockNumberHex, 16);
-    
+
     if (Number.isNaN(blockNumber)) {
       throw new TypeError('Failed to parse block number');
     }
-    
+
     result.blockNumber = blockNumber;
-    
+    result.latencyMs = Date.now() - start;
     result.status = 'working';
   } catch (error) {
+    result.latencyMs = Date.now() - start;
     result.status = 'failed';
     result.error = error.message;
   }
-  
+
   return result;
 }
 
 /**
- * Record a working endpoint result and update counters
- * Returns true if the endpoint failed (to signal chain should stop testing)
+ * Record an endpoint result (working or failed) and update counters
  */
 function recordEndpointResult(testResult, chainId, name, counters) {
   if (testResult.status === 'working') {
     counters.working++;
-    monitoringResults.results.push({ chainId, chainName: name, ...testResult });
+  } else {
+    counters.failed++;
   }
 
+  monitoringResults.results.push({ chainId, chainName: name, ...testResult });
   monitoringResults.lastUpdated = new Date().toISOString();
   monitoringResults.totalEndpoints = counters.total;
   monitoringResults.testedEndpoints = counters.tested;
   monitoringResults.workingEndpoints = counters.working;
+  monitoringResults.failedEndpoints = counters.failed;
 
   if (counters.tested % 50 === 0) {
-    console.log(`Tested ${counters.tested} endpoints, ${counters.working} working...`);
+    console.log(`Tested ${counters.tested} endpoints, ${counters.working} working, ${counters.failed} failed...`);
   }
-
-  return testResult.status === 'failed';
 }
 
 /**
@@ -132,13 +137,12 @@ async function testChainEndpoints(chainEndpoints, counters) {
   if (!rpc || rpc.length === 0) return;
 
   let chainTestedCount = 0;
-  let foundFailedEndpoint = false;
 
   for (const rpcEndpoint of rpc) {
     const url = extractUrl(rpcEndpoint);
     counters.total++;
 
-    if (!isValidUrl(url) || chainTestedCount >= MAX_ENDPOINTS_PER_CHAIN || foundFailedEndpoint) {
+    if (!isValidUrl(url) || chainTestedCount >= MAX_ENDPOINTS_PER_CHAIN) {
       continue;
     }
 
@@ -147,7 +151,7 @@ async function testChainEndpoints(chainEndpoints, counters) {
 
     try {
       const testResult = await testRpcEndpoint(url);
-      foundFailedEndpoint = recordEndpointResult(testResult, chainId, name, counters);
+      recordEndpointResult(testResult, chainId, name, counters);
     } catch (error) {
       console.error(`Error testing ${url}:`, error.message);
     }
@@ -155,27 +159,32 @@ async function testChainEndpoints(chainEndpoints, counters) {
 }
 
 /**
- * Test all RPC endpoints for all chains
+ * Test all RPC endpoints for all chains with concurrency
  */
 async function testAllEndpoints() {
-  console.log('Starting RPC endpoint monitoring...');
+  console.log(`Starting RPC endpoint monitoring (concurrency: ${RPC_CHECK_CONCURRENCY})...`);
 
   const allEndpoints = getAllEndpoints();
-  const counters = { total: 0, tested: 0, working: 0 };
+  const counters = { total: 0, tested: 0, working: 0, failed: 0 };
 
   monitoringResults = {
     lastUpdated: new Date().toISOString(),
     totalEndpoints: 0,
     testedEndpoints: 0,
     workingEndpoints: 0,
+    failedEndpoints: 0,
     results: []
   };
 
-  for (const chainEndpoints of allEndpoints) {
-    await testChainEndpoints(chainEndpoints, counters);
+  // Process chains concurrently in batches
+  for (let i = 0; i < allEndpoints.length; i += RPC_CHECK_CONCURRENCY) {
+    const batch = allEndpoints.slice(i, i + RPC_CHECK_CONCURRENCY);
+    await Promise.allSettled(
+      batch.map(chainEndpoints => testChainEndpoints(chainEndpoints, counters))
+    );
   }
 
-  console.log(`RPC monitoring completed. Tested ${counters.tested}/${counters.total} endpoints, ${counters.working} working.`);
+  console.log(`RPC monitoring completed. Tested ${counters.tested}/${counters.total} endpoints, ${counters.working} working, ${counters.failed} failed.`);
 
   return monitoringResults;
 }

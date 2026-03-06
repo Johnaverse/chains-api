@@ -9,6 +9,7 @@ import {
   getAllEndpoints,
   getAllKeywords,
   validateChainData,
+  traverseRelations,
 } from './dataService.js';
 import { getMonitoringResults, getMonitoringStatus } from './rpcMonitor.js';
 
@@ -129,6 +130,32 @@ export function getToolDefinitions() {
       inputSchema: {
         type: 'object',
         properties: {},
+      },
+    },
+    {
+      name: 'get_stats',
+      description: 'Get aggregate statistics: total chains, mainnets, testnets, L2s, beacons, and RPC health percentage',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+      },
+    },
+    {
+      name: 'traverse_relations',
+      description: 'BFS graph traversal of chain relations from a starting chain. Returns all reachable chains (nodes) and their relationship edges up to a given depth.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          chainId: {
+            type: 'number',
+            description: 'The chain ID to start traversal from (e.g., 1 for Ethereum)',
+          },
+          depth: {
+            type: 'number',
+            description: 'Maximum traversal depth (1-5, default: 2)',
+          },
+        },
+        required: ['chainId'],
       },
     },
     {
@@ -287,6 +314,56 @@ function handleValidateChains() {
   return textResponse(validationResults);
 }
 
+function handleGetStats() {
+  const chains = getAllChains();
+  const monitorResults = getMonitoringResults();
+
+  const totalChains = chains.length;
+  const totalMainnets = chains.filter(c => !c.tags?.includes('Testnet') && !c.tags?.includes('L2') && !c.tags?.includes('Beacon')).length;
+  const totalTestnets = chains.filter(c => c.tags?.includes('Testnet')).length;
+  const totalL2s = chains.filter(c => c.tags?.includes('L2')).length;
+  const totalBeacons = chains.filter(c => c.tags?.includes('Beacon')).length;
+
+  const rpcTested = monitorResults.testedEndpoints;
+  const rpcWorking = monitorResults.workingEndpoints;
+  const rpcFailed = monitorResults.failedEndpoints || 0;
+  const rpcHealthPercent = rpcTested > 0 ? Math.round((rpcWorking / rpcTested) * 10000) / 100 : null;
+
+  return textResponse({
+    totalChains,
+    totalMainnets,
+    totalTestnets,
+    totalL2s,
+    totalBeacons,
+    rpc: {
+      totalEndpoints: monitorResults.totalEndpoints,
+      tested: rpcTested,
+      working: rpcWorking,
+      failed: rpcFailed,
+      healthPercent: rpcHealthPercent,
+    },
+    lastUpdated: monitorResults.lastUpdated,
+  });
+}
+
+function handleTraverseRelations(args) {
+  const { chainId, depth } = args;
+  if (!isValidChainId(chainId)) {
+    return errorResponse('Invalid chain ID');
+  }
+
+  const maxDepth = depth !== undefined ? depth : 2;
+  if (typeof maxDepth !== 'number' || maxDepth < 1 || maxDepth > 5) {
+    return errorResponse('Invalid depth. Must be between 1 and 5');
+  }
+
+  const result = traverseRelations(chainId, maxDepth);
+  if (!result) {
+    return errorResponse('Chain not found');
+  }
+  return textResponse(result);
+}
+
 function getStatusLabel(status, results) {
   if (status.isMonitoring) return 'Running';
   if (results.testedEndpoints > 0) return 'Completed';
@@ -304,6 +381,7 @@ function formatRpcMonitorStatus(status, results) {
     `- Total endpoints discovered: ${results.totalEndpoints}`,
     `- Endpoints tested: ${results.testedEndpoints}`,
     `- Working endpoints: ${results.workingEndpoints}`,
+    `- Failed endpoints: ${results.failedEndpoints ?? 0}`,
     '- Use `get_rpc_monitor_by_id` for per-chain endpoint details.',
   ];
 
@@ -355,9 +433,10 @@ function handleGetRpcMonitorById(args) {
   ];
   for (const ep of chainResults) {
     const block = ep.blockNumber == null ? '' : ` — block #${ep.blockNumber}`;
+    const latency = ep.latencyMs != null ? ` [${ep.latencyMs}ms]` : '';
     const client = ep.clientVersion && ep.clientVersion !== 'unavailable' ? ` (${ep.clientVersion})` : '';
     lines.push(
-      `- **${ep.status}** ${ep.url}${block}${client}`,
+      `- **${ep.status}** ${ep.url}${block}${latency}${client}`,
       ...(ep.error ? [`  - Error: ${ep.error}`] : [])
     );
   }
@@ -376,6 +455,8 @@ const toolHandlers = {
   get_sources: handleGetSources,
   get_keywords: handleGetKeywords,
   validate_chains: handleValidateChains,
+  get_stats: handleGetStats,
+  traverse_relations: handleTraverseRelations,
   get_rpc_monitor: handleGetRpcMonitor,
   get_rpc_monitor_by_id: handleGetRpcMonitorById,
 };

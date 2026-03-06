@@ -432,7 +432,8 @@ import {
   loadData,
   runRpcHealthCheck,
   startRpcHealthCheck,
-  validateChainData
+  validateChainData,
+  traverseRelations
 } from '../../dataService.js';
 
 describe('fetchData', () => {
@@ -2608,5 +2609,137 @@ describe('Function coverage: getChainFromSource find callbacks', () => {
     expect(result).toBeDefined();
     expect(result).toHaveProperty('totalErrors');
     expect(result).toHaveProperty('errorsByRule');
+  });
+});
+
+describe('traverseRelations', () => {
+  it('should return null for non-existent chain', () => {
+    // cachedData.indexed may or may not be populated from prior tests;
+    // either way, a non-existent chainId should return null
+    const result = traverseRelations(999999999);
+    expect(result).toBeNull();
+  });
+
+  it('should return null for non-existent chain after data loaded', async () => {
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ networks: [] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => [] })
+      .mockResolvedValueOnce({ ok: true, json: async () => [{ chainId: 1, name: 'Ethereum', rpc: [] }] })
+      .mockResolvedValueOnce({ ok: true, text: async () => '' });
+
+    await loadData();
+    const result = traverseRelations(999999);
+    expect(result).toBeNull();
+  });
+
+  it('should return single node for chain with no relations', async () => {
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ networks: [] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => [] })
+      .mockResolvedValueOnce({ ok: true, json: async () => [{ chainId: 1, name: 'Ethereum', rpc: [] }] })
+      .mockResolvedValueOnce({ ok: true, text: async () => '' });
+
+    await loadData();
+    const result = traverseRelations(1);
+    expect(result).not.toBeNull();
+    expect(result.startChainId).toBe(1);
+    expect(result.startChainName).toBe('Ethereum');
+    expect(result.totalNodes).toBe(1);
+    expect(result.totalEdges).toBe(0);
+    expect(result.nodes[0].depth).toBe(0);
+  });
+
+  it('should traverse relations to connected chains', async () => {
+    const chains = [
+      { chainId: 1, name: 'Ethereum', rpc: [] },
+      { chainId: 5, name: 'Goerli', rpc: [], parent: { type: 'testnet', chain: 'eip155-1' } },
+      { chainId: 10, name: 'Optimism', rpc: [], parent: { type: 'L2', chain: 'eip155-1' } },
+    ];
+
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ networks: [] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => [] })
+      .mockResolvedValueOnce({ ok: true, json: async () => chains })
+      .mockResolvedValueOnce({ ok: true, text: async () => '' });
+
+    await loadData();
+
+    // From Ethereum, should find Goerli and Optimism via reverse relations
+    const result = traverseRelations(1, 2);
+    expect(result).not.toBeNull();
+    expect(result.totalNodes).toBeGreaterThanOrEqual(2);
+    expect(result.totalEdges).toBeGreaterThanOrEqual(1);
+
+    const chainIds = result.nodes.map(n => n.chainId);
+    expect(chainIds).toContain(1);
+  });
+
+  it('should respect maxDepth parameter', async () => {
+    const chains = [
+      { chainId: 1, name: 'Ethereum', rpc: [] },
+      { chainId: 5, name: 'Goerli', rpc: [], parent: { type: 'testnet', chain: 'eip155-1' } },
+    ];
+
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ networks: [] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => [] })
+      .mockResolvedValueOnce({ ok: true, json: async () => chains })
+      .mockResolvedValueOnce({ ok: true, text: async () => '' });
+
+    await loadData();
+
+    const depth1 = traverseRelations(1, 1);
+    const depth3 = traverseRelations(1, 3);
+
+    // Deeper traversal should find at least as many nodes
+    expect(depth3.totalNodes).toBeGreaterThanOrEqual(depth1.totalNodes);
+  });
+
+  it('should include depth in node objects', async () => {
+    const chains = [
+      { chainId: 1, name: 'Ethereum', rpc: [] },
+      { chainId: 5, name: 'Goerli', rpc: [], parent: { type: 'testnet', chain: 'eip155-1' } },
+    ];
+
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ networks: [] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => [] })
+      .mockResolvedValueOnce({ ok: true, json: async () => chains })
+      .mockResolvedValueOnce({ ok: true, text: async () => '' });
+
+    await loadData();
+
+    const result = traverseRelations(1, 2);
+    const startNode = result.nodes.find(n => n.chainId === 1);
+    expect(startNode.depth).toBe(0);
+
+    // Any connected nodes should be depth >= 1
+    const otherNodes = result.nodes.filter(n => n.chainId !== 1);
+    for (const node of otherNodes) {
+      expect(node.depth).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it('should include edge kind and source', async () => {
+    const chains = [
+      { chainId: 1, name: 'Ethereum', rpc: [] },
+      { chainId: 10, name: 'Optimism', rpc: [], parent: { type: 'L2', chain: 'eip155-1' } },
+    ];
+
+    global.fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ networks: [] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => [] })
+      .mockResolvedValueOnce({ ok: true, json: async () => chains })
+      .mockResolvedValueOnce({ ok: true, text: async () => '' });
+
+    await loadData();
+
+    const result = traverseRelations(1, 2);
+    for (const edge of result.edges) {
+      expect(edge).toHaveProperty('from');
+      expect(edge).toHaveProperty('to');
+      expect(edge).toHaveProperty('kind');
+      expect(edge).toHaveProperty('source');
+    }
   });
 });

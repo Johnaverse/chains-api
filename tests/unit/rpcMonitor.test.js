@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // Mock config before importing rpcMonitor
 vi.mock('../../config.js', () => ({
   MAX_ENDPOINTS_PER_CHAIN: 5,
+  RPC_CHECK_CONCURRENCY: 5,
   PROXY_URL: '',
   PROXY_ENABLED: false
 }));
@@ -121,14 +122,15 @@ describe('RPC Monitor', () => {
         { chainId: 1, name: 'Test', rpc: ['https://test.rpc.com'] }
       ]);
 
-      // First call hangs (creates the overlap window), all subsequent calls resolve immediately
-      let firstResolve;
+      // Each call resolves after a short delay, giving us time to call startMonitoring twice
       vi.mocked(jsonRpcCall)
-        .mockImplementationOnce(() => new Promise((resolve) => { firstResolve = resolve; }))
-        .mockResolvedValue('0x1');
+        .mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve('0x1'), 100)));
 
-      // Start first monitoring (will hang on first jsonRpcCall)
+      // Start first monitoring (will be in-flight for ~100ms)
       const promise1 = startMonitoring();
+
+      // Allow microtask queue to flush so monitoring enters the async loop
+      await new Promise(resolve => setTimeout(resolve, 10));
 
       // Second call should detect monitoring in progress
       const promise2 = startMonitoring();
@@ -141,8 +143,7 @@ describe('RPC Monitor', () => {
         'Monitoring already in progress, returning existing operation...'
       );
 
-      // Resolve the first call so monitoring can complete (remaining calls use mockResolvedValue)
-      firstResolve('geth/v1.0');
+      // Wait for monitoring to complete
       await promise1;
 
       consoleSpy.mockRestore();
@@ -283,7 +284,7 @@ describe('RPC Monitor', () => {
   });
 
   describe('Chain endpoint limiting', () => {
-    it('should stop testing after first failed endpoint for a chain', async () => {
+    it('should test all endpoints even if some fail', async () => {
       const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
       vi.mocked(getAllEndpoints).mockReturnValue([
@@ -299,13 +300,22 @@ describe('RPC Monitor', () => {
       ]);
 
       vi.mocked(jsonRpcCall)
-        .mockResolvedValueOnce('geth/v1.0')
-        .mockRejectedValueOnce(new Error('Block number failed'));
+        .mockResolvedValueOnce('geth/v1.0')       // rpc1 web3_clientVersion
+        .mockRejectedValueOnce(new Error('Block number failed'))  // rpc1 eth_blockNumber
+        .mockResolvedValueOnce('geth/v1.0')       // rpc2 web3_clientVersion
+        .mockResolvedValueOnce('0x123')            // rpc2 eth_blockNumber
+        .mockResolvedValueOnce('geth/v1.0')       // rpc3 web3_clientVersion
+        .mockResolvedValueOnce('0x456');           // rpc3 eth_blockNumber
 
       await startMonitoring();
 
-      // After first endpoint fails, should not test rpc2 and rpc3
-      expect(vi.mocked(jsonRpcCall).mock.calls.length).toBe(2);
+      // All 3 endpoints should be tested (6 jsonRpcCalls: 2 per endpoint)
+      expect(vi.mocked(jsonRpcCall).mock.calls.length).toBe(6);
+
+      const results = getMonitoringResults();
+      // Should have both working and failed results
+      expect(results.results.filter(r => r.status === 'failed').length).toBe(1);
+      expect(results.results.filter(r => r.status === 'working').length).toBe(2);
 
       consoleSpy.mockRestore();
     });
