@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Blockchain Networks Relationships</title>
+    <meta name="description" content="Interactive 3D visualization of blockchain network relationships, L2s, testnets, and beacon chains.">
 
     <!-- 3D Force Graph Library -->
     <script src="https://unpkg.com/3d-force-graph@1.79.1" integrity="sha384-rPBTChNmfoK7+PgrfhGgo2vR12+Pc+e4lg2YZYKUyXi2HLVWpzesq43bHEnnuFTl" crossorigin="anonymous"></script>
@@ -23,37 +24,65 @@
     <div id="ui-container">
         <!-- Header & Search -->
         <header class="glass-panel">
-            <h1>Blockchain Networks Relationships</h1>
+            <div class="header-top">
+                <h1>Blockchain Networks</h1>
+                <span class="subtitle" id="statsLine">Loading...</span>
+            </div>
             <div class="search-box">
-                <input type="text" id="searchInput" placeholder="Search Chain ID or Name..." autocomplete="off">
-                <button id="searchBtn">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                        stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="11" cy="11" r="8"></circle>
-                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                    </svg>
-                </button>
+                <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="11" cy="11" r="8"></circle>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <input type="text" id="searchInput" placeholder="Search by chain ID or name..." autocomplete="off">
+                <kbd class="search-hint">/</kbd>
                 <div id="searchDropdown" class="search-dropdown hidden"></div>
             </div>
 
             <!-- Filters -->
             <div class="filters">
-                <button class="filter-btn active" data-filter="all">All Chains</button>
-                <button class="filter-btn" data-filter="Mainnet">Mainnets</button>
-                <button class="filter-btn" data-filter="Testnet">Testnets</button>
-                <button class="filter-btn" data-filter="L2">L2 Networks</button>
-                <button class="filter-btn" data-filter="Beacon">Beacons</button>
+                <button class="filter-btn active" data-filter="all">
+                    <span class="filter-dot dot-all"></span>All
+                </button>
+                <button class="filter-btn" data-filter="Mainnet">
+                    <span class="filter-dot dot-mainnet"></span>Mainnets
+                </button>
+                <button class="filter-btn" data-filter="Testnet">
+                    <span class="filter-dot dot-testnet"></span>Testnets
+                </button>
+                <button class="filter-btn" data-filter="L2">
+                    <span class="filter-dot dot-l2"></span>L2s
+                </button>
+                <button class="filter-btn" data-filter="Beacon">
+                    <span class="filter-dot dot-beacon"></span>Beacons
+                </button>
             </div>
         </header>
 
+        <!-- Legend -->
+        <div id="legend" class="glass-panel legend">
+            <div class="legend-item"><span class="legend-dot" style="background:var(--color-mainnet)"></span>Mainnet</div>
+            <div class="legend-item"><span class="legend-dot" style="background:var(--color-l2)"></span>L2</div>
+            <div class="legend-item"><span class="legend-dot" style="background:var(--color-testnet)"></span>Testnet</div>
+            <div class="legend-item"><span class="legend-dot" style="background:var(--color-beacon)"></span>Beacon</div>
+            <div class="legend-sep"></div>
+            <div class="legend-item"><span class="legend-line" style="background:rgba(139,92,246,0.7)"></span>L2 link</div>
+            <div class="legend-item"><span class="legend-line" style="background:rgba(245,158,11,0.7)"></span>Testnet link</div>
+        </div>
+
         <!-- Selected Node Details Panel -->
         <aside id="detailsPanel" class="glass-panel hidden">
-            <button id="closeDetails" class="close-btn">&times;</button>
-            <div id="chainIcon" class="chain-icon"></div>
-            <h2 id="chainName">Chain Name</h2>
-            <div class="chain-meta">
-                <span class="badge" id="chainIdBadge">ID: --</span>
-                <span class="badge tag-badge" id="chainTags">Tags: --</span>
+            <button id="closeDetails" class="close-btn" aria-label="Close details">&times;</button>
+            <div class="details-header">
+                <div id="chainIcon" class="chain-icon"></div>
+                <div class="details-title">
+                    <h2 id="chainName">Chain Name</h2>
+                    <div class="chain-meta">
+                        <span class="badge" id="chainIdBadge">ID: --</span>
+                        <span class="badge tag-badge" id="chainStatusBadge"></span>
+                        <span class="badge tag-badge" id="chainTags">Tags: --</span>
+                    </div>
+                </div>
             </div>
 
             <div class="details-content">
@@ -61,12 +90,8 @@
                     <span class="label">Native Currency</span>
                     <span class="value" id="chainCurrency">--</span>
                 </div>
-                <div class="detail-row">
-                    <span class="label">Status</span>
-                    <span class="value" id="chainStatus">--</span>
-                </div>
                 <div class="detail-row" id="rowL1Parent" style="display: none;">
-                    <span class="label">L1</span>
+                    <span class="label">L1 Parent</span>
                     <span class="value" id="chainL1Parent">--</span>
                 </div>
                 <div class="detail-row" id="rowMainnet" style="display: none;">
@@ -97,9 +122,10 @@
         </aside>
 
         <!-- Loading state -->
-        <div id="loadingOverlay" class="glass-panel">
+        <div id="loadingOverlay" class="glass-panel loading-overlay">
             <div class="spinner"></div>
             <p>Loading networks...</p>
+            <p class="loading-sub">Fetching chain data and building graph</p>
         </div>
     </div>
 

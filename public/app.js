@@ -1,10 +1,10 @@
 // Constants for Node Colors
 const COLORS = {
-    MAINNET: '#10b981', // Emerald green
-    L2: '#8b5cf6',      // Purple
-    TESTNET: '#f59e0b', // Amber
-    BEACON: '#ec4899',  // Pink
-    DEFAULT: '#6b7280'  // Gray
+    MAINNET: '#10b981',
+    L2: '#8b5cf6',
+    TESTNET: '#f59e0b',
+    BEACON: '#ec4899',
+    DEFAULT: '#6b7280'
 };
 
 // Global State
@@ -12,6 +12,40 @@ let graphData = { nodes: [], links: [] };
 let filteredData = { nodes: [], links: [] };
 let currentFilter = 'all';
 let myGraph = null;
+
+// ─── Utility: Debounce ───
+function debounce(fn, ms) {
+    let timer;
+    return (...args) => {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn(...args), ms);
+    };
+}
+
+// ─── Utility: Highlight matching text safely using DOM (no innerHTML) ───
+function highlightText(container, text, query) {
+    const lowerText = text.toLowerCase();
+    const lowerQuery = query.toLowerCase();
+    const idx = lowerText.indexOf(lowerQuery);
+
+    if (idx === -1 || !query) {
+        container.textContent = text;
+        return;
+    }
+
+    // Before match
+    if (idx > 0) {
+        container.appendChild(document.createTextNode(text.slice(0, idx)));
+    }
+    // Match (bold)
+    const strong = document.createElement('strong');
+    strong.textContent = text.slice(idx, idx + query.length);
+    container.appendChild(strong);
+    // After match
+    if (idx + query.length < text.length) {
+        container.appendChild(document.createTextNode(text.slice(idx + query.length)));
+    }
+}
 
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
@@ -23,17 +57,18 @@ function initUI() {
     // Filter Buttons
     document.querySelectorAll('.filter-btn').forEach(btn => {
         btn.addEventListener('click', (e) => {
+            const target = e.currentTarget;
             document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-            e.target.classList.add('active');
-
-            currentFilter = e.target.dataset.filter;
+            target.classList.add('active');
+            currentFilter = target.dataset.filter;
             applyFilters();
         });
     });
 
-    // Search Logic (Custom Dropdown)
+    // Search Logic
     const searchInput = document.getElementById('searchInput');
     const searchDropdown = document.getElementById('searchDropdown');
+    let activeDropdownIndex = -1;
 
     globalThis.searchAndFocus = (query) => {
         const q = String(query).toLowerCase().trim();
@@ -51,8 +86,6 @@ function initUI() {
             searchInput.value = node.name;
             searchDropdown.classList.add('hidden');
             focusNode(node);
-        } else {
-            alert('Chain not found. Try a different ID or name.');
         }
     };
 
@@ -63,15 +96,25 @@ function initUI() {
         }
     });
 
-    searchInput.addEventListener('input', (e) => {
-        const query = e.target.value.toLowerCase().trim();
+    // Keyboard shortcut: "/" to focus search
+    document.addEventListener('keydown', (e) => {
+        if (e.key === '/' && document.activeElement !== searchInput) {
+            e.preventDefault();
+            searchInput.focus();
+        }
+        if (e.key === 'Escape') {
+            searchDropdown.classList.add('hidden');
+            searchInput.blur();
+        }
+    });
 
+    // Debounced search to avoid excessive DOM rebuilds
+    const handleSearch = debounce((query) => {
         if (!query) {
             searchDropdown.classList.add('hidden');
             return;
         }
 
-        // Filter nodes matching search query
         const matches = graphData.nodes.filter(n =>
             n.name.toLowerCase().includes(query) ||
             n.id.toString().includes(query) ||
@@ -80,72 +123,104 @@ function initUI() {
             (n.data.tags?.some(t => t.toLowerCase().includes(query)))
         );
 
-        // Sort matches to prioritize exact/closer matches
+        // Sort: exact/prefix matches first
         matches.sort((a, b) => {
             const aName = a.name.toLowerCase();
             const bName = b.name.toLowerCase();
-
-            // Prioritize if the name starts with the query
             const aStarts = aName.startsWith(query);
             const bStarts = bName.startsWith(query);
-            if (aStarts && !bStarts) return -1;
-            if (!aStarts && bStarts) return 1;
-
-            // Prioritize if the query is in the name vs tags
+            if (aStarts !== bStarts) return aStarts ? -1 : 1;
             const aInName = aName.includes(query);
             const bInName = bName.includes(query);
-            if (aInName && !bInName) return -1;
-            if (!aInName && bInName) return 1;
-
-            // Fallback to alphabetical sort
+            if (aInName !== bInName) return aInName ? -1 : 1;
             return aName.localeCompare(bName);
         });
 
-        const topMatches = matches.slice(0, 100); // Limit to 100 results for scrollable container
+        const topMatches = matches.slice(0, 50);
+        activeDropdownIndex = -1;
 
-        searchDropdown.innerHTML = '';
+        // Build dropdown using DocumentFragment for performance
+        const fragment = document.createDocumentFragment();
 
         if (topMatches.length === 0) {
-            searchDropdown.innerHTML = '<div class="dropdown-empty">No chains found.</div>';
+            const empty = document.createElement('div');
+            empty.className = 'dropdown-empty';
+            empty.textContent = 'No chains found.';
+            fragment.appendChild(empty);
         } else {
-            topMatches.forEach(node => {
+            for (const node of topMatches) {
                 const item = document.createElement('div');
                 item.className = 'dropdown-item';
+                item.dataset.nodeId = node.id;
 
-                const iconColor = node.color;
-                const initial = node.name ? node.name.charAt(0).toUpperCase() : '?';
+                const icon = document.createElement('div');
+                icon.className = 'dropdown-icon';
+                icon.style.background = `linear-gradient(135deg, ${node.color}, ${node.color}44)`;
+                icon.textContent = node.name ? node.name.charAt(0).toUpperCase() : '?';
 
-                // Bold the matching part of the name
-                const regex = new RegExp(`(${query})`, 'gi');
-                const highlightedName = node.name.replace(regex, '<strong>$1</strong>');
+                const info = document.createElement('div');
+                info.className = 'dropdown-info';
 
-                // Format tags
-                const tagsList = (node.data.tags && node.data.tags.length > 0)
-                    ? node.data.tags.join(', ') : node.type;
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'dropdown-name';
+                highlightText(nameSpan, node.name, query);
 
-                item.innerHTML = `
-                    <div class="dropdown-icon" style="background: linear-gradient(135deg, ${iconColor}, #050505);">${initial}</div>
-                    <div class="dropdown-info">
-                        <span class="dropdown-name">${highlightedName}</span>
-                        <div class="dropdown-meta">
-                            <span>ID: ${node.id}</span>
-                            <span>•</span>
-                            <span>${tagsList}</span>
-                        </div>
-                    </div>
-                `;
+                const meta = document.createElement('div');
+                meta.className = 'dropdown-meta';
+                const tagsList = node.data.tags?.length > 0 ? node.data.tags.join(', ') : node.type;
+                meta.textContent = `ID: ${node.id}  \u00b7  ${tagsList}`;
+
+                info.appendChild(nameSpan);
+                info.appendChild(meta);
+                item.appendChild(icon);
+                item.appendChild(info);
 
                 item.addEventListener('click', () => searchAndFocus(node.id));
-                searchDropdown.appendChild(item);
-            });
+                fragment.appendChild(item);
+            }
         }
 
+        searchDropdown.textContent = '';
+        searchDropdown.appendChild(fragment);
         searchDropdown.classList.remove('hidden');
+    }, 150);
+
+    searchInput.addEventListener('input', (e) => {
+        handleSearch(e.target.value.toLowerCase().trim());
     });
 
-    searchInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') searchAndFocus(searchInput.value);
+    // Keyboard navigation in dropdown
+    searchInput.addEventListener('keydown', (e) => {
+        const items = searchDropdown.querySelectorAll('.dropdown-item');
+        if (!items.length) return;
+
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            activeDropdownIndex = Math.min(activeDropdownIndex + 1, items.length - 1);
+            updateActiveItem(items);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            activeDropdownIndex = Math.max(activeDropdownIndex - 1, 0);
+            updateActiveItem(items);
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            if (activeDropdownIndex >= 0 && items[activeDropdownIndex]) {
+                const nodeId = items[activeDropdownIndex].dataset.nodeId;
+                searchAndFocus(nodeId);
+            } else {
+                searchAndFocus(searchInput.value);
+            }
+        }
     });
+
+    function updateActiveItem(items) {
+        items.forEach((item, i) => {
+            item.classList.toggle('active', i === activeDropdownIndex);
+        });
+        if (items[activeDropdownIndex]) {
+            items[activeDropdownIndex].scrollIntoView({ block: 'nearest' });
+        }
+    }
 
     // Close Details Panel
     document.getElementById('closeDetails').addEventListener('click', () => {
@@ -155,16 +230,23 @@ function initUI() {
 
 async function fetchData() {
     try {
-        const res = await fetch('https://raw.githubusercontent.com/Johnaverse/chains-api/refs/heads/main/public/export.json');
+        // Try local API first (/export), fall back to GitHub raw
+        let res;
+        try {
+            res = await fetch('/export');
+            if (!res.ok) throw new Error('Local export unavailable');
+        } catch {
+            res = await fetch('https://raw.githubusercontent.com/Johnaverse/chains-api/refs/heads/main/public/export.json');
+        }
         const exportData = await res.json();
 
         const chains = exportData.data.indexed.all;
 
-        // Build relations map { parentId: { childId: { kind } } } from per-chain relations arrays
+        // Build relations map from per-chain relations arrays
         const relations = {};
-        chains.forEach(chain => {
-            if (!chain.relations) return;
-            chain.relations.forEach(rel => {
+        for (const chain of chains) {
+            if (!chain.relations) continue;
+            for (const rel of chain.relations) {
                 if (rel.kind === 'l2Of') {
                     if (!relations[rel.chainId]) relations[rel.chainId] = {};
                     relations[rel.chainId][chain.chainId] = { kind: 'l2Of' };
@@ -175,10 +257,13 @@ async function fetchData() {
                     if (!relations[chain.chainId]) relations[chain.chainId] = {};
                     relations[chain.chainId][rel.chainId] = { kind: 'testnetOf' };
                 }
-            });
-        });
+            }
+        }
 
         processGraphData(chains, relations);
+
+        // Update stats line
+        updateStats();
 
         // Hide loading overlay
         document.getElementById('loadingOverlay').classList.add('hidden');
@@ -188,41 +273,41 @@ async function fetchData() {
     } catch (error) {
         console.error('Error fetching data:', error);
         const overlay = document.getElementById('loadingOverlay');
-        overlay.textContent = 'Failed to load data. Ensure export.json is available.';
-        overlay.style.color = '#ef4444';
+        overlay.querySelector('.spinner').style.display = 'none';
+        overlay.querySelector('p').textContent = 'Failed to load data.';
+        overlay.querySelector('.loading-sub').textContent = 'Check your connection or ensure the API is running.';
     }
+}
+
+function updateStats() {
+    const total = graphData.nodes.length;
+    const mainnets = graphData.nodes.filter(n => n.type === 'Mainnet').length;
+    const l2s = graphData.nodes.filter(n => n.type === 'L2').length;
+    const testnets = graphData.nodes.filter(n => n.type === 'Testnet').length;
+
+    const statsEl = document.getElementById('statsLine');
+    statsEl.textContent = `${total} chains \u00b7 ${mainnets} mainnets \u00b7 ${l2s} L2s \u00b7 ${testnets} testnets`;
 }
 
 function processGraphData(chains, relations) {
     const nodes = [];
     const links = [];
-
-    // Create quick lookup maps
     const nodeMap = new Map();
 
     // First pass: Add all nodes
-    chains.forEach(c => {
-        // Determine node type/color based on tags
+    for (const c of chains) {
         let type = 'Mainnet';
         let color = COLORS.MAINNET;
         let val;
 
         if (c.tags?.includes('Beacon')) {
-            type = 'Beacon';
-            color = COLORS.BEACON;
-            val = 1.5;
+            type = 'Beacon'; color = COLORS.BEACON; val = 1.5;
         } else if (c.tags?.includes('L2')) {
-            type = 'L2';
-            color = COLORS.L2;
-            val = 1.8;
+            type = 'L2'; color = COLORS.L2; val = 1.8;
         } else if (c.tags?.includes('Testnet')) {
-            type = 'Testnet';
-            color = COLORS.TESTNET;
-            val = 1;
+            type = 'Testnet'; color = COLORS.TESTNET; val = 1;
         } else {
-            // Mainnets are larger
             val = 3;
-            // E.g. Ethereum is huge
             if (c.chainId === 1) val = 8;
         }
 
@@ -234,11 +319,11 @@ function processGraphData(chains, relations) {
         const node = {
             id: c.chainId,
             name: displayName,
-            val: val,
-            color: color,
-            type: type,
+            val,
+            color,
+            type,
             data: c,
-            parent: null, // used for filtering mostly
+            parent: null,
             l2Parent: null,
             mainnetParent: null,
             children: [],
@@ -247,18 +332,16 @@ function processGraphData(chains, relations) {
         };
         nodes.push(node);
         nodeMap.set(c.chainId, node);
-    });
+    }
 
-
-
-    // Second pass: Use relations API maps format { "parentID": { "childID": { ... } } }
-    Object.keys(relations).forEach(parentIdStr => {
+    // Second pass: Build links from relations
+    for (const parentIdStr of Object.keys(relations)) {
         const parentId = Number.parseInt(parentIdStr);
         const childrenObj = relations[parentIdStr];
 
-        Object.keys(childrenObj).forEach(childIdStr => {
+        for (const childIdStr of Object.keys(childrenObj)) {
             const childId = Number.parseInt(childIdStr);
-            const relationInfo = childrenObj[childIdStr]; // e.g. { kind: "l2Of", ... }
+            const relationInfo = childrenObj[childIdStr];
 
             const parentNode = nodeMap.get(parentId);
             const childNode = nodeMap.get(childId);
@@ -267,7 +350,7 @@ function processGraphData(chains, relations) {
                 links.push({
                     source: childId,
                     target: parentId,
-                    kind: relationInfo.kind // 'l2Of', 'testnetOf', etc.
+                    kind: relationInfo.kind
                 });
 
                 if (relationInfo.kind === 'l2Of' || relationInfo.kind === 'l1Of') {
@@ -278,11 +361,11 @@ function processGraphData(chains, relations) {
                     parentNode.testnetChildren.push(childNode);
                 }
 
-                childNode.parent = parentNode; // fallback 
-                parentNode.children.push(childNode); // fallback
+                childNode.parent = parentNode;
+                parentNode.children.push(childNode);
             }
-        });
-    });
+        }
+    }
 
     graphData = { nodes, links };
     filteredData = { nodes: [...nodes], links: [...links] };
@@ -297,69 +380,62 @@ function applyFilters() {
     } else if (currentFilter === 'Mainnet') {
         const visibleNodesSet = new Set();
 
-        // Recursively add L2 children (handles L3, L4, etc.)
-        // Skip testnet chains — only mainnet (production) chains belong here
         function addL2Tree(node) {
             if (node.l2Children) {
-                node.l2Children.forEach(child => {
+                for (const child of node.l2Children) {
                     const isTestnet = child.data.tags?.includes('Testnet');
                     if (!visibleNodesSet.has(child) && !isTestnet) {
                         visibleNodesSet.add(child);
                         addL2Tree(child);
                     }
-                });
+                }
             }
         }
 
-        // Add all Mainnet and Beacon nodes (Beacon chains like Ethereum are also mainnets)
-        // and recursively add their entire L2 tree.
-        // Exclude nodes that are testnets (have a mainnetParent) even if they lack the Testnet tag.
-        graphData.nodes.forEach(n => {
+        for (const n of graphData.nodes) {
             if ((n.type === 'Mainnet' || n.type === 'Beacon') && !n.mainnetParent) {
                 visibleNodesSet.add(n);
                 addL2Tree(n);
             }
-        });
+        }
 
         const visibleNodes = Array.from(visibleNodesSet);
         const visibleNodeIds = new Set(visibleNodes.map(n => n.id));
 
-        // Include all non-testnet links between visible nodes
         const visibleLinks = graphData.links.filter(l => {
-            const sourceId = l.source.id || l.source;
-            const targetId = l.target.id || l.target;
+            const sourceId = l.source.id ?? l.source;
+            const targetId = l.target.id ?? l.target;
             return visibleNodeIds.has(sourceId) && visibleNodeIds.has(targetId) && l.kind !== 'testnetOf';
         });
 
-        filteredData = {
-            nodes: visibleNodes,
-            links: visibleLinks
-        };
+        filteredData = { nodes: visibleNodes, links: visibleLinks };
     } else {
         const visibleNodesSet = new Set();
 
-        // Add nodes matching filter AND their parents
-        graphData.nodes.forEach(n => {
+        for (const n of graphData.nodes) {
             if (n.type === currentFilter) {
                 visibleNodesSet.add(n);
-                if (n.parent) {
-                    visibleNodesSet.add(n.parent);
-                }
+                if (n.parent) visibleNodesSet.add(n.parent);
             }
-        });
+        }
 
         const visibleNodes = Array.from(visibleNodesSet);
         const visibleNodeIds = new Set(visibleNodes.map(n => n.id));
 
         const visibleLinks = graphData.links.filter(l =>
-            visibleNodeIds.has(l.source.id || l.source) &&
-            visibleNodeIds.has(l.target.id || l.target)
+            visibleNodeIds.has(l.source.id ?? l.source) &&
+            visibleNodeIds.has(l.target.id ?? l.target)
         );
 
-        filteredData = {
-            nodes: visibleNodes,
-            links: visibleLinks
-        };
+        filteredData = { nodes: visibleNodes, links: visibleLinks };
+    }
+
+    // Update stats for filtered view
+    const statsEl = document.getElementById('statsLine');
+    if (currentFilter === 'all') {
+        updateStats();
+    } else {
+        statsEl.textContent = `Showing ${filteredData.nodes.length} of ${graphData.nodes.length} chains`;
     }
 
     if (myGraph) {
@@ -375,46 +451,45 @@ function renderGraph() {
         .nodeLabel('name')
         .nodeColor('color')
         .nodeVal('val')
-        .nodeResolution(16) // Higher res spheres
+        .nodeResolution(12)
+        .nodeOpacity(0.9)
         .linkColor(link => {
-            if (link.kind === 'l2Of' || link.kind === 'l1Of') return 'rgba(139, 92, 246, 0.45)'; // Purple for L2
-            if (link.kind === 'testnetOf') return 'rgba(245, 158, 11, 0.45)'; // Amber for Testnet
-            return 'rgba(255, 255, 255, 0.15)'; // Default
+            if (link.kind === 'l2Of' || link.kind === 'l1Of') return 'rgba(139, 92, 246, 0.4)';
+            if (link.kind === 'testnetOf') return 'rgba(245, 158, 11, 0.4)';
+            return 'rgba(255, 255, 255, 0.1)';
         })
-        .linkWidth(1)
+        .linkWidth(0.8)
         .linkDirectionalParticles(link => {
-            // Adds small moving particles to highlight relation direction (child -> parent)
             if (link.kind === 'l2Of' || link.kind === 'l1Of' || link.kind === 'testnetOf') return 2;
             return 0;
         })
-        .linkDirectionalParticleSpeed(0.005)
+        .linkDirectionalParticleSpeed(0.004)
+        .linkDirectionalParticleWidth(1.5)
         .linkDirectionalParticleColor(link => {
-            if (link.kind === 'l2Of' || link.kind === 'l1Of') return 'rgba(139, 92, 246, 0.8)';
-            if (link.kind === 'testnetOf') return 'rgba(245, 158, 11, 0.8)';
+            if (link.kind === 'l2Of' || link.kind === 'l1Of') return 'rgba(139, 92, 246, 0.7)';
+            if (link.kind === 'testnetOf') return 'rgba(245, 158, 11, 0.7)';
             return '#ffffff';
         })
-        .backgroundColor('#050505')
-        .cooldownTicks(100) // Stop physics engine early to prevent lag
-        .onNodeClick(node => focusNode(node));
+        .backgroundColor('#060608')
+        .warmupTicks(80)
+        .cooldownTicks(60)
+        .onNodeClick(node => focusNode(node))
+        .onBackgroundClick(() => {
+            document.getElementById('detailsPanel').classList.add('hidden');
+        });
 }
 
 function focusNode(node) {
     if (!myGraph) return;
 
-    // Aim at node from outside it
     const distance = 150;
     const distRatio = 1 + distance / Math.hypot(node.x, node.y, node.z);
 
     const newPos = node.x || node.y || node.z
         ? { x: node.x * distRatio, y: node.y * distRatio, z: node.z * distRatio }
-        : { x: 0, y: 0, z: distance }; // special case if node is at (0,0,0)
+        : { x: 0, y: 0, z: distance };
 
-    myGraph.cameraPosition(
-        newPos,
-        node, // lookAt
-        1500  // ms transition
-    );
-
+    myGraph.cameraPosition(newPos, node, 1200);
     showNodeDetails(node);
 }
 
@@ -437,13 +512,13 @@ function showParentRow(rowId, elemId, parentNode) {
 }
 
 function populateChildLinks(container, children) {
-    children.forEach(child => {
+    for (const child of children) {
         const a = document.createElement('a');
         a.href = "#";
         a.textContent = child.name;
         a.onclick = (e) => { e.preventDefault(); searchAndFocus(child.id); };
         container.appendChild(a);
-    });
+    }
 }
 
 function showChildrenSection(containerId, labelId, children, label) {
@@ -474,7 +549,8 @@ function showRpcEndpoints(data) {
         const a = document.createElement('a');
         a.href = url;
         a.target = "_blank";
-        a.textContent = url.replace('https://', '');
+        a.rel = "noopener";
+        a.textContent = url.replace(/^https?:\/\//, '');
         rpcContainer.appendChild(a);
         shown++;
     }
@@ -485,16 +561,26 @@ function showExplorers(data) {
     const expContainer = document.getElementById('chainExplorers');
     expContainer.textContent = '';
     if (data.explorers && data.explorers.length > 0) {
-        data.explorers.forEach(e => {
+        for (const e of data.explorers) {
             const a = document.createElement('a');
             a.href = e.url;
             a.target = "_blank";
+            a.rel = "noopener";
             a.textContent = e.name;
             expContainer.appendChild(a);
-        });
+        }
     } else {
         expContainer.textContent = 'None available';
     }
+}
+
+function getStatusClass(status) {
+    if (!status) return '';
+    const s = status.toLowerCase();
+    if (s === 'active') return 'status-active';
+    if (s === 'deprecated') return 'status-deprecated';
+    if (s === 'incubating') return 'status-incubating';
+    return '';
 }
 
 function showNodeDetails(node) {
@@ -503,14 +589,24 @@ function showNodeDetails(node) {
 
     const iconElem = document.getElementById('chainIcon');
     iconElem.textContent = node.name ? node.name.charAt(0).toUpperCase() : '?';
-    iconElem.style.background = `linear-gradient(135deg, ${node.color}, #000)`;
+    iconElem.style.background = `linear-gradient(135deg, ${node.color}, ${node.color}33)`;
 
     document.getElementById('chainName').textContent = node.name || 'Unknown Chain';
     document.getElementById('chainIdBadge').textContent = `ID: ${data.chainId}`;
 
+    // Status badge
+    const statusBadge = document.getElementById('chainStatusBadge');
+    if (data.status) {
+        statusBadge.textContent = data.status.charAt(0).toUpperCase() + data.status.slice(1);
+        statusBadge.className = `badge tag-badge ${getStatusClass(data.status)}`;
+        statusBadge.style.display = 'inline-block';
+    } else {
+        statusBadge.style.display = 'none';
+    }
+
     const tagsElem = document.getElementById('chainTags');
     if (data.tags?.length > 0) {
-        tagsElem.textContent = `Tags: ${data.tags.join(', ')}`;
+        tagsElem.textContent = data.tags.join(', ');
         tagsElem.style.display = 'inline-block';
     } else {
         tagsElem.style.display = 'none';
@@ -520,10 +616,6 @@ function showNodeDetails(node) {
     curElem.textContent = data.nativeCurrency
         ? `${data.nativeCurrency.name} (${data.nativeCurrency.symbol})`
         : 'None';
-
-    document.getElementById('chainStatus').textContent = data.status
-        ? data.status.charAt(0).toUpperCase() + data.status.slice(1)
-        : 'Unknown';
 
     const { row: rowL1, elem: l1Elem } = showParentRow('rowL1Parent', 'chainL1Parent', node.l2Parent);
     showParentRow('rowMainnet', 'chainMainnet', node.mainnetParent);
@@ -548,12 +640,17 @@ function showNodeDetails(node) {
 
     const webElem = document.getElementById('chainWebsite');
     if (data.infoURL) {
-        const a = document.createElement('a');
-        a.href = data.infoURL;
-        a.target = "_blank";
-        a.textContent = new URL(data.infoURL).hostname;
-        webElem.textContent = '';
-        webElem.appendChild(a);
+        try {
+            const a = document.createElement('a');
+            a.href = data.infoURL;
+            a.target = "_blank";
+            a.rel = "noopener";
+            a.textContent = new URL(data.infoURL).hostname;
+            webElem.textContent = '';
+            webElem.appendChild(a);
+        } catch {
+            webElem.textContent = data.infoURL;
+        }
     } else {
         webElem.textContent = 'None available';
     }
