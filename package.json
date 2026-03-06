@@ -28,10 +28,14 @@
     "url": "https://github.com/Johnaverse/chains-api/issues"
   },
   "homepage": "https://github.com/Johnaverse/chains-api#readme",
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "@fastify/cors": "^11.2.0",
     "@fastify/helmet": "^13.0.2",
     "@fastify/rate-limit": "^10.3.0",
+    "@fastify/static": "^9.0.0",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "express": "^5.2.1",
     "fastify": "^5.8.1",

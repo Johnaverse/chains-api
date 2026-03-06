@@ -1033,6 +1033,33 @@ export function getAllChains() {
 }
 
 /**
+ * Count chains grouped by tag category
+ * @param {Array} chains - Array of chain objects
+ * @returns {Object} Counts for each category
+ */
+export function countChainsByTag(chains) {
+  const totalChains = chains.length;
+  let totalTestnets = 0;
+  let totalL2s = 0;
+  let totalBeacons = 0;
+  let totalMainnets = 0;
+
+  for (const chain of chains) {
+    const tags = chain.tags || [];
+    const isTestnet = tags.includes('Testnet');
+    const isL2 = tags.includes('L2');
+    const isBeacon = tags.includes('Beacon');
+
+    if (isTestnet) totalTestnets += 1;
+    if (isL2) totalL2s += 1;
+    if (isBeacon) totalBeacons += 1;
+    if (!isTestnet && !isL2 && !isBeacon) totalMainnets += 1;
+  }
+
+  return { totalChains, totalMainnets, totalTestnets, totalL2s, totalBeacons };
+}
+
+/**
  * Add value to a keyword set if it is a non-empty string
  */
 function addKeywordValue(set, value) {
