@@ -316,7 +316,7 @@ describe('Fuzz Testing - API Endpoints', () => {
       const totalTestnets = chains.filter(c => c.tags?.includes('Testnet')).length;
       const totalL2s = chains.filter(c => c.tags?.includes('L2')).length;
       const totalBeacons = chains.filter(c => c.tags?.includes('Beacon')).length;
-      const totalMainnets = chains.filter(c => !c.tags?.includes('Testnet')).length;
+      const totalMainnets = chains.filter(c => !c.tags?.includes('Testnet') && !c.tags?.includes('L2') && !c.tags?.includes('Beacon')).length;
       return {
         totalChains, totalMainnets, totalTestnets, totalL2s, totalBeacons,
         rpc: { totalEndpoints: 100, tested: 50, working: 30, failed: 20, healthPercent: 60 },

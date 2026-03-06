@@ -1321,12 +1321,18 @@ export function traverseRelations(startChainId, maxDepth = 2) {
     for (const rel of relations) {
       if (rel.chainId === undefined) continue;
 
-      edges.push({
-        from: chainId,
-        to: rel.chainId,
-        kind: rel.kind,
-        source: rel.source
-      });
+      // Deduplicate bidirectional edges (A→B and B→A with same kind)
+      const a = Math.min(chainId, rel.chainId);
+      const b = Math.max(chainId, rel.chainId);
+      const isDuplicate = edges.some(e => Math.min(e.from, e.to) === a && Math.max(e.from, e.to) === b && e.kind === rel.kind);
+      if (!isDuplicate) {
+        edges.push({
+          from: chainId,
+          to: rel.chainId,
+          kind: rel.kind,
+          source: rel.source
+        });
+      }
 
       if (!visited.has(rel.chainId)) {
         queue.push({ chainId: rel.chainId, depth: depth + 1 });

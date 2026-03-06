@@ -319,7 +319,7 @@ function handleGetStats() {
   const monitorResults = getMonitoringResults();
 
   const totalChains = chains.length;
-  const totalMainnets = chains.filter(c => !c.tags?.includes('Testnet')).length;
+  const totalMainnets = chains.filter(c => !c.tags?.includes('Testnet') && !c.tags?.includes('L2') && !c.tags?.includes('Beacon')).length;
   const totalTestnets = chains.filter(c => c.tags?.includes('Testnet')).length;
   const totalL2s = chains.filter(c => c.tags?.includes('L2')).length;
   const totalBeacons = chains.filter(c => c.tags?.includes('Beacon')).length;
