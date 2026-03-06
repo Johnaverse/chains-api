@@ -588,14 +588,23 @@ function showWebsite(data) {
         return;
     }
     try {
-        const a = document.createElement('a');
-        a.href = data.infoURL;
-        a.target = "_blank";
-        a.rel = "noopener";
-        a.textContent = new URL(data.infoURL).hostname;
-        webElem.textContent = '';
-        webElem.appendChild(a);
+        const url = new URL(data.infoURL);
+        const protocol = url.protocol;
+
+        if (protocol === 'http:' || protocol === 'https:') {
+            const a = document.createElement('a');
+            a.href = url.toString();
+            a.target = "_blank";
+            a.rel = "noopener";
+            a.textContent = url.hostname;
+            webElem.textContent = '';
+            webElem.appendChild(a);
+        } else {
+            // Unsafe or unsupported protocol: show as plain text without a link
+            webElem.textContent = data.infoURL;
+        }
     } catch {
+        // Invalid URL: show as plain text without a link
         webElem.textContent = data.infoURL;
     }
 }
