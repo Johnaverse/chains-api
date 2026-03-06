@@ -80,6 +80,19 @@ vi.mock('../../dataService.js', async () => {
         generic: ['ethereum', 'geth']
       }
     })),
+    traverseRelations: vi.fn((chainId, maxDepth) => {
+      const numId = Number.parseInt(chainId, 10);
+      if (numId === 1) return {
+        startChainId: 1, startChainName: 'Ethereum', maxDepth: maxDepth || 2,
+        totalNodes: 2, totalEdges: 1,
+        nodes: [
+          { chainId: 1, name: 'Ethereum', tags: ['L1'], depth: 0 },
+          { chainId: 137, name: 'Polygon', tags: ['L2'], depth: 1 },
+        ],
+        edges: [{ from: 1, to: 137, kind: 'parentOf', source: 'theGraph' }],
+      };
+      return null;
+    }),
     validateChainData: vi.fn(() => ({
       totalErrors: 5,
       errorsByRule: {
@@ -134,7 +147,7 @@ let fastify;
 
 describe('Fuzz Testing - API Endpoints', () => {
   beforeAll(async () => {
-    const { getCachedData, getAllChains, getChainById, searchChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints, getAllKeywords, validateChainData } = await import('../../dataService.js');
+    const { getCachedData, getAllChains, getChainById, searchChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints, getAllKeywords, validateChainData, traverseRelations } = await import('../../dataService.js');
     const { getMonitoringResults, getMonitoringStatus } = await import('../../rpcMonitor.js');
 
     fastify = Fastify({ logger: false });
@@ -295,6 +308,36 @@ describe('Fuzz Testing - API Endpoints', () => {
         lastUpdated: results.lastUpdated,
         endpoints: chainResults
       };
+    });
+
+    fastify.get('/stats', async () => {
+      const chains = getAllChains();
+      const totalChains = chains.length;
+      const totalTestnets = chains.filter(c => c.tags?.includes('Testnet')).length;
+      const totalL2s = chains.filter(c => c.tags?.includes('L2')).length;
+      const totalBeacons = chains.filter(c => c.tags?.includes('Beacon')).length;
+      const totalMainnets = chains.filter(c => !c.tags?.includes('Testnet')).length;
+      return {
+        totalChains, totalMainnets, totalTestnets, totalL2s, totalBeacons,
+        rpc: { totalEndpoints: 100, tested: 50, working: 30, failed: 20, healthPercent: 60 },
+        lastUpdated: new Date().toISOString()
+      };
+    });
+
+    fastify.get('/relations/:id/graph', async (request, reply) => {
+      const chainId = Number.parseInt(request.params.id, 10);
+      if (Number.isNaN(chainId)) {
+        return reply.code(400).send({ error: 'Invalid chain ID' });
+      }
+      const depth = request.query.depth !== undefined ? Number.parseInt(request.query.depth, 10) : 2;
+      if (Number.isNaN(depth) || depth < 1 || depth > 5) {
+        return reply.code(400).send({ error: 'Invalid depth. Must be between 1 and 5' });
+      }
+      const result = traverseRelations(chainId, depth);
+      if (!result) {
+        return reply.code(404).send({ error: 'Chain not found' });
+      }
+      return result;
     });
 
     fastify.get('/validate', async (_request, reply) => {
@@ -570,6 +613,150 @@ describe('Fuzz Testing - API Endpoints', () => {
     });
   });
 
+  describe('GET /stats - Fuzz Tests', () => {
+    it('should return aggregate statistics', async () => {
+      const response = await fastify.inject({
+        method: 'GET',
+        url: '/stats'
+      });
+
+      expect(response.statusCode).toBe(200);
+      const data = JSON.parse(response.payload);
+      expect(data).toHaveProperty('totalChains');
+      expect(data).toHaveProperty('totalMainnets');
+      expect(data).toHaveProperty('totalTestnets');
+      expect(data).toHaveProperty('totalL2s');
+      expect(data).toHaveProperty('totalBeacons');
+      expect(data).toHaveProperty('rpc');
+      expect(data.rpc).toHaveProperty('healthPercent');
+    });
+
+    it('should always return valid JSON', async () => {
+      const response = await fastify.inject({
+        method: 'GET',
+        url: '/stats'
+      });
+
+      expect(() => JSON.parse(response.payload)).not.toThrow();
+    });
+
+    it('should handle concurrent requests', async () => {
+      const requests = Array(10).fill(null).map(() =>
+        fastify.inject({ method: 'GET', url: '/stats' })
+      );
+      const responses = await Promise.all(requests);
+      responses.forEach(response => {
+        expect(response.statusCode).toBe(200);
+        expect(() => JSON.parse(response.payload)).not.toThrow();
+      });
+    });
+
+    test.prop([fc.record({
+      userAgent: fc.string(),
+      acceptLanguage: fc.string()
+    })])('should handle various header combinations', async (headers) => {
+      const response = await fastify.inject({
+        method: 'GET',
+        url: '/stats',
+        headers: {
+          'user-agent': headers.userAgent,
+          'accept-language': headers.acceptLanguage
+        }
+      });
+
+      expect(response.statusCode).toBe(200);
+    });
+  });
+
+  describe('GET /relations/:id/graph - Fuzz Tests', () => {
+    test.prop([fc.oneof(fc.string(), fc.integer(), fc.double(), fc.boolean())])
+    ('should handle various ID inputs', async (input) => {
+      const response = await fastify.inject({
+        method: 'GET',
+        url: `/relations/${encodeURIComponent(String(input))}/graph`
+      });
+
+      expect([200, 400, 404]).toContain(response.statusCode);
+      expect(() => JSON.parse(response.payload)).not.toThrow();
+    });
+
+    test.prop([fc.integer()])('should handle integer chain IDs', async (id) => {
+      const response = await fastify.inject({
+        method: 'GET',
+        url: `/relations/${id}/graph`
+      });
+
+      expect([200, 404]).toContain(response.statusCode);
+
+      if (response.statusCode === 200) {
+        const data = JSON.parse(response.payload);
+        expect(data).toHaveProperty('startChainId');
+        expect(data).toHaveProperty('nodes');
+        expect(data).toHaveProperty('edges');
+        expect(data).toHaveProperty('totalNodes');
+        expect(data).toHaveProperty('totalEdges');
+      }
+    });
+
+    test.prop([fc.integer({ min: 1, max: 5 })])('should accept valid depth values', async (depth) => {
+      const response = await fastify.inject({
+        method: 'GET',
+        url: `/relations/1/graph?depth=${depth}`
+      });
+
+      expect([200, 404]).toContain(response.statusCode);
+    });
+
+    test.prop([fc.oneof(fc.integer({ min: -100, max: 0 }), fc.integer({ min: 6, max: 100 }))])
+    ('should reject invalid depth values', async (depth) => {
+      const response = await fastify.inject({
+        method: 'GET',
+        url: `/relations/1/graph?depth=${depth}`
+      });
+
+      expect(response.statusCode).toBe(400);
+      const data = JSON.parse(response.payload);
+      expect(data.error).toBe('Invalid depth. Must be between 1 and 5');
+    });
+
+    test.prop([fc.string()])('should handle non-numeric depth values', async (depth) => {
+      const response = await fastify.inject({
+        method: 'GET',
+        url: `/relations/1/graph?depth=${encodeURIComponent(depth)}`
+      });
+
+      expect([200, 400, 404]).toContain(response.statusCode);
+      expect(response.statusCode).not.toBe(500);
+    });
+
+    test.prop([fc.constantFrom('', ' ', '\n', '\t', '..', '../', '/', '\\')])
+    ('should handle special characters in chain ID', async (input) => {
+      const response = await fastify.inject({
+        method: 'GET',
+        url: `/relations/${encodeURIComponent(input)}/graph`
+      });
+
+      expect([200, 400, 404]).toContain(response.statusCode);
+      expect(response.statusCode).not.toBe(500);
+    });
+
+    const sqlInjectionPayloads = [
+      "1' OR '1'='1",
+      "1; DROP TABLE chains--",
+      "' OR 1=1--"
+    ];
+
+    test.each(sqlInjectionPayloads)('should safely handle SQL injection: %s', async (payload) => {
+      const response = await fastify.inject({
+        method: 'GET',
+        url: `/relations/${encodeURIComponent(payload)}/graph`
+      });
+
+      expect([200, 400, 404]).toContain(response.statusCode);
+      expect(response.statusCode).not.toBe(500);
+    });
+  });
+
   describe('HTTP Method Fuzzing', () => {
     const endpoints = [
       '/health',
@@ -586,7 +773,10 @@ describe('Fuzz Testing - API Endpoints', () => {
       '/validate',
       '/keywords',
       '/rpc-monitor',
-      '/rpc-monitor/1'
+      '/rpc-monitor/1',
+      '/stats',
+      '/relations/1/graph',
+      '/relations/1/graph?depth=3'
     ];
 
     test.each(endpoints)('GET %s should always return valid response', async (endpoint) => {

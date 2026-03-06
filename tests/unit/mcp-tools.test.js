@@ -35,6 +35,7 @@ vi.mock('../../dataService.js', () => ({
     },
   })),
   validateChainData: vi.fn(() => ({ totalErrors: 0, errorsByRule: {}, summary: {}, allErrors: [] })),
+  traverseRelations: vi.fn(() => null),
 }));
 
 // Mock rpcMonitor before importing
@@ -108,10 +109,10 @@ describe('MCP Tools - Shared Module', () => {
   });
 
   describe('getToolDefinitions', () => {
-    it('should return an array of 11 tools', () => {
+    it('should return an array of 13 tools', () => {
       const tools = getToolDefinitions();
       expect(Array.isArray(tools)).toBe(true);
-      expect(tools.length).toBe(11);
+      expect(tools.length).toBe(13);
     });
 
     it('should include all expected tool names', () => {
@@ -126,8 +127,16 @@ describe('MCP Tools - Shared Module', () => {
       expect(names).toContain('get_sources');
       expect(names).toContain('get_keywords');
       expect(names).toContain('validate_chains');
+      expect(names).toContain('get_stats');
+      expect(names).toContain('traverse_relations');
       expect(names).toContain('get_rpc_monitor');
       expect(names).toContain('get_rpc_monitor_by_id');
+    });
+
+    it('should require chainId for traverse_relations', () => {
+      const tools = getToolDefinitions();
+      const tool = tools.find(t => t.name === 'traverse_relations');
+      expect(tool.inputSchema.required).toContain('chainId');
     });
 
     it('should have proper schema structure for each tool', () => {
@@ -560,6 +569,136 @@ describe('MCP Tools - Shared Module', () => {
       const result = await handleToolCall('get_rpc_monitor_by_id', { chainId: 999 });
       expect(result.isError).toBeUndefined();
       expect(result.content[0].text).toContain('No monitoring data available yet for chain 999');
+    });
+  });
+
+  describe('handleToolCall - get_stats', () => {
+    it('should return aggregate stats', async () => {
+      vi.mocked(dataService.getAllChains).mockReturnValue([
+        { chainId: 1, name: 'Ethereum', tags: [] },
+        { chainId: 5, name: 'Goerli', tags: ['Testnet'] },
+        { chainId: 137, name: 'Polygon', tags: ['L2'] },
+        { chainId: 100, name: 'Gnosis Beacon', tags: ['Beacon'] },
+      ]);
+      vi.mocked(rpcMonitor.getMonitoringResults).mockReturnValue({
+        lastUpdated: '2024-01-01T00:00:00.000Z',
+        totalEndpoints: 100,
+        testedEndpoints: 50,
+        workingEndpoints: 40,
+        failedEndpoints: 10,
+        results: [],
+      });
+
+      const result = await handleToolCall('get_stats', {});
+      expect(result.isError).toBeUndefined();
+      const data = JSON.parse(result.content[0].text);
+      expect(data.totalChains).toBe(4);
+      expect(data.totalTestnets).toBe(1);
+      expect(data.totalL2s).toBe(1);
+      expect(data.totalBeacons).toBe(1);
+      expect(data.totalMainnets).toBe(3);
+      expect(data.rpc.working).toBe(40);
+      expect(data.rpc.failed).toBe(10);
+      expect(data.rpc.healthPercent).toBe(80);
+    });
+
+    it('should return null healthPercent when no endpoints tested', async () => {
+      vi.mocked(dataService.getAllChains).mockReturnValue([]);
+      vi.mocked(rpcMonitor.getMonitoringResults).mockReturnValue({
+        lastUpdated: null,
+        totalEndpoints: 0,
+        testedEndpoints: 0,
+        workingEndpoints: 0,
+        failedEndpoints: 0,
+        results: [],
+      });
+
+      const result = await handleToolCall('get_stats', {});
+      const data = JSON.parse(result.content[0].text);
+      expect(data.rpc.healthPercent).toBeNull();
+    });
+  });
+
+  describe('handleToolCall - traverse_relations', () => {
+    it('should return traversal result for valid chain', async () => {
+      vi.mocked(dataService.traverseRelations).mockReturnValue({
+        startChainId: 1,
+        startChainName: 'Ethereum',
+        maxDepth: 2,
+        totalNodes: 3,
+        totalEdges: 2,
+        nodes: [
+          { chainId: 1, name: 'Ethereum', tags: [], depth: 0 },
+          { chainId: 5, name: 'Goerli', tags: ['Testnet'], depth: 1 },
+          { chainId: 10, name: 'Optimism', tags: ['L2'], depth: 1 },
+        ],
+        edges: [
+          { from: 1, to: 5, kind: 'mainnetOf', source: 'theGraph' },
+          { from: 1, to: 10, kind: 'parentOf', source: 'theGraph' },
+        ],
+      });
+
+      const result = await handleToolCall('traverse_relations', { chainId: 1 });
+      expect(result.isError).toBeUndefined();
+      const data = JSON.parse(result.content[0].text);
+      expect(data.startChainId).toBe(1);
+      expect(data.totalNodes).toBe(3);
+      expect(data.totalEdges).toBe(2);
+      expect(data.nodes.length).toBe(3);
+    });
+
+    it('should return error for invalid chain ID', async () => {
+      const result = await handleToolCall('traverse_relations', { chainId: 'invalid' });
+      expect(result.isError).toBe(true);
+      const data = JSON.parse(result.content[0].text);
+      expect(data.error).toBe('Invalid chain ID');
+    });
+
+    it('should return error for NaN chain ID', async () => {
+      const result = await handleToolCall('traverse_relations', { chainId: NaN });
+      expect(result.isError).toBe(true);
+    });
+
+    it('should return error when chain not found', async () => {
+      vi.mocked(dataService.traverseRelations).mockReturnValue(null);
+      const result = await handleToolCall('traverse_relations', { chainId: 999999 });
+      expect(result.isError).toBe(true);
+      const data = JSON.parse(result.content[0].text);
+      expect(data.error).toBe('Chain not found');
+    });
+
+    it('should use default depth of 2', async () => {
+      vi.mocked(dataService.traverseRelations).mockReturnValue({
+        startChainId: 1, startChainName: 'Ethereum', maxDepth: 2,
+        totalNodes: 1, totalEdges: 0, nodes: [], edges: [],
+      });
+
+      await handleToolCall('traverse_relations', { chainId: 1 });
+      expect(dataService.traverseRelations).toHaveBeenCalledWith(1, 2);
+    });
+
+    it('should accept custom depth', async () => {
+      vi.mocked(dataService.traverseRelations).mockReturnValue({
+        startChainId: 1, startChainName: 'Ethereum', maxDepth: 4,
+        totalNodes: 1, totalEdges: 0, nodes: [], edges: [],
+      });
+
+      await handleToolCall('traverse_relations', { chainId: 1, depth: 4 });
+      expect(dataService.traverseRelations).toHaveBeenCalledWith(1, 4);
+    });
+
+    it('should reject depth below 1', async () => {
+      const result = await handleToolCall('traverse_relations', { chainId: 1, depth: 0 });
+      expect(result.isError).toBe(true);
+      const data = JSON.parse(result.content[0].text);
+      expect(data.error).toBe('Invalid depth. Must be between 1 and 5');
+    });
+
+    it('should reject depth above 5', async () => {
+      const result = await handleToolCall('traverse_relations', { chainId: 1, depth: 6 });
+      expect(result.isError).toBe(true);
+      const data = JSON.parse(result.content[0].text);
+      expect(data.error).toBe('Invalid depth. Must be between 1 and 5');
     });
   });
 

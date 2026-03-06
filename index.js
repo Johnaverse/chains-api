@@ -4,7 +4,7 @@ import rateLimit from '@fastify/rate-limit';
 import helmet from '@fastify/helmet';
 import { readFile } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
-import { loadData, initializeDataOnStartup, getCachedData, searchChains, getChainById, getAllChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints, getAllKeywords, validateChainData } from './dataService.js';
+import { loadData, initializeDataOnStartup, getCachedData, searchChains, getChainById, getAllChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints, getAllKeywords, validateChainData, traverseRelations } from './dataService.js';
 import { getMonitoringResults, getMonitoringStatus, startRpcHealthCheck } from './rpcMonitor.js';
 import {
   PORT, HOST, BODY_LIMIT, MAX_PARAM_LENGTH,
@@ -173,6 +173,28 @@ export async function buildApp(options = {}) {
     }
 
     const result = getRelationsById(chainId);
+    if (!result) {
+      return sendError(reply, 404, 'Chain not found');
+    }
+
+    return result;
+  });
+
+  /**
+   * BFS graph traversal of chain relations
+   */
+  fastify.get('/relations/:id/graph', async (request, reply) => {
+    const chainId = parseIntParam(request.params.id);
+    if (chainId === null) {
+      return sendError(reply, 400, 'Invalid chain ID');
+    }
+
+    const depth = request.query.depth !== undefined ? parseIntParam(request.query.depth) : 2;
+    if (depth === null || depth < 1 || depth > 5) {
+      return sendError(reply, 400, 'Invalid depth. Must be between 1 and 5');
+    }
+
+    const result = traverseRelations(chainId, depth);
     if (!result) {
       return sendError(reply, 404, 'Chain not found');
     }
@@ -371,14 +393,51 @@ export async function buildApp(options = {}) {
     }
 
     const workingCount = chainResults.filter(r => r.status === 'working').length;
+    const failedCount = chainResults.filter(r => r.status === 'failed').length;
 
     return {
       chainId,
       chainName: chainResults[0].chainName,
       totalEndpoints: chainResults.length,
       workingEndpoints: workingCount,
+      failedEndpoints: failedCount,
       lastUpdated: results.lastUpdated,
       endpoints: chainResults
+    };
+  });
+
+  /**
+   * Get aggregate stats
+   */
+  fastify.get('/stats', async (request, reply) => {
+    const chains = getAllChains();
+    const monitorResults = getMonitoringResults();
+
+    const totalChains = chains.length;
+    const totalMainnets = chains.filter(c => !c.tags?.includes('Testnet')).length;
+    const totalTestnets = chains.filter(c => c.tags?.includes('Testnet')).length;
+    const totalL2s = chains.filter(c => c.tags?.includes('L2')).length;
+    const totalBeacons = chains.filter(c => c.tags?.includes('Beacon')).length;
+
+    const rpcWorking = monitorResults.workingEndpoints;
+    const rpcFailed = monitorResults.failedEndpoints || 0;
+    const rpcTested = monitorResults.testedEndpoints;
+    const rpcHealthPercent = rpcTested > 0 ? Math.round((rpcWorking / rpcTested) * 10000) / 100 : null;
+
+    return {
+      totalChains,
+      totalMainnets,
+      totalTestnets,
+      totalL2s,
+      totalBeacons,
+      rpc: {
+        totalEndpoints: monitorResults.totalEndpoints,
+        tested: rpcTested,
+        working: rpcWorking,
+        failed: rpcFailed,
+        healthPercent: rpcHealthPercent
+      },
+      lastUpdated: monitorResults.lastUpdated
     };
   });
 
@@ -407,7 +466,9 @@ export async function buildApp(options = {}) {
         '/validate': 'Validate chain data for potential human errors',
         '/keywords': 'Get extracted keywords (blockchain names, network names, client names, etc.)',
         '/rpc-monitor': 'Get RPC endpoint monitoring results',
-        '/rpc-monitor/:id': 'Get RPC monitoring results for a specific chain by ID'
+        '/rpc-monitor/:id': 'Get RPC monitoring results for a specific chain by ID',
+        '/stats': 'Get aggregate stats (chain counts, RPC health percentage)',
+        '/relations/:id/graph?depth=N': 'BFS graph traversal of chain relations (default depth: 2)'
       },
       dataSources: [
         DATA_SOURCE_THE_GRAPH,

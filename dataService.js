@@ -1284,6 +1284,68 @@ export function getRelationsById(chainId) {
 }
 
 /**
+ * BFS graph traversal of chain relations starting from a given chain ID
+ * @param {number} startChainId - The chain ID to start traversal from
+ * @param {number} maxDepth - Maximum traversal depth (default: 2)
+ * @returns {Object|null} Traversal result with nodes and edges, or null if chain not found
+ */
+export function traverseRelations(startChainId, maxDepth = 2) {
+  if (!cachedData.indexed) return null;
+
+  const startChain = cachedData.indexed.byChainId[startChainId];
+  if (!startChain) return null;
+
+  const visited = new Set();
+  const queue = [{ chainId: startChainId, depth: 0 }];
+  const nodes = [];
+  const edges = [];
+
+  while (queue.length > 0) {
+    const { chainId, depth } = queue.shift();
+    if (visited.has(chainId)) continue;
+    visited.add(chainId);
+
+    const chain = cachedData.indexed.byChainId[chainId];
+    if (!chain) continue;
+
+    nodes.push({
+      chainId: chain.chainId,
+      name: chain.name,
+      tags: chain.tags || [],
+      depth
+    });
+
+    if (depth >= maxDepth) continue;
+
+    const relations = chain.relations || [];
+    for (const rel of relations) {
+      if (rel.chainId === undefined) continue;
+
+      edges.push({
+        from: chainId,
+        to: rel.chainId,
+        kind: rel.kind,
+        source: rel.source
+      });
+
+      if (!visited.has(rel.chainId)) {
+        queue.push({ chainId: rel.chainId, depth: depth + 1 });
+      }
+    }
+  }
+
+  return {
+    startChainId,
+    startChainName: startChain.name,
+    maxDepth,
+    totalNodes: nodes.length,
+    totalEdges: edges.length,
+    nodes,
+    edges
+  };
+}
+
+/**
  * Extract endpoints from a chain (helper function)
  */
 function extractEndpoints(chain) {
