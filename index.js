@@ -4,6 +4,7 @@ import rateLimit from '@fastify/rate-limit';
 import helmet from '@fastify/helmet';
 import { readFile } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
+import pkg from './package.json' with { type: 'json' };
 import { loadData, initializeDataOnStartup, getCachedData, searchChains, getChainById, getAllChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints, getAllKeywords, validateChainData, traverseRelations } from './dataService.js';
 import { getMonitoringResults, getMonitoringStatus, startRpcHealthCheck } from './rpcMonitor.js';
 import {
@@ -447,7 +448,7 @@ export async function buildApp(options = {}) {
   fastify.get('/', async (request, reply) => {
     return {
       name: 'Chains API',
-      version: '1.0.0',
+      version: pkg.version,
       description: 'API query service for blockchain chain data from multiple sources',
       endpoints: {
         '/health': 'Health check and data status',
