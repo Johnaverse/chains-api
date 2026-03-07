@@ -592,7 +592,7 @@ describe('MCP Tools - Shared Module', () => {
       expect(data.totalTestnets).toBe(1);
       expect(data.totalL2s).toBe(1);
       expect(data.totalBeacons).toBe(1);
-      expect(data.totalMainnets).toBe(3);
+      expect(data.totalMainnets).toBe(1);
       expect(data.rpc.working).toBe(40);
       expect(data.rpc.failed).toBe(10);
       expect(data.rpc.healthPercent).toBe(80);

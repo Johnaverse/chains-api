@@ -10,6 +10,7 @@ import {
   getAllKeywords,
   validateChainData,
   traverseRelations,
+  countChainsByTag,
   getRpcMonitoringResults,
   getRpcMonitoringStatus,
 } from './dataService.js';
@@ -319,11 +320,7 @@ function handleGetStats() {
   const chains = getAllChains();
   const monitorResults = getRpcMonitoringResults();
 
-  const totalChains = chains.length;
-  const totalMainnets = chains.filter(c => !c.tags?.includes('Testnet')).length;
-  const totalTestnets = chains.filter(c => c.tags?.includes('Testnet')).length;
-  const totalL2s = chains.filter(c => c.tags?.includes('L2')).length;
-  const totalBeacons = chains.filter(c => c.tags?.includes('Beacon')).length;
+  const { totalChains, totalMainnets, totalTestnets, totalL2s, totalBeacons } = countChainsByTag(chains);
 
   const rpcTested = monitorResults.testedEndpoints;
   const rpcWorking = monitorResults.workingEndpoints;
