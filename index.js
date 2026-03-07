@@ -2,9 +2,12 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import helmet from '@fastify/helmet';
+import fastifyStatic from '@fastify/static';
 import { readFile } from 'node:fs/promises';
-import { basename, resolve } from 'node:path';
-import { loadData, initializeDataOnStartup, getCachedData, searchChains, getChainById, getAllChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints, getAllKeywords, validateChainData, traverseRelations, getRpcMonitoringResults, getRpcMonitoringStatus, startRpcHealthCheck } from './dataService.js';
+import { basename, resolve, dirname, join } from 'node:path';
+import { fileURLToPath as toFilePath } from 'node:url';
+import pkg from './package.json' with { type: 'json' };
+import { loadData, initializeDataOnStartup, getCachedData, searchChains, getChainById, getAllChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints, getAllKeywords, validateChainData, traverseRelations, countChainsByTag, getRpcMonitoringResults, getRpcMonitoringStatus, startRpcHealthCheck } from './dataService.js';
 import {
   PORT, HOST, BODY_LIMIT, MAX_PARAM_LENGTH,
   RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS,
@@ -50,9 +53,20 @@ export async function buildApp(options = {}) {
       directives: {
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'"],
-        styleSrc: ["'self'"]
+        styleSrc: ["'self'"],
+        fontSrc: ["'self'"],
+        connectSrc: ["'self'"],
+        imgSrc: ["'self'", "data:"]
       }
     }
+  });
+
+  // Serve public/ directory for the 3D visualization UI
+  const __dir = dirname(toFilePath(import.meta.url));
+  await fastify.register(fastifyStatic, {
+    root: join(__dir, 'public'),
+    prefix: '/ui/',
+    decorateReply: false
   });
 
   // Security: Rate limiting
@@ -74,7 +88,7 @@ export async function buildApp(options = {}) {
   /**
    * Health check endpoint
    */
-  fastify.get('/health', async (request, reply) => {
+  fastify.get('/health', async () => {
     const cachedData = getCachedData();
     return {
       status: 'ok',
@@ -156,7 +170,7 @@ export async function buildApp(options = {}) {
   /**
    * Get all chain relations
    */
-  fastify.get('/relations', async (request, reply) => {
+  fastify.get('/relations', async () => {
     const relations = getAllRelations();
 
     return relations;
@@ -204,7 +218,7 @@ export async function buildApp(options = {}) {
   /**
    * Get all endpoints
    */
-  fastify.get('/endpoints', async (request, reply) => {
+  fastify.get('/endpoints', async () => {
     const endpoints = getAllEndpoints();
 
     return {
@@ -233,7 +247,7 @@ export async function buildApp(options = {}) {
   /**
    * Get raw data sources
    */
-  fastify.get('/sources', async (request, reply) => {
+  fastify.get('/sources', async () => {
     const cachedData = getCachedData();
     return {
       lastUpdated: cachedData.lastUpdated,
@@ -280,7 +294,7 @@ export async function buildApp(options = {}) {
   /**
    * Get SLIP-0044 coin types as JSON
    */
-  fastify.get('/slip44', async (request, reply) => {
+  fastify.get('/slip44', async (_request, reply) => {
     const cachedData = getCachedData();
 
     if (!cachedData.slip44) {
@@ -365,7 +379,7 @@ export async function buildApp(options = {}) {
   /**
    * Get RPC monitoring results
    */
-  fastify.get('/rpc-monitor', async (request, reply) => {
+  fastify.get('/rpc-monitor', async () => {
     const results = getRpcMonitoringResults();
     const status = getRpcMonitoringStatus();
 
@@ -408,15 +422,11 @@ export async function buildApp(options = {}) {
   /**
    * Get aggregate stats
    */
-  fastify.get('/stats', async (request, reply) => {
+  fastify.get('/stats', async () => {
     const chains = getAllChains();
     const monitorResults = getRpcMonitoringResults();
 
-    const totalChains = chains.length;
-    const totalMainnets = chains.filter(c => !c.tags?.includes('Testnet')).length;
-    const totalTestnets = chains.filter(c => c.tags?.includes('Testnet')).length;
-    const totalL2s = chains.filter(c => c.tags?.includes('L2')).length;
-    const totalBeacons = chains.filter(c => c.tags?.includes('Beacon')).length;
+    const { totalChains, totalMainnets, totalTestnets, totalL2s, totalBeacons } = countChainsByTag(chains);
 
     const rpcWorking = monitorResults.workingEndpoints;
     const rpcFailed = monitorResults.failedEndpoints || 0;
@@ -446,7 +456,7 @@ export async function buildApp(options = {}) {
   fastify.get('/', async (request, reply) => {
     return {
       name: 'Chains API',
-      version: '1.1.1',
+      version: pkg.version,
       description: 'API query service for blockchain chain data from multiple sources',
       endpoints: {
         '/health': 'Health check and data status',
@@ -486,7 +496,6 @@ export async function buildApp(options = {}) {
 /**
  * Parse and validate an integer parameter
  * @param {string} param - Parameter value to parse
- * @param {string} paramName - Name of the parameter for error message
  * @returns {number|null} Parsed integer or null if invalid
  */
 function parseIntParam(param) {
@@ -519,12 +528,10 @@ function sendError(reply, code, message) {
 
 // Only run the server if this file is executed directly (CLI mode)
 // This allows the file to be imported for testing without starting the server
-import { fileURLToPath } from 'node:url';
-
-const __filename = fileURLToPath(import.meta.url);
+const __filename = toFilePath(import.meta.url);
 
 // Check if this file is being run directly
-const isMainModule = process.argv[1] === __filename || process.argv[1] === fileURLToPath(import.meta.url);
+const isMainModule = process.argv[1] === __filename;
 
 if (isMainModule) {
   const start = async () => {
@@ -540,5 +547,3 @@ if (isMainModule) {
 
   start();
 }
-
-

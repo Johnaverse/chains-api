@@ -433,7 +433,8 @@ import {
   runRpcHealthCheck,
   startRpcHealthCheck,
   validateChainData,
-  traverseRelations
+  traverseRelations,
+  countChainsByTag
 } from '../../dataService.js';
 
 describe('fetchData', () => {
@@ -2765,4 +2766,80 @@ describe('traverseRelations', () => {
   });
 });
 
+describe('countChainsByTag', () => {
+  it('should return all zeros for an empty array', () => {
+    const result = countChainsByTag([]);
+    expect(result).toEqual({ totalChains: 0, totalMainnets: 0, totalTestnets: 0, totalL2s: 0, totalBeacons: 0 });
+  });
 
+  it('should count chains with no tags as mainnets', () => {
+    const chains = [{ chainId: 1, name: 'Ethereum' }, { chainId: 56, name: 'BSC' }];
+    const result = countChainsByTag(chains);
+    expect(result.totalChains).toBe(2);
+    expect(result.totalMainnets).toBe(2);
+    expect(result.totalTestnets).toBe(0);
+    expect(result.totalL2s).toBe(0);
+    expect(result.totalBeacons).toBe(0);
+  });
+
+  it('should count Testnet-tagged chains correctly', () => {
+    const chains = [
+      { chainId: 1, name: 'Ethereum', tags: [] },
+      { chainId: 5, name: 'Goerli', tags: ['Testnet'] },
+      { chainId: 11155111, name: 'Sepolia', tags: ['Testnet'] }
+    ];
+    const result = countChainsByTag(chains);
+    expect(result.totalChains).toBe(3);
+    expect(result.totalTestnets).toBe(2);
+    expect(result.totalMainnets).toBe(1);
+  });
+
+  it('should count L2-tagged chains correctly and exclude them from mainnets', () => {
+    const chains = [
+      { chainId: 1, name: 'Ethereum', tags: [] },
+      { chainId: 10, name: 'Optimism', tags: ['L2'] },
+      { chainId: 42161, name: 'Arbitrum One', tags: ['L2'] }
+    ];
+    const result = countChainsByTag(chains);
+    expect(result.totalL2s).toBe(2);
+    expect(result.totalMainnets).toBe(1);
+  });
+
+  it('should count Beacon-tagged chains correctly and exclude them from mainnets', () => {
+    const chains = [
+      { chainId: 1, name: 'Ethereum', tags: [] },
+      { chainId: 9999, name: 'Beacon Chain', tags: ['Beacon'] }
+    ];
+    const result = countChainsByTag(chains);
+    expect(result.totalBeacons).toBe(1);
+    expect(result.totalMainnets).toBe(1);
+  });
+
+  it('should handle chains with mixed tags (Testnet + L2)', () => {
+    const chains = [
+      { chainId: 1, name: 'Ethereum', tags: [] },
+      { chainId: 420, name: 'Optimism Goerli', tags: ['Testnet', 'L2'] }
+    ];
+    const result = countChainsByTag(chains);
+    expect(result.totalChains).toBe(2);
+    expect(result.totalTestnets).toBe(1);
+    expect(result.totalL2s).toBe(1);
+    expect(result.totalMainnets).toBe(1);
+  });
+
+  it('should correctly total all categories in a mixed array', () => {
+    const chains = [
+      { chainId: 1, name: 'Ethereum', tags: [] },
+      { chainId: 5, name: 'Goerli', tags: ['Testnet'] },
+      { chainId: 10, name: 'Optimism', tags: ['L2'] },
+      { chainId: 9999, name: 'Beacon', tags: ['Beacon'] },
+      { chainId: 420, name: 'OP Goerli', tags: ['Testnet', 'L2'] }
+    ];
+    const result = countChainsByTag(chains);
+    expect(result.totalChains).toBe(5);
+    expect(result.totalMainnets).toBe(1);
+    expect(result.totalTestnets).toBe(2);
+    expect(result.totalL2s).toBe(2);
+    expect(result.totalBeacons).toBe(1);
+  });
+});
