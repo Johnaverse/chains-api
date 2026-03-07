@@ -2240,6 +2240,27 @@ describe('initializeDataOnStartup with disk cache', () => {
     expect(cache.indexed.byChainId[1].name).toBe('Stale Chain');
   });
 
+  it('preserves cached data when a manual reload loses every source', async () => {
+    const { mod, fsMock } = await importWithDiskCacheEnabled();
+    fsMock.readFile.mockResolvedValueOnce(JSON.stringify(buildSnapshot(1, 'Stale Chain')));
+
+    global.fetch
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ networks: [] }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => [{ chainId: 25, name: 'Fresh Chain' }] })
+      .mockResolvedValueOnce({ ok: true, json: async () => [] })
+      .mockResolvedValueOnce({ ok: true, text: async () => '' });
+
+    await mod.initializeDataOnStartup();
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(mod.getCachedData().indexed.byChainId[25].name).toBe('Fresh Chain');
+
+    global.fetch.mockRejectedValue(new Error('network down'));
+
+    await expect(mod.loadData()).rejects.toThrow('All data sources failed during data refresh');
+    expect(mod.getCachedData().indexed.byChainId[25].name).toBe('Fresh Chain');
+  });
+
   it('deduplicates concurrent startup initialization and refresh operations', async () => {
     const { mod, fsMock } = await importWithDiskCacheEnabled();
     fsMock.readFile.mockResolvedValueOnce(JSON.stringify(buildSnapshot(1, 'Stale Chain')));
@@ -2743,3 +2764,5 @@ describe('traverseRelations', () => {
     }
   });
 });
+
+

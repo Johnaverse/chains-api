@@ -7,8 +7,7 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { createRequire } from 'node:module';
-import { initializeDataOnStartup } from './dataService.js';
-import { startRpcHealthCheck } from './rpcMonitor.js';
+import { initializeDataOnStartup, startRpcHealthCheck } from './dataService.js';
 import { getToolDefinitions, handleToolCall } from './mcp-tools.js';
 
 const require = createRequire(import.meta.url);
@@ -59,3 +58,4 @@ try {
   console.error('Server error:', error);
   process.exit(1);
 }
+

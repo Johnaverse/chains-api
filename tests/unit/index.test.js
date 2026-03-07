@@ -50,22 +50,26 @@ vi.mock('../../dataService.js', async () => {
     getEndpointsById: vi.fn(() => null),
     getAllEndpoints: vi.fn(() => []),
     getAllKeywords: vi.fn(() => ({})),
+    getRpcMonitoringResults: vi.fn(() => ({
+      lastUpdated: null,
+      totalEndpoints: 0,
+      testedEndpoints: 0,
+      workingEndpoints: 0,
+      failedEndpoints: 0,
+      results: []
+    })),
+    getRpcMonitoringStatus: vi.fn(() => ({ isMonitoring: false, lastUpdated: null })),
+    startRpcHealthCheck: vi.fn(),
     validateChainData: vi.fn(() => [])
   };
 });
-
-vi.mock('../../rpcMonitor.js', () => ({
-  getMonitoringResults: vi.fn(() => ({ results: [], lastUpdated: null })),
-  getMonitoringStatus: vi.fn(() => ({ isMonitoring: false, lastUpdated: null })),
-  startRpcHealthCheck: vi.fn()
-}));
 
 vi.mock('node:fs/promises', () => ({
   readFile: vi.fn().mockRejectedValue(new Error('ENOENT'))
 }));
 
 import { buildApp } from '../../index.js';
-import { startRpcHealthCheck } from '../../rpcMonitor.js';
+import * as dataService from '../../dataService.js';
 
 describe('index.js - CORS origin split/map callback', () => {
   beforeEach(() => {
@@ -95,8 +99,9 @@ describe('index.js - onBackgroundRefreshSuccess callback', () => {
     // Invoke it to exercise the callback
     capturedCallback();
 
-    expect(startRpcHealthCheck).toHaveBeenCalled();
+    expect(dataService.startRpcHealthCheck).toHaveBeenCalled();
 
     await app.close();
   });
 });
+

@@ -70,7 +70,7 @@ describe('MCP HTTP Server Handler Logic', () => {
 
       const infoData = {
         name: 'Chains API - MCP HTTP Server',
-        version: '1.0.0',
+        version: '1.1.1',
         description: 'HTTP-based MCP server for blockchain chain data',
         endpoints: {
           '/mcp': 'MCP protocol endpoint (POST for requests, DELETE for session termination)',
@@ -81,7 +81,7 @@ describe('MCP HTTP Server Handler Logic', () => {
       };
 
       expect(infoData.name).toBe('Chains API - MCP HTTP Server');
-      expect(infoData.version).toBe('1.0.0');
+      expect(infoData.version).toBe('1.1.1');
       expect(infoData.endpoints).toHaveProperty('/mcp');
       expect(infoData.endpoints).toHaveProperty('/health');
     });
@@ -124,7 +124,7 @@ describe('MCP HTTP Server Handler Logic', () => {
           capabilities: {},
           clientInfo: {
             name: 'test-client',
-            version: '1.0.0',
+            version: '1.1.1',
           },
         },
       };
@@ -355,7 +355,7 @@ describe('MCP HTTP Server Handler Logic', () => {
     it('should create server with correct metadata', () => {
       const serverConfig = {
         name: 'chains-api',
-        version: '1.0.0',
+        version: '1.1.1',
       };
 
       const capabilities = {
@@ -363,8 +363,9 @@ describe('MCP HTTP Server Handler Logic', () => {
       };
 
       expect(serverConfig.name).toBe('chains-api');
-      expect(serverConfig.version).toBe('1.0.0');
+      expect(serverConfig.version).toBe('1.1.1');
       expect(capabilities).toHaveProperty('tools');
     });
   });
 });
+

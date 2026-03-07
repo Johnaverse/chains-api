@@ -1,3 +1,8 @@
+## v1.1.1 — 2026-03-07
+- Fixed: unified RPC health reporting so the API and MCP servers use the same data source.
+- Fixed: prevented empty-source reloads from wiping a healthy cached dataset.
+- Fixed: tightened numeric route parsing to reject partially numeric IDs and graph depth values.
+- Fixed: reduced frontend cognitive complexity in `public/app.js` for SonarQube compliance.
 # Changelog
 
 All notable changes to this project will be documented in this file.
@@ -57,3 +62,4 @@ Full Changelog: v1.0.0...v1.0.9
 ---
 
 This changelog was drafted from repository structure and test files; run `git log --pretty=oneline v1.0.9..v1.0.11` to produce a commit-based changelog if you prefer exact commit messages.
+

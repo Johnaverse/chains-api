@@ -10,8 +10,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import express from 'express';
 import { createRequire } from 'node:module';
-import { initializeDataOnStartup, getCachedData } from './dataService.js';
-import { startRpcHealthCheck } from './rpcMonitor.js';
+import { initializeDataOnStartup, getCachedData, startRpcHealthCheck } from './dataService.js';
 import { getToolDefinitions, handleToolCall } from './mcp-tools.js';
 
 const require = createRequire(import.meta.url);
@@ -222,3 +221,4 @@ process.on('SIGINT', async () => {
   console.log('Server shutdown complete');
   process.exit(0);
 });
+

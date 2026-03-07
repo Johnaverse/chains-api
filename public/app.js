@@ -600,44 +600,58 @@ function showWebsite(data) {
     }
 }
 
-function showNodeDetails(node) {
-    const panel = document.getElementById('detailsPanel');
-    const data = node.data;
-
+function showNodeHeader(node, data) {
     const iconElem = document.getElementById('chainIcon');
     iconElem.textContent = node.name ? node.name.charAt(0).toUpperCase() : '?';
     iconElem.style.background = `linear-gradient(135deg, ${node.color}, ${node.color}33)`;
 
     document.getElementById('chainName').textContent = node.name || 'Unknown Chain';
     document.getElementById('chainIdBadge').textContent = `ID: ${data.chainId}`;
-
-    showStatusBadge(data);
-    showTagsBadge(data);
-
     document.getElementById('chainCurrency').textContent = data.nativeCurrency
         ? `${data.nativeCurrency.name} (${data.nativeCurrency.symbol})`
         : 'None';
 
+    showStatusBadge(data);
+    showTagsBadge(data);
+}
+
+function showNodeParents(node) {
     const { row: rowL1, elem: l1Elem } = showParentRow('rowL1Parent', 'chainL1Parent', node.l2Parent);
     showParentRow('rowMainnet', 'chainMainnet', node.mainnetParent);
 
-    if (!node.l2Parent && !node.mainnetParent) {
-        rowL1.style.display = 'flex';
-        l1Elem.textContent = 'None';
+    if (node.l2Parent || node.mainnetParent) {
+        return;
     }
 
-    showChildrenSection('chainL2Children', 'labelL2Children', node.l2Children, 'L2 / L3');
+    rowL1.style.display = 'flex';
+    l1Elem.textContent = 'None';
+}
 
+function showNodeTestnets(node) {
     const rowTestnetChildren = document.getElementById('rowTestnetChildren');
     const isTestnet = node.data.tags?.includes('Testnet');
+
     rowTestnetChildren.style.display = isTestnet ? 'none' : 'flex';
-    if (!isTestnet) {
-        showChildrenSection('chainTestnetChildren', 'labelTestnetChildren', node.testnetChildren, 'Testnets');
+    if (isTestnet) {
+        return;
     }
 
+    showChildrenSection('chainTestnetChildren', 'labelTestnetChildren', node.testnetChildren, 'Testnets');
+}
+
+function showNodeDetails(node) {
+    const panel = document.getElementById('detailsPanel');
+    const data = node.data;
+
+    showNodeHeader(node, data);
+    showNodeParents(node);
+    showChildrenSection('chainL2Children', 'labelL2Children', node.l2Children, 'L2 / L3');
+    showNodeTestnets(node);
     showRpcEndpoints(data);
     showExplorers(data);
     showWebsite(data);
 
     panel.classList.remove('hidden');
 }
+
+

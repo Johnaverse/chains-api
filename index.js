@@ -4,8 +4,7 @@ import rateLimit from '@fastify/rate-limit';
 import helmet from '@fastify/helmet';
 import { readFile } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
-import { loadData, initializeDataOnStartup, getCachedData, searchChains, getChainById, getAllChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints, getAllKeywords, validateChainData, traverseRelations } from './dataService.js';
-import { getMonitoringResults, getMonitoringStatus, startRpcHealthCheck } from './rpcMonitor.js';
+import { loadData, initializeDataOnStartup, getCachedData, searchChains, getChainById, getAllChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints, getAllKeywords, validateChainData, traverseRelations, getRpcMonitoringResults, getRpcMonitoringStatus, startRpcHealthCheck } from './dataService.js';
 import {
   PORT, HOST, BODY_LIMIT, MAX_PARAM_LENGTH,
   RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS,
@@ -367,8 +366,8 @@ export async function buildApp(options = {}) {
    * Get RPC monitoring results
    */
   fastify.get('/rpc-monitor', async (request, reply) => {
-    const results = getMonitoringResults();
-    const status = getMonitoringStatus();
+    const results = getRpcMonitoringResults();
+    const status = getRpcMonitoringStatus();
 
     return {
       ...status,
@@ -385,7 +384,7 @@ export async function buildApp(options = {}) {
       return sendError(reply, 400, 'Invalid chain ID');
     }
 
-    const results = getMonitoringResults();
+    const results = getRpcMonitoringResults();
     const chainResults = results.results.filter(r => r.chainId === chainId);
 
     if (chainResults.length === 0) {
@@ -411,7 +410,7 @@ export async function buildApp(options = {}) {
    */
   fastify.get('/stats', async (request, reply) => {
     const chains = getAllChains();
-    const monitorResults = getMonitoringResults();
+    const monitorResults = getRpcMonitoringResults();
 
     const totalChains = chains.length;
     const totalMainnets = chains.filter(c => !c.tags?.includes('Testnet')).length;
@@ -447,7 +446,7 @@ export async function buildApp(options = {}) {
   fastify.get('/', async (request, reply) => {
     return {
       name: 'Chains API',
-      version: '1.0.0',
+      version: '1.1.1',
       description: 'API query service for blockchain chain data from multiple sources',
       endpoints: {
         '/health': 'Health check and data status',
@@ -490,8 +489,21 @@ export async function buildApp(options = {}) {
  * @param {string} paramName - Name of the parameter for error message
  * @returns {number|null} Parsed integer or null if invalid
  */
-function parseIntParam(param, paramName = 'ID') {
-  const parsed = Number.parseInt(param, 10);
+function parseIntParam(param) {
+  if (typeof param === 'number') {
+    return Number.isInteger(param) ? param : null;
+  }
+
+  if (typeof param !== 'string') {
+    return null;
+  }
+
+  const normalized = param.trim();
+  if (!/^-?\d+$/.test(normalized)) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(normalized, 10);
   return Number.isNaN(parsed) ? null : parsed;
 }
 
@@ -528,3 +540,5 @@ if (isMainModule) {
 
   start();
 }
+
+

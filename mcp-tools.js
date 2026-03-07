@@ -10,8 +10,9 @@ import {
   getAllKeywords,
   validateChainData,
   traverseRelations,
+  getRpcMonitoringResults,
+  getRpcMonitoringStatus,
 } from './dataService.js';
-import { getMonitoringResults, getMonitoringStatus } from './rpcMonitor.js';
 
 /**
  * Get the list of MCP tool definitions (schemas)
@@ -316,7 +317,7 @@ function handleValidateChains() {
 
 function handleGetStats() {
   const chains = getAllChains();
-  const monitorResults = getMonitoringResults();
+  const monitorResults = getRpcMonitoringResults();
 
   const totalChains = chains.length;
   const totalMainnets = chains.filter(c => !c.tags?.includes('Testnet')).length;
@@ -399,8 +400,8 @@ function formatRpcMonitorStatus(status, results) {
 }
 
 function handleGetRpcMonitor() {
-  const results = getMonitoringResults();
-  const status = getMonitoringStatus();
+  const results = getRpcMonitoringResults();
+  const status = getRpcMonitoringStatus();
   return { content: [{ type: 'text', text: formatRpcMonitorStatus(status, results) }] };
 }
 
@@ -410,8 +411,8 @@ function handleGetRpcMonitorById(args) {
     return errorResponse('Invalid chain ID');
   }
 
-  const results = getMonitoringResults();
-  const status = getMonitoringStatus();
+  const results = getRpcMonitoringResults();
+  const status = getRpcMonitoringStatus();
   const chainResults = results.results.filter((r) => r.chainId === chainId);
 
   if (chainResults.length === 0) {
@@ -478,3 +479,4 @@ export async function handleToolCall(name, args) {
     return errorResponse('Internal error', error.message);
   }
 }
+

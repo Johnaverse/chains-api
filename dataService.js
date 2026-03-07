@@ -223,7 +223,7 @@ async function refreshDataWithGuard(options = {}) {
     const { data, loadedSourceCount } = await fetchAndBuildData();
 
     if (requireAtLeastOneSource && loadedSourceCount === 0) {
-      throw new Error('All data sources failed during background refresh');
+      throw new Error('All data sources failed during data refresh');
     }
 
     applyDataToCache(data);
@@ -851,7 +851,7 @@ export function indexData(theGraph, chainlist, chains, slip44) {
  * Load and cache all data sources
  */
 export async function loadData() {
-  return refreshDataWithGuard();
+  return refreshDataWithGuard({ requireAtLeastOneSource: true });
 }
 
 /**
@@ -911,6 +911,46 @@ export async function initializeDataOnStartup(options = {}) {
  */
 export function getCachedData() {
   return cachedData;
+}
+
+function flattenRpcHealthResults() {
+  return Object.entries(cachedData.rpcHealth || {}).flatMap(([chainId, results]) => {
+    const numericChainId = Number.parseInt(chainId, 10);
+    const chainName = cachedData.indexed?.byChainId?.[numericChainId]?.name ?? `Chain ${chainId}`;
+
+    return (results || []).map((result) => ({
+      chainId: numericChainId,
+      chainName,
+      url: result.url,
+      status: result.ok ? 'working' : 'failed',
+      clientVersion: result.clientVersion ?? null,
+      blockNumber: result.blockHeight ?? null,
+      latencyMs: result.latencyMs ?? null,
+      error: result.error ?? null
+    }));
+  });
+}
+
+export function getRpcMonitoringResults() {
+  const results = flattenRpcHealthResults();
+  const workingEndpoints = results.filter(result => result.status === 'working').length;
+  const failedEndpoints = results.length - workingEndpoints;
+
+  return {
+    lastUpdated: cachedData.lastRpcCheck,
+    totalEndpoints: results.length,
+    testedEndpoints: results.length,
+    workingEndpoints,
+    failedEndpoints,
+    results
+  };
+}
+
+export function getRpcMonitoringStatus() {
+  return {
+    isMonitoring: rpcCheckInProgress,
+    lastUpdated: cachedData.lastRpcCheck
+  };
 }
 
 /**
@@ -1804,3 +1844,6 @@ export function validateChainData() {
     allErrors: errors
   };
 }
+
+
+
