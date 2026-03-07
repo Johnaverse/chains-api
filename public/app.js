@@ -234,13 +234,20 @@ function initUI() {
 async function fetchExportData() {
     let res;
     try {
-        // Try local API first (/export), fall back to bundled export.json
-        let res;
-        try {
-            res = await fetch('/export');
-            if (!res.ok) throw new Error('Local export unavailable');
-        } catch {
-            res = await fetch('export.json');
+        res = await fetch('/export');
+        if (!res.ok) throw new Error('Local export unavailable');
+    } catch {
+        res = await fetch('export.json');
+    }
+    return res.json();
+}
+
+function buildRelationsMap(chains) {
+    const relations = {};
+    for (const chain of chains) {
+        if (!chain.relations) continue;
+        for (const rel of chain.relations) {
+            addRelation(relations, rel, chain);
         }
     }
     return relations;
@@ -587,29 +594,8 @@ function showNodeDetails(node) {
             statusBadge.style.display = 'none';
         }
     }
-}
 
-function showTagsBadge(data) {
-    const tagsElem = document.getElementById('chainTags');
-    if (tagsElem) {
-        if (data.tags?.length > 0) {
-            tagsElem.textContent = data.tags.join(', ');
-            tagsElem.style.display = 'inline-block';
-        } else {
-            tagsElem.style.display = 'none';
-        }
-    }
-}
-
-function showWebsite(data) {
-    const webElem = document.getElementById('chainWebsite');
-    if (!data.infoURL) {
-        webElem.textContent = 'None available';
-        return;
-    }
-    try {
-        const url = new URL(data.infoURL);
-        const protocol = url.protocol;
+    showTagsBadge(data);
 
     const curElem = document.getElementById('chainCurrency');
     if (curElem) {
@@ -640,25 +626,48 @@ function showWebsite(data) {
 
     showRpcEndpoints(data);
     showExplorers(data);
-
-    const webElem = document.getElementById('chainWebsite');
-    if (webElem) {
-        if (data.infoURL) {
-            try {
-                const a = document.createElement('a');
-                a.href = data.infoURL;
-                a.target = "_blank";
-                a.rel = "noopener";
-                a.textContent = new URL(data.infoURL).hostname;
-                webElem.textContent = '';
-                webElem.appendChild(a);
-            } catch {
-                webElem.textContent = data.infoURL;
-            }
-        } else {
-            webElem.textContent = 'None available';
-        }
-    }
+    showWebsite(data);
 
     panel.classList.remove('hidden');
+}
+
+function showTagsBadge(data) {
+    const tagsElem = document.getElementById('chainTags');
+    if (tagsElem) {
+        if (data.tags?.length > 0) {
+            tagsElem.textContent = data.tags.join(', ');
+            tagsElem.style.display = 'inline-block';
+        } else {
+            tagsElem.style.display = 'none';
+        }
+    }
+}
+
+function showWebsite(data) {
+    const webElem = document.getElementById('chainWebsite');
+    if (!webElem) return;
+    if (!data.infoURL) {
+        webElem.textContent = 'None available';
+        return;
+    }
+    try {
+        const url = new URL(data.infoURL);
+        const protocol = url.protocol.toLowerCase();
+
+        if (protocol === 'http:' || protocol === 'https:') {
+            const a = document.createElement('a');
+            a.href = url.toString();
+            a.target = "_blank";
+            a.rel = "noopener";
+            a.textContent = url.hostname;
+            webElem.textContent = '';
+            webElem.appendChild(a);
+        } else {
+            // Unsafe or unsupported protocol: show as plain text without a link
+            webElem.textContent = data.infoURL;
+        }
+    } catch {
+        // Invalid URL: show as plain text without a link
+        webElem.textContent = data.infoURL;
+    }
 }

@@ -1316,17 +1316,24 @@ export function getRelationsById(chainId) {
  * @param {number} maxDepth - Maximum traversal depth (default: 2)
  * @returns {Object|null} Traversal result with nodes and edges, or null if chain not found
  */
-function collectRelationEdges(chain, chainId, depth, visited, edges, queue) {
+function collectRelationEdges(chain, chainId, depth, visited, edges, queue, seenEdges) {
   const relations = chain.relations || [];
   for (const rel of relations) {
     if (rel.chainId === undefined) continue;
 
-    edges.push({
-      from: chainId,
-      to: rel.chainId,
-      kind: rel.kind,
-      source: rel.source
-    });
+    // Deduplicate bidirectional edges (A→B and B→A with same kind) using O(1) Set lookup
+    const a = Math.min(chainId, rel.chainId);
+    const b = Math.max(chainId, rel.chainId);
+    const edgeKey = `${a}-${b}-${rel.kind}`;
+    if (!seenEdges.has(edgeKey)) {
+      seenEdges.add(edgeKey);
+      edges.push({
+        from: chainId,
+        to: rel.chainId,
+        kind: rel.kind,
+        source: rel.source
+      });
+    }
 
     if (!visited.has(rel.chainId)) {
       queue.push({ chainId: rel.chainId, depth: depth + 1 });
@@ -1341,6 +1348,7 @@ export function traverseRelations(startChainId, maxDepth = 2) {
   if (!startChain) return null;
 
   const visited = new Set();
+  const seenEdges = new Set();
   const queue = [{ chainId: startChainId, depth: 0 }];
   const nodes = [];
   const edges = [];
@@ -1360,28 +1368,8 @@ export function traverseRelations(startChainId, maxDepth = 2) {
       depth
     });
 
-    if (depth >= maxDepth) continue;
-
-    const relations = chain.relations || [];
-    for (const rel of relations) {
-      if (rel.chainId === undefined) continue;
-
-      // Deduplicate bidirectional edges (A→B and B→A with same kind)
-      const a = Math.min(chainId, rel.chainId);
-      const b = Math.max(chainId, rel.chainId);
-      const isDuplicate = edges.some(e => Math.min(e.from, e.to) === a && Math.max(e.from, e.to) === b && e.kind === rel.kind);
-      if (!isDuplicate) {
-        edges.push({
-          from: chainId,
-          to: rel.chainId,
-          kind: rel.kind,
-          source: rel.source
-        });
-      }
-
-      if (!visited.has(rel.chainId)) {
-        queue.push({ chainId: rel.chainId, depth: depth + 1 });
-      }
+    if (depth < maxDepth) {
+      collectRelationEdges(chain, chainId, depth, visited, edges, queue, seenEdges);
     }
   }
 
