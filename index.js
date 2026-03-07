@@ -486,7 +486,6 @@ export async function buildApp(options = {}) {
 /**
  * Parse and validate an integer parameter
  * @param {string} param - Parameter value to parse
- * @param {string} paramName - Name of the parameter for error message
  * @returns {number|null} Parsed integer or null if invalid
  */
 function parseIntParam(param) {

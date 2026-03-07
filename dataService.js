@@ -918,7 +918,7 @@ function flattenRpcHealthResults() {
     const numericChainId = Number.parseInt(chainId, 10);
     const chainName = cachedData.indexed?.byChainId?.[numericChainId]?.name ?? `Chain ${chainId}`;
 
-    return (results || []).map((result) => ({
+    return (Array.isArray(results) ? results : []).map((result) => ({
       chainId: numericChainId,
       chainName,
       url: result.url,
