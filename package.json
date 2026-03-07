@@ -28,6 +28,9 @@
     "url": "https://github.com/Johnaverse/chains-api/issues"
   },
   "homepage": "https://github.com/Johnaverse/chains-api#readme",
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "@fastify/cors": "^11.2.0",
     "@fastify/helmet": "^13.0.2",
