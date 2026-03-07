@@ -352,7 +352,7 @@ function handleTraverseRelations(args) {
     return errorResponse('Invalid chain ID');
   }
 
-  const maxDepth = depth !== undefined ? depth : 2;
+  const maxDepth = depth ?? 2;
   if (typeof maxDepth !== 'number' || maxDepth < 1 || maxDepth > 5) {
     return errorResponse('Invalid depth. Must be between 1 and 5');
   }
@@ -433,7 +433,7 @@ function handleGetRpcMonitorById(args) {
   ];
   for (const ep of chainResults) {
     const block = ep.blockNumber == null ? '' : ` — block #${ep.blockNumber}`;
-    const latency = ep.latencyMs != null ? ` [${ep.latencyMs}ms]` : '';
+    const latency = ep.latencyMs == null ? '' : ` [${ep.latencyMs}ms]`;
     const client = ep.clientVersion && ep.clientVersion !== 'unavailable' ? ` (${ep.clientVersion})` : '';
     lines.push(
       `- **${ep.status}** ${ep.url}${block}${latency}${client}`,

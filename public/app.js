@@ -231,47 +231,50 @@ function initUI() {
     }
 }
 
+async function fetchExportData() {
+    let res;
+    try {
+        res = await fetch('/export');
+        if (!res.ok) throw new Error('Local export unavailable');
+    } catch {
+        res = await fetch('export.json');
+    }
+    return res.json();
+}
+
+function buildRelationsMap(chains) {
+    const relations = {};
+    for (const chain of chains) {
+        if (!chain.relations) continue;
+        for (const rel of chain.relations) {
+            addRelation(relations, rel, chain);
+        }
+    }
+    return relations;
+}
+
+function addRelation(relations, rel, chain) {
+    if (rel.kind === 'l2Of') {
+        if (!relations[rel.chainId]) relations[rel.chainId] = {};
+        relations[rel.chainId][chain.chainId] = { kind: 'l2Of' };
+    } else if (rel.kind === 'testnetOf') {
+        if (!relations[rel.chainId]) relations[rel.chainId] = {};
+        relations[rel.chainId][chain.chainId] = { kind: 'testnetOf' };
+    } else if (rel.kind === 'mainnetOf') {
+        if (!relations[chain.chainId]) relations[chain.chainId] = {};
+        relations[chain.chainId][rel.chainId] = { kind: 'testnetOf' };
+    }
+}
+
 async function fetchData() {
     try {
-        // Try local API first (/export), fall back to bundled export.json
-        let res;
-        try {
-            res = await fetch('/export');
-            if (!res.ok) throw new Error('Local export unavailable');
-        } catch {
-            res = await fetch('export.json');
-        }
-        const exportData = await res.json();
-
+        const exportData = await fetchExportData();
         const chains = exportData.data.indexed.all;
-
-        // Build relations map from per-chain relations arrays
-        const relations = {};
-        for (const chain of chains) {
-            if (!chain.relations) continue;
-            for (const rel of chain.relations) {
-                if (rel.kind === 'l2Of') {
-                    if (!relations[rel.chainId]) relations[rel.chainId] = {};
-                    relations[rel.chainId][chain.chainId] = { kind: 'l2Of' };
-                } else if (rel.kind === 'testnetOf') {
-                    if (!relations[rel.chainId]) relations[rel.chainId] = {};
-                    relations[rel.chainId][chain.chainId] = { kind: 'testnetOf' };
-                } else if (rel.kind === 'mainnetOf') {
-                    if (!relations[chain.chainId]) relations[chain.chainId] = {};
-                    relations[chain.chainId][rel.chainId] = { kind: 'testnetOf' };
-                }
-            }
-        }
+        const relations = buildRelationsMap(chains);
 
         processGraphData(chains, relations);
-
-        // Update stats line
         updateStats();
-
-        // Hide loading overlay
         document.getElementById('loadingOverlay').classList.add('hidden');
-
-        // Render
         renderGraph();
     } catch (error) {
         console.error('Error fetching data:', error);
@@ -292,80 +295,63 @@ function updateStats() {
     statsEl.textContent = `${total} chains \u00b7 ${mainnets} mainnets \u00b7 ${l2s} L2s \u00b7 ${testnets} testnets`;
 }
 
+function classifyChain(c) {
+    if (c.tags?.includes('Beacon')) return { type: 'Beacon', color: COLORS.BEACON, val: 1.5 };
+    if (c.tags?.includes('L2')) return { type: 'L2', color: COLORS.L2, val: 1.8 };
+    if (c.tags?.includes('Testnet')) return { type: 'Testnet', color: COLORS.TESTNET, val: 1 };
+    return { type: 'Mainnet', color: COLORS.MAINNET, val: c.chainId === 1 ? 8 : 3 };
+}
+
+function createGraphNode(c) {
+    const { type, color, val } = classifyChain(c);
+    let displayName = c.name || `Chain ${c.chainId}`;
+    if (c.tags?.includes('Testnet') && !displayName.toLowerCase().includes('testnet')) {
+        displayName += ' Testnet';
+    }
+    return {
+        id: c.chainId, name: displayName, val, color, type, data: c,
+        parent: null, l2Parent: null, mainnetParent: null,
+        children: [], l2Children: [], testnetChildren: []
+    };
+}
+
+function linkRelation(parentNode, childNode, relationInfo, links) {
+    links.push({ source: childNode.id, target: parentNode.id, kind: relationInfo.kind });
+
+    if (relationInfo.kind === 'l2Of' || relationInfo.kind === 'l1Of') {
+        childNode.l2Parent = parentNode;
+        parentNode.l2Children.push(childNode);
+    } else if (relationInfo.kind === 'testnetOf' || relationInfo.kind === 'mainnetOf') {
+        childNode.mainnetParent = parentNode;
+        parentNode.testnetChildren.push(childNode);
+    }
+
+    childNode.parent = parentNode;
+    parentNode.children.push(childNode);
+}
+
 function processGraphData(chains, relations) {
     const nodes = [];
     const links = [];
     const nodeMap = new Map();
 
-    // First pass: Add all nodes
     for (const c of chains) {
-        let type = 'Mainnet';
-        let color = COLORS.MAINNET;
-        let val;
-
-        if (c.tags?.includes('Beacon')) {
-            type = 'Beacon'; color = COLORS.BEACON; val = 1.5;
-        } else if (c.tags?.includes('L2')) {
-            type = 'L2'; color = COLORS.L2; val = 1.8;
-        } else if (c.tags?.includes('Testnet')) {
-            type = 'Testnet'; color = COLORS.TESTNET; val = 1;
-        } else {
-            val = 3;
-            if (c.chainId === 1) val = 8;
-        }
-
-        let displayName = c.name || `Chain ${c.chainId}`;
-        if (c.tags?.includes('Testnet') && !displayName.toLowerCase().includes('testnet')) {
-            displayName += ' Testnet';
-        }
-
-        const node = {
-            id: c.chainId,
-            name: displayName,
-            val,
-            color,
-            type,
-            data: c,
-            parent: null,
-            l2Parent: null,
-            mainnetParent: null,
-            children: [],
-            l2Children: [],
-            testnetChildren: []
-        };
+        const node = createGraphNode(c);
         nodes.push(node);
         nodeMap.set(c.chainId, node);
     }
 
-    // Second pass: Build links from relations
     for (const parentIdStr of Object.keys(relations)) {
         const parentId = Number.parseInt(parentIdStr);
         const childrenObj = relations[parentIdStr];
 
         for (const childIdStr of Object.keys(childrenObj)) {
             const childId = Number.parseInt(childIdStr);
-            const relationInfo = childrenObj[childIdStr];
-
             const parentNode = nodeMap.get(parentId);
             const childNode = nodeMap.get(childId);
 
             if (parentNode && childNode) {
-                links.push({
-                    source: childId,
-                    target: parentId,
-                    kind: relationInfo.kind
-                });
-
-                if (relationInfo.kind === 'l2Of' || relationInfo.kind === 'l1Of') {
-                    childNode.l2Parent = parentNode;
-                    parentNode.l2Children.push(childNode);
-                } else if (relationInfo.kind === 'testnetOf' || relationInfo.kind === 'mainnetOf') {
-                    childNode.mainnetParent = parentNode;
-                    parentNode.testnetChildren.push(childNode);
-                }
-
-                childNode.parent = parentNode;
-                parentNode.children.push(childNode);
+                linkRelation(parentNode, childNode, childrenObj[childIdStr], links);
             }
         }
     }
@@ -374,71 +360,62 @@ function processGraphData(chains, relations) {
     filteredData = { nodes: [...nodes], links: [...links] };
 }
 
+function filterLinksForNodes(nodeIds, excludeKind) {
+    return graphData.links.filter(l => {
+        const sourceId = l.source.id ?? l.source;
+        const targetId = l.target.id ?? l.target;
+        return nodeIds.has(sourceId) && nodeIds.has(targetId) && (!excludeKind || l.kind !== excludeKind);
+    });
+}
+
+function collectL2Tree(node, visibleNodesSet) {
+    if (!node.l2Children) return;
+    for (const child of node.l2Children) {
+        if (visibleNodesSet.has(child) || child.data.tags?.includes('Testnet')) continue;
+        visibleNodesSet.add(child);
+        collectL2Tree(child, visibleNodesSet);
+    }
+}
+
+function filterMainnetNodes() {
+    const visibleNodesSet = new Set();
+    for (const n of graphData.nodes) {
+        if ((n.type === 'Mainnet' || n.type === 'Beacon') && !n.mainnetParent) {
+            visibleNodesSet.add(n);
+            collectL2Tree(n, visibleNodesSet);
+        }
+    }
+    const visibleNodes = Array.from(visibleNodesSet);
+    const visibleNodeIds = new Set(visibleNodes.map(n => n.id));
+    return { nodes: visibleNodes, links: filterLinksForNodes(visibleNodeIds, 'testnetOf') };
+}
+
+function filterByType(type) {
+    const visibleNodesSet = new Set();
+    for (const n of graphData.nodes) {
+        if (n.type === type) {
+            visibleNodesSet.add(n);
+            if (n.parent) visibleNodesSet.add(n.parent);
+        }
+    }
+    const visibleNodes = Array.from(visibleNodesSet);
+    const visibleNodeIds = new Set(visibleNodes.map(n => n.id));
+    return { nodes: visibleNodes, links: filterLinksForNodes(visibleNodeIds) };
+}
+
 function applyFilters() {
     if (currentFilter === 'all') {
-        filteredData = {
-            nodes: [...graphData.nodes],
-            links: [...graphData.links]
-        };
+        filteredData = { nodes: [...graphData.nodes], links: [...graphData.links] };
     } else if (currentFilter === 'Mainnet') {
-        const visibleNodesSet = new Set();
-
-        function addL2Tree(node) {
-            if (node.l2Children) {
-                for (const child of node.l2Children) {
-                    const isTestnet = child.data.tags?.includes('Testnet');
-                    if (!visibleNodesSet.has(child) && !isTestnet) {
-                        visibleNodesSet.add(child);
-                        addL2Tree(child);
-                    }
-                }
-            }
-        }
-
-        for (const n of graphData.nodes) {
-            if ((n.type === 'Mainnet' || n.type === 'Beacon') && !n.mainnetParent) {
-                visibleNodesSet.add(n);
-                addL2Tree(n);
-            }
-        }
-
-        const visibleNodes = Array.from(visibleNodesSet);
-        const visibleNodeIds = new Set(visibleNodes.map(n => n.id));
-
-        const visibleLinks = graphData.links.filter(l => {
-            const sourceId = l.source.id ?? l.source;
-            const targetId = l.target.id ?? l.target;
-            return visibleNodeIds.has(sourceId) && visibleNodeIds.has(targetId) && l.kind !== 'testnetOf';
-        });
-
-        filteredData = { nodes: visibleNodes, links: visibleLinks };
+        filteredData = filterMainnetNodes();
     } else {
-        const visibleNodesSet = new Set();
-
-        for (const n of graphData.nodes) {
-            if (n.type === currentFilter) {
-                visibleNodesSet.add(n);
-                if (n.parent) visibleNodesSet.add(n.parent);
-            }
-        }
-
-        const visibleNodes = Array.from(visibleNodesSet);
-        const visibleNodeIds = new Set(visibleNodes.map(n => n.id));
-
-        const visibleLinks = graphData.links.filter(l =>
-            visibleNodeIds.has(l.source.id ?? l.source) &&
-            visibleNodeIds.has(l.target.id ?? l.target)
-        );
-
-        filteredData = { nodes: visibleNodes, links: visibleLinks };
+        filteredData = filterByType(currentFilter);
     }
 
-    // Update stats for filtered view
-    const statsEl = document.getElementById('statsLine');
     if (currentFilter === 'all') {
         updateStats();
     } else {
-        statsEl.textContent = `Showing ${filteredData.nodes.length} of ${graphData.nodes.length} chains`;
+        document.getElementById('statsLine').textContent = `Showing ${filteredData.nodes.length} of ${graphData.nodes.length} chains`;
     }
 
     if (myGraph) {
@@ -618,15 +595,7 @@ function showNodeDetails(node) {
         }
     }
 
-    const tagsElem = document.getElementById('chainTags');
-    if (tagsElem) {
-        if (data.tags?.length > 0) {
-            tagsElem.textContent = data.tags.join(', ');
-            tagsElem.style.display = 'inline-block';
-        } else {
-            tagsElem.style.display = 'none';
-        }
-    }
+    showTagsBadge(data);
 
     const curElem = document.getElementById('chainCurrency');
     if (curElem) {
@@ -657,25 +626,48 @@ function showNodeDetails(node) {
 
     showRpcEndpoints(data);
     showExplorers(data);
-
-    const webElem = document.getElementById('chainWebsite');
-    if (webElem) {
-        if (data.infoURL) {
-            try {
-                const a = document.createElement('a');
-                a.href = data.infoURL;
-                a.target = "_blank";
-                a.rel = "noopener";
-                a.textContent = new URL(data.infoURL).hostname;
-                webElem.textContent = '';
-                webElem.appendChild(a);
-            } catch {
-                webElem.textContent = data.infoURL;
-            }
-        } else {
-            webElem.textContent = 'None available';
-        }
-    }
+    showWebsite(data);
 
     panel.classList.remove('hidden');
+}
+
+function showTagsBadge(data) {
+    const tagsElem = document.getElementById('chainTags');
+    if (tagsElem) {
+        if (data.tags?.length > 0) {
+            tagsElem.textContent = data.tags.join(', ');
+            tagsElem.style.display = 'inline-block';
+        } else {
+            tagsElem.style.display = 'none';
+        }
+    }
+}
+
+function showWebsite(data) {
+    const webElem = document.getElementById('chainWebsite');
+    if (!webElem) return;
+    if (!data.infoURL) {
+        webElem.textContent = 'None available';
+        return;
+    }
+    try {
+        const url = new URL(data.infoURL);
+        const protocol = url.protocol.toLowerCase();
+
+        if (protocol === 'http:' || protocol === 'https:') {
+            const a = document.createElement('a');
+            a.href = url.toString();
+            a.target = "_blank";
+            a.rel = "noopener";
+            a.textContent = url.hostname;
+            webElem.textContent = '';
+            webElem.appendChild(a);
+        } else {
+            // Unsafe or unsupported protocol: show as plain text without a link
+            webElem.textContent = data.infoURL;
+        }
+    } catch {
+        // Invalid URL: show as plain text without a link
+        webElem.textContent = data.infoURL;
+    }
 }

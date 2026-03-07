@@ -295,7 +295,7 @@ describe('API Endpoints', () => {
       expect(response.statusCode).toBe(200);
       const data = JSON.parse(response.payload);
       expect(data).toHaveProperty('name', 'Chains API');
-      expect(data).toHaveProperty('version', '1.0.0');
+      expect(data).toHaveProperty('version', '1.1.0');
       expect(data).toHaveProperty('description');
       expect(data).toHaveProperty('endpoints');
       expect(data).toHaveProperty('dataSources');

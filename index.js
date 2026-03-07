@@ -6,6 +6,7 @@ import fastifyStatic from '@fastify/static';
 import { readFile } from 'node:fs/promises';
 import { basename, resolve, dirname, join } from 'node:path';
 import { fileURLToPath as toFilePath } from 'node:url';
+import pkg from './package.json' with { type: 'json' };
 import { loadData, initializeDataOnStartup, getCachedData, searchChains, getChainById, getAllChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints, getAllKeywords, validateChainData, traverseRelations, countChainsByTag } from './dataService.js';
 import { getMonitoringResults, getMonitoringStatus, startRpcHealthCheck } from './rpcMonitor.js';
 import {
@@ -202,7 +203,7 @@ export async function buildApp(options = {}) {
       return sendError(reply, 400, 'Invalid chain ID');
     }
 
-    const depth = request.query.depth !== undefined ? parseIntParam(request.query.depth) : 2;
+    const depth = request.query.depth === undefined ? 2 : parseIntParam(request.query.depth);
     if (depth === null || depth < 1 || depth > 5) {
       return sendError(reply, 400, 'Invalid depth. Must be between 1 and 5');
     }
@@ -456,7 +457,7 @@ export async function buildApp(options = {}) {
   fastify.get('/', async (request, reply) => {
     return {
       name: 'Chains API',
-      version: '1.0.0',
+      version: pkg.version,
       description: 'API query service for blockchain chain data from multiple sources',
       endpoints: {
         '/health': 'Health check and data status',
