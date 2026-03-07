@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { buildApp } from '../../index.js';
 import * as dataService from '../../dataService.js';
-import * as rpcMonitor from '../../rpcMonitor.js';
 import * as fsPromises from 'node:fs/promises';
 
 vi.mock('node:fs/promises', () => ({
@@ -209,6 +208,29 @@ vi.mock('../../dataService.js', async () => {
         }
       ]
     })),
+    getRpcMonitoringResults: vi.fn(() => ({
+      lastUpdated: new Date().toISOString(),
+      totalEndpoints: 100,
+      testedEndpoints: 50,
+      workingEndpoints: 30,
+      failedEndpoints: 20,
+      results: [
+        {
+          chainId: 1,
+          chainName: 'Ethereum Mainnet',
+          url: 'https://eth.llamarpc.com',
+          status: 'working',
+          blockNumber: 12345678,
+          latencyMs: 150,
+          error: null
+        }
+      ]
+    })),
+    getRpcMonitoringStatus: vi.fn(() => ({
+      isMonitoring: false,
+      lastUpdated: new Date().toISOString()
+    })),
+    startRpcHealthCheck: vi.fn(),
     getAllKeywords: vi.fn(() => ({
       totalKeywords: 13,
       keywords: {
@@ -226,30 +248,6 @@ vi.mock('../../dataService.js', async () => {
   };
 });
 
-vi.mock('../../rpcMonitor.js', () => ({
-  getMonitoringResults: vi.fn(() => ({
-    lastUpdated: new Date().toISOString(),
-    totalEndpoints: 100,
-    testedEndpoints: 50,
-    workingEndpoints: 30,
-    results: [
-      {
-        chainId: 1,
-        chainName: 'Ethereum Mainnet',
-        endpoint: 'https://eth.llamarpc.com',
-        status: 'working',
-        blockNumber: 12345678,
-        responseTime: 150
-      }
-    ]
-  })),
-  getMonitoringStatus: vi.fn(() => ({
-    isMonitoring: false,
-    lastUpdated: new Date().toISOString()
-  })),
-  startRpcHealthCheck: vi.fn()
-}));
-
 describe('API Endpoints', () => {
   let app;
 
@@ -265,7 +263,7 @@ describe('API Endpoints', () => {
   describe('Startup Initialization', () => {
     it('should warm-start using initializeDataOnStartup and serve endpoints immediately', async () => {
       vi.mocked(dataService.initializeDataOnStartup).mockClear();
-      vi.mocked(rpcMonitor.startRpcHealthCheck).mockClear();
+      vi.mocked(dataService.startRpcHealthCheck).mockClear();
 
       const startupApp = await buildApp({ logger: false, loadDataOnStartup: true });
       const response = await startupApp.inject({
@@ -279,7 +277,7 @@ describe('API Endpoints', () => {
       expect(payload).toHaveProperty('dataLoaded');
       expect(payload).toHaveProperty('totalChains');
       expect(vi.mocked(dataService.initializeDataOnStartup)).toHaveBeenCalledTimes(1);
-      expect(vi.mocked(rpcMonitor.startRpcHealthCheck)).toHaveBeenCalled();
+      expect(vi.mocked(dataService.startRpcHealthCheck)).toHaveBeenCalled();
 
       await startupApp.close();
     });
@@ -295,7 +293,7 @@ describe('API Endpoints', () => {
       expect(response.statusCode).toBe(200);
       const data = JSON.parse(response.payload);
       expect(data).toHaveProperty('name', 'Chains API');
-      expect(data).toHaveProperty('version', '1.1.0');
+      expect(data).toHaveProperty('version', '1.1.1');
       expect(data).toHaveProperty('description');
       expect(data).toHaveProperty('endpoints');
       expect(data).toHaveProperty('dataSources');
@@ -412,17 +410,15 @@ describe('API Endpoints', () => {
       expect(data).toHaveProperty('error', 'Invalid chain ID');
     });
 
-    it('should handle decimal chain ID by parsing as integer', async () => {
-      // Note: Fastify's URL parsing converts '1.5' to '1' before our handler sees it
+    it('should reject partially numeric chain IDs', async () => {
       const response = await app.inject({
         method: 'GET',
-        url: '/chains/1.5'
+        url: '/chains/1abc'
       });
 
-      // The request is handled as chain ID 1
-      expect(response.statusCode).toBe(200);
+      expect(response.statusCode).toBe(400);
       const data = JSON.parse(response.payload);
-      expect(data).toHaveProperty('chainId', 1);
+      expect(data).toHaveProperty('error', 'Invalid chain ID');
     });
   });
 
@@ -527,6 +523,17 @@ describe('API Endpoints', () => {
       expect(response.statusCode).toBe(400);
       const data = JSON.parse(response.payload);
       expect(data).toHaveProperty('error', 'Invalid chain ID');
+    });
+
+    it('should reject partially numeric graph depth values', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/relations/1/graph?depth=2xyz'
+      });
+
+      expect(response.statusCode).toBe(400);
+      const data = JSON.parse(response.payload);
+      expect(data).toHaveProperty('error', 'Invalid depth. Must be between 1 and 5');
     });
   });
 
@@ -973,3 +980,6 @@ describe('API Endpoints', () => {
     });
   });
 });
+
+
+

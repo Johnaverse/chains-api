@@ -7,8 +7,7 @@ import { readFile } from 'node:fs/promises';
 import { basename, resolve, dirname, join } from 'node:path';
 import { fileURLToPath as toFilePath } from 'node:url';
 import pkg from './package.json' with { type: 'json' };
-import { loadData, initializeDataOnStartup, getCachedData, searchChains, getChainById, getAllChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints, getAllKeywords, validateChainData, traverseRelations, countChainsByTag } from './dataService.js';
-import { getMonitoringResults, getMonitoringStatus, startRpcHealthCheck } from './rpcMonitor.js';
+import { loadData, initializeDataOnStartup, getCachedData, searchChains, getChainById, getAllChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints, getAllKeywords, validateChainData, traverseRelations, countChainsByTag, getRpcMonitoringResults, getRpcMonitoringStatus, startRpcHealthCheck } from './dataService.js';
 import {
   PORT, HOST, BODY_LIMIT, MAX_PARAM_LENGTH,
   RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS,
@@ -381,8 +380,8 @@ export async function buildApp(options = {}) {
    * Get RPC monitoring results
    */
   fastify.get('/rpc-monitor', async () => {
-    const results = getMonitoringResults();
-    const status = getMonitoringStatus();
+    const results = getRpcMonitoringResults();
+    const status = getRpcMonitoringStatus();
 
     return {
       ...status,
@@ -399,7 +398,7 @@ export async function buildApp(options = {}) {
       return sendError(reply, 400, 'Invalid chain ID');
     }
 
-    const results = getMonitoringResults();
+    const results = getRpcMonitoringResults();
     const chainResults = results.results.filter(r => r.chainId === chainId);
 
     if (chainResults.length === 0) {
@@ -425,7 +424,7 @@ export async function buildApp(options = {}) {
    */
   fastify.get('/stats', async () => {
     const chains = getAllChains();
-    const monitorResults = getMonitoringResults();
+    const monitorResults = getRpcMonitoringResults();
 
     const { totalChains, totalMainnets, totalTestnets, totalL2s, totalBeacons } = countChainsByTag(chains);
 
@@ -500,7 +499,20 @@ export async function buildApp(options = {}) {
  * @returns {number|null} Parsed integer or null if invalid
  */
 function parseIntParam(param) {
-  const parsed = Number.parseInt(param, 10);
+  if (typeof param === 'number') {
+    return Number.isInteger(param) ? param : null;
+  }
+
+  if (typeof param !== 'string') {
+    return null;
+  }
+
+  const normalized = param.trim();
+  if (!/^-?\d+$/.test(normalized)) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(normalized, 10);
   return Number.isNaN(parsed) ? null : parsed;
 }
 

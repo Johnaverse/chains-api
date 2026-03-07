@@ -61,7 +61,7 @@ Pre-built Docker images are automatically published to GitHub Container Registry
 docker pull ghcr.io/johnaverse/chains-api:latest
 
 # Or pull a specific version
-docker pull ghcr.io/johnaverse/chains-api:v1.0.0
+docker pull ghcr.io/johnaverse/chains-api:v1.1.1
 ```
 
 #### Build Docker image locally
@@ -256,7 +256,7 @@ The HTTP server will start on `http://0.0.0.0:3001` by default (configurable via
 curl -X POST http://localhost:3001/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"my-client","version":"1.0.0"}}}'
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"my-client","version":"1.1.1"}}}'
 
 # Extract session ID from the mcp-session-id header, then call a tool:
 curl -X POST http://localhost:3001/mcp \
@@ -355,7 +355,7 @@ Get API information and available endpoints.
 ```json
 {
   "name": "Chains API",
-  "version": "1.0.0",
+  "version": "1.1.1",
   "description": "API query service for blockchain chain data from multiple sources",
   "endpoints": { ... },
   "dataSources": [ ... ]
@@ -865,3 +865,4 @@ If you have questions or encounter issues, please [open an issue](https://github
 ## License
 
 MIT
+

@@ -36,6 +36,18 @@ vi.mock('../../dataService.js', () => ({
       generic: [],
     },
   })),
+  getRpcMonitoringResults: vi.fn(() => ({
+    lastUpdated: null,
+    totalEndpoints: 0,
+    testedEndpoints: 0,
+    workingEndpoints: 0,
+    failedEndpoints: 0,
+    results: [],
+  })),
+  getRpcMonitoringStatus: vi.fn(() => ({
+    isMonitoring: false,
+    lastUpdated: null,
+  })),
   startRpcHealthCheck: vi.fn(),
   validateChainData: vi.fn(() => ({ totalErrors: 0, errorsByRule: {}, summary: {}, allErrors: [] })),
 }));
@@ -300,3 +312,4 @@ describe('MCP Server Tool Handlers', () => {
     });
   });
 });
+
