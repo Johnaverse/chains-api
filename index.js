@@ -6,6 +6,7 @@ import fastifyStatic from '@fastify/static';
 import { readFile } from 'node:fs/promises';
 import { basename, resolve, dirname, join } from 'node:path';
 import { fileURLToPath as toFilePath } from 'node:url';
+import pkg from './package.json' with { type: 'json' };
 import { loadData, initializeDataOnStartup, getCachedData, searchChains, getChainById, getAllChains, getAllRelations, getRelationsById, getEndpointsById, getAllEndpoints, getAllKeywords, validateChainData, traverseRelations, countChainsByTag } from './dataService.js';
 import { getMonitoringResults, getMonitoringStatus, startRpcHealthCheck } from './rpcMonitor.js';
 import {
