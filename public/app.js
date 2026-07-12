@@ -684,7 +684,14 @@ const SERVER_STATUS_LABEL = {
     operational: 'Operational', degraded: 'Degraded', partial_outage: 'Partial outage', major_outage: 'Major outage'
 };
 const SCHEDULED_STATUSES = new Set(['maintenance_scheduled', 'maintenance_in_progress', 'maintenance_completed']);
-const incidents = { items: [], byKey: new Map(), ws: null, retries: 0, groupBy: 'flat', dayFilter: null, category: 'all' };
+const incidents = {
+    items: [], byKey: new Map(), ws: null, retries: 0, groupBy: 'flat', dayFilter: null, category: 'all',
+    // LLM enrichment (chains-status-news two-phase delivery): raw items arrive as
+    // status.item, a status.enrichment (keyed by the raw eventId) follows later.
+    // eventToKey resolves an eventId to its incident; enrichByKey holds the newest
+    // enrichment per incident; enrichPending stashes any that arrive before the item.
+    eventToKey: new Map(), enrichByKey: new Map(), enrichPending: new Map(), enrichTimer: null
+};
 const providers = { filter: 'all', dayFilter: null };
 
 function parseIncidentStatus(ev) {
@@ -780,6 +787,14 @@ function addIncidents(events) {
     let changed = false;
     for (const ev of events) {
         const m = incidentModel(ev);
+        // Remember which incident this raw event belongs to so a later
+        // status.enrichment (keyed by eventId) attaches to the right card; drain
+        // any enrichment that raced ahead of its item.
+        if (ev.id) {
+            incidents.eventToKey.set(ev.id, m.key);
+            const early = incidents.enrichPending.get(ev.id);
+            if (early) { incidents.enrichPending.delete(ev.id); applyEnrichment(m.key, early); }
+        }
         const existing = incidents.byKey.get(m.key);
         if (!existing) { incidents.byKey.set(m.key, m); changed = true; continue; }
         // merge into the single block for this incident
@@ -803,6 +818,31 @@ function addIncidents(events) {
     incidents.items = [...incidents.byKey.values()].sort((a, b) => (b.whenMs || 0) - (a.whenMs || 0));
     try { renderIncidents(); } catch (err) { console.error('incident render failed', err); }
     try { renderProviders(); } catch (err) { console.error('provider render failed', err); }
+}
+
+// A status.enrichment frame: the LLM classification/summary for one event,
+// delivered after its status.item. Attach it to the event's incident (or stash
+// it if the item hasn't landed yet) and repaint.
+function addEnrichment(enr) {
+    const key = incidents.eventToKey.get(enr.eventId);
+    if (!key) { incidents.enrichPending.set(enr.eventId, enr); return; }
+    if (applyEnrichment(key, enr)) scheduleEnrichmentRerender();
+}
+// Newest enrichment wins per incident (a later update can re-classify it).
+function applyEnrichment(key, enr) {
+    const prev = incidents.enrichByKey.get(key);
+    if (prev && (Date.parse(prev.createdAt) || 0) >= (Date.parse(enr.createdAt) || 0)) return false;
+    incidents.enrichByKey.set(key, enr);
+    return true;
+}
+// Enrichments burst (WS replay re-sends them); coalesce the repaint.
+function scheduleEnrichmentRerender() {
+    if (incidents.enrichTimer) return;
+    incidents.enrichTimer = setTimeout(() => {
+        incidents.enrichTimer = null;
+        try { renderIncidents(); } catch (err) { console.error('incident render failed', err); }
+        try { renderProviders(); } catch (err) { console.error('provider render failed', err); }
+    }, 300);
 }
 
 // The Incidents tab covers chain operator status pages; RPC provider status
@@ -883,6 +923,9 @@ function renderCalendar() {
 function incidentCard(it) {
     const isProvider = !!it.isProvider;
     const label = isProvider ? it.providerName : it.netName;
+    const enr = incidents.enrichByKey.get(it.key) || null;
+    const enrAction = enr?.context?.actionRequired && String(enr.context.actionRequired).toLowerCase() !== 'none'
+        ? enr.context.actionRequired : null;
     const open = it.ongoing != null
         ? it.ongoing
         : Boolean(it.status && !CLOSED_STATUSES.has(it.status.toLowerCase()));
@@ -890,6 +933,8 @@ function incidentCard(it) {
     const meta = [label, when, open ? 'ongoing' : null].filter(Boolean);
     const dur = fmtDuration(it.durationMs);
     const side = [];
+    // The LLM severity is the strongest at-a-glance signal — lead the rail with it.
+    if (enr?.severity) side.push(el('span', { class: `pill sev-${String(enr.severity).toLowerCase()}`, text: enr.severity }));
     if (it.status) side.push(el('span', { class: `pill st-${it.status.toLowerCase().replace(/\s+/g, '')}`, text: it.status }));
     if (dur) side.push(el('span', { class: 'incident-dur', text: dur }));
 
@@ -917,6 +962,17 @@ function incidentCard(it) {
                 el('span', { text: it.title })
             ]),
             el('div', { class: 'incident-meta', text: meta.join(' · ') }),
+            // LLM enrichment (chains-status-news): plain-language summary + any
+            // required action. The "AI" tag carries class/confidence/model on hover.
+            enr?.summary ? el('div', { class: 'incident-ai' }, [
+                el('span', {
+                    class: 'ai-tag', text: 'AI',
+                    title: [enr.class, enr.confidence != null ? `${Math.round(enr.confidence * 100)}%` : null, enr.model]
+                        .filter(Boolean).join(' · ')
+                }),
+                el('span', { class: 'ai-summary', text: enr.summary })
+            ]) : null,
+            enrAction ? el('div', { class: 'incident-action', text: `Action: ${enrAction}` }) : null,
             affected
         ]),
         el('div', { class: 'incident-side' }, side)
@@ -1020,7 +1076,11 @@ function connectStatusFeed() {
     try { ws = new WebSocket(wsUrl); } catch { return; }
     incidents.ws = ws;
     ws.onopen = () => { incidents.retries = 0; setFeedLive(true); statusFeedBackfill(); };
-    ws.onmessage = ev => { let m; try { m = JSON.parse(ev.data); } catch { return; } if (m.type === 'status.item' && m.item) addIncidents([m.item]); };
+    ws.onmessage = ev => {
+        let m; try { m = JSON.parse(ev.data); } catch { return; }
+        if (m.type === 'status.item' && m.item) addIncidents([m.item]);
+        else if (m.type === 'status.enrichment' && m.eventId) addEnrichment(m);
+    };
     ws.onerror = () => { try { ws.close(); } catch { /* noop */ } };
     ws.onclose = () => {
         incidents.ws = null;
