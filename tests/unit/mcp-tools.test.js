@@ -51,7 +51,16 @@ vi.mock('../../dataService.js', () => ({
       if (isBeacon) totalBeacons += 1;
       if (!isTestnet && !isL2 && !isBeacon) totalMainnets += 1;
     }
-    return { totalChains: chains.length, totalMainnets, totalTestnets, totalL2s, totalBeacons };
+    const byStatus = {};
+    for (const chain of chains) {
+      const status = chain.status || 'unknown';
+      byStatus[status] = (byStatus[status] || 0) + 1;
+    }
+    const deprecatedChains = byStatus.deprecated || 0;
+    return {
+      totalChains: chains.length, totalMainnets, totalTestnets, totalL2s, totalBeacons,
+      byStatus, activeChains: chains.length - deprecatedChains, deprecatedChains
+    };
   }),
   getRpcMonitoringResults: vi.fn(() => ({
     lastUpdated: '2024-01-01T00:00:00.000Z',
@@ -750,10 +759,10 @@ describe('MCP Tools - Shared Module', () => {
   describe('handleToolCall - get_stats', () => {
     it('should return aggregate stats', async () => {
       vi.mocked(dataService.getAllChains).mockReturnValue([
-        { chainId: 1, name: 'Ethereum', tags: [] },
-        { chainId: 5, name: 'Goerli', tags: ['Testnet'] },
-        { chainId: 137, name: 'Polygon', tags: ['L2'] },
-        { chainId: 100, name: 'Gnosis Beacon', tags: ['Beacon'] },
+        { chainId: 1, name: 'Ethereum', tags: [], status: 'active' },
+        { chainId: 5, name: 'Goerli', tags: ['Testnet'], status: 'deprecated' },
+        { chainId: 137, name: 'Polygon', tags: ['L2'], status: 'active' },
+        { chainId: 100, name: 'Gnosis Beacon', tags: ['Beacon'], status: 'active' },
       ]);
       vi.mocked(dataService.getRpcMonitoringResults).mockReturnValue({
         lastUpdated: '2024-01-01T00:00:00.000Z',
@@ -772,6 +781,9 @@ describe('MCP Tools - Shared Module', () => {
       expect(data.totalL2s).toBe(1);
       expect(data.totalBeacons).toBe(1);
       expect(data.totalMainnets).toBe(1);
+      expect(data.activeChains).toBe(3);
+      expect(data.deprecatedChains).toBe(1);
+      expect(data.byStatus).toEqual({ active: 3, deprecated: 1 });
       expect(data.rpc.working).toBe(40);
       expect(data.rpc.failed).toBe(10);
       expect(data.rpc.healthPercent).toBe(80);

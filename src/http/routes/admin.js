@@ -209,7 +209,7 @@ export async function adminRoutes(fastify) {
     const chains = getAllChains();
     const monitorResults = getRpcMonitoringResults();
 
-    const { totalChains, totalMainnets, totalTestnets, totalL2s, totalBeacons } = countChainsByTag(chains);
+    const { totalChains, totalMainnets, totalTestnets, totalL2s, totalBeacons, byStatus, activeChains, deprecatedChains } = countChainsByTag(chains);
 
     const rpcWorking = monitorResults.workingEndpoints;
     const rpcFailed = monitorResults.failedEndpoints || 0;
@@ -224,6 +224,9 @@ export async function adminRoutes(fastify) {
       totalTestnets,
       totalL2s,
       totalBeacons,
+      activeChains,
+      deprecatedChains,
+      byStatus,
       rpc: {
         totalEndpoints: monitorResults.totalEndpoints,
         tested: rpcTested,

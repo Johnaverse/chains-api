@@ -189,6 +189,10 @@ export function countChainsByTag(chains) {
   let totalL2s = 0;
   let totalBeacons = 0;
   let totalMainnets = 0;
+  // Lifecycle status is orthogonal to tags: chains carry active/incubating/
+  // deprecated (or none). Counted in the same pass so /stats can report the
+  // active-vs-deprecated split without a second scan.
+  const byStatus = {};
 
   for (const chain of chains) {
     const tags = chain.tags || [];
@@ -200,9 +204,22 @@ export function countChainsByTag(chains) {
     if (isL2) totalL2s += 1;
     if (isBeacon) totalBeacons += 1;
     if (!isTestnet && !isL2 && !isBeacon) totalMainnets += 1;
+
+    const status = chain.status || 'unknown';
+    byStatus[status] = (byStatus[status] || 0) + 1;
   }
 
-  return { totalChains, totalMainnets, totalTestnets, totalL2s, totalBeacons };
+  const deprecatedChains = byStatus.deprecated || 0;
+  return {
+    totalChains,
+    totalMainnets,
+    totalTestnets,
+    totalL2s,
+    totalBeacons,
+    byStatus,
+    activeChains: totalChains - deprecatedChains,
+    deprecatedChains
+  };
 }
 
 function extractEndpoints(chain) {

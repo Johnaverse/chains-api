@@ -14,7 +14,7 @@ vi.mock('../../../src/store/queries.js', () => ({
     failedEndpoints: 0,
     results: []
   })),
-  countChainsByTag: vi.fn(() => ({ totalChains: 0, totalMainnets: 0, totalTestnets: 0, totalL2s: 0, totalBeacons: 0 }))
+  countChainsByTag: vi.fn(() => ({ totalChains: 0, totalMainnets: 0, totalTestnets: 0, totalL2s: 0, totalBeacons: 0, byStatus: {}, activeChains: 0, deprecatedChains: 0 }))
 }));
 
 vi.mock('../../../src/domain/keywords.js', () => ({
