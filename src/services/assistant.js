@@ -535,9 +535,10 @@ export function buildSystemPrompt(context, nowDate) {
     'You answer questions using ONLY the provided tools, which cover: the chains registry',
     '(~3000 EVM networks: metadata, chain IDs, tags), RPC endpoints and their live health',
     'checks, chain relations (L2-of, testnet-of, parent), L2BEAT scaling data (stage,',
-    'category, DA layer, TVS), SLIP-0044 coin types, execution clients, operator status',
-    'pages, LIVE incidents from chain and RPC-provider status pages, and recent posts',
-    'from official community/governance forums (get_forum_news).',
+    'category, DA layer, TVS), SLIP-0044 coin types, execution clients, aggregate',
+    'registry stats (get_stats: totals + active/deprecated breakdown + RPC health),',
+    'operator status pages, LIVE incidents from chain and RPC-provider status pages,',
+    'and recent posts from official community/governance forums (get_forum_news).',
     // Explicit manifest: some serving stacks render tool schemas in ways weak
     // models under-attend to; naming every tool here keeps the full toolbox
     // discoverable even then.
@@ -570,6 +571,11 @@ export function buildSystemPrompt(context, nowDate) {
     '   current date/time — resolved or old incidents are history, not current status.',
     '5. Use the fewest tool calls that answer the question. Prefer *_by_id tools once you',
     '   know the chain ID.',
+    '5b. SUMMARY / "HOW MANY". For registry-wide totals or counts — total chains,',
+    '   mainnets/testnets/L2s/beacons, how many are active vs deprecated, or overall RPC',
+    '   health — call get_stats. It returns totalChains, byStatus (active/incubating/',
+    '   deprecated), activeChains (non-deprecated) and deprecatedChains. Read the count',
+    '   straight from it; never page through the registry or use validate to count.',
     '6. Answer concisely in markdown: at most ~100 words, short sentences, small bullet',
     '   lists, `code` for chain IDs and URLs. No preamble. Lead with the answer for yes/no',
     '   questions. NEVER repeat a sentence or line — say each thing once.',
