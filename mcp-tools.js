@@ -148,7 +148,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_stats',
-      description: 'Get aggregate statistics: total chains, mainnets, testnets, L2s, beacons, and RPC health percentage',
+      description: 'Get aggregate statistics: total chains, mainnets, testnets, L2s, beacons, RPC health percentage, and a lifecycle breakdown — activeChains (non-deprecated), deprecatedChains, and byStatus (counts per active/incubating/deprecated). Use for "how many chains", "how many are active/deprecated".',
       inputSchema: {
         type: 'object',
         properties: {},
@@ -480,7 +480,7 @@ function handleGetStats() {
   const chains = getAllChains();
   const monitorResults = getRpcMonitoringResults();
 
-  const { totalChains, totalMainnets, totalTestnets, totalL2s, totalBeacons } = countChainsByTag(chains);
+  const { totalChains, totalMainnets, totalTestnets, totalL2s, totalBeacons, byStatus, activeChains, deprecatedChains } = countChainsByTag(chains);
 
   const rpcTested = monitorResults.testedEndpoints;
   const rpcWorking = monitorResults.workingEndpoints;
@@ -493,6 +493,9 @@ function handleGetStats() {
     totalTestnets,
     totalL2s,
     totalBeacons,
+    activeChains,
+    deprecatedChains,
+    byStatus,
     rpc: {
       totalEndpoints: monitorResults.totalEndpoints,
       tested: rpcTested,

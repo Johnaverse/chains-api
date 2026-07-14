@@ -245,6 +245,13 @@ describe('buildSystemPrompt', () => {
     expect(prompt).not.toContain('undefined');
   });
 
+  it('tells the model to use get_stats for summary / "how many" questions', () => {
+    const prompt = buildSystemPrompt(undefined, new Date('2026-07-06T12:00:00Z'));
+    expect(prompt).toContain('get_stats');
+    expect(prompt).toMatch(/SUMMARY \/ "HOW MANY"/);
+    expect(prompt).toContain('active vs deprecated');
+  });
+
   it('lists every callable tool by name', () => {
     const prompt = buildSystemPrompt(undefined, new Date('2026-07-06T12:00:00Z'));
     // The mocked registry has two tools — both must appear in the manifest

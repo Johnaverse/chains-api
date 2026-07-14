@@ -2797,7 +2797,25 @@ describe('traverseRelations', () => {
 describe('countChainsByTag', () => {
   it('should return all zeros for an empty array', () => {
     const result = countChainsByTag([]);
-    expect(result).toEqual({ totalChains: 0, totalMainnets: 0, totalTestnets: 0, totalL2s: 0, totalBeacons: 0 });
+    expect(result).toEqual({
+      totalChains: 0, totalMainnets: 0, totalTestnets: 0, totalL2s: 0, totalBeacons: 0,
+      byStatus: {}, activeChains: 0, deprecatedChains: 0
+    });
+  });
+
+  it('should break chains down by lifecycle status (non-deprecated = active)', () => {
+    const chains = [
+      { chainId: 1, name: 'Ethereum', status: 'active' },
+      { chainId: 8453, name: 'Base', status: 'active' },
+      { chainId: 4326, name: 'MegaETH', status: 'incubating' },
+      { chainId: 5, name: 'Goerli', status: 'deprecated' },
+      { chainId: 42, name: 'No status' } // missing status → 'unknown'
+    ];
+    const result = countChainsByTag(chains);
+    expect(result.byStatus).toEqual({ active: 2, incubating: 1, deprecated: 1, unknown: 1 });
+    expect(result.deprecatedChains).toBe(1);
+    // Everything that isn't 'deprecated' counts as active (incubating + unknown included).
+    expect(result.activeChains).toBe(4);
   });
 
   it('should count chains with no tags as mainnets', () => {

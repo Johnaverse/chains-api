@@ -256,7 +256,10 @@ function installMockDefaults() {
     totalMainnets: 1,
     totalTestnets: 1,
     totalL2s: 1,
-    totalBeacons: 0
+    totalBeacons: 0,
+    byStatus: { active: 2, deprecated: 1 },
+    activeChains: 2,
+    deprecatedChains: 1
   });
 }
 
@@ -404,6 +407,18 @@ describe('API Endpoints', () => {
       for (const source of ['theGraph', 'chainlist', 'chains', 'slip44', 'l2beat']) {
         expect(response.body).toContain(`chains_api_source_loaded{source="${source}"}`);
       }
+    });
+  });
+
+  describe('GET /stats', () => {
+    it('reports the lifecycle breakdown (active/deprecated/byStatus)', async () => {
+      const response = await app.inject({ method: 'GET', url: '/stats' });
+      expect(response.statusCode).toBe(200);
+      const data = JSON.parse(response.payload);
+      expect(data.totalChains).toBe(3);
+      expect(data.activeChains).toBe(2);
+      expect(data.deprecatedChains).toBe(1);
+      expect(data.byStatus).toEqual({ active: 2, deprecated: 1 });
     });
   });
 
