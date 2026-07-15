@@ -36,7 +36,7 @@ export function getToolDefinitions() {
     {
       name: 'get_chains',
       description:
-        'List blockchain chains, optionally filtered by tag (Testnet/L2/Beacon) and/or lifecycle status. Returns a CAPPED sample (default 50, max 200) — `totalMatched` is the full number of chains matching the filter, `count` is how many are in this response, and `truncated` is true when there are more. For an exact total or category breakdown use get_stats; to find a specific chain use search_chains. Never treat a tag/category count as the overall registry total.',
+        'List blockchain chains, optionally filtered by tag (Testnet/L2/Beacon) and/or lifecycle status. Returns a CAPPED sample (default 50, max 200) — `totalMatched` is the full number of chains matching the filter, `count` is how many are in this response, and `truncated` is true when there are more. When `truncated` is true, tell the user you are showing the first `count` of `totalMatched` (a display limit) and offer to narrow by tag/status or search by name — do NOT present the sample as the complete list. For an exact total or category breakdown use get_stats; to find a specific chain use search_chains. Never treat a tag/category count as the overall registry total.',
       inputSchema: {
         type: 'object',
         properties: {
