@@ -1367,14 +1367,20 @@ function forumMatchesSearch(p, q) {
 function renderForumList() {
     const list = document.getElementById('forumList'); if (!list) return;
     if (!forum.loaded) return;
-    const groups = [...forum.byForum.values()].filter(g => !forum.filter || g.id === forum.filter);
+    // Order forums by their most recent post (last event) so a forum that just
+    // had activity rises above a higher-volume but quiet one. posts are already
+    // newest-first within a group (regroupForum sorts by whenMs), so [0] is its
+    // latest; filter first so the key reflects the posts actually shown.
+    const groups = [...forum.byForum.values()]
+        .filter(g => !forum.filter || g.id === forum.filter)
+        .map(g => ({ g, posts: g.posts.filter(p => !searchQuery || forumMatchesSearch(p, searchQuery)) }))
+        .filter(x => x.posts.length)
+        .sort((a, b) => (b.posts[0]?.whenMs || 0) - (a.posts[0]?.whenMs || 0));
     const count = document.getElementById('forumCount');
 
     let shown = 0;
     list.textContent = '';
-    for (const g of groups) {
-        const posts = g.posts.filter(p => !searchQuery || forumMatchesSearch(p, searchQuery));
-        if (!posts.length) continue;
+    for (const { g, posts } of groups) {
         shown += posts.length;
         const chainChips = g.chains.slice(0, 6).map(c =>
             el('span', { class: 'chain-chip', onclick: () => openChainDetail(c.chainId), text: c.name || `Chain ${c.chainId}` }));
