@@ -294,8 +294,45 @@ describe('MCP Tools - Shared Module', () => {
       const result = await handleToolCall('get_chains', {});
       const data = JSON.parse(result.content[0].text);
       expect(data.count).toBe(2);
+      expect(data.totalMatched).toBe(2);
+      expect(data.truncated).toBe(false);
       expect(data.chains.length).toBe(2);
       expect(result.isError).toBeUndefined();
+    });
+
+    it('caps the returned list but reports the full total via totalMatched', async () => {
+      const many = Array.from({ length: 130 }, (_, i) => ({ chainId: i + 1, name: `Chain ${i + 1}`, tags: [] }));
+      vi.mocked(dataService.getAllChains).mockReturnValue(many);
+
+      const result = await handleToolCall('get_chains', { limit: 20 });
+      const data = JSON.parse(result.content[0].text);
+      expect(data.totalMatched).toBe(130);
+      expect(data.count).toBe(20);
+      expect(data.chains.length).toBe(20);
+      expect(data.truncated).toBe(true);
+    });
+
+    it('applies the default cap (50) when no limit is given', async () => {
+      const many = Array.from({ length: 130 }, (_, i) => ({ chainId: i + 1, name: `Chain ${i + 1}`, tags: [] }));
+      vi.mocked(dataService.getAllChains).mockReturnValue(many);
+
+      const result = await handleToolCall('get_chains', {});
+      const data = JSON.parse(result.content[0].text);
+      expect(data.count).toBe(50);
+      expect(data.totalMatched).toBe(130);
+    });
+
+    it('filters by lifecycle status', async () => {
+      vi.mocked(dataService.getAllChains).mockReturnValue([
+        { chainId: 1, name: 'Ethereum', tags: [], status: 'active' },
+        { chainId: 5, name: 'Goerli', tags: ['Testnet'], status: 'deprecated' },
+        { chainId: 11155111, name: 'Sepolia', tags: ['Testnet'], status: 'active' },
+      ]);
+
+      const result = await handleToolCall('get_chains', { status: 'deprecated' });
+      const data = JSON.parse(result.content[0].text);
+      expect(data.totalMatched).toBe(1);
+      expect(data.chains.map((c) => c.chainId)).toEqual([5]);
     });
 
     it('should filter chains by tag', async () => {
