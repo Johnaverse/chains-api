@@ -35,7 +35,8 @@ export function getToolDefinitions() {
   return [
     {
       name: 'get_chains',
-      description: 'Get all blockchain chains, optionally filtered by tag (Testnet, L2, or Beacon)',
+      description:
+        'List blockchain chains, optionally filtered by tag (Testnet/L2/Beacon) and/or lifecycle status. Returns a CAPPED sample (default 50, max 200) — `totalMatched` is the full number of chains matching the filter, `count` is how many are in this response, and `truncated` is true when there are more. For an exact total or category breakdown use get_stats; to find a specific chain use search_chains. Never treat a tag/category count as the overall registry total.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -43,6 +44,15 @@ export function getToolDefinitions() {
             type: 'string',
             description: 'Optional tag to filter chains (e.g., "Testnet", "L2", "Beacon")',
             enum: ['Testnet', 'L2', 'Beacon'],
+          },
+          status: {
+            type: 'string',
+            description: 'Optional lifecycle status filter (e.g. "deprecated" for retired chains, "active" for live ones)',
+            enum: ['active', 'incubating', 'deprecated', 'unknown'],
+          },
+          limit: {
+            type: 'number',
+            description: 'Max chains to return (default 50, max 200)',
           },
         },
       },
@@ -352,18 +362,35 @@ function isValidChainId(chainId) {
 
 // --- Individual tool handlers ---
 
+const GET_CHAINS_DEFAULT_LIMIT = 50;
+const GET_CHAINS_MAX_LIMIT = 200;
+
 async function handleGetChains(args) {
   let chains = getAllChains();
   if (args.tag) {
     chains = chains.filter((chain) => chain.tags?.includes(args.tag));
   }
-  const chainIds = chains.map((c) => c.chainId);
-  const priceMap = await getPricesForChains(chainIds);
-  const enrichedChains = chains.map((chain) => ({
+  if (args.status) {
+    chains = chains.filter((chain) => (chain.status || 'unknown') === args.status);
+  }
+  // The registry has ~3000 chains; returning them all (with a price lookup
+  // each) is a huge payload that overflows an LLM's context and makes it lose
+  // the true total. Cap the list, report totalMatched so callers still get the
+  // honest count, and only price-enrich the slice actually returned.
+  const totalMatched = chains.length;
+  const limit = Math.max(1, Math.min(Number(args.limit) || GET_CHAINS_DEFAULT_LIMIT, GET_CHAINS_MAX_LIMIT));
+  const sliced = chains.slice(0, limit);
+  const priceMap = await getPricesForChains(sliced.map((c) => c.chainId));
+  const enrichedChains = sliced.map((chain) => ({
     ...chain,
     price: priceMap.get(chain.chainId) ?? null,
   }));
-  return textResponse({ count: enrichedChains.length, chains: enrichedChains });
+  return textResponse({
+    totalMatched,
+    count: enrichedChains.length,
+    truncated: totalMatched > enrichedChains.length,
+    chains: enrichedChains,
+  });
 }
 
 async function handleGetChainById(args) {
