@@ -21,6 +21,18 @@
         }
       }
     },
+    "/ready": {
+      "get": {
+        "tags": [
+          "Meta"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
     "/sources": {
       "get": {
         "tags": [
