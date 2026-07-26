@@ -8,7 +8,8 @@ import {
 } from '../../../config.js';
 
 const ENDPOINTS = {
-  '/health': 'Health check and data status',
+  '/health': 'Health check and data status (liveness; always 200 while the process is up)',
+  '/ready': 'Readiness probe (503 until the first data load completes)',
   '/chains': 'Get all chains (optional ?tag=Testnet|L2|Beacon)',
   '/chains/:id': 'Get chain by ID',
   '/search?q={query}': 'Search chains by name or ID',
