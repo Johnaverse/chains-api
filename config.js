@@ -137,12 +137,14 @@ export const FORUM_NEWS_URL = parseStringEnv(
   'FORUM_NEWS_URL',
   'https://chains-forum-news.johnaverse.cc'
 );
-// Ecosystem/editorial news feed (chains-news). Cluster DNS in deployment; the public host
-// is only a local-dev convenience — see docs/SERVICE-CONTRACT.md rule 1 on why an unset
-// var must not silently leave the cluster.
+// Ecosystem/editorial news feed (chains-news). Unlike the other two feeds this one has NO
+// public hostname — it is deliberately internal-only, with no HTTPRoute — so the default is
+// the in-cluster Service DNS name. A public default would be a host that never resolves,
+// and per docs/SERVICE-CONTRACT.md rule 1 a code default must not point outside the cluster
+// anyway. For local development, point this at a chains-news you run yourself.
 export const WEB3_NEWS_URL = parseStringEnv(
   'WEB3_NEWS_URL',
-  'https://chains-news.johnaverse.cc'
+  'http://chains-news.chains-api.svc.cluster.local:8080'
 );
 export const WEB3_NEWS_CACHE_TTL_MS = parseIntEnv('WEB3_NEWS_CACHE_TTL_MS', 60000);
 export const WEB3_NEWS_FETCH_TIMEOUT_MS = parseIntEnv('WEB3_NEWS_FETCH_TIMEOUT_MS', 10000);

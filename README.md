@@ -382,7 +382,7 @@ Behavior:
 - `ASSISTANT_FALLBACK_MODEL` defaults to `ASSISTANT_MODEL` when unset, and the key is only needed for auth-protected backups.
 - `LIVE_INCIDENTS_URL`: Live incident feed for the `get_live_incidents` tool (default: `https://chains-status-news.johnaverse.cc`)
 - `FORUM_NEWS_URL`: Forum/governance news feed for the `get_forum_news` tool (default: `https://chains-forum-news.johnaverse.cc`)
-- `WEB3_NEWS_URL`: Ecosystem/editorial news feed for the `get_web3_news` tool (default: `https://chains-news.johnaverse.cc`). In-cluster deployments should set this to the Service DNS name.
+- `WEB3_NEWS_URL`: Ecosystem/editorial news feed for the `get_web3_news` tool (default: `http://chains-news.chains-api.svc.cluster.local:8080`). Unlike the other two feeds, `chains-news` is **internal-only** — it has no public hostname — so the default is the in-cluster Service DNS name; point it at a locally-run instance for development.
 - `WEB3_NEWS_CACHE_TTL_MS` / `WEB3_NEWS_FETCH_TIMEOUT_MS`: cache window and per-request timeout for that feed (defaults `60000` / `10000`)
 
 ### Other
