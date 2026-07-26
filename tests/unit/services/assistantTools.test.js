@@ -18,8 +18,10 @@ describe('getOpenAiTools', () => {
 
   it('converts every MCP tool to the OpenAI function format', () => {
     const tools = getOpenAiTools();
+    // Derived from the registry, not a literal: the point of this assertion is that the
+    // adapter converts EVERY tool, and a hardcoded count just rots on each new tool.
     expect(tools.length).toBe(getToolDefinitions().length);
-    expect(tools.length).toBe(22);
+    expect(tools.length).toBeGreaterThan(20);
     for (const tool of tools) {
       expect(tool.type).toBe('function');
       expect(tool.function.name).toBeTruthy();

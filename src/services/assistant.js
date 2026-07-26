@@ -538,7 +538,9 @@ export function buildSystemPrompt(context, nowDate) {
     'category, DA layer, TVS), SLIP-0044 coin types, execution clients, aggregate',
     'registry stats (get_stats: totals + active/deprecated breakdown + RPC health),',
     'operator status pages, LIVE incidents from chain and RPC-provider status pages,',
-    'and recent posts from official community/governance forums (get_forum_news).',
+    'recent posts from official community/governance forums (get_forum_news), and curated',
+    'blockchain/web3 ecosystem news from publishers like the Ethereum Foundation blog,',
+    'Consensys, CoinDesk and The Block (get_web3_news).',
     // Explicit manifest: some serving stacks render tool schemas in ways weak
     // models under-attend to; naming every tool here keeps the full toolbox
     // discoverable even then.

@@ -26,6 +26,7 @@ import {
 } from './src/sources/statusPages.js';
 import { getLiveIncidents } from './src/sources/liveIncidents.js';
 import { getForumNews } from './src/sources/forumNews.js';
+import { getWeb3News } from './src/sources/web3News.js';
 
 /**
  * Get the list of MCP tool definitions (schemas)
@@ -333,6 +334,33 @@ export function getToolDefinitions() {
           limit: {
             type: 'number',
             description: 'Max posts to return (default 15, max 50)',
+          },
+        },
+      },
+    },
+    {
+      name: 'get_web3_news',
+      description:
+        'Get recent blockchain/web3 ecosystem news from curated publishers (Ethereum Foundation blog, Vitalik\'s blog, Consensys, CoinDesk, Decrypt, The Block). Use for "what is new with X", upgrade/hard-fork announcements, research, funding and ecosystem developments. Distinct from the other feeds: get_live_incidents is outages/maintenance and get_forum_news is governance discussion — this is what the ecosystem publishes about itself. `weight` separates protocol/research sources ("primary") from news desks that also cover markets ("secondary"); prefer primary for protocol facts. Returns a capped list (default 15, max 50) with `totalMatched`; when it exceeds `count`, say you are showing the most recent subset. Near-real-time (cached ~60s).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          chainId: {
+            type: 'number',
+            description: 'Only news mapped to this chain ID. Mapping is precision-first, so many articles carry no chain — omit this for broad questions',
+          },
+          sourceId: {
+            type: 'string',
+            description: 'Only news from this source id (e.g. "ethereum-foundation", "coindesk", "vitalik")',
+          },
+          weight: {
+            type: 'string',
+            enum: ['primary', 'secondary'],
+            description: 'primary = protocol/research publishing (EF, Vitalik, Consensys), secondary = news desks including market coverage',
+          },
+          limit: {
+            type: 'number',
+            description: 'Max articles to return (default 15, max 50)',
           },
         },
       },
@@ -745,6 +773,20 @@ async function handleGetForumNews(args) {
   }
 }
 
+async function handleGetWeb3News(args) {
+  const { chainId, sourceId, weight, limit } = args ?? {};
+  try {
+    const result = await getWeb3News({ chainId, sourceId, weight, limit });
+    // publishedMs is an internal sort key; drop it from tool output.
+    return textResponse({
+      ...result,
+      news: result.news.map(({ publishedMs: _publishedMs, ...rest }) => rest),
+    });
+  } catch (error) {
+    return errorResponse('Web3 news feed unavailable', error.message);
+  }
+}
+
 async function handleGetLiveIncidents(args) {
   const { type, chainId, provider, ongoing, status, limit } = args ?? {};
   try {
@@ -782,6 +824,7 @@ const toolHandlers = {
   get_status_page_by_symbol: handleGetStatusPageBySymbol,
   get_live_incidents: handleGetLiveIncidents,
   get_forum_news: handleGetForumNews,
+  get_web3_news: handleGetWeb3News,
 };
 
 /**
