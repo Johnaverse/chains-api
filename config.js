@@ -137,6 +137,16 @@ export const FORUM_NEWS_URL = parseStringEnv(
   'FORUM_NEWS_URL',
   'https://chains-forum-news.johnaverse.cc'
 );
+// Ecosystem/editorial news feed (chains-news). Cluster DNS in deployment; the public host
+// is only a local-dev convenience — see docs/SERVICE-CONTRACT.md rule 1 on why an unset
+// var must not silently leave the cluster.
+export const WEB3_NEWS_URL = parseStringEnv(
+  'WEB3_NEWS_URL',
+  'https://chains-news.johnaverse.cc'
+);
+export const WEB3_NEWS_CACHE_TTL_MS = parseIntEnv('WEB3_NEWS_CACHE_TTL_MS', 60000);
+export const WEB3_NEWS_FETCH_TIMEOUT_MS = parseIntEnv('WEB3_NEWS_FETCH_TIMEOUT_MS', 10000);
+
 export const FORUM_NEWS_CACHE_TTL_MS = parseIntEnv('FORUM_NEWS_CACHE_TTL_MS', 60000);
 export const FORUM_NEWS_FETCH_TIMEOUT_MS = parseIntEnv('FORUM_NEWS_FETCH_TIMEOUT_MS', 10000);
 
