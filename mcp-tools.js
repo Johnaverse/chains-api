@@ -28,6 +28,7 @@ import { getLiveIncidents } from './src/sources/liveIncidents.js';
 import { getForumNews } from './src/sources/forumNews.js';
 import { getWeb3News } from './src/sources/web3News.js';
 import { getChainUpgrades } from './src/services/upgrades.js';
+import { getProviderStats } from './src/services/providerStats.js';
 
 /**
  * Get the list of MCP tool definitions (schemas)
@@ -357,6 +358,20 @@ export function getToolDefinitions() {
           limit: {
             type: 'number',
             description: 'Max upgrades to return (default 20, max 50)',
+          },
+        },
+      },
+    },
+    {
+      name: 'get_provider_stats',
+      description:
+        'Get per-RPC-provider quality indicators (Infura, QuickNode, Alchemy, dRPC, Chainstack, …): incidents30d, ongoingNow, maintenance30d, chainsAffected30d, resolutionHours (median/avg time-to-resolve), availability, endpointReachability, and chain coverage. For "which provider is most reliable/available" use `availability`: CHAIN-WEIGHTED over three windows (last24h/last7d/last30d), each {percent, chainHoursLost} where percent = 1 − chain-hours lost / (chainsSupported × window hours) — so 1 of 10 supported chains down for a full 24h window is 90%, not 0%. chainsSupported is ONLY what the provider lists on its own status page; when that coverage is unavailable the percents are null with a note. It is SELF-REPORTED: a provider that never posts incidents scores a perfect 100 (a silent status page looks perfect), so always say it is self-reported; a "partial window" note means feed retention is younger than the window. `endpointReachability` ({working, total, percent, registryChains}) measures whether REGISTRY-LISTED endpoint URLs answer chains-api\'s probes — keyed/stale/geo-blocked registry URLs fail by design, so it is a registry data-quality signal; do NOT present it as provider uptime.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          provider: {
+            type: 'string',
+            description: 'Only this provider id (e.g. "infura", "quicknode", "alchemy"). Omit for all providers, sorted by incidents30d descending',
           },
         },
       },
@@ -806,6 +821,16 @@ async function handleGetChainUpgrades(args) {
   }
 }
 
+async function handleGetProviderStats(args) {
+  const { provider } = args ?? {};
+  try {
+    const result = await getProviderStats({ provider });
+    return textResponse(result);
+  } catch (error) {
+    return errorResponse('Provider stats unavailable', error.message);
+  }
+}
+
 async function handleGetWeb3News(args) {
   const { chainId, sourceId, weight, limit } = args ?? {};
   try {
@@ -859,6 +884,7 @@ const toolHandlers = {
   get_forum_news: handleGetForumNews,
   get_web3_news: handleGetWeb3News,
   get_chain_upgrades: handleGetChainUpgrades,
+  get_provider_stats: handleGetProviderStats,
 };
 
 /**

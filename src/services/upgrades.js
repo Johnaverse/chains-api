@@ -32,8 +32,10 @@ const CONTEXT_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
 const MAX_LIMIT = 50;
 const DEFAULT_LIMIT = 20;
 
-const MAINTENANCE_STATUSES = new Set(['maintenance_scheduled', 'maintenance_in_progress', 'maintenance_completed']);
-const INCIDENT_STATUSES = new Set(['investigating', 'identified', 'monitoring', 'resolved', 'degraded', 'partial_outage', 'major_outage']);
+// Shared with providerStats.js: both layers must classify a group as maintenance vs
+// incident identically or the provider scorecard would disagree with the timeline.
+export const MAINTENANCE_STATUSES = new Set(['maintenance_scheduled', 'maintenance_in_progress', 'maintenance_completed']);
+export const INCIDENT_STATUSES = new Set(['investigating', 'identified', 'monitoring', 'resolved', 'degraded', 'partial_outage', 'major_outage']);
 
 /**
  * @param {object} [options]
@@ -84,7 +86,7 @@ export async function getChainUpgrades({ chainId, network, limit = DEFAULT_LIMIT
  * @param {{forumPosts?: object[], newsItems?: object[]}} [context]
  */
 export function buildUpgradeEvents(events, { forumPosts = [], newsItems = [] } = {}) {
-  const groups = groupByIncident(events);
+  const groups = groupEventsByIncident(events);
 
   const upgradeGroups = [];
   const incidentGroups = [];
@@ -100,7 +102,9 @@ export function buildUpgradeEvents(events, { forumPosts = [], newsItems = [] } =
 
 // One group per real-world incident/window. incidentId (stable across updates AND retitles)
 // wins; statusPage+title is the fallback for events from feeds that predate the field.
-function groupByIncident(events) {
+// Exported because providerStats.js must group updates into incidents the SAME way —
+// two grouping implementations would disagree on what "an incident" is.
+export function groupEventsByIncident(events) {
   const byKey = new Map();
   for (const ev of events) {
     const key = ev.incidentId ?? `${ev.statusPage?.id ?? 'unknown'}|${(ev.title ?? '').toLowerCase().trim()}`;

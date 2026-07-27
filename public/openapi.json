@@ -558,6 +558,30 @@
         }
       }
     },
+    "/providers/stats": {
+      "get": {
+        "tags": [
+          "Meta"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 40
+            },
+            "in": "query",
+            "name": "provider",
+            "required": false,
+            "description": "Only this provider id (e.g. \"infura\", \"quicknode\")"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
     "/feedback": {
       "post": {
         "tags": [

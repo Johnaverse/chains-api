@@ -178,6 +178,11 @@
             </h2>
             <p class="view-lead">Status of public RPC providers (Infura, QuickNode, dRPC, Pinax). Each incident is
                 mapped to the chains it affects.</p>
+            <!-- Scorecards: headline availability is derived from the provider's own
+                 status-page incidents (self-reported — a silent page looks perfect);
+                 registry-endpoint reachability is a muted footnote, not a health signal.
+                 Hidden entirely when the API predates /providers/stats. -->
+            <div class="provider-scorecards" id="providerScorecards" hidden></div>
             <div class="calendars" id="providerCalendar"></div>
 
             <div class="toolbar">

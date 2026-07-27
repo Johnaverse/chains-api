@@ -544,7 +544,13 @@ export function buildSystemPrompt(context, nowDate) {
     '(get_chain_upgrades: scheduled upgrades with required software versions, urgency,',
     'incidents that followed on the same network, and related discussion/coverage — use it',
     'for "when is the next upgrade", "what version is required", "did the upgrade cause',
-    'incidents", including networks with no EVM chain ID via its `network` parameter).',
+    'incidents", including networks with no EVM chain ID via its `network` parameter),',
+    'and per-RPC-provider quality indicators (get_provider_stats: incidents, resolution',
+    'times, and chain-weighted availability over 24h/7d/30d windows derived from',
+    'status-page incidents — use it for "which provider is most reliable", always noting',
+    'it is self-reported (a silent page looks perfect; null percents mean the status page',
+    'exposes no chain coverage); endpointReachability there is registry data quality,',
+    'NOT uptime).',
     // Explicit manifest: some serving stacks render tool schemas in ways weak
     // models under-attend to; naming every tool here keeps the full toolbox
     // discoverable even then.
