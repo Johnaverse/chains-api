@@ -540,7 +540,11 @@ export function buildSystemPrompt(context, nowDate) {
     'operator status pages, LIVE incidents from chain and RPC-provider status pages,',
     'recent posts from official community/governance forums (get_forum_news), and curated',
     'blockchain/web3 ecosystem news from publishers like the Ethereum Foundation blog,',
-    'Consensys, CoinDesk and The Block (get_web3_news).',
+    'Consensys, CoinDesk and The Block (get_web3_news), and a cross-feed upgrade timeline',
+    '(get_chain_upgrades: scheduled upgrades with required software versions, urgency,',
+    'incidents that followed on the same network, and related discussion/coverage — use it',
+    'for "when is the next upgrade", "what version is required", "did the upgrade cause',
+    'incidents", including networks with no EVM chain ID via its `network` parameter).',
     // Explicit manifest: some serving stacks render tool schemas in ways weak
     // models under-attend to; naming every tool here keeps the full toolbox
     // discoverable even then.

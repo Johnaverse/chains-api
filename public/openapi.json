@@ -514,6 +514,50 @@
         }
       }
     },
+    "/upgrades": {
+      "get": {
+        "tags": [
+          "Meta"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer"
+            },
+            "in": "query",
+            "name": "chainId",
+            "required": false,
+            "description": "Only upgrades touching this chain ID"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "in": "query",
+            "name": "network",
+            "required": false,
+            "description": "Network name or slug (e.g. \"Solana Mainnet\", \"gnosis\") — covers networks with no EVM chain ID"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
     "/metrics": {
       "get": {
         "tags": [

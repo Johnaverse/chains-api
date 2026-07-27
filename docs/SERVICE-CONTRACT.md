@@ -147,6 +147,16 @@ posture is closed rather than open. This matters because all three services are
 routed publicly with `PathPrefix: /` — an unauthenticated refresh endpoint is a free
 fan-out vector.
 
+### 11. Network slugs
+Cross-feed joins fall back to network NAMES when a chainId does not exist (Solana, Canton,
+Zcash). Names only join if every service canonicalizes them identically, so the rule is part
+of the contract: **lowercase → non-alphanumerics to spaces → strip trailing default-tier and
+generic tokens (`mainnet`, `mainnets`, `network`, `chain`, `protocol`, `ledger`) repeatedly →
+join with `-`**. Testnet tokens are never stripped: `Arbitrum Sepolia → arbitrum-sepolia`,
+because aliasing a testnet to its mainnet joins a testnet incident to a mainnet upgrade.
+Implementations: `chains-status-news src/upgradeInfo.js` (producer, `networkSlugs` field) and
+`chains-api src/domain/networkSlug.js` (consumer). Change one and you must change both.
+
 ## Ordering constraint when rolling out
 
 A readiness probe pointing at `/ready` before the image exposing `/ready` is deployed

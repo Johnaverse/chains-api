@@ -27,6 +27,7 @@ const ENDPOINTS = {
   '/rpc-monitor': 'Get RPC endpoint monitoring results',
   '/rpc-monitor/:id': 'Get RPC monitoring results for a specific chain by ID',
   '/stats': 'Get aggregate stats (chain counts, RPC health percentage)',
+  '/upgrades': 'Cross-feed upgrade timeline: scheduled upgrades with required software, urgency, follow-on incidents, and forum/news context',
   '/summary': 'Slim dashboard projection: all chains (id, name, tags, relations, RPC count) + L2BEAT headline data, with ETag revalidation',
   '/relations/:id/graph?depth=N': 'BFS graph traversal of chain relations (default depth: 2)',
   '/scaling': 'Get all chains with L2BEAT scaling data (stage, category, DA layer, TVS)',
