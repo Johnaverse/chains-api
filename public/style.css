@@ -296,6 +296,8 @@ a:hover { text-decoration: underline; }
 .psc-dot.bad { background: var(--bad); }
 .psc-value { font-weight: 700; color: var(--text-main); font-variant-numeric: tabular-nums; flex-shrink: 0; }
 .psc-label { font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* registry-endpoint reachability: data-quality footnote, never a health signal */
+.psc-secondary { margin-top: 2px; opacity: 0.75; }
 
 /* ─── Incidents list ─── */
 .incidents-list { display: flex; flex-direction: column; gap: 8px; }

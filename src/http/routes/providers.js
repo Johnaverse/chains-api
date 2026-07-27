@@ -2,10 +2,11 @@ import { getProviderStats } from '../../services/providerStats.js';
 import { sendError } from '../util/sendError.js';
 
 /**
- * RPC-provider quality indicators. Two vantage points, never blended: the
- * self-reported side (incidents/resolution/availability from the provider's
- * own status page — a silent page looks perfect) and endpointHealth from
- * chains-api's OWN endpoint probes.
+ * RPC-provider quality indicators. `availability` is THE availability metric
+ * (time-weighted from status-page incident durations, honestly labelled
+ * self-reported — a silent page looks perfect); `endpointReachability` is a
+ * registry data-quality signal (do registry-listed URLs answer our probes?),
+ * never to be read as provider uptime.
  */
 export async function providersRoutes(fastify) {
   fastify.get('/providers/stats', {

@@ -140,7 +140,7 @@ describe('buildProviderStats — per-provider metrics', () => {
     expect(q.resolutionHours).toBeNull();
   });
 
-  it('selfReportedAvailability = 1 - admitted downtime / window, unresolved running to now', () => {
+  it('availability = 1 - admitted downtime / window, unresolved running to now, labelled self-reported', () => {
     const windowMs = 30 * DAY;
     const events = [
       anchor(),
@@ -151,17 +151,22 @@ describe('buildProviderStats — per-provider metrics', () => {
       ev({ incidentId: 'q:u', publishedMs: NOW - 12 * HOUR, status: 'investigating' })
     ];
     const q = buildProviderStats(events, { now: NOW }).providers.find((p) => p.id === 'quicknode');
-    const expected = Math.round((1 - (15 * HOUR) / windowMs) * 10000) / 10000;
-    expect(q.selfReportedAvailability).toBe(expected);
+    const expected = Math.round((1 - (15 * HOUR) / windowMs) * 10000) / 100;
+    expect(q.availability).toEqual({
+      percent: expected,
+      basis: 'status-page-incidents',
+      selfReported: true
+    });
   });
 
-  it('a silent provider (catalog entry, zero events) self-reports a perfect 1.0', () => {
+  it('a silent provider (catalog entry, zero events) self-reports a perfect 100', () => {
     const statusPages = [{ id: 'getblock', name: 'GetBlock', kind: 'rpc-provider' }];
     const { providers } = buildProviderStats([anchor()], { statusPages, now: NOW });
     const g = providers.find((p) => p.id === 'getblock');
     expect(g).toBeDefined();
     expect(g.incidents30d).toBe(0);
-    expect(g.selfReportedAvailability).toBe(1); // silence looks perfect — hence the label
+    expect(g.availability.percent).toBe(100); // silence looks perfect — hence the labelling
+    expect(g.availability.selfReported).toBe(true);
   });
 
   it('counts distinct chains affected across incident groups', () => {
@@ -186,7 +191,7 @@ describe('buildProviderStats — per-provider metrics', () => {
   });
 });
 
-describe('buildProviderStats — endpointHealth (OUR probes)', () => {
+describe('buildProviderStats — endpointReachability (registry data quality, not uptime)', () => {
   const events = [anchor(), ev()];
 
   it('matches endpoints by domain, including deep subdomains', () => {
@@ -201,12 +206,12 @@ describe('buildProviderStats — endpointHealth (OUR probes)', () => {
     ];
     const { providers } = buildProviderStats(events, { statusPages, rpcResults, now: NOW });
     const a = providers.find((p) => p.id === 'alchemy');
-    expect(a.endpointHealth).toEqual({ working: 2, total: 3, percent: 66.7, registryChains: 2 });
+    expect(a.endpointReachability).toEqual({ working: 2, total: 3, percent: 66.7, registryChains: 2 });
   });
 
   it('is null when no registry endpoint matches the provider', () => {
     const { providers } = buildProviderStats(events, { rpcResults: [], now: NOW });
-    expect(providers.find((p) => p.id === 'quicknode').endpointHealth).toBeNull();
+    expect(providers.find((p) => p.id === 'quicknode').endpointReachability).toBeNull();
   });
 
   it('covers both quicknode domains', () => {
@@ -215,7 +220,7 @@ describe('buildProviderStats — endpointHealth (OUR probes)', () => {
       { url: 'https://endpoints.quicknode.com/eth', status: 'working', chainId: 1 }
     ];
     const { providers } = buildProviderStats(events, { rpcResults, now: NOW });
-    expect(providers.find((p) => p.id === 'quicknode').endpointHealth.total).toBe(2);
+    expect(providers.find((p) => p.id === 'quicknode').endpointReachability.total).toBe(2);
   });
 
   it('domain map covers every provider the feed publishes', () => {

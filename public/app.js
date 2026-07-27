@@ -1081,10 +1081,12 @@ function renderProviderFilter() {
 }
 
 // ─── Provider scorecards (GET /providers/stats) ───
-// Two vantage points per card, labelled apart on purpose: "self-reported" is what
-// the provider admits on its own status page (a silent page scores 100%), while
-// "our probes" is chains-api's own endpoint monitoring. 404 → older API without
-// the endpoint → the grid simply stays hidden.
+// The headline metric is availability, time-weighted from the incident durations
+// the provider posts on its own status page — self-reported, so a silent page
+// scores 100% (hence the label). Registry-endpoint reachability is a muted
+// secondary line: failed probes usually mean keyed/stale registry URLs, not a
+// down provider, so it must not carry a health dot. 404 → older API without the
+// endpoint → the grid simply stays hidden.
 async function loadProviderStats() {
     let data;
     try { data = await api('/providers/stats'); } catch { return; }
@@ -1109,13 +1111,12 @@ function providerScorecard(p, windowDays) {
     ]);
     const rows = [];
 
-    if (p.endpointHealth) {
-        const pct = p.endpointHealth.percent;
-        const cls = pct > 90 ? 'good' : pct > 70 ? 'warn' : 'bad';
-        rows.push(metric(cls, `${pct}%`, `our probes · ${p.endpointHealth.working}/${p.endpointHealth.total} endpoints`));
-    }
-    if (p.selfReportedAvailability != null) {
-        rows.push(metric(null, `${(p.selfReportedAvailability * 100).toFixed(2)}%`, 'self-reported availability'));
+    // Headline: incident-derived availability. It lives near 100 (unlike a
+    // probe percentage), so the dot thresholds are tight: green>99, amber>97.
+    if (p.availability?.percent != null) {
+        const pct = p.availability.percent;
+        const cls = pct > 99 ? 'good' : pct > 97 ? 'warn' : 'bad';
+        rows.push(metric(cls, `${pct.toFixed(2)}%`, 'availability (self-reported)'));
     }
     if (p.resolutionHours?.median != null) {
         rows.push(metric(null, `~${p.resolutionHours.median}h`, 'resolves in (median)'));
@@ -1124,9 +1125,18 @@ function providerScorecard(p, windowDays) {
     rows.push(metric(null, `${p.incidents30d}`, `incident${p.incidents30d === 1 ? '' : 's'} in ${days}d`));
 
     // Coverage: self-declared (from the provider's status page) beats
-    // registry-derived (chains our probes hit) when both exist.
+    // registry-derived (chains the registry lists for it) when both exist.
     if (p.chainsSupported != null) rows.push(metric(null, `${p.chainsSupported}`, 'chains (self-declared)'));
-    else if (p.endpointHealth?.registryChains) rows.push(metric(null, `${p.endpointHealth.registryChains}`, 'chains (registry)'));
+    else if (p.endpointReachability?.registryChains) rows.push(metric(null, `${p.endpointReachability.registryChains}`, 'chains (registry)'));
+
+    // Demoted on purpose: reachability of registry-listed URLs is a registry
+    // data-quality signal (keyed endpoints fail by design), not uptime — no
+    // health dot, muted styling.
+    if (p.endpointReachability) {
+        rows.push(el('div', { class: 'psc-row psc-secondary' }, [
+            el('span', { class: 'psc-label', text: `registry endpoints reachable: ${p.endpointReachability.working}/${p.endpointReachability.total}` })
+        ]));
+    }
 
     return el('div', { class: 'provider-card' }, [
         el('div', { class: 'provider-card-head' }, [

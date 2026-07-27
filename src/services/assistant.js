@@ -546,9 +546,9 @@ export function buildSystemPrompt(context, nowDate) {
     'for "when is the next upgrade", "what version is required", "did the upgrade cause',
     'incidents", including networks with no EVM chain ID via its `network` parameter),',
     'and per-RPC-provider quality indicators (get_provider_stats: incidents, resolution',
-    'times, selfReportedAvailability — the provider\'s OWN status-page claim, where a',
-    'silent page looks perfect — versus endpointHealth from our own probes; prefer',
-    'endpointHealth for "which provider is healthiest" and always say which is which).',
+    'times, and availability derived from status-page incident durations — use it for',
+    '"which provider is most reliable", always noting it is self-reported (a silent page',
+    'looks perfect); endpointReachability there is registry data quality, NOT uptime).',
     // Explicit manifest: some serving stacks render tool schemas in ways weak
     // models under-attend to; naming every tool here keeps the full toolbox
     // discoverable even then.

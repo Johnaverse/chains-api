@@ -4,20 +4,20 @@ import { getRpcMonitoringResults } from '../store/queries.js';
 import { groupEventsByIncident, MAINTENANCE_STATUSES, INCIDENT_STATUSES } from './upgrades.js';
 
 /**
- * Per-RPC-provider quality indicators, from two deliberately separated vantage
- * points:
+ * Per-RPC-provider quality indicators. Two metrics that must never be
+ * conflated:
  *
- *   self-reported  what the provider ADMITS on its own status page (incident
- *                  counts, resolution times, selfReportedAvailability). A
- *                  provider that never posts incidents scores a perfect 1.0
- *                  here — the field name and every surface label it as
- *                  self-reported precisely because silence looks like health.
- *   our probes     chains-api's own RPC endpoint checks (endpointHealth),
- *                  matched to providers by URL domain. Independent of what the
- *                  provider chooses to publish.
- *
- * Never blend the two into one score: the honest answer to "which provider is
- * reliable" is both numbers side by side.
+ *   availability          THE availability metric: time-weighted from the
+ *                         incident durations the provider posts on its own
+ *                         status page. Self-reported — a provider that never
+ *                         posts incidents scores a perfect 100, which is why
+ *                         every surface labels it (basis + selfReported flag).
+ *   endpointReachability  whether the REGISTRY-LISTED endpoint URLs for this
+ *                         provider answer our probes. A failed probe usually
+ *                         means a keyed/stale/geo-blocked registry URL, not a
+ *                         down provider — this is a registry data-quality
+ *                         signal, NOT provider uptime, and must never be
+ *                         presented as such.
  */
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -159,12 +159,18 @@ export function buildProviderStats(events, { statusPages = [], rpcResults = [], 
       resolutionHours: resolutionSamples.length
         ? { median: round1(median(resolutionSamples)), avg: round1(avg(resolutionSamples)) }
         : null,
-      // What the provider ADMITS: 1.0 means "posted no incident time in the
-      // window", which a silent status page also produces. Label accordingly.
-      selfReportedAvailability: windowMs > 0
-        ? Math.round(clamp(1 - downtimeMs / windowMs, 0, 1) * 10000) / 10000
+      // THE availability metric: 1 − admitted incident time / window. It is
+      // what the provider ADMITS: 100 also means "posted no incident time in
+      // the window", which a silent status page produces too — hence the
+      // basis/selfReported labelling carried in the value itself.
+      availability: windowMs > 0
+        ? {
+            percent: Math.round(clamp(1 - downtimeMs / windowMs, 0, 1) * 10000) / 100,
+            basis: 'status-page-incidents',
+            selfReported: true
+          }
         : null,
-      endpointHealth: endpointHealthFor(id, rpcResults),
+      endpointReachability: endpointReachabilityFor(id, rpcResults),
       // Self-declared coverage from the status page itself (status-news >=
       // the coverage rollout); null on feeds that predate it.
       chainsSupported: coverage?.chainsListed ?? null,
@@ -176,8 +182,13 @@ export function buildProviderStats(events, { statusPages = [], rpcResults = [], 
   return { windowDays, providers };
 }
 
-/** OUR probes: registry endpoints whose hostname belongs to this provider. */
-function endpointHealthFor(id, rpcResults) {
+/**
+ * Registry-endpoint reachability: do the REGISTRY-LISTED URLs under this
+ * provider's domains answer our probes? Keyed endpoints fail by design, stale
+ * or geo-blocked registry entries fail too — so a low percent flags registry
+ * data quality, not a down provider. Never present this as uptime.
+ */
+function endpointReachabilityFor(id, rpcResults) {
   const domains = PROVIDER_DOMAINS[id];
   if (!domains?.length) return null;
   let working = 0;
