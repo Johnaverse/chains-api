@@ -42,6 +42,7 @@ export const MAX_PARAM_LENGTH = parseIntEnv('MAX_PARAM_LENGTH', 200);
 export const RATE_LIMIT_MAX = parseIntEnv('RATE_LIMIT_MAX', 100);
 export const RATE_LIMIT_WINDOW_MS = parseIntEnv('RATE_LIMIT_WINDOW_MS', 60000); // 1 minute
 export const RELOAD_RATE_LIMIT_MAX = parseIntEnv('RELOAD_RATE_LIMIT_MAX', 5);
+export const FEEDBACK_RATE_LIMIT_MAX = parseIntEnv('FEEDBACK_RATE_LIMIT_MAX', 5);
 export const SEARCH_RATE_LIMIT_MAX = parseIntEnv('SEARCH_RATE_LIMIT_MAX', 30);
 
 // RPC health check

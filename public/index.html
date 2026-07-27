@@ -45,6 +45,7 @@
             <button class="tab" data-view="graph" role="tab">Relationships</button>
             <button class="tab" data-view="incidents" role="tab">Incidents</button>
             <button class="tab" data-view="providers" role="tab">Providers</button>
+            <button class="tab" data-view="timeline" role="tab">Timeline</button>
             <button class="tab" data-view="forum" role="tab">Forum</button>
         </nav>
     </header>
@@ -186,6 +187,33 @@
                 <span class="toolbar-count" id="providersCount"></span>
             </div>
             <div id="providersList" class="incidents-list"><div class="feed-empty">Connecting to live status feed…</div></div>
+        </div>
+    </section>
+
+    <!-- ─── View: Timeline (upgrade windows linked to fallout + coverage) ─── -->
+    <section id="view-timeline" class="view scroll-view">
+        <div class="view-inner">
+            <h2 class="section-title">Upgrade timeline
+                <span class="src-pill" id="timelineMeta"></span>
+            </h2>
+            <p class="view-lead">Scheduled network upgrades and maintenance windows, cross-linked with the
+                other feeds. Upcoming windows count down to activation with the software they require;
+                past ones show the incidents that followed on the same network (suspected, never asserted)
+                and the forum discussion / news coverage around them. Spot something wrong? Flag it with
+                the ⚑ on any card.</p>
+
+            <!-- Center-spine timeline: a vertical line down the middle, cards
+                 alternating left/right of it (single column under 820px), a
+                 "now" tick between the upcoming and recent halves. -->
+            <div class="tl-wrap" id="timelineWrap">
+                <h2 class="tl-heading"><span class="tl-heading-inner">Upcoming <span class="tl-count" id="timelineUpcomingCount"></span></span></h2>
+                <div id="timelineUpcoming" class="tl-list"><div class="feed-empty">Loading upgrade timeline…</div></div>
+
+                <div class="tl-now"><span class="tl-now-label">now</span></div>
+
+                <h2 class="tl-heading"><span class="tl-heading-inner">Recent <span class="tl-count" id="timelineRecentCount"></span></span></h2>
+                <div id="timelineRecent" class="tl-list"></div>
+            </div>
         </div>
     </section>
 
