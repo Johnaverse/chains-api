@@ -1,14 +1,18 @@
 // ─────────────────────────────────────────────────────────────────────────
 // Chains dashboard — Networks (default landing: KPIs + chains + L2 scaling),
 // Relationships (lazy-loaded 3D graph), Incidents and Providers (live
-// operator/RPC-provider status, last 30 days).
+// operator/RPC-provider status, last 30 days), Timeline (upgrade windows
+// cross-linked with their fallout and coverage), Forum (post treemap).
 // Data: chains-api /summary (slim bulk, ETag + localStorage SWR; falls back
 // to /export then the checked-in snapshot), per-chain detail endpoints on
 // drawer open, and chains-status-news (WebSocket /ws).
 // ─────────────────────────────────────────────────────────────────────────
 
 const SAME_ORIGIN_API =
-    location.port === '3000' || location.hostname === 'chains-api.johnaverse.cc';
+    location.port === '3000' || location.hostname === 'chains-api.johnaverse.cc'
+    // The API serves this dashboard itself at /ui/ (any port) — those calls
+    // must stay same-origin, or a local server's UI would show prod's data.
+    || location.pathname.startsWith('/ui');
 const API_BASE = SAME_ORIGIN_API ? '' : 'https://chains-api.johnaverse.cc';
 const STATUS_NEWS_BASE = 'https://chains-status-news.johnaverse.cc';
 const FORUM_NEWS_BASE = 'https://chains-forum-news.johnaverse.cc';
@@ -283,7 +287,7 @@ function initTabs() {
 // separate, shareable, reloadable page (e.g. ?view=incidents&q=base).
 // Networks is the default landing view: info-dense and cheap to render —
 // the 3D graph (1.2 MB lib + physics warmup) only loads when visited.
-const VIEWS = ['networks', 'graph', 'incidents', 'providers', 'forum'];
+const VIEWS = ['networks', 'graph', 'incidents', 'providers', 'timeline', 'forum'];
 const DEFAULT_VIEW = 'networks';
 let activeView = DEFAULT_VIEW;
 let searchQuery = '';
@@ -297,6 +301,7 @@ function switchView(view, opts = {}) {
     document.getElementById(`view-${view}`).classList.add('active');
     document.body.classList.toggle('graph-active', view === 'graph');
     if (view === 'graph') ensureGraphView();
+    if (view === 'timeline') ensureTimelineView(); else stopTimelineTicker();
     if (view === 'forum') ensureForumView();
     updateSearchPlaceholder();
     applySearch();
@@ -308,6 +313,7 @@ function updateSearchPlaceholder() {
     if (input) input.placeholder = activeView === 'networks' ? 'Filter networks — id or name…'
         : activeView === 'incidents' ? 'Filter incidents — network or title…'
         : activeView === 'providers' ? 'Filter provider incidents — provider, chain or title…'
+        : activeView === 'timeline' ? 'Filter timeline — network, software or title…'
         : activeView === 'forum' ? 'Filter forum posts — network, forum or title…'
         : 'Find a network — id or name…';
 }
@@ -317,6 +323,7 @@ function applySearch() {
     if (activeView === 'networks') { chainShown = CHAIN_PAGE; renderChainsView(); }
     else if (activeView === 'incidents') renderIncidentList();
     else if (activeView === 'providers') renderProviderList();
+    else if (activeView === 'timeline') renderTimeline();
     else if (activeView === 'forum') { renderForumTreemap(); renderForumList(); }
 }
 
@@ -992,7 +999,10 @@ function incidentCard(it) {
                 el('span', { class: 'ai-summary', text: enr.summary })
             ]) : null,
             enrAction ? el('div', { class: 'incident-action', text: `Action: ${enrAction}` }) : null,
-            affected
+            affected,
+            // Wrong-info loop: kind reflects whose page the incident came
+            // from; the merge key (status page + title) identifies the item.
+            feedbackAffordance({ kind: isProvider ? 'provider' : 'incident', refId: it.key })
         ]),
         el('div', { class: 'incident-side' }, side)
     ]);
@@ -1400,6 +1410,263 @@ function renderForumList() {
     }
     if (count) count.textContent = `${shown} post${shown === 1 ? '' : 's'}${forum.filter ? ` · ${forum.byForum.get(forum.filter)?.name || ''}` : ''}${searchQuery ? ` · “${searchQuery}”` : ''}`;
     if (!shown) list.appendChild(el('div', { class: 'feed-empty', text: 'Nothing matches.' }));
+}
+
+// ─────────────────────────────── Timeline (upgrades ↔ fallout ↔ coverage) ───────────────────────────────
+// One card per scheduled upgrade/maintenance window from the API's /upgrades
+// correlation layer. Upcoming windows carry the required software and a live
+// countdown to activation; past windows link the incidents that followed on
+// the same network (labelled suspected — temporal correlation, never asserted
+// causation) plus the forum discussion and news coverage around them.
+const timeline = { upgrades: [], loaded: false, loading: false, error: null, ticker: null };
+
+function ensureTimelineView() {
+    if (timeline.loaded) { renderTimeline(); return; }
+    if (timeline.loading) return;
+    timeline.loading = true;
+    loadTimeline();
+}
+
+async function loadTimeline() {
+    try {
+        const d = await api('/upgrades?limit=50');
+        timeline.upgrades = d.upgrades || [];
+        timeline.loaded = true;
+        timeline.error = null;
+    } catch (err) {
+        // A 404 means an older chains-api deployment — the Pages dashboard
+        // can front-run the API rollout — so say that instead of a generic
+        // failure. Anything else is retried on the next visit to the tab.
+        timeline.error = /→ 404$/.test(err?.message || '') ? 'old-api' : 'down';
+    } finally {
+        timeline.loading = false;
+    }
+    renderTimeline();
+}
+
+function timelineActivationMs(u) {
+    const t = Date.parse(u.activationAt || '');
+    return Number.isNaN(t) ? null : t;
+}
+
+function timelineMatchesSearch(u, q) {
+    if ((u.title || '').toLowerCase().includes(q) || (u.provider || '').toLowerCase().includes(q)) return true;
+    if ((u.networkNames || []).some(n => n.toLowerCase().includes(q))) return true;
+    if ((u.software || []).some(s => `${s.client || ''} ${s.version || ''}`.toLowerCase().includes(q))) return true;
+    return (u.chainIds || []).some(id => String(id).includes(q) || state.byId.get(id)?.name?.toLowerCase().includes(q));
+}
+
+function renderTimeline() {
+    const upWrap = document.getElementById('timelineUpcoming');
+    const reWrap = document.getElementById('timelineRecent');
+    if (!upWrap || !reWrap) return;
+    const meta = document.getElementById('timelineMeta');
+    upWrap.textContent = ''; reWrap.textContent = '';
+
+    if (timeline.error) {
+        const msg = timeline.error === 'old-api'
+            ? 'Timeline requires a newer chains-api — the API this dashboard points at doesn’t serve /upgrades yet.'
+            : 'Upgrade timeline unavailable — the /upgrades feed didn’t answer. Revisit the tab to retry.';
+        upWrap.appendChild(el('div', { class: 'feed-empty', text: msg }));
+        reWrap.appendChild(el('div', { class: 'feed-empty', text: msg }));
+        if (meta) meta.textContent = '';
+        return;
+    }
+    if (!timeline.loaded) {
+        upWrap.appendChild(el('div', { class: 'feed-empty', text: 'Loading upgrade timeline…' }));
+        return;
+    }
+
+    const now = Date.now();
+    const items = searchQuery ? timeline.upgrades.filter(u => timelineMatchesSearch(u, searchQuery)) : timeline.upgrades;
+    // Upcoming: future activations, soonest first. A null activation time
+    // can't count down, so those windows land in Recent (sorted last).
+    const upcoming = items.filter(u => (timelineActivationMs(u) ?? -1) > now)
+        .sort((a, b) => timelineActivationMs(a) - timelineActivationMs(b));
+    const recent = items.filter(u => (timelineActivationMs(u) ?? -1) <= now)
+        .sort((a, b) => (timelineActivationMs(b) ?? 0) - (timelineActivationMs(a) ?? 0));
+
+    if (meta) meta.textContent = `${timeline.upgrades.length} windows`;
+    const suffix = searchQuery ? ` · “${searchQuery}”` : '';
+    document.getElementById('timelineUpcomingCount').textContent = `${upcoming.length} scheduled${suffix}`;
+    document.getElementById('timelineRecentCount').textContent = `${recent.length} past${suffix}`;
+
+    if (!upcoming.length) upWrap.appendChild(el('div', { class: 'feed-empty', text: searchQuery ? 'Nothing matches.' : 'No upcoming upgrades or maintenance windows announced.' }));
+    // Cards alternate left/right of the center spine (index-based per half).
+    upcoming.forEach((u, i) => upWrap.appendChild(timelineCard(u, { upcoming: true, side: i % 2 ? 'right' : 'left' })));
+    if (!recent.length) reWrap.appendChild(el('div', { class: 'feed-empty', text: searchQuery ? 'Nothing matches.' : 'No recent upgrades in the feed’s window.' }));
+    recent.forEach((u, i) => reWrap.appendChild(timelineCard(u, { upcoming: false, side: i % 2 ? 'right' : 'left' })));
+
+    if (upcoming.length) startTimelineTicker(); else stopTimelineTicker();
+}
+
+// "in 2d 4h" / "in 35m" — the live part of an upcoming card.
+function countdownText(ms) {
+    if (!Number.isFinite(ms) || ms <= 0) return 'now';
+    const m = Math.ceil(ms / 60000);
+    if (m < 60) return `in ${m}m`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `in ${h}h ${m % 60}m`;
+    return `in ${Math.floor(h / 24)}d ${h % 24}h`;
+}
+
+// One shared minute tick updates every visible countdown in place; a window
+// crossing into the past re-renders so it re-buckets into Recent. Guarded so
+// re-renders never stack a second interval; cleared on view switch.
+function startTimelineTicker() {
+    if (timeline.ticker) return;
+    timeline.ticker = setInterval(() => {
+        if (activeView !== 'timeline') return;
+        let expired = false;
+        document.querySelectorAll('#timelineUpcoming .tl-countdown').forEach(n => {
+            const left = Number(n.dataset.at) - Date.now();
+            if (left <= 0) expired = true;
+            n.textContent = countdownText(left);
+        });
+        if (expired) renderTimeline();
+    }, 60000);
+}
+function stopTimelineTicker() { if (timeline.ticker) { clearInterval(timeline.ticker); timeline.ticker = null; } }
+
+// Sanitized urgency class token (same guard as the severity pill) — the raw
+// value still shows as the pill's text. Shared by the pill and the spine dot.
+function urgencyClass(urgency) {
+    return `urg-${String(urgency || 'standard').toLowerCase().replace(/[^a-z]/g, '')}`;
+}
+function urgencyPill(urgency) {
+    return el('span', { class: `pill ${urgencyClass(urgency)}`, text: urgency || 'standard' });
+}
+
+// Fallout: incidents that started on the same network within the follow
+// window after activation — the "what did this upgrade cause?" rows.
+function timelineFalloutRows(u) {
+    return (u.followedByIncidents || []).slice(0, 4).map(inc =>
+        el('div', { class: 'tl-fallout' }, [
+            el('span', { class: 'tl-fallout-arrow', text: '↳' }),
+            inc.url ? el('a', { href: inc.url, target: '_blank', rel: 'noopener', text: inc.title }) : el('span', { text: inc.title }),
+            el('span', { class: 'muted', text: `+${inc.hoursAfterActivation}h after activation (suspected)` })
+        ]));
+}
+
+// Context: governance discussion (forum) and editorial coverage (news)
+// around the window — what was written about it.
+function timelineContextRows(u) {
+    const row = (label, item) => el('div', { class: 'tl-context' }, [
+        el('span', { class: 'tl-context-kind', text: label }),
+        el('a', { href: item.url, target: '_blank', rel: 'noopener', text: item.title }),
+        item.publishedAt ? el('span', { class: 'muted', text: relTime(item.publishedAt) }) : null
+    ]);
+    return [
+        ...(u.discussion || []).slice(0, 2).map(d => row('discussion', d)),
+        ...(u.coverage || []).slice(0, 2).map(c => row('coverage', c))
+    ];
+}
+
+// One spine item: the urgency-colored dot on the center line plus the card on
+// its side. Typography inside leads with the WHEN (countdown for upcoming,
+// date for past) — on a timeline, time is the headline — then title, then
+// muted meta; fallout/coverage sit in a bordered footer; the ⚑ report
+// affordance rides the card corner (CSS positions it).
+function timelineCard(u, { upcoming, side }) {
+    const netNames = u.networkNames?.length ? u.networkNames
+        : (u.chainIds || []).map(id => state.byId.get(id)?.name || `Chain ${id}`);
+    const label = netNames[0] || u.provider || 'Unknown';
+    const chainId = (u.chainIds || [])[0] ?? null;
+    const actMs = timelineActivationMs(u);
+    const meta = [netNames.slice(0, 3).join(', ') || null, u.provider].filter(Boolean);
+
+    const when = upcoming && actMs != null
+        ? el('span', { class: 'tl-when tl-countdown mono', 'data-at': String(actMs), text: countdownText(actMs - Date.now()) })
+        : el('span', {
+            class: 'tl-when tl-when-past',
+            text: actMs != null
+                ? new Date(actMs).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                : 'unscheduled'
+        });
+    const head = [when, urgencyPill(u.urgency)];
+    if (!upcoming) {
+        const st = SERVER_STATUS_LABEL[u.status];
+        if (st) head.push(el('span', { class: `pill st-${st.toLowerCase().replace(/\s+/g, '')}`, text: st }));
+    }
+    if (upcoming && actMs != null) head.push(el('span', { class: 'tl-when-sub muted mono', text: new Date(actMs).toLocaleString() }));
+
+    const footRows = [...timelineFalloutRows(u), ...timelineContextRows(u)];
+
+    const card = el('div', { class: 'tl-card glass-panel' }, [
+        el('div', { class: 'tl-card-head' }, head),
+        el('div', { class: 'tl-title' }, [
+            networkIcon(label, iconColorFor(chainId), 'net-icon sm'),
+            u.url ? el('a', { href: u.url, target: '_blank', rel: 'noopener', text: u.title }) : el('span', { text: u.title })
+        ]),
+        meta.length ? el('div', { class: 'tl-meta muted', text: meta.join(' · ') }) : null,
+        (u.software || []).length ? el('div', { class: 'tl-software' }, u.software.map(s =>
+            el('span', { class: 'sw-chip mono', text: [s.client, s.version].filter(Boolean).join(' ') }))) : null,
+        footRows.length ? el('div', { class: 'tl-foot' }, footRows) : null,
+        feedbackAffordance({ kind: 'upgrade', refId: u.incidentId || u.title })
+    ]);
+
+    return el('div', { class: `tl-item ${side}${upcoming ? ' upcoming' : ''}` }, [
+        el('span', { class: `tl-dot ${urgencyClass(u.urgency)}` }),
+        card
+    ]);
+}
+
+// ─────────────────────────────── Report-wrong-info affordance (⚑) ───────────────────────────────
+// The feeds are correlated by heuristics, so some links are inevitably wrong
+// — and only a human reader can tell which. Every timeline and incident card
+// gets a small flag that unfolds an inline report form posting to /feedback.
+const FEEDBACK_REASONS = [
+    ['wrong_chain', 'Wrong chain/network'],
+    ['wrong_version', 'Wrong version'],
+    ['wrong_time', 'Wrong time'],
+    ['not_related', 'Not related'],
+    ['misclassified', 'Misclassified'],
+    ['outdated', 'Outdated'],
+    ['other', 'Other']
+];
+
+function feedbackAffordance({ kind, refId }) {
+    const wrap = el('div', { class: 'report-wrap' });
+    // Incident cards are anchors: swallow clicks anywhere in the affordance
+    // so opening the form / picking a reason never navigates the card's link
+    // (preventDefault stops the anchor; the controls' own listeners and
+    // mousedown-driven behaviour — select opening, input focus — still work).
+    wrap.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); });
+
+    const btn = el('button', { class: 'report-btn', title: 'Report wrong info', 'aria-label': 'Report wrong info', text: '⚑ report' });
+    const select = el('select', { class: 'report-reason' },
+        FEEDBACK_REASONS.map(([value, label]) => el('option', { value, text: label })));
+    const comment = el('input', { class: 'report-comment', type: 'text', maxlength: '500', placeholder: 'What’s wrong? (optional)' });
+    const send = el('button', { class: 'report-send', text: 'Send' });
+    const note = el('span', { class: 'report-note hidden' });
+    const form = el('div', { class: 'report-form hidden' }, [select, comment, send, note]);
+
+    btn.addEventListener('click', () => form.classList.toggle('hidden'));
+    send.addEventListener('click', async () => {
+        send.disabled = true;
+        note.classList.add('hidden');
+        const body = { kind, reason: select.value, page: activeView };
+        if (refId) body.refId = String(refId).slice(0, 200);
+        const text = comment.value.trim();
+        if (text) body.comment = text.slice(0, 500);
+        let res = null;
+        try { res = await apiPost('/feedback', body, { timeoutMs: 15000 }); } catch { /* network error → note below */ }
+        if (res?.ok) {
+            form.textContent = '';
+            form.appendChild(el('span', { class: 'report-thanks', text: 'Thanks — recorded.' }));
+            btn.disabled = true;
+            return;
+        }
+        note.textContent = res?.status === 429 ? 'Too many reports — try again in a minute.'
+            : res ? (res.data?.error || 'Couldn’t send — try again.')
+            : 'Couldn’t send — network error.';
+        note.classList.remove('hidden');
+        send.disabled = false;
+    });
+
+    wrap.appendChild(btn);
+    wrap.appendChild(form);
+    return wrap;
 }
 
 // ─────────────────────────────── Assistant (floating chat overlay) ───────────────────────────────

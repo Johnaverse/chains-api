@@ -558,6 +558,155 @@
         }
       }
     },
+    "/feedback": {
+      "post": {
+        "tags": [
+          "Feedback"
+        ],
+        "description": "Report wrong or misattributed information (an upgrade linked to the wrong incident, a stale version, a mis-mapped chain). Stored in memory (last 1000) with a best-effort file mirror; no IP or user-agent is recorded.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "upgrade",
+                      "incident",
+                      "provider",
+                      "forum",
+                      "news",
+                      "chain",
+                      "other"
+                    ],
+                    "description": "What the report is about",
+                    "errorMessage": {
+                      "enum": "Field \"kind\" must be one of: upgrade, incident, provider, forum, news, chain, other"
+                    }
+                  },
+                  "refId": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "description": "Identifier of the item being reported (incident id, upgrade/incident title, chain id…)",
+                    "errorMessage": {
+                      "maxLength": "Field \"refId\" too long. Max length: 200"
+                    }
+                  },
+                  "reason": {
+                    "type": "string",
+                    "enum": [
+                      "wrong_chain",
+                      "wrong_version",
+                      "wrong_time",
+                      "not_related",
+                      "misclassified",
+                      "outdated",
+                      "other"
+                    ],
+                    "description": "Why the item is wrong",
+                    "errorMessage": {
+                      "enum": "Field \"reason\" must be one of: wrong_chain, wrong_version, wrong_time, not_related, misclassified, outdated, other"
+                    }
+                  },
+                  "comment": {
+                    "type": "string",
+                    "maxLength": 500,
+                    "description": "Optional free-text detail",
+                    "errorMessage": {
+                      "maxLength": "Field \"comment\" too long. Max length: 500"
+                    }
+                  },
+                  "page": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "description": "Dashboard view the report came from",
+                    "errorMessage": {
+                      "maxLength": "Field \"page\" too long. Max length: 100"
+                    }
+                  }
+                },
+                "required": [
+                  "kind",
+                  "reason"
+                ],
+                "errorMessage": {
+                  "required": {
+                    "kind": "Field \"kind\" is required",
+                    "reason": "Field \"reason\" is required"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "received": {
+                      "type": "boolean"
+                    },
+                    "id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Feedback"
+        ],
+        "description": "Review submitted feedback reports, newest-first. Filter by kind; limit defaults to 50 (max 500).",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "upgrade",
+                "incident",
+                "provider",
+                "forum",
+                "news",
+                "chain",
+                "other"
+              ]
+            },
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "description": "Only reports of this kind"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 50
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
     "/metrics": {
       "get": {
         "tags": [
@@ -1007,6 +1156,10 @@
     {
       "name": "Assistant",
       "description": "LLM chat assistant over the chains registry and live incidents"
+    },
+    {
+      "name": "Feedback",
+      "description": "User reports of wrong or misattributed information"
     },
     {
       "name": "Meta",

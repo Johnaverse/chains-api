@@ -37,6 +37,7 @@ import { clientsRoutes } from './routes/clients.js';
 import { scalingRoutes } from './routes/scaling.js';
 import { statusPagesRoutes } from './routes/statusPages.js';
 import { upgradesRoutes } from './routes/upgrades.js';
+import { feedbackRoutes } from './routes/feedback.js';
 import { adminRoutes } from './routes/admin.js';
 import { metricsRoute } from './routes/metrics.js';
 import { refresherRoute } from './routes/refresher.js';
@@ -107,7 +108,8 @@ const TAG_BY_SEGMENT = {
   export: 'Meta',
   summary: 'Meta',
   reload: 'Admin',
-  assistant: 'Assistant'
+  assistant: 'Assistant',
+  feedback: 'Feedback'
 };
 
 function tagForUrl(url) {
@@ -142,6 +144,7 @@ const OPENAPI_TAGS = [
   { name: 'Observability', description: 'Prometheus metrics and refresher status' },
   { name: 'Admin', description: 'Data reload' },
   { name: 'Assistant', description: 'LLM chat assistant over the chains registry and live incidents' },
+  { name: 'Feedback', description: 'User reports of wrong or misattributed information' },
   { name: 'Meta', description: 'Service info, health, and data sources' }
 ];
 
@@ -303,6 +306,7 @@ export async function buildApp(options = {}) {
   await fastify.register(scalingRoutes);
   await fastify.register(statusPagesRoutes);
   await fastify.register(upgradesRoutes);
+  await fastify.register(feedbackRoutes);
   await fastify.register(metricsRoute);
   await fastify.register(refresherRoute);
   await fastify.register(summaryRoute);
