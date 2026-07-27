@@ -27,6 +27,7 @@ import {
 import { getLiveIncidents } from './src/sources/liveIncidents.js';
 import { getForumNews } from './src/sources/forumNews.js';
 import { getWeb3News } from './src/sources/web3News.js';
+import { getChainUpgrades } from './src/services/upgrades.js';
 
 /**
  * Get the list of MCP tool definitions (schemas)
@@ -334,6 +335,28 @@ export function getToolDefinitions() {
           limit: {
             type: 'number',
             description: 'Max posts to return (default 15, max 50)',
+          },
+        },
+      },
+    },
+    {
+      name: 'get_chain_upgrades',
+      description:
+        'Get the cross-feed upgrade timeline: scheduled/completed network upgrades and maintenance windows with the REQUIRED SOFTWARE ({client, version} operators must run), urgency (standard/urgent/mandatory), activation time, incidents that followed on the same network within 24h (labelled suspectedCause: "upgrade" — temporal correlation, not asserted causation), and related forum discussion + news coverage. Use for "when is the next upgrade for X", "what version is required", "did the upgrade cause incidents", "hard fork schedule". `network` accepts a name for chains with no EVM chain ID (e.g. "Solana", "Canton"). Returns a capped list with totalMatched/truncated — say when you are showing a subset.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          chainId: {
+            type: 'number',
+            description: 'Only upgrades touching this chain ID',
+          },
+          network: {
+            type: 'string',
+            description: 'Network name or slug (e.g. "Solana Mainnet", "gnosis") — use for networks that have no EVM chain ID',
+          },
+          limit: {
+            type: 'number',
+            description: 'Max upgrades to return (default 20, max 50)',
           },
         },
       },
@@ -773,6 +796,16 @@ async function handleGetForumNews(args) {
   }
 }
 
+async function handleGetChainUpgrades(args) {
+  const { chainId, network, limit } = args ?? {};
+  try {
+    const result = await getChainUpgrades({ chainId, network, limit });
+    return textResponse(result);
+  } catch (error) {
+    return errorResponse('Upgrade timeline unavailable', error.message);
+  }
+}
+
 async function handleGetWeb3News(args) {
   const { chainId, sourceId, weight, limit } = args ?? {};
   try {
@@ -825,6 +858,7 @@ const toolHandlers = {
   get_live_incidents: handleGetLiveIncidents,
   get_forum_news: handleGetForumNews,
   get_web3_news: handleGetWeb3News,
+  get_chain_upgrades: handleGetChainUpgrades,
 };
 
 /**

@@ -245,6 +245,16 @@ describe('buildSystemPrompt', () => {
     expect(prompt).not.toContain('undefined');
   });
 
+  it('carries the small-model procedure spine', () => {
+    const prompt = buildSystemPrompt(undefined, new Date('2026-07-06T12:00:00Z'));
+    // An ordered per-turn checklist is what small tool-calling models actually follow;
+    // losing it silently degrades every weak-model deployment.
+    expect(prompt).toContain('PROCEDURE');
+    expect(prompt).toContain('Step 1.');
+    expect(prompt).toContain('Step 5.');
+    expect(prompt).toContain('get_chain_upgrades');
+  });
+
   it('tells the model to use get_stats for summary / "how many" questions', () => {
     const prompt = buildSystemPrompt(undefined, new Date('2026-07-06T12:00:00Z'));
     expect(prompt).toContain('get_stats');
