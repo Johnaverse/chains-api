@@ -136,6 +136,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // bulk load or it appears stuck.
     connectStatusFeed();
     loadStatsLine();
+    loadProviderStats();
     loadBulk();
     window.addEventListener('popstate', applyUrlState);
 });
@@ -1077,6 +1078,63 @@ function renderProviderFilter() {
     bar.appendChild(chip('all', `All (${all.length})`));
     for (const [id, name] of [...names].sort((a, b) => (a[1] || '').localeCompare(b[1] || '')))
         bar.appendChild(chip(id, `${name} (${counts.get(id) || 0})`));
+}
+
+// ─── Provider scorecards (GET /providers/stats) ───
+// Two vantage points per card, labelled apart on purpose: "self-reported" is what
+// the provider admits on its own status page (a silent page scores 100%), while
+// "our probes" is chains-api's own endpoint monitoring. 404 → older API without
+// the endpoint → the grid simply stays hidden.
+async function loadProviderStats() {
+    let data;
+    try { data = await api('/providers/stats'); } catch { return; }
+    renderProviderScorecards(data);
+}
+
+function renderProviderScorecards(data) {
+    const grid = document.getElementById('providerScorecards');
+    if (!grid) return;
+    const provs = data?.providers || [];
+    grid.textContent = '';
+    if (!provs.length) { grid.hidden = true; return; }
+    for (const p of provs) grid.appendChild(providerScorecard(p, data.windowDays));
+    grid.hidden = false;
+}
+
+function providerScorecard(p, windowDays) {
+    const metric = (cls, value, label) => el('div', { class: 'psc-row' }, [
+        cls ? el('span', { class: `psc-dot ${cls}` }) : null,
+        el('span', { class: 'psc-value', text: value }),
+        el('span', { class: 'psc-label', text: label })
+    ]);
+    const rows = [];
+
+    if (p.endpointHealth) {
+        const pct = p.endpointHealth.percent;
+        const cls = pct > 90 ? 'good' : pct > 70 ? 'warn' : 'bad';
+        rows.push(metric(cls, `${pct}%`, `our probes · ${p.endpointHealth.working}/${p.endpointHealth.total} endpoints`));
+    }
+    if (p.selfReportedAvailability != null) {
+        rows.push(metric(null, `${(p.selfReportedAvailability * 100).toFixed(2)}%`, 'self-reported availability'));
+    }
+    if (p.resolutionHours?.median != null) {
+        rows.push(metric(null, `~${p.resolutionHours.median}h`, 'resolves in (median)'));
+    }
+    const days = Math.round(windowDays ?? 30);
+    rows.push(metric(null, `${p.incidents30d}`, `incident${p.incidents30d === 1 ? '' : 's'} in ${days}d`));
+
+    // Coverage: self-declared (from the provider's status page) beats
+    // registry-derived (chains our probes hit) when both exist.
+    if (p.chainsSupported != null) rows.push(metric(null, `${p.chainsSupported}`, 'chains (self-declared)'));
+    else if (p.endpointHealth?.registryChains) rows.push(metric(null, `${p.endpointHealth.registryChains}`, 'chains (registry)'));
+
+    return el('div', { class: 'provider-card' }, [
+        el('div', { class: 'provider-card-head' }, [
+            el('span', { class: 'provider-card-name', text: p.name || p.id }),
+            p.ongoingNow > 0 ? el('span', { class: 'pill pill-ongoing', text: `${p.ongoingNow} ongoing` }) : null
+        ]),
+        ...rows
+    ]);
 }
 
 function renderProviderList() {

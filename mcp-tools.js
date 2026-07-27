@@ -28,6 +28,7 @@ import { getLiveIncidents } from './src/sources/liveIncidents.js';
 import { getForumNews } from './src/sources/forumNews.js';
 import { getWeb3News } from './src/sources/web3News.js';
 import { getChainUpgrades } from './src/services/upgrades.js';
+import { getProviderStats } from './src/services/providerStats.js';
 
 /**
  * Get the list of MCP tool definitions (schemas)
@@ -357,6 +358,20 @@ export function getToolDefinitions() {
           limit: {
             type: 'number',
             description: 'Max upgrades to return (default 20, max 50)',
+          },
+        },
+      },
+    },
+    {
+      name: 'get_provider_stats',
+      description:
+        'Get per-RPC-provider quality indicators (Infura, QuickNode, Alchemy, dRPC, Chainstack, …) over a ~30-day window: incidents30d, ongoingNow, maintenance30d, chainsAffected30d, resolutionHours (median/avg time-to-resolve), selfReportedAvailability, endpointHealth, and chain coverage. CRITICAL distinction between the two data sources: `selfReportedAvailability` and the incident counts are SELF-REPORTED — computed from what the provider admits on its own status page, so a provider that never posts incidents scores a perfect 1.0 (a silent status page looks perfect); `endpointHealth` is chains-api\'s OWN endpoint probes ({working, total, percent, registryChains}), independent of what the provider publishes. For "which provider is healthiest/most reliable" prefer endpointHealth and treat selfReportedAvailability as the provider\'s own claim, always saying it is self-reported. `windowDays` is the actually-observed window (may be under 30 when feed retention is shorter).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          provider: {
+            type: 'string',
+            description: 'Only this provider id (e.g. "infura", "quicknode", "alchemy"). Omit for all providers, sorted by incidents30d descending',
           },
         },
       },
@@ -806,6 +821,16 @@ async function handleGetChainUpgrades(args) {
   }
 }
 
+async function handleGetProviderStats(args) {
+  const { provider } = args ?? {};
+  try {
+    const result = await getProviderStats({ provider });
+    return textResponse(result);
+  } catch (error) {
+    return errorResponse('Provider stats unavailable', error.message);
+  }
+}
+
 async function handleGetWeb3News(args) {
   const { chainId, sourceId, weight, limit } = args ?? {};
   try {
@@ -859,6 +884,7 @@ const toolHandlers = {
   get_forum_news: handleGetForumNews,
   get_web3_news: handleGetWeb3News,
   get_chain_upgrades: handleGetChainUpgrades,
+  get_provider_stats: handleGetProviderStats,
 };
 
 /**
