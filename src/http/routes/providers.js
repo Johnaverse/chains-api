@@ -2,11 +2,12 @@ import { getProviderStats } from '../../services/providerStats.js';
 import { sendError } from '../util/sendError.js';
 
 /**
- * RPC-provider quality indicators. `availability` is THE availability metric
- * (time-weighted from status-page incident durations, honestly labelled
- * self-reported — a silent page looks perfect); `endpointReachability` is a
- * registry data-quality signal (do registry-listed URLs answer our probes?),
- * never to be read as provider uptime.
+ * RPC-provider quality indicators. `availability` is THE availability metric:
+ * chain-weighted per window (last24h/7d/30d) from status-page incident
+ * durations against the chain count the provider's own page lists, honestly
+ * labelled self-reported — a silent page looks perfect; `endpointReachability`
+ * is a registry data-quality signal (do registry-listed URLs answer our
+ * probes?), never to be read as provider uptime.
  */
 export async function providersRoutes(fastify) {
   fastify.get('/providers/stats', {

@@ -140,35 +140,6 @@ describe('buildProviderStats — per-provider metrics', () => {
     expect(q.resolutionHours).toBeNull();
   });
 
-  it('availability = 1 - admitted downtime / window, unresolved running to now, labelled self-reported', () => {
-    const windowMs = 30 * DAY;
-    const events = [
-      anchor(),
-      // Resolved: 3h of admitted downtime.
-      ev({ incidentId: 'q:r', publishedMs: NOW - 10 * DAY, status: 'investigating' }),
-      ev({ incidentId: 'q:r', publishedMs: NOW - 10 * DAY + 3 * HOUR, status: 'resolved' }),
-      // Unresolved: down from first report until NOW (12h).
-      ev({ incidentId: 'q:u', publishedMs: NOW - 12 * HOUR, status: 'investigating' })
-    ];
-    const q = buildProviderStats(events, { now: NOW }).providers.find((p) => p.id === 'quicknode');
-    const expected = Math.round((1 - (15 * HOUR) / windowMs) * 10000) / 100;
-    expect(q.availability).toEqual({
-      percent: expected,
-      basis: 'status-page-incidents',
-      selfReported: true
-    });
-  });
-
-  it('a silent provider (catalog entry, zero events) self-reports a perfect 100', () => {
-    const statusPages = [{ id: 'getblock', name: 'GetBlock', kind: 'rpc-provider' }];
-    const { providers } = buildProviderStats([anchor()], { statusPages, now: NOW });
-    const g = providers.find((p) => p.id === 'getblock');
-    expect(g).toBeDefined();
-    expect(g.incidents30d).toBe(0);
-    expect(g.availability.percent).toBe(100); // silence looks perfect — hence the labelling
-    expect(g.availability.selfReported).toBe(true);
-  });
-
   it('counts distinct chains affected across incident groups', () => {
     const events = [
       anchor(),
@@ -188,6 +159,119 @@ describe('buildProviderStats — per-provider metrics', () => {
     ];
     const { providers } = buildProviderStats(events, { now: NOW });
     expect(providers.map((p) => p.id)).toEqual(['infura', 'quicknode']);
+  });
+});
+
+describe('buildProviderStats — chain-weighted availability', () => {
+  const qnPage = (chainsListed) => [{
+    id: 'quicknode',
+    name: 'QuickNode',
+    kind: 'rpc-provider',
+    coverage: { chainsListed, chainIdsResolved: [], componentCount: 0 }
+  }];
+
+  it('worked example: provider supports 10 chains, one incident takes 1 chain down for the full 24h window → last24h availability = 90%', () => {
+    const events = [
+      anchor(),
+      // Started before the window, still unresolved: covers all 24h of it.
+      ev({ incidentId: 'q:down', publishedMs: NOW - 30 * HOUR, status: 'investigating', ongoing: true, chains: [{ chainId: 1, name: 'Ethereum' }] })
+    ];
+    const q = buildProviderStats(events, { statusPages: qnPage(10), now: NOW }).providers.find((p) => p.id === 'quicknode');
+    expect(q.availability.last24h).toEqual({ percent: 90, chainHoursLost: 24 });
+    expect(q.availability.basis).toBe('status-page-chains');
+    expect(q.availability.selfReported).toBe(true);
+    expect(q.availability.chainsSupported).toBe(10);
+    // The 7d window only loses the incident's actual 30h: 1 - 30/(10*168).
+    expect(q.availability.last7d.chainHoursLost).toBe(30);
+    expect(q.availability.last7d.percent).toBe(98.21);
+  });
+
+  it('merges overlapping incidents on the same chain — simultaneous incidents are not double downtime', () => {
+    const events = [
+      anchor(),
+      // Two incidents on chain 1: 10h→4h ago and 8h→2h ago. Merged: 10h→2h = 8h,
+      // not 6h + 6h = 12h.
+      ev({ incidentId: 'q:one', publishedMs: NOW - 10 * HOUR, status: 'investigating' }),
+      ev({ incidentId: 'q:one', publishedMs: NOW - 4 * HOUR, status: 'resolved' }),
+      ev({ incidentId: 'q:two', publishedMs: NOW - 8 * HOUR, status: 'investigating' }),
+      ev({ incidentId: 'q:two', publishedMs: NOW - 2 * HOUR, status: 'resolved' })
+    ];
+    const q = buildProviderStats(events, { statusPages: qnPage(10), now: NOW }).providers.find((p) => p.id === 'quicknode');
+    expect(q.availability.last24h.chainHoursLost).toBe(8);
+    expect(q.availability.last24h.percent).toBe(Math.round((1 - 8 / 240) * 10000) / 100);
+  });
+
+  it('clips an ongoing incident to each window boundary', () => {
+    const events = [
+      anchor(),
+      ev({ incidentId: 'q:long', publishedMs: NOW - 3 * DAY, status: 'investigating', ongoing: true })
+    ];
+    const q = buildProviderStats(events, { statusPages: qnPage(10), now: NOW }).providers.find((p) => p.id === 'quicknode');
+    expect(q.availability.last24h.chainHoursLost).toBe(24); // clipped to the window
+    expect(q.availability.last7d.chainHoursLost).toBe(72);  // its real 3d
+    expect(q.availability.last30d.chainHoursLost).toBe(72);
+  });
+
+  it('an incident mapping to no chain counts as exactly 1 chain-equivalent', () => {
+    const events = [
+      anchor(),
+      // Provider-wide/dashboard incident: no chain attribution possible.
+      ev({ incidentId: 'q:wide', publishedMs: NOW - 6 * HOUR, status: 'investigating', chains: [] })
+    ];
+    const q = buildProviderStats(events, { statusPages: qnPage(10), now: NOW }).providers.find((p) => p.id === 'quicknode');
+    expect(q.availability.last24h).toEqual({ percent: 97.5, chainHoursLost: 6 }); // 1 - 6/240
+  });
+
+  it('clamps an incident claiming more chains than the page lists — percent never goes below 0', () => {
+    const events = [
+      anchor(),
+      ev({
+        incidentId: 'q:big',
+        publishedMs: NOW - 30 * HOUR,
+        status: 'investigating',
+        ongoing: true,
+        chains: [{ chainId: 1 }, { chainId: 137 }, { chainId: 10 }]
+      })
+    ];
+    // Page lists only 2 chains; the incident claims 3. Charge at most 2.
+    const q = buildProviderStats(events, { statusPages: qnPage(2), now: NOW }).providers.find((p) => p.id === 'quicknode');
+    expect(q.availability.last24h.chainHoursLost).toBe(48); // 2 chains × 24h, full window
+    expect(q.availability.last24h.percent).toBe(0);
+  });
+
+  it('coverage unavailable → null percents with a note (never a registry fallback)', () => {
+    const events = [
+      anchor(),
+      ev({ incidentId: 'q:down', publishedMs: NOW - 6 * HOUR, status: 'investigating' })
+    ];
+    const q = buildProviderStats(events, { now: NOW }).providers.find((p) => p.id === 'quicknode');
+    expect(q.availability.chainsSupported).toBeNull();
+    expect(q.availability.last24h.percent).toBeNull();
+    expect(q.availability.last7d.percent).toBeNull();
+    expect(q.availability.last30d.percent).toBeNull();
+    expect(q.availability.note).toContain('chain coverage unavailable');
+    // The numerator is still well-defined and reported.
+    expect(q.availability.last24h.chainHoursLost).toBe(6);
+  });
+
+  it('notes a partial window when feed retention is younger than 30d, and exposes oldestEventAt', () => {
+    // No anchor: the oldest event is only 3d old.
+    const events = [ev({ publishedMs: NOW - 3 * DAY, status: 'resolved' })];
+    const result = buildProviderStats(events, { statusPages: qnPage(10), now: NOW });
+    expect(result.oldestEventAt).toBe(new Date(NOW - 3 * DAY).toISOString());
+    const q = result.providers.find((p) => p.id === 'quicknode');
+    expect(q.availability.note).toBe('partial window');
+  });
+
+  it('a silent provider (coverage present, zero events) self-reports a perfect 100 in every window', () => {
+    const statusPages = [{ id: 'getblock', name: 'GetBlock', kind: 'rpc-provider', coverage: { chainsListed: 5, chainIdsResolved: [], componentCount: 0 } }];
+    const g = buildProviderStats([anchor()], { statusPages, now: NOW }).providers.find((p) => p.id === 'getblock');
+    expect(g.incidents30d).toBe(0);
+    // Silence looks perfect — hence the selfReported labelling.
+    expect(g.availability.last24h).toEqual({ percent: 100, chainHoursLost: 0 });
+    expect(g.availability.last7d.percent).toBe(100);
+    expect(g.availability.last30d.percent).toBe(100);
+    expect(g.availability.selfReported).toBe(true);
   });
 });
 

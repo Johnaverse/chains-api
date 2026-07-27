@@ -1081,9 +1081,10 @@ function renderProviderFilter() {
 }
 
 // ─── Provider scorecards (GET /providers/stats) ───
-// The headline metric is availability, time-weighted from the incident durations
-// the provider posts on its own status page — self-reported, so a silent page
-// scores 100% (hence the label). Registry-endpoint reachability is a muted
+// The headline metric is availability, chain-weighted per window from the
+// incident durations the provider posts on its own status page — self-reported,
+// so a silent page scores 100% (hence the label), and null (—) when the page
+// exposes no chain coverage. Registry-endpoint reachability is a muted
 // secondary line: failed probes usually mean keyed/stale registry URLs, not a
 // down provider, so it must not carry a health dot. 404 → older API without the
 // endpoint → the grid simply stays hidden.
@@ -1111,12 +1112,17 @@ function providerScorecard(p, windowDays) {
     ]);
     const rows = [];
 
-    // Headline: incident-derived availability. It lives near 100 (unlike a
-    // probe percentage), so the dot thresholds are tight: green>99, amber>97.
-    if (p.availability?.percent != null) {
-        const pct = p.availability.percent;
-        const cls = pct > 99 ? 'good' : pct > 97 ? 'warn' : 'bad';
-        rows.push(metric(cls, `${pct.toFixed(2)}%`, 'availability (self-reported)'));
+    // Headline: chain-weighted availability across the three windows. It lives
+    // near 100 (unlike a probe percentage), so the dot thresholds are tight:
+    // green>99, amber>97, driven by the 24h number. Percents are null (shown as
+    // "—") when the provider's status page exposes no chain coverage.
+    if (p.availability) {
+        const fmtA = (w) => w?.percent == null ? '—' : `${Math.round(w.percent * 10) / 10}%`;
+        const pct24 = p.availability.last24h?.percent;
+        const cls = pct24 == null ? null : pct24 > 99 ? 'good' : pct24 > 97 ? 'warn' : 'bad';
+        rows.push(metric(cls,
+            `24h ${fmtA(p.availability.last24h)} · 7d ${fmtA(p.availability.last7d)} · 30d ${fmtA(p.availability.last30d)}`,
+            'availability (self-reported)'));
     }
     if (p.resolutionHours?.median != null) {
         rows.push(metric(null, `~${p.resolutionHours.median}h`, 'resolves in (median)'));
@@ -1124,10 +1130,9 @@ function providerScorecard(p, windowDays) {
     const days = Math.round(windowDays ?? 30);
     rows.push(metric(null, `${p.incidents30d}`, `incident${p.incidents30d === 1 ? '' : 's'} in ${days}d`));
 
-    // Coverage: self-declared (from the provider's status page) beats
-    // registry-derived (chains the registry lists for it) when both exist.
-    if (p.chainsSupported != null) rows.push(metric(null, `${p.chainsSupported}`, 'chains (self-declared)'));
-    else if (p.endpointReachability?.registryChains) rows.push(metric(null, `${p.endpointReachability.registryChains}`, 'chains (registry)'));
+    // Only the provider's own status-page chain count — never a registry
+    // fallback (the registry knows its URLs, not the provider's breadth).
+    rows.push(metric(null, p.chainsSupported != null ? `${p.chainsSupported}` : '—', 'chains (status page)'));
 
     // Demoted on purpose: reachability of registry-listed URLs is a registry
     // data-quality signal (keyed endpoints fail by design), not uptime — no

@@ -7,11 +7,16 @@ import { groupEventsByIncident, MAINTENANCE_STATUSES, INCIDENT_STATUSES } from '
  * Per-RPC-provider quality indicators. Two metrics that must never be
  * conflated:
  *
- *   availability          THE availability metric: time-weighted from the
- *                         incident durations the provider posts on its own
- *                         status page. Self-reported — a provider that never
- *                         posts incidents scores a perfect 100, which is why
- *                         every surface labels it (basis + selfReported flag).
+ *   availability          THE availability metric, CHAIN-WEIGHTED per window:
+ *                         1 − chain-hours lost / (chainsSupported × window
+ *                         hours). A provider is a fleet — 1 of its 10 chains
+ *                         down for a full 24h window is 90% availability, not
+ *                         0%. The denominator is ONLY what the provider's own
+ *                         status page lists (coverage.chainsListed); with no
+ *                         coverage the percents are null rather than invented
+ *                         from a registry. Self-reported — a provider that
+ *                         never posts incidents scores a perfect 100, which is
+ *                         why every surface labels it (basis + selfReported).
  *   endpointReachability  whether the REGISTRY-LISTED endpoint URLs for this
  *                         provider answer our probes. A failed probe usually
  *                         means a keyed/stale/geo-blocked registry URL, not a
@@ -44,7 +49,7 @@ export const PROVIDER_DOMAINS = {
 /**
  * @param {object} [options]
  * @param {string} [options.provider] only this provider id (e.g. "infura")
- * @returns {Promise<{fetchedAt: string, windowDays: number, count: number, providers: object[]}>}
+ * @returns {Promise<{fetchedAt: string, windowDays: number, oldestEventAt: string|null, count: number, providers: object[]}>}
  * @throws when the incident feed is unreachable and nothing is cached
  */
 export async function getProviderStats({ provider } = {}) {
@@ -55,7 +60,7 @@ export async function getProviderStats({ provider } = {}) {
   ]);
   const monitoring = getRpcMonitoringResults();
 
-  const { windowDays, providers } = buildProviderStats(events, {
+  const { windowDays, oldestEventAt, providers } = buildProviderStats(events, {
     statusPages,
     rpcResults: monitoring.results ?? []
   });
@@ -69,6 +74,7 @@ export async function getProviderStats({ provider } = {}) {
   return {
     fetchedAt: new Date().toISOString(),
     windowDays,
+    oldestEventAt,
     count: filtered.length,
     providers: filtered
   };
@@ -84,7 +90,7 @@ export async function getProviderStats({ provider } = {}) {
  * @param {object[]} [sources.statusPages] status-news /status-pages entries
  * @param {object[]} [sources.rpcResults] getRpcMonitoringResults().results
  * @param {number} [sources.now] clock override for tests
- * @returns {{windowDays: number, providers: object[]}}
+ * @returns {{windowDays: number, oldestEventAt: string|null, providers: object[]}}
  */
 export function buildProviderStats(events, { statusPages = [], rpcResults = [], now = Date.now() } = {}) {
   // The window is honest about feed retention: the feed keeps a few hundred
@@ -120,7 +126,10 @@ export function buildProviderStats(events, { statusPages = [], rpcResults = [], 
     const groups = groupEventsByIncident(own);
 
     const inWindow = (group) => group.first.publishedMs != null && group.first.publishedMs >= windowStart;
-    const incidentGroups = groups.filter((g) => INCIDENT_STATUSES.has(g.latest.status) && inWindow(g));
+    // ALL incident-class groups feed availability (each availability window
+    // clips intervals itself); the 30d counters keep the retention-honest window.
+    const allIncidentGroups = groups.filter((g) => INCIDENT_STATUSES.has(g.latest.status) && g.first.publishedMs != null);
+    const incidentGroups = allIncidentGroups.filter(inWindow);
     const maintenanceGroups = groups.filter((g) => MAINTENANCE_STATUSES.has(g.latest.status) && inWindow(g));
 
     // Ongoing is a NOW question, not a window question: an incident opened
@@ -128,17 +137,11 @@ export function buildProviderStats(events, { statusPages = [], rpcResults = [], 
     const ongoingNow = groups.filter((g) => g.latest.ongoing === true).length;
 
     const resolutionSamples = [];
-    let downtimeMs = 0;
     for (const g of incidentGroups) {
       const firstMs = g.first.publishedMs;
       const resolved = g.updates.find((u) => u.status === 'resolved' && u.publishedMs != null);
       if (resolved && resolved.publishedMs >= firstMs) {
         resolutionSamples.push((resolved.publishedMs - firstMs) / 3600000);
-        downtimeMs += Math.min(resolved.publishedMs - firstMs, windowMs);
-      } else {
-        // Unresolved: it has been down from first report until now, capped so
-        // one stuck incident can't push availability below 0.
-        downtimeMs += Math.min(Math.max(0, now - firstMs), windowMs);
       }
     }
 
@@ -148,6 +151,10 @@ export function buildProviderStats(events, { statusPages = [], rpcResults = [], 
     }
 
     const coverage = page?.coverage;
+    // The denominator is ONLY the provider's own status-page chain count. No
+    // registry fallback: the registry knows which of its URLs belong to a
+    // provider, not how many chains the provider serves.
+    const chainsSupported = coverage?.chainsListed ?? null;
 
     return {
       id,
@@ -159,27 +166,118 @@ export function buildProviderStats(events, { statusPages = [], rpcResults = [], 
       resolutionHours: resolutionSamples.length
         ? { median: round1(median(resolutionSamples)), avg: round1(avg(resolutionSamples)) }
         : null,
-      // THE availability metric: 1 − admitted incident time / window. It is
-      // what the provider ADMITS: 100 also means "posted no incident time in
-      // the window", which a silent status page produces too — hence the
-      // basis/selfReported labelling carried in the value itself.
-      availability: windowMs > 0
-        ? {
-            percent: Math.round(clamp(1 - downtimeMs / windowMs, 0, 1) * 10000) / 100,
-            basis: 'status-page-incidents',
-            selfReported: true
-          }
-        : null,
+      availability: chainWeightedAvailability(allIncidentGroups, { chainsSupported, now, oldestMs }),
       endpointReachability: endpointReachabilityFor(id, rpcResults),
       // Self-declared coverage from the status page itself (status-news >=
       // the coverage rollout); null on feeds that predate it.
-      chainsSupported: coverage?.chainsListed ?? null,
+      chainsSupported,
       chainsResolved: Array.isArray(coverage?.chainIdsResolved) ? coverage.chainIdsResolved.length : null
     };
   });
 
   providers.sort((a, b) => b.incidents30d - a.incidents30d || a.id.localeCompare(b.id));
-  return { windowDays, providers };
+  return {
+    windowDays,
+    // The feed fetch is capped (~500 events): a 30d availability computed from
+    // less history must be detectable. Callers get the raw horizon here; each
+    // availability object carries a 'partial window' note when affected.
+    oldestEventAt: oldestMs != null ? new Date(oldestMs).toISOString() : null,
+    providers
+  };
+}
+
+// Availability windows. Fixed spans (unlike the retention-clamped 30d counter
+// window): each carries its own 'partial window' note instead when the feed
+// horizon is younger than the span.
+const AVAILABILITY_WINDOWS = [
+  ['last24h', DAY_MS],
+  ['last7d', 7 * DAY_MS],
+  ['last30d', 30 * DAY_MS]
+];
+
+/**
+ * Chain-weighted, per-window: percent = 1 − chainHoursLost / (chainsSupported
+ * × windowHours). Worked example: a provider supporting 10 chains with one
+ * incident taking 1 chain down for the whole 24h window is 90% available.
+ *
+ * Numerator rules:
+ * - an incident's affected chains = the distinct chainIds across its updates;
+ *   an incident mapping to NO chain counts as 1 chain-equivalent (provider-wide
+ *   /dashboard incidents can't be attributed — undercounting beats charging
+ *   all N chains), clamped to chainsSupported when known;
+ * - duration = first update → first resolved update (or now while unresolved),
+ *   clipped to each window;
+ * - overlapping intervals are merged PER CHAIN before summing, so two
+ *   simultaneous incidents on the same chain don't double-count its downtime.
+ */
+function chainWeightedAvailability(incidentGroups, { chainsSupported, now, oldestMs }) {
+  // Downtime intervals per chain key. Unmapped groups get a synthetic key each
+  // (they are distinct real-world incidents; only same-chain overlap merges).
+  const intervalsByChain = new Map();
+  incidentGroups.forEach((g, idx) => {
+    const startMs = g.first.publishedMs;
+    const resolved = g.updates.find((u) => u.status === 'resolved' && u.publishedMs != null);
+    const endMs = resolved && resolved.publishedMs >= startMs ? resolved.publishedMs : now;
+    if (endMs <= startMs) return;
+    let keys = [...new Set(g.updates.flatMap((u) => (u.chains ?? []).map((c) => c?.chainId).filter((cid) => cid != null)))];
+    if (!keys.length) keys = [`unmapped:${idx}`];
+    // chainsListed can be smaller than the chains an incident claims; the
+    // denominator is authoritative, so clamp the charge to it.
+    if (chainsSupported != null && chainsSupported > 0 && keys.length > chainsSupported) {
+      keys = keys.slice(0, chainsSupported);
+    }
+    for (const key of keys) {
+      if (!intervalsByChain.has(key)) intervalsByChain.set(key, []);
+      intervalsByChain.get(key).push([startMs, endMs]);
+    }
+  });
+
+  const notes = [];
+  if (chainsSupported == null) notes.push('chain coverage unavailable');
+  if (oldestMs != null && oldestMs > now - 30 * DAY_MS) notes.push('partial window');
+
+  const availability = {};
+  for (const [name, spanMs] of AVAILABILITY_WINDOWS) {
+    let lostMs = 0;
+    for (const intervals of intervalsByChain.values()) {
+      lostMs += mergedOverlapMs(intervals, now - spanMs, now);
+    }
+    const capacityMs = chainsSupported != null && chainsSupported > 0 ? chainsSupported * spanMs : null;
+    const chargedMs = capacityMs != null ? Math.min(lostMs, capacityMs) : lostMs;
+    availability[name] = {
+      percent: capacityMs != null
+        ? Math.round(clamp(1 - chargedMs / capacityMs, 0, 1) * 10000) / 100
+        : null,
+      chainHoursLost: Math.round((chargedMs / 3600000) * 100) / 100
+    };
+  }
+  availability.basis = 'status-page-chains';
+  availability.selfReported = true;
+  availability.chainsSupported = chainsSupported;
+  if (notes.length) availability.note = notes.join('; ');
+  return availability;
+}
+
+/** Total time covered by `intervals` within [winStart, winEnd], overlaps merged. */
+function mergedOverlapMs(intervals, winStart, winEnd) {
+  const clipped = intervals
+    .map(([s, e]) => [Math.max(s, winStart), Math.min(e, winEnd)])
+    .filter(([s, e]) => e > s)
+    .sort((a, b) => a[0] - b[0]);
+  let total = 0;
+  let curStart = null;
+  let curEnd = null;
+  for (const [s, e] of clipped) {
+    if (curEnd == null || s > curEnd) {
+      if (curEnd != null) total += curEnd - curStart;
+      curStart = s;
+      curEnd = e;
+    } else if (e > curEnd) {
+      curEnd = e;
+    }
+  }
+  if (curEnd != null) total += curEnd - curStart;
+  return total;
 }
 
 /**
