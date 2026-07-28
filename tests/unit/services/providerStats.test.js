@@ -110,6 +110,23 @@ describe('buildProviderStats — per-provider metrics', () => {
     expect(q.ongoingNow).toBe(1);
   });
 
+  it('counts maintenance in progress separately from open incidents', () => {
+    // The feed sets ongoing:true on both. Counting them together put an
+    // alarm-red "4 ongoing" on QuickNode when all four were planned upgrades
+    // running to schedule — 10 of 12 live ongoing events were maintenance.
+    const events = [
+      anchor(),
+      ev({ incidentId: 'q:inc', title: 'RPC outage', publishedMs: NOW - 3 * HOUR, status: 'investigating', ongoing: true }),
+      ev({ incidentId: 'q:m1', title: 'Upgrade Lighthouse', publishedMs: NOW - 2 * HOUR, status: 'maintenance_in_progress', ongoing: true }),
+      ev({ incidentId: 'q:m2', title: 'Upgrade Erigon', publishedMs: NOW - 1 * HOUR, status: 'maintenance_in_progress', ongoing: true })
+    ];
+    const q = buildProviderStats(events, { now: NOW }).providers.find((p) => p.id === 'quicknode');
+    expect(q.ongoingNow).toBe(1);
+    expect(q.ongoingMaintenance).toBe(2);
+    // "Longest open" must track the incident, not the older maintenance window.
+    expect(q.oldestOngoingAt).toBe(new Date(NOW - 3 * HOUR).toISOString());
+  });
+
   it('still counts an incident as ongoing when it started before the window', () => {
     const events = [
       ev({ incidentId: 'q:stuck', publishedMs: NOW - 40 * DAY, status: 'investigating', ongoing: true })

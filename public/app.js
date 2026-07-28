@@ -1219,6 +1219,7 @@ function renderProviderBoard() {
 function providerBoardCaption(data, provs, days) {
     const withCoverage = provs.filter(p => p.chainsSupported != null).length;
     const ongoing = provs.reduce((n, p) => n + (p.ongoingNow || 0), 0);
+    const inMaint = provs.reduce((n, p) => n + (p.ongoingMaintenance || 0), 0);
     // How much of the incident history had a duration at all. Most status pages
     // publish an incident exactly once, at resolution, so its start — and
     // therefore its cost — is unknowable. Those are excluded from availability
@@ -1229,8 +1230,9 @@ function providerBoardCaption(data, provs, days) {
         el('div', { class: 'pb-caption-head' }, [
             el('h3', { class: 'pb-caption-title', text: 'Provider performance' }),
             ongoing > 0
-                ? el('span', { class: 'pill pill-ongoing', text: `${ongoing} ongoing now` })
-                : el('span', { class: 'pill pill-quiet', text: 'nothing ongoing' })
+                ? el('span', { class: 'pill pill-ongoing', text: `${ongoing} incident${ongoing === 1 ? '' : 's'} open now` })
+                : el('span', { class: 'pill pill-quiet', text: 'no open incidents' }),
+            inMaint > 0 ? el('span', { class: 'pill pill-maint', text: `${inMaint} maintenance running` }) : null
         ]),
         el('p', { class: 'pb-caption-note muted' }, [
             el('strong', { text: 'Self-reported. ' }),
@@ -1312,7 +1314,10 @@ function providerRow(p, columns) {
     return el('tr', { class: `pb-row${p.ongoingNow > 0 ? ' pb-ongoing' : ''}` }, [
         el('td', { class: 'pb-left pb-name' }, [
             el('span', { class: 'pb-name-main', text: p.name || p.id }),
+            // Red is reserved for real incidents. A window running to schedule
+            // is planned work and gets a neutral chip, not an alarm.
             p.ongoingNow > 0 ? el('span', { class: 'pill pill-ongoing sm', text: `${p.ongoingNow} ongoing` }) : null,
+            p.ongoingMaintenance > 0 ? el('span', { class: 'pill pill-maint sm', title: 'Scheduled maintenance in progress — planned, not an outage.', text: `${p.ongoingMaintenance} in maintenance` }) : null,
             !d.publishesChainCoverage ? el('span', { class: 'pb-flag', title: 'This status page exposes no machine-readable chain list, so no availability denominator exists.', text: 'no coverage' }) : null
         ]),
         availCell,
@@ -1731,7 +1736,9 @@ function renderForumList() {
 // so "scheduled" never reads as "happened".
 const timeline = {
     upgrades: [], loaded: false, loading: false, error: null, ticker: null,
-    stream: 'all', rangeDays: 7, sort: 'time'
+    stream: 'all', rangeDays: 7, sort: 'time',
+    // Domain + bucketing of the chart as last drawn, read by the hover layer.
+    hover: null
 };
 
 // Range presets. Each spans backwards `days` and forwards far enough to hold the
@@ -1758,6 +1765,7 @@ function svgEl(tag, props = {}, children = []) {
 
 function ensureTimelineView() {
     initTimelineControls();
+    initTimelineHover();
     if (timeline.loaded) { renderTimeline(); return; }
     if (timeline.loading) return;
     timeline.loading = true;
@@ -1835,6 +1843,8 @@ function renderTimeline() {
             : 'Upgrade timeline unavailable — the /upgrades feed didn’t answer. Revisit the tab to retry.';
         rowsWrap.textContent = '';
         rowsWrap.appendChild(el('div', { class: 'feed-empty', text: msg }));
+        timeline.hover = null;
+        hideTimelineHover();
         document.getElementById('timelineChartWrap')?.setAttribute('hidden', '');
         if (meta) meta.textContent = '';
         return;
@@ -1957,6 +1967,24 @@ function renderTimelineChart(inRange, selected, [lo, hi], now) {
     renderTimelinePins(inRange, selected, x, now);
     renderTimelineHeat(inRange, x);
     renderTimelineAxis(lo, hi, nowX);
+
+    // Hand the hover layer the same domain and bucketing the chart just drew,
+    // so the tooltip always describes the exact bar under the cursor.
+    timeline.hover = { lo, hi, buckets: bucketize(inRange, lo, hi) };
+}
+
+// inRange split into the same TL_BUCKETS the area chart uses. The tooltip reads
+// from this rather than re-deriving, so a bar of height 3 always lists 3 rows.
+function bucketize(items, lo, hi) {
+    const span = Math.max(hi - lo, 1);
+    const buckets = Array.from({ length: TL_BUCKETS }, () => []);
+    for (const u of items) {
+        const t = timelineActivationMs(u);
+        if (t == null) continue;
+        buckets[Math.min(TL_BUCKETS - 1, Math.max(0, Math.floor(((t - lo) / span) * TL_BUCKETS)))].push(u);
+    }
+    for (const b of buckets) b.sort((a, c) => (timelineActivationMs(a) ?? 0) - (timelineActivationMs(c) ?? 0));
+    return buckets;
 }
 
 // Pins: the windows a reader should notice first — anything with fallout, then
@@ -2031,6 +2059,94 @@ function renderTimelineAxis(lo, hi, nowX) {
         }));
     }
     host.appendChild(el('span', { class: 'tlx-tick tlx-tick-now', style: { left: `${nowPct.toFixed(2)}%` }, text: 'now' }));
+}
+
+// ─── Hover crosshair (Grafana-style) ───
+// Pointing anywhere across the chart reads out that moment: a vertical
+// crosshair, the timestamp under the cursor, and the windows in the bar being
+// pointed at. Without it the density curve says "something happened here" and
+// gives no way to ask what.
+const TL_TOOLTIP_ROWS = 6;
+
+function initTimelineHover() {
+    const wrap = document.getElementById('timelineChartWrap');
+    if (!wrap || wrap.dataset.hoverBound) return;
+    wrap.dataset.hoverBound = '1';
+    // Pointer events rather than mouse events, so a stylus or touch drag reads
+    // the chart too. Touch also fires pointerdown -> move, which is the natural
+    // "scrub" gesture on a phone.
+    wrap.addEventListener('pointermove', onTimelineHover);
+    wrap.addEventListener('pointerdown', onTimelineHover);
+    wrap.addEventListener('pointerleave', hideTimelineHover);
+}
+
+function onTimelineHover(e) {
+    const wrap = document.getElementById('timelineChartWrap');
+    const cross = document.getElementById('timelineCrosshair');
+    const tip = document.getElementById('timelineTooltip');
+    if (!wrap || !cross || !tip || !timeline.hover) return;
+
+    const rect = wrap.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const frac = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    const { lo, hi, buckets } = timeline.hover;
+    const at = lo + frac * (hi - lo);
+    const idx = Math.min(TL_BUCKETS - 1, Math.floor(frac * TL_BUCKETS));
+
+    cross.style.left = `${(frac * 100).toFixed(3)}%`;
+    cross.hidden = false;
+
+    renderTimelineTooltip(tip, buckets[idx] ?? [], at, hi - lo);
+    // Follow the cursor, flipping before the tooltip would leave the panel.
+    const width = tip.offsetWidth || 280;
+    const raw = frac * rect.width + 14;
+    tip.style.left = `${Math.max(6, Math.min(raw, rect.width - width - 6)).toFixed(0)}px`;
+    tip.hidden = false;
+}
+
+function hideTimelineHover() {
+    const cross = document.getElementById('timelineCrosshair');
+    const tip = document.getElementById('timelineTooltip');
+    if (cross) cross.hidden = true;
+    if (tip) tip.hidden = true;
+}
+
+function renderTimelineTooltip(tip, items, at, spanMs) {
+    tip.textContent = '';
+    // Resolution follows the zoom: a 1-day view wants minutes, a month wants
+    // the date. Same rule as the axis, so the two never disagree.
+    const stamp = new Date(at).toLocaleString(undefined, spanMs <= 36 * 36e5
+        ? { weekday: 'short', hour: '2-digit', minute: '2-digit' }
+        : { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+    tip.appendChild(el('div', { class: 'tlx-tip-head' }, [
+        el('span', { class: 'tlx-tip-time mono', text: stamp }),
+        el('span', { class: 'tlx-tip-count', text: items.length ? `${items.length} window${items.length === 1 ? '' : 's'}` : 'nothing scheduled' })
+    ]));
+
+    const now = Date.now();
+    for (const u of items.slice(0, TL_TOOLTIP_ROWS)) {
+        const ms = timelineActivationMs(u);
+        const pending = ms != null && ms > now;
+        tip.appendChild(el('div', { class: 'tlx-tip-row' }, [
+            el('span', { class: `tlx-tip-dot ${urgencyClass(u.urgency)}` }),
+            el('span', {
+                class: `tlx-tip-when mono${pending ? ' pending' : ''}`,
+                text: ms != null ? new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : '—'
+            }),
+            el('span', { class: 'tlx-tip-title', text: u.title }),
+            el('span', { class: 'tlx-tip-meta', text: [timelineNetworkLabel(u), u.provider].filter(Boolean).join(' · ') }),
+            (u.software || []).length
+                ? el('span', { class: 'tlx-tip-sw mono', text: (u.software || []).map(s => [s.client, s.version].filter(Boolean).join(' ')).join(', ') })
+                : null,
+            u.followedByIncidents?.length
+                ? el('span', { class: 'tlx-tip-fallout', text: `↯ ${u.followedByIncidents.length} incident${u.followedByIncidents.length === 1 ? '' : 's'} followed` })
+                : null
+        ]));
+    }
+    if (items.length > TL_TOOLTIP_ROWS) {
+        tip.appendChild(el('div', { class: 'tlx-tip-more', text: `+${items.length - TL_TOOLTIP_ROWS} more in this interval` }));
+    }
 }
 
 // ─── Rows ───

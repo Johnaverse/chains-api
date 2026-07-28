@@ -216,11 +216,17 @@
                  set the chart draws, so counts and picture never disagree. -->
             <div class="tlx-tabs" id="timelineTabs"></div>
 
-            <div class="tlx-chart-wrap" id="timelineChartWrap">
-                <div class="tlx-pins" id="timelinePins"></div>
-                <div class="tlx-chart" id="timelineChart"></div>
-                <div class="tlx-heat" id="timelineHeat"></div>
-                <div class="tlx-axis" id="timelineAxis"></div>
+            <!-- The outer box exists so the hover tooltip can escape the chart's
+                 own overflow clipping, which the pins and edge blobs need. -->
+            <div class="tlx-chart-outer">
+                <div class="tlx-chart-wrap" id="timelineChartWrap">
+                    <div class="tlx-pins" id="timelinePins"></div>
+                    <div class="tlx-chart" id="timelineChart"></div>
+                    <div class="tlx-heat" id="timelineHeat"></div>
+                    <div class="tlx-axis" id="timelineAxis"></div>
+                    <div class="tlx-crosshair" id="timelineCrosshair" hidden></div>
+                </div>
+                <div class="tlx-tooltip" id="timelineTooltip" role="status" aria-live="polite" hidden></div>
             </div>
 
             <div class="tlx-toolbar">

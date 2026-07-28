@@ -134,13 +134,21 @@ export function buildProviderStats(events, { statusPages = [], rpcResults = [], 
 
     // Ongoing is a NOW question, not a window question: an incident opened
     // before the window that is still burning must not disappear.
+    //
+    // Maintenance in progress is NOT an incident. The feed sets ongoing:true on
+    // both, and counting them together made QuickNode read "4 ongoing" in an
+    // alarm-red badge when all four were planned upgrades running to schedule —
+    // 10 of the 12 live ongoing events were maintenance. They are reported
+    // separately so a surface can show a planned window as planned.
     const ongoing = groups.filter((g) => g.latest.ongoing === true);
-    const ongoingNow = ongoing.length;
-    // When the longest-running open incident started. With resolution times
+    const ongoingIncidents = ongoing.filter((g) => INCIDENT_STATUSES.has(g.latest.status));
+    const ongoingNow = ongoingIncidents.length;
+    const ongoingMaintenance = ongoing.filter((g) => MAINTENANCE_STATUSES.has(g.latest.status)).length;
+    // When the longest-running open INCIDENT started. With resolution times
     // almost never observable this is the one duration the feeds DO expose, and
     // it separates a provider with a 12-day-open outage from one with a fresh
     // blip — a distinction the incident COUNT completely hides.
-    const ongoingStarts = ongoing.map((g) => g.first.publishedMs).filter((ms) => Number.isFinite(ms));
+    const ongoingStarts = ongoingIncidents.map((g) => g.first.publishedMs).filter((ms) => Number.isFinite(ms));
     const oldestOngoingAt = ongoingStarts.length ? new Date(Math.min(...ongoingStarts)).toISOString() : null;
 
     // Time-to-resolve, but only where the feed actually witnessed the incident OPEN.
@@ -174,6 +182,7 @@ export function buildProviderStats(events, { statusPages = [], rpcResults = [], 
       name: page?.name ?? own[0]?.statusPage?.name ?? id,
       incidents30d: incidentGroups.length,
       ongoingNow,
+      ongoingMaintenance,
       oldestOngoingAt,
       maintenance30d: maintenanceGroups.length,
       chainsAffected30d: chainsAffected.size,
