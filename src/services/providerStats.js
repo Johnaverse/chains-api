@@ -141,9 +141,17 @@ export function buildProviderStats(events, { statusPages = [], rpcResults = [], 
     // 10 of the 12 live ongoing events were maintenance. They are reported
     // separately so a surface can show a planned window as planned.
     const ongoing = groups.filter((g) => g.latest.ongoing === true);
-    const ongoingIncidents = ongoing.filter((g) => INCIDENT_STATUSES.has(g.latest.status));
+    // The two status sets are NOT a cover of what the feed emits — `status` is passed
+    // through unvalidated and `unknown` is carried by 178 of 438 live events. Partitioning
+    // on them alone would let an ongoing event of unlabelled kind fall out of BOTH counters
+    // and disappear from every surface, where the previous `ongoing.length` always showed
+    // it. Anything not clearly labelled maintenance counts as an incident: planned work is
+    // reliably labelled, so the unlabelled case is more likely an incident, and surfacing
+    // it in red is the safer failure.
+    const ongoingMaintenanceGroups = ongoing.filter((g) => MAINTENANCE_STATUSES.has(g.latest.status));
+    const ongoingIncidents = ongoing.filter((g) => !MAINTENANCE_STATUSES.has(g.latest.status));
     const ongoingNow = ongoingIncidents.length;
-    const ongoingMaintenance = ongoing.filter((g) => MAINTENANCE_STATUSES.has(g.latest.status)).length;
+    const ongoingMaintenance = ongoingMaintenanceGroups.length;
     // When the longest-running open INCIDENT started. With resolution times
     // almost never observable this is the one duration the feeds DO expose, and
     // it separates a provider with a 12-day-open outage from one with a fresh
