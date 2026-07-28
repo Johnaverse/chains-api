@@ -55,7 +55,7 @@ export function windowEndMs(summary, startMs) {
   if (!hasWindowBanner(summary) || !Number.isFinite(startMs)) return null;
   // Strip the <var data-var='date'>5</var> wrappers Atlassian injects so the
   // banner reads as the plain text the regexes above expect.
-  const text = String(summary).replace(/<[^>]+>/g, '').replace(/\s+/g, ' ');
+  const text = stripTags(String(summary)).replace(/\s+/g, ' ');
   const banner = text.slice(text.search(BANNER), text.search(BANNER) + 160);
   const start = new Date(startMs);
 
@@ -82,4 +82,25 @@ export function windowEndMs(summary, startMs) {
 
 function sane(endMs, startMs) {
   return endMs > startMs && endMs - startMs <= MAX_WINDOW_MS ? endMs : null;
+}
+
+/**
+ * Tags out, repeated until the string stops changing.
+ *
+ * A single pass over `<[^>]*>` is not enough: removing the inner tag of
+ * `<scr<a>ipt>` reassembles the outer one, which is why the one-pass form is a
+ * recognised anti-pattern. Nothing here is ever rendered — the only output of
+ * this module is an epoch timestamp — but the pattern is wrong to leave in
+ * place, and the loop costs nothing on the well-formed bodies feeds actually
+ * send. It terminates because every pass either shortens the string or leaves
+ * it identical.
+ */
+function stripTags(html) {
+  let out = html;
+  let previous;
+  do {
+    previous = out;
+    out = out.replace(/<[^>]*>/g, ' ');
+  } while (out !== previous);
+  return out;
 }

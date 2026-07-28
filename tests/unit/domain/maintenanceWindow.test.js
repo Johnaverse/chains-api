@@ -37,6 +37,14 @@ describe('windowEndMs', () => {
     expect(windowEndMs(banner('Dec 31, 23:00 UTC - Jan 1, 03:00 UTC'), s)).toBe(start('2027-01-01T03:00:00.000Z'));
   });
 
+  it('strips nested tags that a single pass would reassemble', () => {
+    // `<scr<a>ipt>` becomes `<script>` after one pass; the extraction loops
+    // until stable so the banner text is reached whatever the body contains.
+    const s = start('2026-08-03T14:00:00.000Z');
+    const messy = `<p><scr<a>ipt>THIS IS A SCHEDULED EVENT Aug <var data-var='date'>3</var>, 14:00 - 18:00 UTC</p>`;
+    expect(windowEndMs(messy, s)).toBe(start('2026-08-03T18:00:00.000Z'));
+  });
+
   it('returns null rather than a guess for a missing banner, bad start or absurd span', () => {
     expect(windowEndMs('<p>no banner here</p>', start('2026-08-03T14:00:00.000Z'))).toBeNull();
     expect(windowEndMs(banner('Aug 3, 14:00 - 18:00 UTC'), null)).toBeNull();

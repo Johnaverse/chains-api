@@ -86,13 +86,41 @@ function safeHost(url) { try { const u = new URL(url); return (u.protocol === 'h
 // Provider status pages emit HTML bodies, and when the LLM enrichment falls back
 // to the raw body the dashboard rendered the markup as literal text —
 // "<p><strong>THIS IS A SCHEDULED EVENT Aug <var data-var='date'>5</var>…".
-// Tags out, entities decoded, whitespace collapsed. Assigned via textContent by
-// every caller, so this is a legibility fix, not a sanitizer.
+// Tags out, entities decoded, whitespace collapsed.
+//
+// Deliberately NOT DOMParser: an inert parsed document read via textContent is
+// safe, but handing untrusted markup to a parser at all is the wrong shape and
+// CodeQL is right to flag it. Plain string work has no such question, and the
+// only entities these feeds emit are the handful mapped below. Every caller
+// assigns the result with textContent.
+const NAMED_ENTITIES = {
+    amp: '&', lt: '<', gt: '>', quot: '"', apos: '\'', nbsp: ' ',
+    mdash: '—', ndash: '–', hellip: '…', rsquo: '’', lsquo: '‘', ldquo: '“', rdquo: '”'
+};
+
 function plainText(s) {
     if (typeof s !== 'string') return '';
     if (!/[<&]/.test(s)) return s;
-    const doc = new DOMParser().parseFromString(s.replace(/<(br|\/p|\/div|\/li)\s*\/?>/gi, ' '), 'text/html');
-    return (doc.body.textContent || '').replace(/\s+/g, ' ').trim();
+    // Block-ish tags become a space so words either side don't run together.
+    let out = s.replace(/<(?:br|\/p|\/div|\/li|\/tr|\/h[1-6])\s*\/?>/gi, ' ');
+    // Repeat until stable: one pass over `<[^>]*>` reassembles nested tags.
+    let previous;
+    do {
+        previous = out;
+        out = out.replace(/<[^>]*>/g, '');
+    } while (out !== previous);
+    return out.replace(/&(#[0-9]+|#[xX][0-9a-fA-F]+|[a-zA-Z]+);/g, (match, ref) => decodeEntity(ref) ?? match)
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function decodeEntity(ref) {
+    if (ref[0] !== '#') return NAMED_ENTITIES[ref.toLowerCase()] ?? null;
+    const code = /^#[xX]/.test(ref) ? parseInt(ref.slice(2), 16) : Number(ref.slice(1));
+    if (!Number.isInteger(code) || code <= 0 || code > 0x10ffff) return null;
+    // Surrogate halves are not standalone code points.
+    if (code >= 0xd800 && code <= 0xdfff) return null;
+    return String.fromCodePoint(code);
 }
 function iconColorFor(chainId) { const c = state.byId.get(chainId); return c ? COLORS[classify(c)] : COLORS.Default; }
 function networkIcon(label, color, cls = 'net-icon') {
