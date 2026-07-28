@@ -422,11 +422,15 @@ a:hover { text-decoration: underline; }
 .tlx-tab-label { font-size: 12px; font-weight: 600; }
 .tlx-tab-count { font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; opacity: 0.85; }
 
+/* The outer box is the tooltip's positioning context: the inner wrap clips
+   (pins and edge blobs overhang by design), and a clipped tooltip is useless. */
+.tlx-chart-outer { position: relative; }
 .tlx-chart-wrap {
     --tlx-accent: #60a5fa;
     position: relative; padding: 34px 0 0;
     border: 1px solid var(--panel-border); border-radius: var(--radius-md);
     background: rgba(255, 255, 255, 0.015); overflow: hidden;
+    cursor: crosshair; touch-action: pan-y;
 }
 .tlx-chart { position: relative; height: 150px; }
 .tlx-svg { display: block; width: 100%; height: 150px; }
@@ -456,6 +460,42 @@ a:hover { text-decoration: underline; }
 .tlx-tick:first-child { transform: none; left: 6px !important; }
 .tlx-tick-end { transform: translateX(-100%); margin-left: -4px; }
 .tlx-tick-now { color: #6ee7b7; font-weight: 700; }
+
+/* ─── Hover crosshair + readout ─── */
+/* Spans the plot and the severity ribbon, stopping short of the axis so the
+   tick labels stay legible under it. */
+.tlx-crosshair {
+    position: absolute; left: 0; top: 34px; height: 166px; width: 1px;
+    background: rgba(255, 255, 255, 0.45); pointer-events: none; z-index: 2;
+}
+.tlx-crosshair::before {
+    content: ''; position: absolute; inset: 0 -4px; background: rgba(96, 165, 250, 0.08);
+}
+.tlx-tooltip {
+    position: absolute; top: 40px; z-index: 30; width: 340px; max-width: calc(100vw - 48px);
+    padding: 9px 11px; border-radius: var(--radius-md);
+    background: rgba(10, 10, 16, 0.96); border: 1px solid rgba(255, 255, 255, 0.13);
+    box-shadow: 0 10px 34px rgba(0, 0, 0, 0.6);
+    /* Never intercept the pointer: the tooltip sits under the cursor and would
+       otherwise fight the pointermove it exists to answer. */
+    pointer-events: none;
+}
+.tlx-tip-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding-bottom: 6px; margin-bottom: 6px; border-bottom: 1px solid var(--panel-border); }
+.tlx-tip-time { font-size: 12px; font-weight: 700; }
+.tlx-tip-count { font-size: 10.5px; color: var(--text-muted); }
+.tlx-tip-row { display: grid; grid-template-columns: 8px 44px 1fr; gap: 2px 7px; align-items: baseline; padding: 4px 0; }
+.tlx-tip-row + .tlx-tip-row { border-top: 1px solid rgba(255, 255, 255, 0.04); }
+.tlx-tip-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); align-self: center; }
+.tlx-tip-dot.urg-urgent { background: var(--color-testnet); }
+.tlx-tip-dot.urg-mandatory, .tlx-tip-dot.urg-critical { background: var(--bad); }
+.tlx-tip-when { font-size: 11px; color: var(--text-muted); }
+.tlx-tip-when.pending { color: #6ee7b7; font-weight: 650; }
+.tlx-tip-title { font-size: 12px; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+.tlx-tip-meta, .tlx-tip-sw, .tlx-tip-fallout { grid-column: 3; font-size: 10.5px; }
+.tlx-tip-meta { color: var(--text-muted); }
+.tlx-tip-sw { color: #c4b5fd; }
+.tlx-tip-fallout { color: #fca5a5; }
+.tlx-tip-more { font-size: 10.5px; color: var(--text-muted); padding-top: 5px; }
 
 .tlx-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 14px 0 10px; }
 .tlx-range { display: flex; gap: 4px; background: rgba(255, 255, 255, 0.04); border-radius: 999px; padding: 3px; }
