@@ -45,6 +45,11 @@ function el(tag, props = {}, children = []) {
     for (const [k, v] of Object.entries(props)) {
         if (k === 'class') node.className = v;
         else if (k === 'text') node.textContent = v;
+        // Styles MUST go through the CSSOM: the page ships `style-src 'self'`
+        // with no 'unsafe-inline', so a style ATTRIBUTE is dropped by the
+        // browser without an error — positioned elements silently pile up at
+        // the origin. Pass an object, never a string.
+        else if (k === 'style' && v && typeof v === 'object') Object.assign(node.style, v);
         else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2), v);
         else if (v !== null && v !== undefined) node.setAttribute(k, v);
     }
@@ -78,6 +83,45 @@ function fmtDuration(ms) {
     return `${Math.floor(h / 24)}d ${h % 24}h`;
 }
 function safeHost(url) { try { const u = new URL(url); return (u.protocol === 'http:' || u.protocol === 'https:') ? u.host : null; } catch { return null; } }
+// Provider status pages emit HTML bodies, and when the LLM enrichment falls back
+// to the raw body the dashboard rendered the markup as literal text —
+// "<p><strong>THIS IS A SCHEDULED EVENT Aug <var data-var='date'>5</var>…".
+// Tags out, entities decoded, whitespace collapsed.
+//
+// Deliberately NOT DOMParser: an inert parsed document read via textContent is
+// safe, but handing untrusted markup to a parser at all is the wrong shape and
+// CodeQL is right to flag it. Plain string work has no such question, and the
+// only entities these feeds emit are the handful mapped below. Every caller
+// assigns the result with textContent.
+const NAMED_ENTITIES = {
+    amp: '&', lt: '<', gt: '>', quot: '"', apos: '\'', nbsp: ' ',
+    mdash: '—', ndash: '–', hellip: '…', rsquo: '’', lsquo: '‘', ldquo: '“', rdquo: '”'
+};
+
+function plainText(s) {
+    if (typeof s !== 'string') return '';
+    if (!/[<&]/.test(s)) return s;
+    // Block-ish tags become a space so words either side don't run together.
+    let out = s.replace(/<(?:br|\/p|\/div|\/li|\/tr|\/h[1-6])\s*\/?>/gi, ' ');
+    // Repeat until stable: one pass over `<[^>]*>` reassembles nested tags.
+    let previous;
+    do {
+        previous = out;
+        out = out.replace(/<[^>]*>/g, '');
+    } while (out !== previous);
+    return out.replace(/&(#[0-9]+|#[xX][0-9a-fA-F]+|[a-zA-Z]+);/g, (match, ref) => decodeEntity(ref) ?? match)
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function decodeEntity(ref) {
+    if (ref[0] !== '#') return NAMED_ENTITIES[ref.toLowerCase()] ?? null;
+    const code = /^#[xX]/.test(ref) ? parseInt(ref.slice(2), 16) : Number(ref.slice(1));
+    if (!Number.isInteger(code) || code <= 0 || code > 0x10ffff) return null;
+    // Surrogate halves are not standalone code points.
+    if (code >= 0xd800 && code <= 0xdfff) return null;
+    return String.fromCodePoint(code);
+}
 function iconColorFor(chainId) { const c = state.byId.get(chainId); return c ? COLORS[classify(c)] : COLORS.Default; }
 function networkIcon(label, color, cls = 'net-icon') {
     const n = el('span', { class: cls, text: (label || '?').charAt(0).toUpperCase() });
@@ -997,7 +1041,7 @@ function incidentCard(it) {
                     title: [enr.class, enr.confidence != null ? `${Math.round(enr.confidence * 100)}%` : null, enr.model]
                         .filter(Boolean).join(' · ')
                 }),
-                el('span', { class: 'ai-summary', text: enr.summary })
+                el('span', { class: 'ai-summary', text: plainText(enr.summary) })
             ]) : null,
             enrAction ? el('div', { class: 'incident-action', text: `Action: ${enrAction}` }) : null,
             affected,
@@ -1079,78 +1123,267 @@ function renderProviderFilter() {
     for (const [id, name] of [...names].sort((a, b) => (a[1] || '').localeCompare(b[1] || '')))
         bar.appendChild(chip(id, `${name} (${counts.get(id) || 0})`));
 }
+// ─── Provider performance board (GET /providers/stats) ───
+// A comparison table, not ten isolated cards. Cards forced every provider to
+// occupy equal space and to show a value for every metric, so nine of ten
+// rendered as a column of em-dashes; a table lets one glance rank providers on
+// whichever column the reader cares about and lets a missing value simply be
+// missing.
+//
+// Two ideas the design has to carry, or the numbers mislead:
+//
+//   self-reported   Every figure comes from the provider's OWN status page. A
+//                   provider that posts nothing scores a silent 100%. Rows
+//                   whose page doesn't publish incidents are marked and sink
+//                   below the comparable ones instead of topping the ranking.
+//   disclosure bias Incident COUNTS are editorial policy, not reliability —
+//                   Blockdaemon posts 19 maintenance windows and 1 incident
+//                   while Alchemy posts 19 incidents. The count column says so.
+//
+// 404 → older API without the endpoint → the board simply stays hidden.
+const providerBoard = { data: null, sort: 'availability', dir: 1 };
 
-// ─── Provider scorecards (GET /providers/stats) ───
-// The headline metric is availability, chain-weighted per window from the
-// incident durations the provider posts on its own status page — self-reported,
-// so a silent page scores 100% (hence the label), and null (—) when the page
-// exposes no chain coverage. Registry-endpoint reachability is a muted
-// secondary line: failed probes usually mean keyed/stale registry URLs, not a
-// down provider, so it must not carry a health dot. 404 → older API without the
-// endpoint → the grid simply stays hidden.
 async function loadProviderStats() {
     let data;
     try { data = await api('/providers/stats'); } catch { return; }
-    renderProviderScorecards(data);
+    providerBoard.data = data;
+    renderProviderBoard();
 }
 
-function renderProviderScorecards(data) {
-    const grid = document.getElementById('providerScorecards');
-    if (!grid) return;
+// `when` decides whether a column earns its width: a column no provider can
+// populate is 12% of the table spent on a stack of em-dashes. Time-to-resolve
+// is the live example — resolution transitions are almost never published, so
+// it only appears once some page actually exposes one.
+const PB_COLUMNS = [
+    { key: 'name', label: 'Provider', align: 'left' },
+    { key: 'availability', label: 'Availability', title: 'Chain-weighted: 1 − chain-hours lost ÷ (chains supported × window). Counts only incidents whose duration the page published.' },
+    { key: 'lost', label: 'Chain-hours lost', title: 'Chains affected × hours down, overlaps merged per chain. Available even when the availability denominator is not.' },
+    { key: 'chains', label: 'Chains', title: 'How many chains the provider’s own status page lists. This is the availability denominator.' },
+    { key: 'incidents', label: 'Posted', title: 'Incidents / maintenance windows published in the observed window. Disclosure policy differs sharply between providers — do not read this as a reliability ranking.' },
+    { key: 'openfor', label: 'Longest open', title: 'How long the provider’s oldest still-open incident has been running. With resolution times unpublished, this is the one duration the feeds do expose.', when: (ps) => ps.some((p) => p.oldestOngoingAt) },
+    { key: 'mttr', label: 'Time to resolve', title: 'Median hours from the first update to the resolved update, over the incidents where the page actually showed both.', when: (ps) => ps.some((p) => p.resolutionHours) },
+    { key: 'trend', label: '30-day trend', title: 'Chain-hours lost per day.' }
+];
+
+function renderProviderBoard() {
+    const host = document.getElementById('providerScorecards');
+    const data = providerBoard.data;
+    if (!host) return;
     const provs = data?.providers || [];
-    grid.textContent = '';
-    if (!provs.length) { grid.hidden = true; return; }
-    for (const p of provs) grid.appendChild(providerScorecard(p, data.windowDays));
-    grid.hidden = false;
-}
+    host.textContent = '';
+    if (!provs.length) { host.hidden = true; return; }
+    host.hidden = false;
 
-function providerScorecard(p, windowDays) {
-    const metric = (cls, value, label) => el('div', { class: 'psc-row' }, [
-        cls ? el('span', { class: `psc-dot ${cls}` }) : null,
-        el('span', { class: 'psc-value', text: value }),
-        el('span', { class: 'psc-label', text: label })
-    ]);
-    const rows = [];
+    const days = Math.round(data.windowDays ?? 30);
+    const comparable = provs.filter(p => p.disclosure?.comparable !== false);
+    const partial = provs.filter(p => p.disclosure?.comparable === false);
 
-    // Headline: chain-weighted availability across the three windows. It lives
-    // near 100 (unlike a probe percentage), so the dot thresholds are tight:
-    // green>99, amber>97, driven by the 24h number. Percents are null (shown as
-    // "—") when the provider's status page exposes no chain coverage.
-    if (p.availability) {
-        const fmtA = (w) => w?.percent == null ? '—' : `${Math.round(w.percent * 10) / 10}%`;
-        const pct24 = p.availability.last24h?.percent;
-        const cls = pct24 == null ? null : pct24 > 99 ? 'good' : pct24 > 97 ? 'warn' : 'bad';
-        rows.push(metric(cls,
-            `24h ${fmtA(p.availability.last24h)} · 7d ${fmtA(p.availability.last7d)} · 30d ${fmtA(p.availability.last30d)}`,
-            'availability (self-reported)'));
-    }
-    if (p.resolutionHours?.median != null) {
-        rows.push(metric(null, `~${p.resolutionHours.median}h`, 'resolves in (median)'));
-    }
-    const days = Math.round(windowDays ?? 30);
-    rows.push(metric(null, `${p.incidents30d}`, `incident${p.incidents30d === 1 ? '' : 's'} in ${days}d`));
+    host.appendChild(providerBoardCaption(data, provs, days));
 
-    // Only the provider's own status-page chain count — never a registry
-    // fallback (the registry knows its URLs, not the provider's breadth).
-    rows.push(metric(null, p.chainsSupported != null ? `${p.chainsSupported}` : '—', 'chains (status page)'));
+    const columns = PB_COLUMNS.filter(c => !c.when || c.when(provs));
+    const table = el('table', { class: 'pb-table' });
+    table.appendChild(el('colgroup', {}, columns.map(c => el('col', { class: `c-${c.key}` }))));
+    const thead = el('thead', {}, [el('tr', {}, columns.map(c => {
+        const active = providerBoard.sort === c.key;
+        return el('th', {
+            class: `${c.align === 'left' ? 'pb-left' : ''}${active ? ' pb-sorted' : ''}${c.key === 'trend' ? ' pb-trend-h' : ''}`,
+            title: c.title || null,
+            'aria-sort': active ? (providerBoard.dir > 0 ? 'descending' : 'ascending') : 'none'
+        }, [
+            el('button', {
+                class: 'pb-sort-btn',
+                text: c.label + (active ? (providerBoard.dir > 0 ? ' ↓' : ' ↑') : ''),
+                onclick: () => {
+                    if (providerBoard.sort === c.key) providerBoard.dir *= -1;
+                    else { providerBoard.sort = c.key; providerBoard.dir = 1; }
+                    renderProviderBoard();
+                }
+            })
+        ]);
+    }))]);
+    table.appendChild(thead);
 
-    // Demoted on purpose: reachability of registry-listed URLs is a registry
-    // data-quality signal (keyed endpoints fail by design), not uptime — no
-    // health dot, muted styling.
-    if (p.endpointReachability) {
-        rows.push(el('div', { class: 'psc-row psc-secondary' }, [
-            el('span', { class: 'psc-label', text: `registry endpoints reachable: ${p.endpointReachability.working}/${p.endpointReachability.total}` })
+    const body = el('tbody');
+    for (const p of sortProviders(comparable)) body.appendChild(providerRow(p, columns));
+    if (partial.length) {
+        body.appendChild(el('tr', { class: 'pb-divider' }, [
+            el('td', { colspan: String(columns.length) },
+                [el('span', { text: `Not comparable — ${partial.length === 1 ? 'this page does' : 'these pages do'} not publish the chain list or any incident history, so availability can’t be computed from ${partial.length === 1 ? 'it' : 'them'}.` })])
         ]));
+        for (const p of sortProviders(partial)) body.appendChild(providerRow(p, columns));
     }
+    table.appendChild(body);
+    host.appendChild(el('div', { class: 'pb-scroll' }, [table]));
+}
 
-    return el('div', { class: 'provider-card' }, [
-        el('div', { class: 'provider-card-head' }, [
-            el('span', { class: 'provider-card-name', text: p.name || p.id }),
-            p.ongoingNow > 0 ? el('span', { class: 'pill pill-ongoing', text: `${p.ongoingNow} ongoing` }) : null
+function providerBoardCaption(data, provs, days) {
+    const withCoverage = provs.filter(p => p.chainsSupported != null).length;
+    const ongoing = provs.reduce((n, p) => n + (p.ongoingNow || 0), 0);
+    // How much of the incident history had a duration at all. Most status pages
+    // publish an incident exactly once, at resolution, so its start — and
+    // therefore its cost — is unknowable. Those are excluded from availability
+    // rather than guessed, and a reader has to know that before ranking on it.
+    const measured = provs.reduce((n, p) => n + (p.availability?.measuredIncidents || 0), 0);
+    const unknown = provs.reduce((n, p) => n + (p.availability?.unknownDurationIncidents || 0), 0);
+    return el('div', { class: 'pb-caption' }, [
+        el('div', { class: 'pb-caption-head' }, [
+            el('h3', { class: 'pb-caption-title', text: 'Provider performance' }),
+            ongoing > 0
+                ? el('span', { class: 'pill pill-ongoing', text: `${ongoing} ongoing now` })
+                : el('span', { class: 'pill pill-quiet', text: 'nothing ongoing' })
         ]),
-        ...rows
+        el('p', { class: 'pb-caption-note muted' }, [
+            el('strong', { text: 'Self-reported. ' }),
+            el('span', {
+                text: `Every figure comes from each provider’s own status page over the last ${days} days. `
+                    + `${withCoverage} of ${provs.length} pages list the chains they cover — that list is the availability denominator, `
+                    + 'so the other pages get no percentage rather than an invented one.'
+            })
+        ]),
+        unknown > 0 ? el('p', { class: 'pb-caption-note muted' }, [
+            el('strong', { class: 'pb-warn', text: 'Read availability narrowly. ' }),
+            el('span', {
+                text: `Only ${measured} of ${measured + unknown} incidents published enough to time them; the rest appear once, at resolution, `
+                    + 'with no start. Those are left out of the percentage instead of being charged as downtime, so today availability mostly '
+                    + 'reflects what is burning right now. Incident counts below are complete — but they measure disclosure policy as much as reliability.'
+            })
+        ]) : null
     ]);
 }
+
+function sortProviders(list) {
+    const val = (p) => {
+        switch (providerBoard.sort) {
+            case 'availability': return p.availability?.last30d?.percent ?? -1;
+            case 'lost': return p.availability?.last30d?.chainHoursLost ?? -1;
+            case 'chains': return p.chainsSupported ?? -1;
+            case 'incidents': return p.incidents30d ?? -1;
+            case 'mttr': return p.resolutionHours?.median ?? -1;
+            case 'openfor': return p.oldestOngoingAt ? Date.now() - Date.parse(p.oldestOngoingAt) : -1;
+            case 'trend': return p.availability?.last7d?.chainHoursLost ?? -1;
+            default: return null;
+        }
+    };
+    return [...list].sort((a, b) => {
+        if (providerBoard.sort === 'name') return (a.name || a.id).localeCompare(b.name || b.id) * providerBoard.dir;
+        // Availability sorts best-first by default, which means DESCENDING; every
+        // other column is "more is more", so one shared direction flag works.
+        const d = (val(b) - val(a)) * providerBoard.dir;
+        return d || (a.name || a.id).localeCompare(b.name || b.id);
+    });
+}
+
+function providerRow(p, columns) {
+    const a = p.availability || {};
+    const pct = a.last30d?.percent;
+    const lost = a.last30d?.chainHoursLost;
+    const d = p.disclosure || {};
+
+    // Availability cell: the 30d headline, with 24h/7d underneath so a provider
+    // that is bad RIGHT NOW can't hide behind a good month.
+    const availCell = pct == null
+        ? el('td', { class: 'pb-avail pb-none' }, [
+            el('span', { class: 'pb-dash', text: '—' }),
+            el('span', { class: 'pb-sub muted', text: p.chainsSupported == null ? 'no chain list published' : 'no incidents posted' })
+        ])
+        : el('td', { class: 'pb-avail' }, [
+            el('div', { class: 'pb-avail-main' }, [
+                el('span', { class: `pb-dot ${availClass(pct)}` }),
+                el('span', { class: 'pb-pct mono', text: `${fmtPct(pct)}%` }),
+                el('span', { class: 'pb-bar' }, [
+                    // Deviation from 100 is the signal and it is tiny, so the bar
+                    // scales the LOSS across a 3% floor rather than the value —
+                    // a 0-100 bar would render every provider as a full bar.
+                    el('span', { class: `pb-bar-fill ${availClass(pct)}`, style: { width: `${Math.min(100, ((100 - pct) / 3) * 100).toFixed(1)}%` } })
+                ])
+            ]),
+            el('span', {
+                class: 'pb-sub muted',
+                // A 100% built from zero timed incidents means "nothing open",
+                // not "a clean month" — say which, or the column overstates.
+                text: a.measuredIncidents ? `24h ${fmtPct(a.last24h?.percent)}% · 7d ${fmtPct(a.last7d?.percent)}%` : 'nothing open · none timed'
+            })
+        ]);
+
+    const trend = p.dailySeries?.length
+        ? sparkline(p.dailySeries.map(b => b.chainHoursLost), 96, 26)
+        : el('span', { class: 'muted', text: '—' });
+
+    return el('tr', { class: `pb-row${p.ongoingNow > 0 ? ' pb-ongoing' : ''}` }, [
+        el('td', { class: 'pb-left pb-name' }, [
+            el('span', { class: 'pb-name-main', text: p.name || p.id }),
+            p.ongoingNow > 0 ? el('span', { class: 'pill pill-ongoing sm', text: `${p.ongoingNow} ongoing` }) : null,
+            !d.publishesChainCoverage ? el('span', { class: 'pb-flag', title: 'This status page exposes no machine-readable chain list, so no availability denominator exists.', text: 'no coverage' }) : null
+        ]),
+        availCell,
+        el('td', { class: 'pb-num' }, [
+            el('span', { class: 'mono', text: lost == null ? '—' : fmt1(lost) }),
+            el('span', { class: 'pb-sub muted', text: lost ? `${fmt1(a.last24h?.chainHoursLost || 0)} in 24h` : '' })
+        ]),
+        el('td', { class: 'pb-num' }, [
+            el('span', { class: 'mono', text: p.chainsSupported == null ? '—' : String(p.chainsSupported) }),
+            el('span', { class: 'pb-sub muted', text: p.chainsAffected30d ? `${p.chainsAffected30d} hit` : '' })
+        ]),
+        el('td', { class: 'pb-num' }, [
+            el('span', { class: 'mono', text: `${p.incidents30d} inc` }),
+            el('span', { class: 'pb-sub muted', text: p.maintenance30d ? `${p.maintenance30d} maint` : 'no maintenance posted' })
+        ]),
+        ...(columns.some(c => c.key === 'openfor') ? [el('td', { class: 'pb-num' }, openForCell(p))] : []),
+        ...(columns.some(c => c.key === 'mttr') ? [el('td', { class: 'pb-num' }, mttrCell(p))] : []),
+        el('td', { class: 'pb-trend' }, [trend])
+    ]);
+}
+
+// The age of the oldest still-open incident. A provider sitting on a 12-day-old
+// unresolved outage and one that opened a ticket an hour ago post the same "1
+// ongoing"; only this column tells them apart.
+function openForCell(p) {
+    if (!p.oldestOngoingAt) return [el('span', { class: 'pb-dash', text: '—' })];
+    const ms = Date.now() - Date.parse(p.oldestOngoingAt);
+    return [
+        el('span', { class: `mono ${ms > 7 * 864e5 ? 'pb-stale' : ''}`, text: fmtDuration(ms) || '—' }),
+        el('span', { class: 'pb-sub muted', text: p.ongoingNow > 1 ? `oldest of ${p.ongoingNow}` : 'still open' })
+    ];
+}
+
+// MTTR is only as good as the share of incidents where the page showed an
+// open→resolved transition. Most publish a history feed carrying the resolved
+// entry alone, so the sample is often 1-of-16 — printing a bare "22.6h" there
+// would be a confident lie. The sample size travels with the number.
+function mttrCell(p) {
+    const r = p.resolutionHours;
+    if (!r?.median && r?.median !== 0) return [el('span', { class: 'pb-dash', text: '—' }), el('span', { class: 'pb-sub muted', text: 'not tracked' })];
+    const share = p.disclosure?.resolutionTracked ?? 0;
+    return [
+        el('span', { class: 'mono', text: `${fmt1(r.median)}h` }),
+        el('span', {
+            class: `pb-sub ${share < 0.3 ? 'pb-thin' : 'muted'}`,
+            title: share < 0.3 ? 'Small sample — most of this page’s incidents never showed an opening update.' : null,
+            text: `${r.samples} of ${p.incidents30d}`
+        })
+    ];
+}
+
+// Inline sparkline. Areas read as volume at this size where a polyline reads as
+// noise, so the shape is filled; an all-zero series draws a flat baseline
+// instead of vanishing, because "no downtime" is a result worth seeing.
+function sparkline(values, w, h) {
+    const peak = Math.max(...values, 0);
+    const n = values.length;
+    const step = w / Math.max(1, n - 1);
+    const y = (v) => peak <= 0 ? h - 1.5 : h - 1.5 - (v / peak) * (h - 4);
+    const pts = values.map((v, i) => `${(i * step).toFixed(1)},${y(v).toFixed(1)}`);
+    return svgEl('svg', { viewBox: `0 0 ${w} ${h}`, width: String(w), height: String(h), class: 'pb-spark', 'aria-hidden': 'true' }, [
+        svgEl('path', { d: `M0,${h} L${pts.join(' L')} L${w},${h} Z`, class: 'pb-spark-fill' }),
+        svgEl('path', { d: `M${pts.join(' L')}`, class: 'pb-spark-line', fill: 'none', 'vector-effect': 'non-scaling-stroke' })
+    ]);
+}
+
+// Availability lives near 100, so thresholds are tight — a 97% month means a
+// chain-equivalent was down for most of a day.
+function availClass(pct) { return pct == null ? '' : pct >= 99.9 ? 'good' : pct >= 99 ? 'ok' : pct >= 97 ? 'warn' : 'bad'; }
+function fmtPct(v) { return v == null ? '—' : String(Math.round(v * 100) / 100); }
+function fmt1(v) { return v == null ? '—' : String(Math.round(v * 10) / 10); }
 
 function renderProviderList() {
     const list = document.getElementById('providersList'); if (!list) return;
@@ -1435,7 +1668,9 @@ function renderForumTreemap() {
         // that map to no chain), centred; scale with tile size.
         if (t.w > 40 && t.h > 22) {
             const fs = Math.max(10, Math.min(20, Math.round(t.w / 9)));
-            tile.appendChild(el('span', { class: 'tm-name', style: `font-size:${fs}px`, text: g.chains[0]?.name || g.name }));
+            // Object form, not a string: a style attribute is blocked by the
+            // page's style-src CSP, so this size never took effect.
+            tile.appendChild(el('span', { class: 'tm-name', style: { fontSize: `${fs}px` }, text: g.chains[0]?.name || g.name }));
         }
         wrap.appendChild(tile);
     }
@@ -1484,16 +1719,45 @@ function renderForumList() {
     if (count) count.textContent = `${shown} post${shown === 1 ? '' : 's'}${forum.filter ? ` · ${forum.byForum.get(forum.filter)?.name || ''}` : ''}${searchQuery ? ` · “${searchQuery}”` : ''}`;
     if (!shown) list.appendChild(el('div', { class: 'feed-empty', text: 'Nothing matches.' }));
 }
-
 // ─────────────────────────────── Timeline (upgrades ↔ fallout ↔ coverage) ───────────────────────────────
-// One card per scheduled upgrade/maintenance window from the API's /upgrades
-// correlation layer. Upcoming windows carry the required software and a live
-// countdown to activation; past windows link the incidents that followed on
-// the same network (labelled suspected — temporal correlation, never asserted
-// causation) plus the forum discussion and news coverage around them.
-const timeline = { upgrades: [], loaded: false, loading: false, error: null, ticker: null };
+// An activity view over the API's /upgrades correlation layer, not a list of
+// cards: a density chart across a real time axis with NOW in it, so pending
+// windows and recent history read as one continuous picture, then a dense row
+// list underneath. The previous centre-spine layout fitted eleven windows in a
+// 2400px viewport and put every scheduled window in a column headed "Recent".
+//
+// The chart's x-domain deliberately extends into the FUTURE — this feed's whole
+// point is that ten upgrades are pending — and the future half is drawn hatched
+// so "scheduled" never reads as "happened".
+const timeline = {
+    upgrades: [], loaded: false, loading: false, error: null, ticker: null,
+    stream: 'all', rangeDays: 7, sort: 'time'
+};
+
+// Range presets. Each spans backwards `days` and forwards far enough to hold the
+// pending windows, capped so one distant window can't flatten the recent detail.
+const TL_RANGES = [
+    ['1D', 1], ['7D', 7], ['30D', 30], ['All', 0]
+];
+
+const TL_STREAMS = [
+    ['all', 'All windows'],
+    ['upcoming', 'Upcoming'],
+    ['active', 'In progress'],
+    ['fallout', 'With fallout'],
+    ['done', 'Completed']
+];
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+function svgEl(tag, props = {}, children = []) {
+    const node = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(props)) if (v !== null && v !== undefined) node.setAttribute(k, v);
+    for (const c of [].concat(children)) if (c != null) node.appendChild(c);
+    return node;
+}
 
 function ensureTimelineView() {
+    initTimelineControls();
     if (timeline.loaded) { renderTimeline(); return; }
     if (timeline.loading) return;
     timeline.loading = true;
@@ -1502,7 +1766,7 @@ function ensureTimelineView() {
 
 async function loadTimeline() {
     try {
-        const d = await api('/upgrades?limit=50');
+        const d = await api('/upgrades?limit=200');
         timeline.upgrades = d.upgrades || [];
         timeline.loaded = true;
         timeline.error = null;
@@ -1529,51 +1793,324 @@ function timelineMatchesSearch(u, q) {
     return (u.chainIds || []).some(id => String(id).includes(q) || state.byId.get(id)?.name?.toLowerCase().includes(q));
 }
 
+// Which stream tab an upgrade belongs to. Pending is decided by the clock, not
+// by status: providers leave a window labelled "scheduled" long after it ran.
+function timelineStreamOf(u, now) {
+    const ms = timelineActivationMs(u);
+    if (ms != null && ms > now) return 'upcoming';
+    if (u.status === 'maintenance_in_progress') return 'active';
+    return 'done';
+}
+
+function timelineInStream(u, stream, now) {
+    if (stream === 'all') return true;
+    if (stream === 'fallout') return (u.followedByIncidents || []).length > 0;
+    return timelineStreamOf(u, now) === stream;
+}
+
+// The x-domain: `rangeDays` back from now, and forward to the last pending
+// window (bounded by the same span, so a window three weeks out never squashes
+// the last 24 hours into a pixel). 'All' fits every window in the payload.
+function timelineDomain(items, now) {
+    const times = items.map(timelineActivationMs).filter(t => t != null);
+    if (timeline.rangeDays === 0) {
+        const lo = times.length ? Math.min(...times, now) : now - 7 * 864e5;
+        const hi = times.length ? Math.max(...times, now) : now + 864e5;
+        const pad = Math.max((hi - lo) * 0.02, 36e5);
+        return [lo - pad, hi + pad];
+    }
+    const span = timeline.rangeDays * 864e5;
+    const lastPending = Math.max(now, ...times.filter(t => t > now));
+    return [now - span, Math.min(lastPending + span * 0.05, now + span)];
+}
+
 function renderTimeline() {
-    const upWrap = document.getElementById('timelineUpcoming');
-    const reWrap = document.getElementById('timelineRecent');
-    if (!upWrap || !reWrap) return;
+    const rowsWrap = document.getElementById('timelineRows');
+    if (!rowsWrap) return;
     const meta = document.getElementById('timelineMeta');
-    upWrap.textContent = ''; reWrap.textContent = '';
 
     if (timeline.error) {
         const msg = timeline.error === 'old-api'
             ? 'Timeline requires a newer chains-api — the API this dashboard points at doesn’t serve /upgrades yet.'
             : 'Upgrade timeline unavailable — the /upgrades feed didn’t answer. Revisit the tab to retry.';
-        upWrap.appendChild(el('div', { class: 'feed-empty', text: msg }));
-        reWrap.appendChild(el('div', { class: 'feed-empty', text: msg }));
+        rowsWrap.textContent = '';
+        rowsWrap.appendChild(el('div', { class: 'feed-empty', text: msg }));
+        document.getElementById('timelineChartWrap')?.setAttribute('hidden', '');
         if (meta) meta.textContent = '';
         return;
     }
     if (!timeline.loaded) {
-        upWrap.appendChild(el('div', { class: 'feed-empty', text: 'Loading upgrade timeline…' }));
+        rowsWrap.textContent = '';
+        rowsWrap.appendChild(el('div', { class: 'feed-empty', text: 'Loading upgrade timeline…' }));
+        return;
+    }
+    document.getElementById('timelineChartWrap')?.removeAttribute('hidden');
+
+    const now = Date.now();
+    const searched = searchQuery ? timeline.upgrades.filter(u => timelineMatchesSearch(u, searchQuery)) : timeline.upgrades;
+    const [lo, hi] = timelineDomain(searched, now);
+    // The chart shows everything the search matched inside the window; the tabs
+    // then slice that set, so tab counts always describe what the chart draws.
+    const inRange = searched.filter(u => { const t = timelineActivationMs(u); return t != null && t >= lo && t <= hi; });
+    const items = inRange.filter(u => timelineInStream(u, timeline.stream, now));
+
+    renderTimelineTabs(inRange, now);
+    renderTimelineChart(inRange, items, [lo, hi], now);
+    renderTimelineRows(items, now);
+
+    if (meta) meta.textContent = `${timeline.upgrades.length} windows`;
+    const nextUp = searched.map(timelineActivationMs).filter(t => t != null && t > now).sort((a, b) => a - b)[0];
+    const notice = document.getElementById('timelineNextNotice');
+    if (notice) {
+        notice.textContent = '';
+        if (nextUp != null) {
+            const u = searched.find(x => timelineActivationMs(x) === nextUp);
+            notice.appendChild(el('span', { class: 'tlx-next-dot' }));
+            notice.appendChild(el('span', { class: 'tlx-next-label', text: 'Next window' }));
+            notice.appendChild(el('span', { class: 'tlx-next-count mono tl-countdown', 'data-at': String(nextUp), text: countdownText(nextUp - now) }));
+            notice.appendChild(el('span', { class: 'tlx-next-title', text: `${timelineNetworkLabel(u)} · ${u.title}` }));
+            notice.hidden = false;
+        } else {
+            notice.hidden = true;
+        }
+    }
+
+    if (searched.some(u => (timelineActivationMs(u) ?? 0) > now)) startTimelineTicker(); else stopTimelineTicker();
+}
+
+function renderTimelineTabs(inRange, now) {
+    const bar = document.getElementById('timelineTabs');
+    if (!bar) return;
+    bar.textContent = '';
+    for (const [key, label] of TL_STREAMS) {
+        const n = inRange.filter(u => timelineInStream(u, key, now)).length;
+        bar.appendChild(el('button', {
+            class: `tlx-tab${timeline.stream === key ? ' active' : ''}`,
+            onclick: () => { timeline.stream = key; renderTimeline(); }
+        }, [
+            el('span', { class: 'tlx-tab-label', text: label }),
+            el('span', { class: 'tlx-tab-count', text: String(n) })
+        ]));
+    }
+}
+
+// ─── The chart ───
+// Area = number of windows activating per bucket, drawn as a stepped density
+// curve. Past and future are two separate paths so the future can be hatched.
+// Above it ride pins for the windows that matter most (fallout, then urgency),
+// each dropping a leader line onto its exact position on the axis.
+const TL_CHART_W = 1000;   // viewBox units; the SVG scales to its container
+const TL_CHART_H = 150;
+const TL_BUCKETS = 96;
+
+function renderTimelineChart(inRange, selected, [lo, hi], now) {
+    const host = document.getElementById('timelineChart');
+    if (!host) return;
+    host.textContent = '';
+    const span = Math.max(hi - lo, 1);
+    const x = (t) => ((t - lo) / span) * TL_CHART_W;
+
+    const counts = new Array(TL_BUCKETS).fill(0);
+    for (const u of inRange) {
+        const t = timelineActivationMs(u);
+        if (t == null) continue;
+        counts[Math.min(TL_BUCKETS - 1, Math.max(0, Math.floor(((t - lo) / span) * TL_BUCKETS)))] += 1;
+    }
+    const peak = Math.max(1, ...counts);
+    const bw = TL_CHART_W / TL_BUCKETS;
+    const y = (n) => TL_CHART_H - (n / peak) * (TL_CHART_H - 14);
+
+    // Stepped outline across all buckets; the fill closes it to the baseline.
+    const pts = [];
+    counts.forEach((n, i) => { pts.push([i * bw, y(n)], [(i + 1) * bw, y(n)]); });
+    const line = pts.map(([px, py], i) => `${i ? 'L' : 'M'}${px.toFixed(1)},${py.toFixed(1)}`).join(' ');
+    const nowX = Math.max(0, Math.min(TL_CHART_W, x(now)));
+
+    const defs = svgEl('defs', {}, [
+        svgEl('linearGradient', { id: 'tlxFill', x1: '0', y1: '0', x2: '0', y2: '1' }, [
+            svgEl('stop', { offset: '0%', 'stop-color': 'var(--tlx-accent)', 'stop-opacity': '0.45' }),
+            svgEl('stop', { offset: '100%', 'stop-color': 'var(--tlx-accent)', 'stop-opacity': '0.02' })
+        ]),
+        svgEl('pattern', { id: 'tlxHatch', width: '6', height: '6', patternUnits: 'userSpaceOnUse', patternTransform: 'rotate(45)' }, [
+            svgEl('rect', { width: '6', height: '6', fill: 'var(--tlx-accent)', 'fill-opacity': '0.06' }),
+            svgEl('line', { x1: '0', y1: '0', x2: '0', y2: '6', stroke: 'var(--tlx-accent)', 'stroke-opacity': '0.35', 'stroke-width': '1.5' })
+        ]),
+        // Past and future share one outline; each clip reveals its own half.
+        svgEl('clipPath', { id: 'tlxPast' }, [svgEl('rect', { x: '0', y: '0', width: String(nowX), height: String(TL_CHART_H) })]),
+        svgEl('clipPath', { id: 'tlxFuture' }, [svgEl('rect', { x: String(nowX), y: '0', width: String(TL_CHART_W - nowX), height: String(TL_CHART_H) })])
+    ]);
+
+    const area = `${line} L${TL_CHART_W},${TL_CHART_H} L0,${TL_CHART_H} Z`;
+    const svg = svgEl('svg', {
+        viewBox: `0 0 ${TL_CHART_W} ${TL_CHART_H}`, preserveAspectRatio: 'none',
+        class: 'tlx-svg', role: 'img',
+        'aria-label': `Upgrade window density, ${new Date(lo).toLocaleDateString()} to ${new Date(hi).toLocaleDateString()}`
+    }, [
+        defs,
+        svgEl('path', { d: area, fill: 'url(#tlxFill)', 'clip-path': 'url(#tlxPast)' }),
+        svgEl('path', { d: area, fill: 'url(#tlxHatch)', 'clip-path': 'url(#tlxFuture)' }),
+        svgEl('path', { d: line, fill: 'none', stroke: 'var(--tlx-accent)', 'stroke-width': '1.5', 'vector-effect': 'non-scaling-stroke' }),
+        svgEl('line', { x1: String(nowX), y1: '0', x2: String(nowX), y2: String(TL_CHART_H), class: 'tlx-nowline', 'vector-effect': 'non-scaling-stroke' })
+    ]);
+    host.appendChild(svg);
+
+    renderTimelinePins(inRange, selected, x, now);
+    renderTimelineHeat(inRange, x);
+    renderTimelineAxis(lo, hi, nowX);
+}
+
+// Pins: the windows a reader should notice first — anything with fallout, then
+// the most urgent, then the soonest. Capped so they never collide into mush.
+function renderTimelinePins(inRange, selected, x, now) {
+    const host = document.getElementById('timelinePins');
+    if (!host) return;
+    host.textContent = '';
+    const weight = (u) => (u.followedByIncidents?.length ? 100 : 0)
+        + (/urgent|critical|mandatory/i.test(u.urgency || '') ? 40 : 0)
+        + ((timelineActivationMs(u) ?? 0) > now ? 20 : 0);
+    const picked = [...inRange].sort((a, b) => weight(b) - weight(a) || (timelineActivationMs(b) ?? 0) - (timelineActivationMs(a) ?? 0))
+        .filter(u => weight(u) > 0).slice(0, 8)
+        .sort((a, b) => (timelineActivationMs(a) ?? 0) - (timelineActivationMs(b) ?? 0));
+
+    const selectedSet = new Set(selected);
+    let lastPct = -99;
+    for (const u of picked) {
+        const t = timelineActivationMs(u);
+        if (t == null) continue;
+        const pct = (x(t) / TL_CHART_W) * 100;
+        if (pct - lastPct < 7) continue;   // keep badges legible
+        lastPct = pct;
+        const fallout = u.followedByIncidents?.length || 0;
+        const pin = el('div', {
+            class: `tlx-pin${selectedSet.has(u) ? '' : ' dim'}`,
+            style: { left: `${pct.toFixed(2)}%` },
+            title: `${u.title}\n${new Date(t).toLocaleString()}`
+        }, [
+            el('span', { class: `tlx-pin-badge ${urgencyClass(u.urgency)}`, text: fallout ? `↯${fallout}` : (timelineNetworkLabel(u) || '•').slice(0, 3) }),
+            el('span', { class: 'tlx-pin-stem' })
+        ]);
+        host.appendChild(pin);
+    }
+}
+
+// The thin strip under the chart: one blob per window, coloured by urgency —
+// AppControl's temperature ribbon, carrying severity instead of heat.
+function renderTimelineHeat(inRange, x) {
+    const host = document.getElementById('timelineHeat');
+    if (!host) return;
+    host.textContent = '';
+    for (const u of inRange) {
+        const t = timelineActivationMs(u);
+        if (t == null) continue;
+        host.appendChild(el('span', {
+            class: `tlx-blob ${urgencyClass(u.urgency)}${u.followedByIncidents?.length ? ' has-fallout' : ''}`,
+            style: { left: `${((x(t) / TL_CHART_W) * 100).toFixed(2)}%` },
+            title: u.title
+        }));
+    }
+}
+
+function renderTimelineAxis(lo, hi, nowX) {
+    const host = document.getElementById('timelineAxis');
+    if (!host) return;
+    host.textContent = '';
+    const span = hi - lo;
+    const withinDay = span <= 36 * 36e5;
+    const fmt = (t) => new Date(t).toLocaleString(undefined,
+        withinDay ? { hour: '2-digit', minute: '2-digit' } : { month: 'short', day: 'numeric' });
+    // "now" always wins: a date tick sitting on top of it rendered as "Junow".
+    const nowPct = (nowX / TL_CHART_W) * 100;
+    for (let i = 0; i <= 6; i += 1) {
+        const pct = (i / 6) * 100;
+        if (Math.abs(pct - nowPct) < 5) continue;
+        host.appendChild(el('span', {
+            // The last tick sits at 100% and its centring transform pushed half
+            // the label outside the clipped container ("Aug 3" read as "Au").
+            class: `tlx-tick${i === 6 ? ' tlx-tick-end' : ''}`,
+            style: { left: `${pct.toFixed(2)}%` }, text: fmt(lo + (span * i) / 6)
+        }));
+    }
+    host.appendChild(el('span', { class: 'tlx-tick tlx-tick-now', style: { left: `${nowPct.toFixed(2)}%` }, text: 'now' }));
+}
+
+// ─── Rows ───
+const TL_SORTS = [
+    ['time', 'Time'],
+    ['urgency', 'Urgency'],
+    ['fallout', 'Fallout'],
+    ['provider', 'Provider']
+];
+
+const TL_URGENCY_RANK = { mandatory: 3, critical: 3, urgent: 2, standard: 1 };
+
+function renderTimelineRows(items, now) {
+    const wrap = document.getElementById('timelineRows');
+    if (!wrap) return;
+    wrap.textContent = '';
+    const count = document.getElementById('timelineCount');
+    if (count) count.textContent = `${items.length} window${items.length === 1 ? '' : 's'}${searchQuery ? ` · “${searchQuery}”` : ''}`;
+
+    if (!items.length) {
+        wrap.appendChild(el('div', { class: 'feed-empty', text: searchQuery ? 'Nothing matches.' : 'No windows in this range.' }));
         return;
     }
 
-    const now = Date.now();
-    const items = searchQuery ? timeline.upgrades.filter(u => timelineMatchesSearch(u, searchQuery)) : timeline.upgrades;
-    // Upcoming: future activations, soonest first. A null activation time
-    // can't count down, so those windows land in Recent (sorted last).
-    const upcoming = items.filter(u => (timelineActivationMs(u) ?? -1) > now)
-        .sort((a, b) => timelineActivationMs(a) - timelineActivationMs(b));
-    const recent = items.filter(u => (timelineActivationMs(u) ?? -1) <= now)
-        .sort((a, b) => (timelineActivationMs(b) ?? 0) - (timelineActivationMs(a) ?? 0));
+    const sorted = [...items].sort((a, b) => {
+        if (timeline.sort === 'urgency') {
+            const d = (TL_URGENCY_RANK[(b.urgency || '').toLowerCase()] || 0) - (TL_URGENCY_RANK[(a.urgency || '').toLowerCase()] || 0);
+            if (d) return d;
+        } else if (timeline.sort === 'fallout') {
+            const d = (b.followedByIncidents?.length || 0) - (a.followedByIncidents?.length || 0);
+            if (d) return d;
+        } else if (timeline.sort === 'provider') {
+            const d = (a.provider || '').localeCompare(b.provider || '');
+            if (d) return d;
+        }
+        // Default and tiebreak: pending soonest-first, then history newest-first.
+        const ta = timelineActivationMs(a) ?? 0;
+        const tb = timelineActivationMs(b) ?? 0;
+        const aP = ta > now, bP = tb > now;
+        if (aP !== bP) return aP ? -1 : 1;
+        return aP ? ta - tb : tb - ta;
+    });
 
-    if (meta) meta.textContent = `${timeline.upgrades.length} windows`;
-    const suffix = searchQuery ? ` · “${searchQuery}”` : '';
-    document.getElementById('timelineUpcomingCount').textContent = `${upcoming.length} scheduled${suffix}`;
-    document.getElementById('timelineRecentCount').textContent = `${recent.length} past${suffix}`;
-
-    if (!upcoming.length) upWrap.appendChild(el('div', { class: 'feed-empty', text: searchQuery ? 'Nothing matches.' : 'No upcoming upgrades or maintenance windows announced.' }));
-    // Cards alternate left/right of the center spine (index-based per half).
-    upcoming.forEach((u, i) => upWrap.appendChild(timelineCard(u, { upcoming: true, side: i % 2 ? 'right' : 'left' })));
-    if (!recent.length) reWrap.appendChild(el('div', { class: 'feed-empty', text: searchQuery ? 'Nothing matches.' : 'No recent upgrades in the feed’s window.' }));
-    recent.forEach((u, i) => reWrap.appendChild(timelineCard(u, { upcoming: false, side: i % 2 ? 'right' : 'left' })));
-
-    if (upcoming.length) startTimelineTicker(); else stopTimelineTicker();
+    let lastBucket = null;
+    for (const u of sorted) {
+        // Day separators only make sense while the list is in time order.
+        if (timeline.sort === 'time') {
+            // Pending windows sort ahead of history, so "Today" occurs twice —
+            // once for what is still to come and once for what already ran.
+            // Qualify the pending one or the two runs read as a rendering bug.
+            const actMs = timelineActivationMs(u);
+            const day = timelineDayBucket(actMs, now);
+            const bucket = actMs != null && actMs > now ? `${day} · scheduled` : day;
+            if (bucket !== lastBucket) {
+                lastBucket = bucket;
+                wrap.appendChild(el('div', { class: 'tlx-daybreak', text: bucket }));
+            }
+        }
+        wrap.appendChild(timelineRow(u, now));
+    }
 }
 
-// "in 2d 4h" / "in 35m" — the live part of an upcoming card.
+function timelineDayBucket(ms, now) {
+    if (ms == null) return 'Unscheduled';
+    const d = new Date(ms);
+    const today = new Date(now);
+    const days = Math.round((Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())) / 864e5);
+    if (days === 0) return 'Today';
+    if (days === 1) return 'Tomorrow';
+    if (days === -1) return 'Yesterday';
+    return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function timelineNetworkLabel(u) {
+    const names = u.networkNames?.length ? u.networkNames
+        : (u.chainIds || []).map(id => state.byId.get(id)?.name).filter(Boolean);
+    return names[0] || u.provider || 'Unknown';
+}
+
+// "in 2d 4h" / "in 35m" — the live part of a pending row.
 function countdownText(ms) {
     if (!Number.isFinite(ms) || ms <= 0) return 'now';
     const m = Math.ceil(ms / 60000);
@@ -1584,14 +2121,14 @@ function countdownText(ms) {
 }
 
 // One shared minute tick updates every visible countdown in place; a window
-// crossing into the past re-renders so it re-buckets into Recent. Guarded so
-// re-renders never stack a second interval; cleared on view switch.
+// crossing into the past re-renders so it re-buckets. Guarded so re-renders
+// never stack a second interval; cleared on view switch.
 function startTimelineTicker() {
     if (timeline.ticker) return;
     timeline.ticker = setInterval(() => {
         if (activeView !== 'timeline') return;
         let expired = false;
-        document.querySelectorAll('#timelineUpcoming .tl-countdown').forEach(n => {
+        document.querySelectorAll('#view-timeline .tl-countdown').forEach(n => {
             const left = Number(n.dataset.at) - Date.now();
             if (left <= 0) expired = true;
             n.textContent = countdownText(left);
@@ -1602,7 +2139,7 @@ function startTimelineTicker() {
 function stopTimelineTicker() { if (timeline.ticker) { clearInterval(timeline.ticker); timeline.ticker = null; } }
 
 // Sanitized urgency class token (same guard as the severity pill) — the raw
-// value still shows as the pill's text. Shared by the pill and the spine dot.
+// value still shows as the pill's text. Shared by rows, pins and blobs.
 function urgencyClass(urgency) {
     return `urg-${String(urgency || 'standard').toLowerCase().replace(/[^a-z]/g, '')}`;
 }
@@ -1621,69 +2158,111 @@ function timelineFalloutRows(u) {
         ]));
 }
 
-// Context: governance discussion (forum) and editorial coverage (news)
-// around the window — what was written about it.
+// Context: governance discussion (forum) and editorial coverage (news) around
+// the window. Deduped by URL — the same ACD call is often carried by both
+// feeds, and two identical links under one window reads as a bug.
 function timelineContextRows(u) {
     const row = (label, item) => el('div', { class: 'tl-context' }, [
         el('span', { class: 'tl-context-kind', text: label }),
         el('a', { href: item.url, target: '_blank', rel: 'noopener', text: item.title }),
         item.publishedAt ? el('span', { class: 'muted', text: relTime(item.publishedAt) }) : null
     ]);
+    const seen = new Set();
+    const fresh = (list) => (list || []).filter(i => {
+        const k = (i.url || i.title || '').toLowerCase();
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+    });
     return [
-        ...(u.discussion || []).slice(0, 2).map(d => row('discussion', d)),
-        ...(u.coverage || []).slice(0, 2).map(c => row('coverage', c))
+        ...fresh(u.discussion).slice(0, 2).map(d => row('discussion', d)),
+        ...fresh(u.coverage).slice(0, 2).map(c => row('coverage', c))
     ];
 }
 
-// One spine item: the urgency-colored dot on the center line plus the card on
-// its side. Typography inside leads with the WHEN (countdown for upcoming,
-// date for past) — on a timeline, time is the headline — then title, then
-// muted meta; fallout/coverage sit in a bordered footer; the ⚑ report
-// affordance rides the card corner (CSS positions it).
-function timelineCard(u, { upcoming, side }) {
-    const netNames = u.networkNames?.length ? u.networkNames
-        : (u.chainIds || []).map(id => state.byId.get(id)?.name || `Chain ${id}`);
-    const label = netNames[0] || u.provider || 'Unknown';
-    const chainId = (u.chainIds || [])[0] ?? null;
+// One row. Time leads (this is a timeline), then network + title, then the
+// evidence chips. Detail — fallout, discussion, coverage — is collapsed behind
+// a disclosure so a hundred windows stay scannable; rows with fallout open by
+// default because that is the finding, not a footnote.
+function timelineRow(u, now) {
     const actMs = timelineActivationMs(u);
-    const meta = [netNames.slice(0, 3).join(', ') || null, u.provider].filter(Boolean);
+    const pending = actMs != null && actMs > now;
+    const label = timelineNetworkLabel(u);
+    const chainId = (u.chainIds || [])[0] ?? null;
+    const fallout = u.followedByIncidents?.length || 0;
 
-    const when = upcoming && actMs != null
-        ? el('span', { class: 'tl-when tl-countdown mono', 'data-at': String(actMs), text: countdownText(actMs - Date.now()) })
+    const when = pending
+        ? el('span', { class: 'tlx-when mono tl-countdown', 'data-at': String(actMs), text: countdownText(actMs - now) })
         : el('span', {
-            class: 'tl-when tl-when-past',
-            text: actMs != null
-                ? new Date(actMs).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-                : 'unscheduled'
+            class: 'tlx-when past',
+            text: actMs != null ? new Date(actMs).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : '—'
         });
-    const head = [when, urgencyPill(u.urgency)];
-    if (!upcoming) {
-        const st = SERVER_STATUS_LABEL[u.status];
-        if (st) head.push(el('span', { class: `pill st-${st.toLowerCase().replace(/\s+/g, '')}`, text: st }));
+
+    const chips = [];
+    for (const s of (u.software || []).slice(0, 3)) {
+        chips.push(el('span', { class: 'sw-chip mono', text: [s.client, s.version].filter(Boolean).join(' ') }));
     }
-    if (upcoming && actMs != null) head.push(el('span', { class: 'tl-when-sub muted mono', text: new Date(actMs).toLocaleString() }));
+    if (u.windowMinutes) chips.push(el('span', { class: 'tlx-chip-dim mono', text: fmtDuration(u.windowMinutes * 60000) }));
+    if (fallout) chips.push(el('span', { class: 'tlx-chip-fallout', text: `↯ ${fallout} incident${fallout === 1 ? '' : 's'} after` }));
 
-    const footRows = [...timelineFalloutRows(u), ...timelineContextRows(u)];
+    const detail = [...timelineFalloutRows(u), ...timelineContextRows(u)];
 
-    const card = el('div', { class: 'tl-card glass-panel' }, [
-        el('div', { class: 'tl-card-head' }, head),
-        el('div', { class: 'tl-title' }, [
+    const head = el('div', { class: 'tlx-row-head' }, [
+        el('span', { class: `tlx-row-dot ${urgencyClass(u.urgency)}` }),
+        when,
+        el('span', { class: 'tlx-row-main' }, [
             networkIcon(label, iconColorFor(chainId), 'net-icon sm'),
-            u.url ? el('a', { href: u.url, target: '_blank', rel: 'noopener', text: u.title }) : el('span', { text: u.title })
+            u.url ? el('a', { class: 'tlx-row-title', href: u.url, target: '_blank', rel: 'noopener', text: u.title })
+                : el('span', { class: 'tlx-row-title', text: u.title }),
+            el('span', { class: 'tlx-row-sub muted', text: [label, u.provider].filter(Boolean).join(' · ') })
         ]),
-        meta.length ? el('div', { class: 'tl-meta muted', text: meta.join(' · ') }) : null,
-        (u.software || []).length ? el('div', { class: 'tl-software' }, u.software.map(s =>
-            el('span', { class: 'sw-chip mono', text: [s.client, s.version].filter(Boolean).join(' ') }))) : null,
-        footRows.length ? el('div', { class: 'tl-foot' }, footRows) : null,
+        el('span', { class: 'tlx-row-chips' }, chips),
+        urgencyPill(u.urgency),
         feedbackAffordance({ kind: 'upgrade', refId: u.incidentId || u.title })
     ]);
 
-    return el('div', { class: `tl-item ${side}${upcoming ? ' upcoming' : ''}` }, [
-        el('span', { class: `tl-dot ${urgencyClass(u.urgency)}` }),
-        card
-    ]);
+    if (!detail.length) return el('div', { class: `tlx-row${pending ? ' pending' : ''}` }, [head]);
+
+    const body = el('div', { class: 'tlx-row-detail' }, detail);
+    const toggle = el('button', {
+        class: 'tlx-row-toggle',
+        'aria-expanded': fallout ? 'true' : 'false',
+        text: fallout ? 'Hide links' : `${detail.length} linked`,
+        onclick: (e) => {
+            const open = body.hidden;
+            body.hidden = !open;
+            e.currentTarget.setAttribute('aria-expanded', String(open));
+            e.currentTarget.textContent = open ? 'Hide links' : `${detail.length} linked`;
+        }
+    });
+    body.hidden = !fallout;
+    head.insertBefore(toggle, head.lastChild);
+    return el('div', { class: `tlx-row${pending ? ' pending' : ''}${fallout ? ' has-fallout' : ''}` }, [head, body]);
 }
 
+// Range + sort controls. Built once; re-render only repaints their active state.
+function initTimelineControls() {
+    const rangeBar = document.getElementById('timelineRange');
+    if (rangeBar && !rangeBar.childElementCount) {
+        for (const [label, days] of TL_RANGES) {
+            rangeBar.appendChild(el('button', {
+                class: `tlx-range-btn${timeline.rangeDays === days ? ' active' : ''}`,
+                'data-days': String(days), text: label,
+                onclick: () => {
+                    timeline.rangeDays = days;
+                    rangeBar.querySelectorAll('.tlx-range-btn').forEach(b => b.classList.toggle('active', Number(b.dataset.days) === days));
+                    renderTimeline();
+                }
+            }));
+        }
+    }
+    const sortSel = document.getElementById('timelineSort');
+    if (sortSel && !sortSel.childElementCount) {
+        for (const [key, label] of TL_SORTS) sortSel.appendChild(el('option', { value: key, text: label }));
+        sortSel.value = timeline.sort;
+        sortSel.addEventListener('change', () => { timeline.sort = sortSel.value; renderTimeline(); });
+    }
+}
 // ─────────────────────────────── Report-wrong-info affordance (⚑) ───────────────────────────────
 // The feeds are correlated by heuristics, so some links are inevitably wrong
 // — and only a human reader can tell which. Every timeline and incident card

@@ -157,6 +157,34 @@ because aliasing a testnet to its mainnet joins a testnet incident to a mainnet 
 Implementations: `chains-status-news src/upgradeInfo.js` (producer, `networkSlugs` field) and
 `chains-api src/domain/networkSlug.js` (consumer). Change one and you must change both.
 
+### 12. `incidentId` identifies an ENTRY, not a rollout
+`incidentId` is stable across an entry's updates and across retitles, and that is all it
+promises. It is **not** a rollout id: Atlassian publishes a scheduled maintenance as two
+objects with two GUIDs — the announcement, and the window itself, whose own `publishedAt`
+IS the window start (frequently weeks later, frequently in the future). Consumers must
+therefore, for maintenance-class events only:
+
+- **fold** same-provider, same-title groups into one rollout — keying on `incidentId` alone
+  split 41 of 111 live windows into duplicate pairs;
+- take the **window** entry's timestamp as the activation, not the announcement's — taking
+  the earliest scheduled update reported every pending window as past, and the dashboard
+  read "Upcoming — 0 scheduled" while eleven windows were pending;
+- **not** apply either rule to incidents: `Superposition Testnet RPC went down` recurs
+  verbatim across separate outages, and folding those undercounts incidents.
+
+The window entry is identified by the `THIS IS A SCHEDULED EVENT …` banner in the body, not
+by `status` — some providers label their window entries `maintenance_completed` up front.
+That banner is also the only place a window's END, and so its duration, is published.
+Consumer: `chains-api src/domain/maintenanceWindow.js` + `groupEventsByIncident`.
+
+### 13. An unpublished duration is unknown, not ongoing
+Most status pages publish an incident exactly **once, at resolution** — 143 of 149 live
+incidents. Such an entry gives no start time, so its cost is unknowable. Availability
+consumers must exclude those incidents and say how many they excluded, never charge them
+"open until now": doing so turned an incident Infura resolved on 7 July into three weeks of
+current downtime and reported 96% availability for a quiet day. Charge to `now` **only**
+when the feed still marks the incident `ongoing: true`.
+
 ## Ordering constraint when rolling out
 
 A readiness probe pointing at `/ready` before the image exposing `/ready` is deployed

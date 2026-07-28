@@ -134,13 +134,26 @@ export function buildProviderStats(events, { statusPages = [], rpcResults = [], 
 
     // Ongoing is a NOW question, not a window question: an incident opened
     // before the window that is still burning must not disappear.
-    const ongoingNow = groups.filter((g) => g.latest.ongoing === true).length;
+    const ongoing = groups.filter((g) => g.latest.ongoing === true);
+    const ongoingNow = ongoing.length;
+    // When the longest-running open incident started. With resolution times
+    // almost never observable this is the one duration the feeds DO expose, and
+    // it separates a provider with a 12-day-open outage from one with a fresh
+    // blip — a distinction the incident COUNT completely hides.
+    const ongoingStarts = ongoing.map((g) => g.first.publishedMs).filter((ms) => Number.isFinite(ms));
+    const oldestOngoingAt = ongoingStarts.length ? new Date(Math.min(...ongoingStarts)).toISOString() : null;
 
+    // Time-to-resolve, but only where the feed actually witnessed the incident OPEN.
+    // Most providers publish a history RSS whose only entry per incident is the final
+    // "resolved" one; measuring first->resolved on those yields exactly 0h, which
+    // rendered as a confident "~0h resolves in (median)" on nine of ten cards. An
+    // unobserved duration is unknown, not instant — so require the resolved update to
+    // be a LATER update than the first.
     const resolutionSamples = [];
     for (const g of incidentGroups) {
       const firstMs = g.first.publishedMs;
-      const resolved = g.updates.find((u) => u.status === 'resolved' && u.publishedMs != null);
-      if (resolved && resolved.publishedMs >= firstMs) {
+      const resolved = g.updates.find((u) => u !== g.first && u.status === 'resolved' && u.publishedMs != null);
+      if (resolved && resolved.publishedMs > firstMs) {
         resolutionSamples.push((resolved.publishedMs - firstMs) / 3600000);
       }
     }
@@ -161,12 +174,25 @@ export function buildProviderStats(events, { statusPages = [], rpcResults = [], 
       name: page?.name ?? own[0]?.statusPage?.name ?? id,
       incidents30d: incidentGroups.length,
       ongoingNow,
+      oldestOngoingAt,
       maintenance30d: maintenanceGroups.length,
       chainsAffected30d: chainsAffected.size,
       resolutionHours: resolutionSamples.length
-        ? { median: round1(median(resolutionSamples)), avg: round1(avg(resolutionSamples)) }
+        // `samples` travels with the number because most pages expose an open->resolved
+        // transition for only a handful of their incidents; "22.6h" off 1 of 16 is a
+        // data point, and the UI has to be able to say so.
+        ? { median: round1(median(resolutionSamples)), avg: round1(avg(resolutionSamples)), samples: resolutionSamples.length }
         : null,
       availability: chainWeightedAvailability(allIncidentGroups, { chainsSupported, now, oldestMs }),
+      // What this provider's status page actually publishes. Without it a reader
+      // ranks providers by incident count and concludes the quietest page is the
+      // best operator — Blockdaemon posts 20 maintenance windows and 1 incident,
+      // Alchemy posts 19 incidents; that gap is editorial policy, not reliability.
+      disclosure: disclosureFor({ incidentGroups, maintenanceGroups, resolutionSamples, chainsSupported }),
+      // 30 daily buckets, oldest first — the sparkline series. Provider pages are
+      // bursty, and a shape ("quiet, then three bad days") carries information no
+      // single 30d number does.
+      dailySeries: dailySeries(allIncidentGroups, maintenanceGroups, now),
       endpointReachability: endpointReachabilityFor(id, rpcResults),
       // Self-declared coverage from the status page itself (status-news >=
       // the coverage rollout); null on feeds that predate it.
@@ -183,6 +209,67 @@ export function buildProviderStats(events, { statusPages = [], rpcResults = [], 
     // availability object carries a 'partial window' note when affected.
     oldestEventAt: oldestMs != null ? new Date(oldestMs).toISOString() : null,
     providers
+  };
+}
+
+const SPARK_DAYS = 30;
+
+/**
+ * Per-day incident/maintenance/chain-hours-lost buckets, oldest first. An incident
+ * spanning days is charged to the day it OPENED (the count is "incidents started"),
+ * while the hours it cost are spread across the days it actually burned — the two
+ * answer different questions and conflating them would make a single long outage
+ * look like a daily recurrence.
+ */
+function dailySeries(incidentGroups, maintenanceGroups, now) {
+  const dayStart = Math.floor(now / DAY_MS) * DAY_MS;
+  const buckets = [];
+  for (let i = SPARK_DAYS - 1; i >= 0; i -= 1) {
+    const from = dayStart - i * DAY_MS;
+    buckets.push({ date: new Date(from).toISOString().slice(0, 10), incidents: 0, maintenance: 0, chainHoursLost: 0, _from: from });
+  }
+  const indexOf = (ms) => {
+    const i = SPARK_DAYS - 1 - Math.floor((dayStart - Math.floor(ms / DAY_MS) * DAY_MS) / DAY_MS);
+    return i >= 0 && i < SPARK_DAYS ? i : -1;
+  };
+
+  for (const g of maintenanceGroups) {
+    const i = indexOf(g.first.publishedMs);
+    if (i >= 0) buckets[i].maintenance += 1;
+  }
+  for (const g of incidentGroups) {
+    const startMs = g.first.publishedMs;
+    const i = indexOf(startMs);
+    if (i >= 0) buckets[i].incidents += 1;
+
+    // Same rule as the availability numerator: an unpublished duration
+    // contributes no hours, so the sparkline and the percent agree.
+    const endMs = downtimeEndMs(g, now);
+    if (endMs == null) continue;
+    const chains = Math.max(1, new Set(g.updates.flatMap((u) => (u.chains ?? []).map((c) => c?.chainId).filter((c) => c != null))).size);
+    for (const b of buckets) {
+      const overlap = Math.min(endMs, b._from + DAY_MS) - Math.max(startMs, b._from);
+      if (overlap > 0) b.chainHoursLost += (overlap / 3600000) * chains;
+    }
+  }
+  return buckets.map(({ _from, ...b }) => ({ ...b, chainHoursLost: Math.round(b.chainHoursLost * 100) / 100 }));
+}
+
+/**
+ * What this page discloses, so the UI can refuse to rank on a metric a provider
+ * doesn't publish. `comparable` is the honest gate on availability: it is only a
+ * like-for-like number when the page names the chains it covers AND posts incidents
+ * at all — a page that never posts scores a silent, meaningless 100%.
+ */
+function disclosureFor({ incidentGroups, maintenanceGroups, resolutionSamples, chainsSupported }) {
+  return {
+    postsIncidents: incidentGroups.length > 0,
+    postsMaintenance: maintenanceGroups.length > 0,
+    // Fraction of incidents where the page showed an open->resolved transition. MTTR
+    // computed off anything less than a decent share of them is a sample, not a rate.
+    resolutionTracked: incidentGroups.length ? Math.round((resolutionSamples.length / incidentGroups.length) * 100) / 100 : 0,
+    publishesChainCoverage: chainsSupported != null,
+    comparable: chainsSupported != null && incidentGroups.length > 0
   };
 }
 
@@ -214,10 +301,18 @@ function chainWeightedAvailability(incidentGroups, { chainsSupported, now, oldes
   // Downtime intervals per chain key. Unmapped groups get a synthetic key each
   // (they are distinct real-world incidents; only same-chain overlap merges).
   const intervalsByChain = new Map();
+  let measured = 0;
+  let unknownDuration = 0;
   incidentGroups.forEach((g, idx) => {
     const startMs = g.first.publishedMs;
-    const resolved = g.updates.find((u) => u.status === 'resolved' && u.publishedMs != null);
-    const endMs = resolved && resolved.publishedMs >= startMs ? resolved.publishedMs : now;
+    const endMs = downtimeEndMs(g, now);
+    // An incident whose duration the page never published is UNKNOWN, not
+    // ongoing. Treating it as "still down until now" charged Infura 21 days of
+    // outage for an incident it resolved on 7 July and reported 96% for the
+    // last 24 hours on a quiet day. 143 of 149 live incidents appear exactly
+    // once — at resolution — so this was the dominant term in every number.
+    if (endMs == null) { unknownDuration += 1; return; }
+    measured += 1;
     if (endMs <= startMs) return;
     let keys = [...new Set(g.updates.flatMap((u) => (u.chains ?? []).map((c) => c?.chainId).filter((cid) => cid != null)))];
     if (!keys.length) keys = [`unmapped:${idx}`];
@@ -235,6 +330,7 @@ function chainWeightedAvailability(incidentGroups, { chainsSupported, now, oldes
   const notes = [];
   if (chainsSupported == null) notes.push('chain coverage unavailable');
   if (oldestMs != null && oldestMs > now - 30 * DAY_MS) notes.push('partial window');
+  if (unknownDuration > 0) notes.push(`${unknownDuration} incident${unknownDuration === 1 ? '' : 's'} of unpublished duration excluded`);
 
   const availability = {};
   for (const [name, spanMs] of AVAILABILITY_WINDOWS) {
@@ -254,8 +350,32 @@ function chainWeightedAvailability(incidentGroups, { chainsSupported, now, oldes
   availability.basis = 'status-page-chains';
   availability.selfReported = true;
   availability.chainsSupported = chainsSupported;
+  // How much of the incident history actually fed the number. With
+  // measuredIncidents near zero the percent means "nothing is burning right
+  // now", not "a clean month" — consumers must be able to tell those apart.
+  availability.measuredIncidents = measured;
+  availability.unknownDurationIncidents = unknownDuration;
   if (notes.length) availability.note = notes.join('; ');
   return availability;
+}
+
+/**
+ * When an incident stopped costing availability, or null when the page never said.
+ *
+ * Three cases, and the third is the common one:
+ *   observed    a later update flips to resolved -> that timestamp, the real duration
+ *   ongoing     the feed still marks it live      -> now, it is genuinely burning
+ *   unpublished a lone entry in a terminal state  -> null; the page posted the incident
+ *               only once, at resolution, so its start and duration are unknowable from
+ *               the feed. Inventing "until now" is the worst of the three options —
+ *               it silently converts old, closed incidents into current downtime.
+ */
+function downtimeEndMs(group, now) {
+  const startMs = group.first.publishedMs;
+  const resolved = group.updates.find((u) => u !== group.first && u.status === 'resolved' && u.publishedMs != null);
+  if (resolved && resolved.publishedMs > startMs) return resolved.publishedMs;
+  if (group.latest.ongoing === true) return now;
+  return null;
 }
 
 /** Total time covered by `intervals` within [winStart, winEnd], overlaps merged. */
