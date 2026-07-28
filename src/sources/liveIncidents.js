@@ -4,6 +4,7 @@ import {
   LIVE_INCIDENTS_FETCH_TIMEOUT_MS
 } from '../../config.js';
 import { proxyFetch } from '../../fetchUtil.js';
+import { hasWindowBanner, windowEndMs } from '../domain/maintenanceWindow.js';
 import { logger } from '../util/logger.js';
 
 /**
@@ -140,6 +141,13 @@ function normalizeEvent(ev) {
     urgency: ev.urgency ?? null,
     networkNames: Array.isArray(ev.networkNames) ? ev.networkNames.filter((n) => typeof n === 'string') : [],
     networkSlugs: Array.isArray(ev.networkSlugs) ? ev.networkSlugs.filter((s) => typeof s === 'string') : [],
+    // Scheduled-window facts derived from the entry body, which we then drop:
+    // the body is multi-KB of provider HTML and every consumer of this record
+    // (assistant, MCP tools) pays for it in tokens. `isWindowEntry` marks the
+    // update whose publishedAt IS the window start — the activation time —
+    // and `windowEndMs` is the only source of window duration in the feed.
+    isWindowEntry: hasWindowBanner(ev.summary),
+    windowEndMs: windowEndMs(ev.summary, publishedMs),
     statusPage: { id: statusPage.id || null, name: statusPage.name || null, kind: statusPage.kind || null },
     isProvider: statusPage.kind === 'rpc-provider',
     chains: Array.isArray(ev.chains)

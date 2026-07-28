@@ -15,7 +15,7 @@ export async function upgradesRoutes(fastify) {
         properties: {
           chainId: { type: 'integer', description: 'Only upgrades touching this chain ID' },
           network: { type: 'string', maxLength: 80, description: 'Network name or slug (e.g. "Solana Mainnet", "gnosis") — covers networks with no EVM chain ID' },
-          limit: { type: 'integer', minimum: 1, maximum: 50, default: 20 }
+          limit: { type: 'integer', minimum: 1, maximum: 200, default: 20 }
         }
       }
     }

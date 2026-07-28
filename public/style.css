@@ -279,26 +279,81 @@ a:hover { text-decoration: underline; }
 .cal-cell.has .cal-day { color: var(--text-main); }
 .cal-count { font-size: 11px; font-weight: 700; color: #c4b5fd; }
 
-/* ─── Provider scorecards (Providers tab, above the incident list) ─── */
-.provider-scorecards { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; margin-bottom: 18px; }
-.provider-card {
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015));
-    border: 1px solid var(--panel-border); border-radius: var(--radius-md); padding: 14px 16px;
-    display: flex; flex-direction: column; gap: 6px;
-}
-.provider-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; flex-wrap: wrap; }
-.provider-card-name { font-size: 14px; font-weight: 700; letter-spacing: -0.01em; }
+/* ─── Provider performance board (Providers tab, above the incident list) ───
+   A table, not a card grid. The old grid gave every provider identical space
+   and demanded a value per metric, so most rendered as a column of em-dashes
+   with the labels clipped to "availabilit…". A table ranks at a glance, lets a
+   missing value be missing, and keeps the honesty text in one caption instead
+   of repeating it on ten cards. */
+.provider-scorecards { margin-bottom: 20px; }
+.pb-caption { margin-bottom: 12px; }
+.pb-caption-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pb-caption-title { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
+.pb-caption-note { font-size: 12px; line-height: 1.55; margin-top: 4px; max-width: 78ch; }
+.pb-caption-note strong { color: #fcd34d; font-weight: 700; }
+.pb-caption-note .pb-warn { color: #fca5a5; }
+.pb-caption-note + .pb-caption-note { margin-top: 5px; }
 .pill-ongoing { background: rgba(239, 68, 68, 0.16); color: #fca5a5; }
-.psc-row { display: flex; align-items: baseline; gap: 6px; font-size: 12px; min-width: 0; }
-.psc-dot { width: 8px; height: 8px; border-radius: 50%; align-self: center; flex-shrink: 0; }
-.psc-dot.good { background: var(--good); }
-.psc-dot.warn { background: #fbbf24; }
-.psc-dot.bad { background: var(--bad); }
-.psc-value { font-weight: 700; color: var(--text-main); font-variant-numeric: tabular-nums; flex-shrink: 0; }
-.psc-label { font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* registry-endpoint reachability: data-quality footnote, never a health signal */
-.psc-secondary { margin-top: 2px; opacity: 0.75; }
+.pill-quiet { background: rgba(16, 185, 129, 0.14); color: #6ee7b7; }
+.pill.sm { font-size: 10px; padding: 1px 7px; }
 
+.pb-scroll { border: 1px solid var(--panel-border); border-radius: var(--radius-md); overflow-x: auto; background: rgba(255, 255, 255, 0.015); }
+/* Fixed layout with explicit shares. Auto layout gave the name column all the
+   slack, stranding ~330px of empty space between "Alchemy" and its numbers. */
+.pb-table { width: 100%; border-collapse: collapse; min-width: 880px; table-layout: fixed; }
+.pb-table col.c-name { width: 19%; }
+.pb-table col.c-avail { width: 20%; }
+.pb-table col.c-lost { width: 14%; }
+.pb-table col.c-chains { width: 10%; }
+.pb-table col.c-posted { width: 14%; }
+.pb-table col.c-openfor { width: 12%; }
+.pb-table col.c-mttr { width: 12%; }
+.pb-table col.c-trend { width: 11%; }
+.pb-name-main { overflow: hidden; text-overflow: ellipsis; }
+.pb-table th { text-align: right; padding: 0; background: var(--panel-solid); border-bottom: 1px solid var(--panel-border); white-space: nowrap; }
+.pb-table th.pb-left { text-align: left; }
+.pb-sort-btn { width: 100%; background: none; border: none; color: var(--text-muted); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 10px 14px; cursor: pointer; text-align: inherit; }
+.pb-sort-btn:hover { color: var(--text-main); }
+.pb-table th.pb-sorted .pb-sort-btn { color: var(--accent-hover); }
+.pb-table td { padding: 10px 14px; border-bottom: 1px solid rgba(255, 255, 255, 0.04); vertical-align: middle; text-align: right; }
+.pb-table td.pb-left { text-align: left; }
+.pb-row:hover { background: rgba(255, 255, 255, 0.03); }
+.pb-row.pb-ongoing { box-shadow: inset 3px 0 0 var(--bad); }
+.pb-table tbody tr:last-child td { border-bottom: none; }
+
+.pb-name { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pb-name-main { font-size: 13px; font-weight: 650; }
+.pb-flag { font-size: 9px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); border: 1px dashed rgba(255, 255, 255, 0.18); border-radius: 5px; padding: 1px 5px; cursor: help; }
+
+/* Availability: the headline number plus the sub-window line, so a good month
+   can't hide a bad day. The bar encodes LOSS from 100 across a 3% floor —
+   a 0-100 scale would draw every provider as a full bar. */
+.pb-avail { min-width: 190px; }
+.pb-avail-main { display: flex; align-items: center; justify-content: flex-end; gap: 7px; }
+.pb-pct { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.pb-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.pb-dot.good, .pb-bar-fill.good { background: var(--good); }
+.pb-dot.ok, .pb-bar-fill.ok { background: #84cc16; }
+.pb-dot.warn, .pb-bar-fill.warn { background: #fbbf24; }
+.pb-dot.bad, .pb-bar-fill.bad { background: var(--bad); }
+.pb-bar { width: 58px; height: 4px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); overflow: hidden; flex-shrink: 0; }
+.pb-bar-fill { display: block; height: 100%; border-radius: 999px; min-width: 2px; }
+.pb-sub { display: block; font-size: 10.5px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.pb-thin { color: #fbbf24; cursor: help; }
+.pb-stale { color: #fca5a5; }
+.pb-dash { color: var(--text-muted); font-size: 15px; }
+.pb-none .pb-sub { font-style: italic; }
+.pb-num .mono { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+.pb-trend, .pb-trend-h { width: 110px; }
+.pb-spark { display: block; margin-left: auto; overflow: visible; }
+.pb-spark-fill { fill: rgba(59, 130, 246, 0.22); }
+.pb-spark-line { stroke: var(--accent-hover); stroke-width: 1.25px; }
+
+/* The "not comparable" band: providers whose page publishes neither a chain
+   list nor incident history sit BELOW it, so they never top a ranking by
+   virtue of saying nothing. */
+.pb-divider td { text-align: left; padding: 9px 14px; font-size: 11px; color: var(--text-muted); background: rgba(255, 255, 255, 0.025); border-top: 1px solid var(--panel-border); }
 /* ─── Incidents list ─── */
 .incidents-list { display: flex; flex-direction: column; gap: 8px; }
 .incident-card { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border: 1px solid var(--panel-border); border-radius: var(--radius-md); background: rgba(255, 255, 255, 0.02); }
@@ -339,69 +394,119 @@ a:hover { text-decoration: underline; }
 .ai-summary { color: var(--text-muted); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .incident-action { margin-top: 3px; font-size: 12px; color: #fcd34d; }
 
-/* ─── Timeline (center-spine upgrade timeline) ───
-   appcontrol-inspired: minimalist, generous whitespace, big type hierarchy,
-   soft-shadowed rounded cards — translated onto the dashboard's dark glass
-   theme. A 2px spine runs down the middle; cards alternate left/right of it,
-   each pinned by an urgency-colored dot (single column under 820px). */
-.tl-wrap { position: relative; padding: 6px 0 30px; }
-.tl-wrap::before { content: ''; position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: rgba(255, 255, 255, 0.08); }
-.tl-heading { position: relative; display: flex; justify-content: center; font-size: 19px; font-weight: 750; letter-spacing: -0.02em; margin: 10px 0 28px; }
-.tl-heading-inner { background: var(--bg-color); padding: 0 18px; display: flex; align-items: baseline; gap: 10px; }
-.tl-count { font-size: 12px; font-weight: 600; color: var(--text-muted); }
-.tl-list { display: flex; flex-direction: column; gap: 26px; }
-.tl-list .feed-empty { position: relative; background: var(--bg-color); max-width: 440px; margin: 0 auto; }
-/* "now" tick between the upcoming and recent halves */
-.tl-now { position: relative; display: flex; justify-content: center; margin: 34px 0; }
-.tl-now-label { background: var(--bg-color); border: 1px solid rgba(59, 130, 246, 0.5); color: #93c5fd; font-size: 10px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; padding: 3px 14px; border-radius: 999px; }
+/* ─── Timeline (activity chart + dense rows) ───
+   Modelled on AppControl's activity view: a metric tab strip, a density chart
+   over a real time axis with pinned events, a severity ribbon, a range control,
+   then a scannable list. Replaces a centre-spine layout that fitted eleven
+   windows in a 2400px viewport and left half the width empty.
+   The x-axis runs through NOW into the future — this feed's point is that
+   upgrades are PENDING — and everything right of the now-line is hatched so
+   "scheduled" can never be misread as "happened". */
+.tlx-next {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 10px 14px; margin-bottom: 14px;
+    border: 1px solid rgba(59, 130, 246, 0.32); border-radius: var(--radius-md);
+    background: linear-gradient(90deg, rgba(59, 130, 246, 0.13), rgba(59, 130, 246, 0.02));
+}
+.tlx-next-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-hover); box-shadow: 0 0 8px var(--accent-hover); animation: live-pulse 2s ease-in-out infinite; flex-shrink: 0; }
+.tlx-next-label { font-size: 10px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: #93c5fd; }
+.tlx-next-count { font-size: 16px; font-weight: 700; color: #6ee7b7; font-variant-numeric: tabular-nums; }
+.tlx-next-title { font-size: 12.5px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 
-/* spine items: dot on the line, card on one side */
-.tl-item { position: relative; display: flex; }
-.tl-item.left { justify-content: flex-start; }
-.tl-item.right { justify-content: flex-end; }
-/* color carries urgency; currentColor lets the upcoming glow match the fill */
-.tl-dot { position: absolute; left: 50%; top: 26px; width: 10px; height: 10px; border-radius: 50%; transform: translateX(-50%); z-index: 1; background: currentColor; color: var(--accent); /* standard / unknown */ }
-.tl-dot.urg-mandatory { color: var(--bad); }
-.tl-dot.urg-urgent { color: var(--color-testnet); }
-.tl-item.upcoming .tl-dot { box-shadow: 0 0 7px currentColor; animation: live-pulse 2s ease-in-out infinite; }
+.tlx-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.tlx-tab { display: flex; align-items: baseline; gap: 7px; background: rgba(255, 255, 255, 0.04); border: 1px solid transparent; border-radius: 999px; padding: 6px 14px; cursor: pointer; color: var(--text-muted); }
+.tlx-tab:hover { background: rgba(255, 255, 255, 0.07); color: var(--text-main); }
+.tlx-tab.active { background: rgba(59, 130, 246, 0.16); border-color: rgba(59, 130, 246, 0.45); color: #dbeafe; }
+.tlx-tab-label { font-size: 12px; font-weight: 600; }
+.tlx-tab-count { font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; opacity: 0.85; }
 
-.tl-card { position: relative; width: 46%; padding: 18px 20px; border-radius: var(--radius-md); }
-.tl-card-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; padding-right: 64px; }
-/* the WHEN is the card's headline: big countdown (upcoming) or date (past) */
-.tl-when { font-size: 20px; font-weight: 650; letter-spacing: -0.02em; white-space: nowrap; }
-.tl-countdown { color: #6ee7b7; }
-.tl-when-past { color: var(--text-main); }
-.tl-when-sub { font-size: 11px; flex-basis: 100%; }
-.pill.urg-mandatory { background: rgba(239, 68, 68, 0.22); color: #fca5a5; }
-.pill.urg-urgent { background: rgba(245, 158, 11, 0.2); color: #fcd34d; }
-.pill.urg-standard { background: rgba(130, 130, 150, 0.24); color: var(--text-muted); }
-.tl-title { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 14px; font-weight: 600; min-width: 0; }
-.tl-title a, .tl-title > span:last-child { color: var(--text-main); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tl-title a:hover { color: var(--accent-hover); }
-.tl-meta { font-size: 12px; margin-top: 6px; }
-.tl-software { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 10px; }
+.tlx-chart-wrap {
+    --tlx-accent: #60a5fa;
+    position: relative; padding: 34px 0 0;
+    border: 1px solid var(--panel-border); border-radius: var(--radius-md);
+    background: rgba(255, 255, 255, 0.015); overflow: hidden;
+}
+.tlx-chart { position: relative; height: 150px; }
+.tlx-svg { display: block; width: 100%; height: 150px; }
+.tlx-nowline { stroke: #6ee7b7; stroke-width: 1.5px; stroke-dasharray: 4 3; opacity: 0.85; }
+
+/* Pins sit in the padding above the chart; each drops a stem to the axis
+   position of its window. Only the noteworthy ones are pinned (fallout first),
+   spaced apart so the badges stay legible. */
+.tlx-pins { position: absolute; top: 0; left: 0; right: 0; height: 34px; pointer-events: none; }
+.tlx-pin { position: absolute; top: 2px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; pointer-events: auto; }
+.tlx-pin.dim { opacity: 0.4; }
+.tlx-pin-badge { font-size: 9.5px; font-weight: 800; letter-spacing: 0.02em; padding: 2px 6px; border-radius: 5px; white-space: nowrap; background: rgba(59, 130, 246, 0.9); color: #04101f; }
+.tlx-pin-badge.urg-urgent { background: #fbbf24; color: #241a00; }
+.tlx-pin-badge.urg-mandatory, .tlx-pin-badge.urg-critical { background: var(--bad); color: #fff; }
+.tlx-pin-stem { width: 1px; height: 14px; background: linear-gradient(180deg, rgba(255, 255, 255, 0.35), transparent); }
+
+/* Severity ribbon — one blob per window, AppControl's temperature strip
+   carrying urgency instead of heat. */
+.tlx-heat { position: relative; height: 16px; border-top: 1px solid var(--panel-border); background: rgba(255, 255, 255, 0.02); }
+.tlx-blob { position: absolute; top: 5px; width: 6px; height: 6px; border-radius: 50%; transform: translateX(-50%); background: var(--accent); opacity: 0.75; }
+.tlx-blob.urg-urgent { background: var(--color-testnet); }
+.tlx-blob.urg-mandatory, .tlx-blob.urg-critical { background: var(--bad); }
+.tlx-blob.has-fallout { box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.3); }
+
+.tlx-axis { position: relative; height: 24px; border-top: 1px solid var(--panel-border); }
+.tlx-tick { position: absolute; top: 5px; transform: translateX(-50%); font-size: 10px; color: var(--text-muted); white-space: nowrap; }
+.tlx-tick:first-child { transform: none; left: 6px !important; }
+.tlx-tick-end { transform: translateX(-100%); margin-left: -4px; }
+.tlx-tick-now { color: #6ee7b7; font-weight: 700; }
+
+.tlx-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 14px 0 10px; }
+.tlx-range { display: flex; gap: 4px; background: rgba(255, 255, 255, 0.04); border-radius: 999px; padding: 3px; }
+.tlx-range-btn { background: none; border: none; color: var(--text-muted); font-size: 11.5px; font-weight: 650; padding: 5px 12px; border-radius: 999px; cursor: pointer; }
+.tlx-range-btn:hover { color: var(--text-main); }
+.tlx-range-btn.active { background: rgba(255, 255, 255, 0.1); color: var(--text-main); }
+.tlx-sort { margin-left: auto; font-size: 11.5px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
+.tlx-sort select { background: var(--panel-solid); border: 1px solid var(--panel-border); border-radius: var(--radius-sm); color: var(--text-main); font-size: 11.5px; padding: 5px 8px; outline: none; cursor: pointer; }
+.tlx-sort select:focus { border-color: var(--accent); }
+
+/* ─── Rows ─── */
+.tlx-rows { display: flex; flex-direction: column; }
+.tlx-daybreak { font-size: 10px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); padding: 16px 0 7px; }
+.tlx-row { border: 1px solid var(--panel-border); border-radius: var(--radius-md); background: rgba(255, 255, 255, 0.02); margin-bottom: 6px; }
+.tlx-row:hover { background: rgba(255, 255, 255, 0.045); }
+.tlx-row.pending { border-color: rgba(59, 130, 246, 0.28); background: rgba(59, 130, 246, 0.05); }
+.tlx-row.has-fallout { box-shadow: inset 3px 0 0 var(--bad); }
+.tlx-row-head { position: relative; display: flex; align-items: center; gap: 11px; padding: 11px 14px; min-width: 0; }
+.tlx-row-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--accent); }
+.tlx-row-dot.urg-urgent { background: var(--color-testnet); }
+.tlx-row-dot.urg-mandatory, .tlx-row-dot.urg-critical { background: var(--bad); }
+.tlx-row.pending .tlx-row-dot { box-shadow: 0 0 7px currentColor; animation: live-pulse 2s ease-in-out infinite; }
+.tlx-when { flex-shrink: 0; width: 92px; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; color: #6ee7b7; }
+.tlx-when.past { color: var(--text-muted); font-weight: 600; }
+.tlx-row-main { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
+.tlx-row-title { font-size: 13px; font-weight: 600; color: var(--text-main); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+a.tlx-row-title:hover { color: var(--accent-hover); }
+.tlx-row-sub { flex-shrink: 0; font-size: 11px; }
+.tlx-row-chips { display: flex; gap: 5px; flex-shrink: 0; }
 .sw-chip { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 6px; background: rgba(139, 92, 246, 0.16); color: #c4b5fd; }
-/* footer: linked fallout + discussion/coverage, visually separated */
-.tl-foot { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--panel-border); }
+.tlx-chip-dim { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 6px; background: rgba(255, 255, 255, 0.06); color: var(--text-muted); }
+.tlx-chip-fallout { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 6px; background: rgba(239, 68, 68, 0.16); color: #fca5a5; }
+.tlx-row-toggle { flex-shrink: 0; background: none; border: 1px solid var(--panel-border); border-radius: 6px; color: var(--text-muted); font-size: 10.5px; font-weight: 650; padding: 3px 9px; cursor: pointer; }
+.tlx-row-toggle:hover { color: var(--text-main); border-color: rgba(255, 255, 255, 0.2); }
+.tlx-row-detail { padding: 0 14px 11px 46px; }
+.tlx-row .report-wrap { flex-shrink: 0; margin-top: 0; }
+
 .tl-fallout, .tl-context { display: flex; align-items: baseline; gap: 7px; margin-top: 4px; font-size: 12px; min-width: 0; }
 .tl-fallout a, .tl-context a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tl-fallout .muted, .tl-context .muted { flex-shrink: 0; font-size: 11px; }
 .tl-fallout-arrow { color: var(--bad); flex-shrink: 0; }
 .tl-context-kind { flex-shrink: 0; font-size: 9px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); }
-/* the ⚑ rides the card corner; its form still unfolds in-flow below */
-.tl-card .report-btn { position: absolute; top: 16px; right: 16px; }
 
-/* single column: spine on the left, all cards to its right */
+/* Below ~820px the row collapses to two lines: time + title, then meta. The
+   chart keeps its full width — it is the part that benefits most from it. */
 @media (max-width: 820px) {
-    .tl-wrap::before { left: 14px; margin-left: 0; }
-    .tl-heading { justify-content: flex-start; }
-    .tl-heading-inner { padding-left: 0; }
-    .tl-now { justify-content: flex-start; }
-    .tl-now-label { margin-left: 0; }
-    .tl-item.left, .tl-item.right { justify-content: flex-start; padding-left: 38px; }
-    .tl-dot { left: 14px; transform: translateX(-50%); }
-    .tl-card { width: 100%; }
-    .tl-list .feed-empty { margin-left: 38px; }
+    .tlx-row-head { flex-wrap: wrap; gap: 8px 10px; }
+    .tlx-when { width: auto; }
+    .tlx-row-main { flex-basis: 100%; order: 3; }
+    .tlx-row-sub { display: none; }
+    .tlx-row-chips { flex-wrap: wrap; }
+    .tlx-row-detail { padding-left: 14px; }
+    .tlx-sort { margin-left: 0; }
 }
 
 /* ─── Report-wrong-info affordance (⚑ on timeline + incident cards) ─── */

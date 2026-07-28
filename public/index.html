@@ -202,23 +202,36 @@
                 <span class="src-pill" id="timelineMeta"></span>
             </h2>
             <p class="view-lead">Scheduled network upgrades and maintenance windows, cross-linked with the
-                other feeds. Upcoming windows count down to activation with the software they require;
-                past ones show the incidents that followed on the same network (suspected, never asserted)
-                and the forum discussion / news coverage around them. Spot something wrong? Flag it with
-                the ⚑ on any card.</p>
+                other feeds. The chart runs left to right through <em>now</em> — the hatched half is
+                scheduled, not yet happened. Rows carry the software each window requires, the incidents
+                that followed on the same network (suspected, never asserted) and the forum discussion /
+                news coverage around them. Spot something wrong? Flag it with the ⚑ on any row.</p>
 
-            <!-- Center-spine timeline: a vertical line down the middle, cards
-                 alternating left/right of it (single column under 820px), a
-                 "now" tick between the upcoming and recent halves. -->
-            <div class="tl-wrap" id="timelineWrap">
-                <h2 class="tl-heading"><span class="tl-heading-inner">Upcoming <span class="tl-count" id="timelineUpcomingCount"></span></span></h2>
-                <div id="timelineUpcoming" class="tl-list"><div class="feed-empty">Loading upgrade timeline…</div></div>
+            <!-- Pending-window banner: the one fact a visitor most often wants
+                 ("is anything about to happen?"), lifted out of the list. -->
+            <div class="tlx-next" id="timelineNextNotice" hidden></div>
 
-                <div class="tl-now"><span class="tl-now-label">now</span></div>
+            <!-- Stream tabs, density chart and range control. The chart's x-axis
+                 is real time and spans into the future; the tabs slice the same
+                 set the chart draws, so counts and picture never disagree. -->
+            <div class="tlx-tabs" id="timelineTabs"></div>
 
-                <h2 class="tl-heading"><span class="tl-heading-inner">Recent <span class="tl-count" id="timelineRecentCount"></span></span></h2>
-                <div id="timelineRecent" class="tl-list"></div>
+            <div class="tlx-chart-wrap" id="timelineChartWrap">
+                <div class="tlx-pins" id="timelinePins"></div>
+                <div class="tlx-chart" id="timelineChart"></div>
+                <div class="tlx-heat" id="timelineHeat"></div>
+                <div class="tlx-axis" id="timelineAxis"></div>
             </div>
+
+            <div class="tlx-toolbar">
+                <div class="tlx-range" id="timelineRange"></div>
+                <span class="toolbar-count" id="timelineCount"></span>
+                <label class="tlx-sort">Sort by
+                    <select id="timelineSort" aria-label="Sort timeline windows"></select>
+                </label>
+            </div>
+
+            <div id="timelineRows" class="tlx-rows"><div class="feed-empty">Loading upgrade timeline…</div></div>
         </div>
     </section>
 

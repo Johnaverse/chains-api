@@ -99,8 +99,10 @@ describe('buildProviderStats — per-provider metrics', () => {
     const events = [
       anchor(),
       ev({ incidentId: 'q:1', publishedMs: NOW - 5 * DAY, status: 'investigating', ongoing: true }),
-      ev({ incidentId: 'q:2', publishedMs: NOW - 3 * DAY, status: 'maintenance_scheduled' }),
-      ev({ incidentId: 'q:3', publishedMs: NOW - 1 * DAY, status: 'maintenance_completed' })
+      // Distinct titles: same-titled maintenance entries are one rollout
+      // (a provider's announcement and its window carry different GUIDs).
+      ev({ incidentId: 'q:2', title: 'Upgrade to v2', publishedMs: NOW - 3 * DAY, status: 'maintenance_scheduled' }),
+      ev({ incidentId: 'q:3', title: 'Upgrade to v3', publishedMs: NOW - 1 * DAY, status: 'maintenance_completed' })
     ];
     const q = buildProviderStats(events, { now: NOW }).providers.find((p) => p.id === 'quicknode');
     expect(q.incidents30d).toBe(1);
@@ -131,7 +133,65 @@ describe('buildProviderStats — per-provider metrics', () => {
       ev({ incidentId: 'q:c', publishedMs: NOW - 1 * DAY, status: 'investigating' })
     ];
     const q = buildProviderStats(events, { now: NOW }).providers.find((p) => p.id === 'quicknode');
-    expect(q.resolutionHours).toEqual({ median: 4, avg: 4 });
+    expect(q.resolutionHours).toEqual({ median: 4, avg: 4, samples: 2 });
+    // Two of the three incidents showed both ends; the UI needs that ratio to
+    // decide whether the median is a rate or an anecdote.
+    expect(q.disclosure.resolutionTracked).toBeCloseTo(0.67, 2);
+  });
+
+  it('does not treat a resolved-only incident as resolved in 0h', () => {
+    // Most providers publish a history RSS carrying ONLY the final "resolved"
+    // entry. Measuring first->resolved across those yields 0h and rendered as a
+    // confident "~0h resolves in (median)" on nine of ten live provider cards.
+    const events = [
+      anchor(),
+      ev({ incidentId: 'q:only', publishedMs: NOW - 3 * DAY, status: 'resolved' }),
+      ev({ incidentId: 'q:only2', publishedMs: NOW - 4 * DAY, status: 'resolved' })
+    ];
+    const q = buildProviderStats(events, { now: NOW }).providers.find((p) => p.id === 'quicknode');
+    expect(q.resolutionHours).toBeNull();
+    expect(q.disclosure.resolutionTracked).toBe(0);
+  });
+
+  it('marks a provider comparable only with both a chain list and posted incidents', () => {
+    const events = [
+      anchor(),
+      ev({ incidentId: 'q:a', publishedMs: NOW - 2 * DAY, status: 'investigating' })
+    ];
+    const pages = [
+      { id: 'quicknode', name: 'QuickNode', kind: 'rpc-provider', coverage: { chainsListed: 10 } },
+      // Publishes a chain list but has posted nothing: a silent page scores a
+      // meaningless 100%, so it must not rank against pages that do report.
+      { id: 'silent', name: 'Silent', kind: 'rpc-provider', coverage: { chainsListed: 40 } }
+    ];
+    const { providers } = buildProviderStats(events, { statusPages: pages, now: NOW });
+    expect(providers.find((p) => p.id === 'quicknode').disclosure.comparable).toBe(true);
+    expect(providers.find((p) => p.id === 'silent').disclosure).toMatchObject({
+      comparable: false, postsIncidents: false, publishesChainCoverage: true
+    });
+  });
+
+  it('spreads an incident\'s chain-hours across the days it burned, counting it once', () => {
+    const events = [
+      anchor(),
+      // Two chains down for 48h, ending 24h ago.
+      ev({
+        incidentId: 'q:long', publishedMs: NOW - 3 * DAY, status: 'investigating',
+        chains: [{ chainId: 1, name: 'Ethereum' }, { chainId: 10, name: 'Optimism' }]
+      }),
+      ev({
+        incidentId: 'q:long', publishedMs: NOW - 1 * DAY, status: 'resolved',
+        chains: [{ chainId: 1, name: 'Ethereum' }, { chainId: 10, name: 'Optimism' }]
+      })
+    ];
+    const q = buildProviderStats(events, { now: NOW }).providers.find((p) => p.id === 'quicknode');
+    const days = q.dailySeries;
+    expect(days).toHaveLength(30);
+    // Counted as ONE incident on the day it opened, not once per day it ran.
+    expect(days.reduce((n, d) => n + d.incidents, 0)).toBe(1);
+    // 48h x 2 chains = 96 chain-hours, spread over the days it actually burned.
+    expect(days.reduce((n, d) => n + d.chainHoursLost, 0)).toBeCloseTo(96, 1);
+    expect(days.filter((d) => d.chainHoursLost > 0).length).toBeGreaterThan(1);
   });
 
   it('reports resolutionHours null when no incident resolved', () => {
@@ -216,7 +276,7 @@ describe('buildProviderStats — chain-weighted availability', () => {
     const events = [
       anchor(),
       // Provider-wide/dashboard incident: no chain attribution possible.
-      ev({ incidentId: 'q:wide', publishedMs: NOW - 6 * HOUR, status: 'investigating', chains: [] })
+      ev({ incidentId: 'q:wide', publishedMs: NOW - 6 * HOUR, status: 'investigating', ongoing: true, chains: [] })
     ];
     const q = buildProviderStats(events, { statusPages: qnPage(10), now: NOW }).providers.find((p) => p.id === 'quicknode');
     expect(q.availability.last24h).toEqual({ percent: 97.5, chainHoursLost: 6 }); // 1 - 6/240
@@ -242,7 +302,7 @@ describe('buildProviderStats — chain-weighted availability', () => {
   it('coverage unavailable → null percents with a note (never a registry fallback)', () => {
     const events = [
       anchor(),
-      ev({ incidentId: 'q:down', publishedMs: NOW - 6 * HOUR, status: 'investigating' })
+      ev({ incidentId: 'q:down', publishedMs: NOW - 6 * HOUR, status: 'investigating', ongoing: true })
     ];
     const q = buildProviderStats(events, { now: NOW }).providers.find((p) => p.id === 'quicknode');
     expect(q.availability.chainsSupported).toBeNull();
@@ -260,7 +320,37 @@ describe('buildProviderStats — chain-weighted availability', () => {
     const result = buildProviderStats(events, { statusPages: qnPage(10), now: NOW });
     expect(result.oldestEventAt).toBe(new Date(NOW - 3 * DAY).toISOString());
     const q = result.providers.find((p) => p.id === 'quicknode');
-    expect(q.availability.note).toBe('partial window');
+    expect(q.availability.note).toContain('partial window');
+  });
+
+  it('excludes an incident whose duration the page never published', () => {
+    // The dominant live shape: 143 of 149 incidents appear exactly once, at
+    // resolution. Charging them "until now" turned a July 7 outage into three
+    // weeks of current downtime and put Infura at 96% for a quiet day.
+    const events = [
+      anchor(),
+      ev({ incidentId: 'q:old', publishedMs: NOW - 20 * DAY, status: 'resolved', ongoing: false }),
+      ev({ incidentId: 'q:old2', publishedMs: NOW - 2 * DAY, status: 'resolved', ongoing: false })
+    ];
+    const q = buildProviderStats(events, { statusPages: qnPage(10), now: NOW }).providers.find((p) => p.id === 'quicknode');
+    expect(q.availability.last24h.chainHoursLost).toBe(0);
+    expect(q.availability.last30d.chainHoursLost).toBe(0);
+    expect(q.availability.last30d.percent).toBe(100);
+    expect(q.availability.measuredIncidents).toBe(0);
+    expect(q.availability.unknownDurationIncidents).toBe(2);
+    expect(q.availability.note).toContain('2 incidents of unpublished duration excluded');
+    // The incidents themselves are still counted and still shown.
+    expect(q.incidents30d).toBe(2);
+  });
+
+  it('still charges an incident the feed marks ongoing, right up to now', () => {
+    const events = [
+      anchor(),
+      ev({ incidentId: 'q:live', publishedMs: NOW - 6 * HOUR, status: 'investigating', ongoing: true })
+    ];
+    const q = buildProviderStats(events, { statusPages: qnPage(10), now: NOW }).providers.find((p) => p.id === 'quicknode');
+    expect(q.availability.last24h.chainHoursLost).toBe(6);
+    expect(q.availability.measuredIncidents).toBe(1);
   });
 
   it('a silent provider (coverage present, zero events) self-reports a perfect 100 in every window', () => {
