@@ -127,6 +127,23 @@ describe('buildProviderStats — per-provider metrics', () => {
     expect(q.oldestOngoingAt).toBe(new Date(NOW - 3 * HOUR).toISOString());
   });
 
+  it('never loses an ongoing event whose status is in neither set', () => {
+    // The two status sets do not cover what the feed emits: `status` is passed through
+    // unvalidated and `unknown` is 178 of 438 live events. Partitioning on both sets alone
+    // let such an event vanish from ongoingNow AND ongoingMaintenance, so the caption read
+    // "no open incidents" while it was burning.
+    const events = [
+      anchor(),
+      ev({ incidentId: 'q:weird', title: 'Something is wrong', publishedMs: NOW - 4 * HOUR, status: 'unknown', ongoing: true }),
+      ev({ incidentId: 'q:null', title: 'Unlabelled', publishedMs: NOW - 2 * HOUR, status: null, ongoing: true })
+    ];
+    const q = buildProviderStats(events, { now: NOW }).providers.find((p) => p.id === 'quicknode');
+    expect(q.ongoingNow).toBe(2);
+    expect(q.ongoingMaintenance).toBe(0);
+    // And it still anchors "longest open", so the duration is not silently lost either.
+    expect(q.oldestOngoingAt).toBe(new Date(NOW - 4 * HOUR).toISOString());
+  });
+
   it('still counts an incident as ongoing when it started before the window', () => {
     const events = [
       ev({ incidentId: 'q:stuck', publishedMs: NOW - 40 * DAY, status: 'investigating', ongoing: true })
