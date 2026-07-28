@@ -295,6 +295,8 @@ a:hover { text-decoration: underline; }
 .pb-caption-note + .pb-caption-note { margin-top: 5px; }
 .pill-ongoing { background: rgba(239, 68, 68, 0.16); color: #fca5a5; }
 .pill-quiet { background: rgba(16, 185, 129, 0.14); color: #6ee7b7; }
+/* planned work in progress — deliberately not the incident red */
+.pill-maint { background: rgba(139, 92, 246, 0.18); color: #c4b5fd; }
 .pill.sm { font-size: 10px; padding: 1px 7px; }
 
 .pb-scroll { border: 1px solid var(--panel-border); border-radius: var(--radius-md); overflow-x: auto; background: rgba(255, 255, 255, 0.015); }

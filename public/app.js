@@ -1219,6 +1219,7 @@ function renderProviderBoard() {
 function providerBoardCaption(data, provs, days) {
     const withCoverage = provs.filter(p => p.chainsSupported != null).length;
     const ongoing = provs.reduce((n, p) => n + (p.ongoingNow || 0), 0);
+    const inMaint = provs.reduce((n, p) => n + (p.ongoingMaintenance || 0), 0);
     // How much of the incident history had a duration at all. Most status pages
     // publish an incident exactly once, at resolution, so its start — and
     // therefore its cost — is unknowable. Those are excluded from availability
@@ -1229,8 +1230,9 @@ function providerBoardCaption(data, provs, days) {
         el('div', { class: 'pb-caption-head' }, [
             el('h3', { class: 'pb-caption-title', text: 'Provider performance' }),
             ongoing > 0
-                ? el('span', { class: 'pill pill-ongoing', text: `${ongoing} ongoing now` })
-                : el('span', { class: 'pill pill-quiet', text: 'nothing ongoing' })
+                ? el('span', { class: 'pill pill-ongoing', text: `${ongoing} incident${ongoing === 1 ? '' : 's'} open now` })
+                : el('span', { class: 'pill pill-quiet', text: 'no open incidents' }),
+            inMaint > 0 ? el('span', { class: 'pill pill-maint', text: `${inMaint} maintenance running` }) : null
         ]),
         el('p', { class: 'pb-caption-note muted' }, [
             el('strong', { text: 'Self-reported. ' }),
@@ -1312,7 +1314,10 @@ function providerRow(p, columns) {
     return el('tr', { class: `pb-row${p.ongoingNow > 0 ? ' pb-ongoing' : ''}` }, [
         el('td', { class: 'pb-left pb-name' }, [
             el('span', { class: 'pb-name-main', text: p.name || p.id }),
+            // Red is reserved for real incidents. A window running to schedule
+            // is planned work and gets a neutral chip, not an alarm.
             p.ongoingNow > 0 ? el('span', { class: 'pill pill-ongoing sm', text: `${p.ongoingNow} ongoing` }) : null,
+            p.ongoingMaintenance > 0 ? el('span', { class: 'pill pill-maint sm', title: 'Scheduled maintenance in progress — planned, not an outage.', text: `${p.ongoingMaintenance} in maintenance` }) : null,
             !d.publishesChainCoverage ? el('span', { class: 'pb-flag', title: 'This status page exposes no machine-readable chain list, so no availability denominator exists.', text: 'no coverage' }) : null
         ]),
         availCell,
