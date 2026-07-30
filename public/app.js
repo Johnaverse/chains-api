@@ -2778,15 +2778,66 @@ function assistantStepsFrom(data) {
     return null;
 }
 
+/* ─── LLM loading state — pixel-grid loader for long-running work ───
+   Ported from a React/Tailwind original to this page's idiom: no build step, so
+   the grid is built with el() and the per-cell delays go through the CSSOM (a
+   style ATTRIBUTE is dropped under `style-src 'self'`). Tailwind's --ink/--ink-3
+   map onto this palette's --text-main/--text-muted.
+
+   Variants:
+     drive — square cells, chevron wavefront driving right; the 650ms cycle is
+             shorter than the sweep, so two fronts are always in flight
+     dots  — same wavefront, circular cells
+     orbit — a comet lapping the grid perimeter
+
+   Reduced motion freezes the grid to its dim state (see style.css); the elapsed
+   timer still ticks, because that is information rather than decoration. */
+const CHEVRON_DELAYS = Array.from({ length: 9 }, (_, i) => {
+    const r = Math.floor(i / 3), c = i % 3;
+    return (c + Math.abs(r - 1)) * 90;
+});
+
+const ORBIT_ORDER = [0, 1, 2, 5, 8, 7, 6, 3];
+const ORBIT_DELAYS = Array.from({ length: 9 }, (_, i) => {
+    const k = ORBIT_ORDER.indexOf(i);
+    return k === -1 ? null : k * 110;   // null = the centre cell, which never lights
+});
+
+const LOADER_PATTERNS = {
+    drive: { delays: CHEVRON_DELAYS, dur: 650, round: false },
+    dots: { delays: CHEVRON_DELAYS, dur: 650, round: true },
+    orbit: { delays: ORBIT_DELAYS, dur: 950, round: false }
+};
+
+function pixelLoader(variant = 'drive') {
+    const { delays, dur, round } = LOADER_PATTERNS[variant] ?? LOADER_PATTERNS.drive;
+    return el('span', { class: 'pixel-grid', 'aria-hidden': 'true' }, delays.map(d => el('span', {
+        class: `pixel-cell${round ? ' round' : ''}`,
+        style: d === null
+            ? { opacity: '0.07' }
+            : { opacity: '0.15', animation: `pixel-on ${dur}ms ease-in-out ${d}ms infinite` }
+    })));
+}
+
+// Tenths of a second, then minutes past 60s. Deliberately finer than the whole
+// seconds this used to show: a run here regularly takes one to three minutes,
+// and a figure that visibly moves is the difference between "working" and
+// "stuck" — the single most common question during a long answer.
+function fmtElapsed(ms) {
+    const total = ms / 1000;
+    if (total < 60) return `${total.toFixed(1)}s`;
+    return `${Math.floor(total / 60)}m ${(total % 60).toFixed(1)}s`;
+}
+
 function appendChatThinking() {
     const log = document.getElementById('assistantLog');
     const trace = el('div', { class: 'chat-trace hidden' });
     const elapsed = el('span', { class: 'chat-elapsed' });
+    // The label carries what is happening NOW; the trace below carries what is
+    // already done. Before, the current step appeared in both.
+    const label = el('span', { class: 'chat-shimmer', text: 'Thinking' });
     const bubble = el('div', { class: 'chat-bubble assistant chat-thinking', 'aria-label': 'Assistant is thinking' }, [
-        el('div', { class: 'chat-dots-row' }, [
-            el('div', { class: 'chat-dots' }, [el('span'), el('span'), el('span')]),
-            elapsed
-        ]),
+        el('div', { class: 'chat-dots-row' }, [pixelLoader('drive'), label, elapsed]),
         trace
     ]);
     log.appendChild(bubble);
@@ -2795,9 +2846,9 @@ function appendChatThinking() {
     // Elapsed timer; cleared deterministically by wrapping remove() — every
     // exit path in sendAssistantMessage goes through thinking.remove().
     const startedAt = Date.now();
-    const timer = setInterval(() => {
-        elapsed.textContent = `${Math.round((Date.now() - startedAt) / 1000)}s`;
-    }, 1000);
+    const tick = () => { elapsed.textContent = fmtElapsed(Date.now() - startedAt); };
+    tick();   // paint 0.0s immediately rather than showing an empty slot for the first tick
+    const timer = setInterval(tick, 100);
     const baseRemove = bubble.remove.bind(bubble);
     bubble.remove = () => { clearInterval(timer); baseRemove(); };
 
@@ -2817,19 +2868,22 @@ function appendChatThinking() {
         // Only auto-scroll if the user is already at the bottom — never yank
         // them away from history they scrolled up to read.
         const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 48;
+        // The newest step is the one in flight — it becomes the shimmering label,
+        // so it is not also listed below. The shimmer says "in progress" better
+        // than the animated ellipsis it replaces.
+        if (last.label) label.textContent = last.label;
         trace.textContent = '';
-        steps.forEach((s, i) => {
-            const current = i === steps.length - 1;
-            const durMs = !current && s.at != null && steps[i + 1]?.at != null ? steps[i + 1].at - s.at : null;
-            const text = current ? `${s.label}…`
-                : durMs != null && durMs >= 100 ? `${s.label} (${(durMs / 1000).toFixed(1)}s)`
-                : s.label;
-            trace.appendChild(el('div', { class: `chat-trace-step${current ? ' active' : ' done'}` }, [
-                el('span', { class: 'chat-trace-mark', text: current ? '›' : '✓' }),
+        steps.slice(0, -1).forEach((s, i) => {
+            const durMs = s.at != null && steps[i + 1]?.at != null ? steps[i + 1].at - s.at : null;
+            const text = durMs != null && durMs >= 100 ? `${s.label} (${(durMs / 1000).toFixed(1)}s)` : s.label;
+            trace.appendChild(el('div', { class: 'chat-trace-step done' }, [
+                el('span', { class: 'chat-trace-mark', text: '✓' }),
                 el('span', { text })
             ]));
         });
-        trace.classList.remove('hidden');
+        // Nothing finished yet on the first step, so an empty trace stays hidden
+        // rather than opening an empty box under the label.
+        trace.classList.toggle('hidden', trace.childElementCount === 0);
         if (nearBottom) log.scrollTop = log.scrollHeight;
     };
     return bubble;
