@@ -76,6 +76,11 @@ function fmtUsd(n) {
 }
 function fmtDuration(ms) {
     if (!ms || ms < 0) return null;
+    // Seconds below a minute. Rounding everything to minutes rendered a 35-second
+    // outage as "1m" and a 3-second step gap as "0m" — and uptime-monitor
+    // incidents are routinely tens of seconds long (Abstract's Portal recovered in
+    // 35s on Jul 20 and 3m on Jul 29).
+    if (ms < 60000) return `${Math.max(1, Math.round(ms / 1000))}s`;
     const m = Math.round(ms / 60000);
     if (m < 60) return `${m}m`;
     const h = Math.floor(m / 60);
@@ -736,6 +741,15 @@ const SERVER_STATUS_LABEL = {
     operational: 'Operational', degraded: 'Degraded', partial_outage: 'Partial outage', major_outage: 'Major outage'
 };
 const SCHEDULED_STATUSES = new Set(['maintenance_scheduled', 'maintenance_in_progress', 'maintenance_completed']);
+
+// The CSS token for a status label ('In progress' -> 'inprogress'). Shared by the
+// status pill and the timeline dot so the two cannot key on different strings —
+// the dot palette was originally written against the feed's raw enum
+// ('major_outage') while parseIncidentStatus returns a LABEL ('Major outage'),
+// which left every maintenance step grey.
+function statusToken(status) {
+    return status ? String(status).toLowerCase().replace(/\s+/g, '') : null;
+}
 const incidents = {
     items: [], byKey: new Map(), ws: null, retries: 0, groupBy: 'flat', dayFilter: null, category: 'all',
     // LLM enrichment (chains-status-news two-phase delivery): raw items arrive as
@@ -825,11 +839,15 @@ function incidentKey(ev) {
 const MAX_TRANSITIONS = 24;
 
 // Merge one event into an incident's ordered transition list, newest last and
-// deduped by event id (a re-broadcast must not double the timeline).
+// deduped so a re-broadcast cannot double the timeline. addIncidents runs for
+// both the REST fetch and the WS replay, so the same event genuinely arrives
+// twice; an event with no id falls back to its timestamp+title rather than
+// skipping dedup entirely.
 function addTransition(list, ev, ms) {
     if (ms == null) return list;
-    if (ev.id && list.some(t => t.id === ev.id)) return list;
-    list.push({ id: ev.id ?? null, ms, title: ev.title || '', status: parseIncidentStatus(ev) });
+    const id = ev.id ?? `${ms}|${ev.title || ''}`;
+    if (list.some(t => t.id === id)) return list;
+    list.push({ id, ms, title: ev.title || '', status: parseIncidentStatus(ev) });
     list.sort((a, b) => a.ms - b.ms);
     if (list.length > MAX_TRANSITIONS) list.splice(0, list.length - MAX_TRANSITIONS);
     return list;
@@ -1062,7 +1080,7 @@ function incidentCard(it) {
     // inject stray classes); the raw value is still shown as the pill's text.
     const sevClass = enr?.severity ? String(enr.severity).toLowerCase().replace(/[^a-z]/g, '') : null;
     if (sevClass) side.push(el('span', { class: `pill sev-${sevClass}`, text: enr.severity }));
-    if (it.status) side.push(el('span', { class: `pill st-${it.status.toLowerCase().replace(/\s+/g, '')}`, text: it.status }));
+    if (it.status) side.push(el('span', { class: `pill st-${statusToken(it.status)}`, text: it.status }));
     // A duration measured between two published states is a fact; one read out of an
     // entry's prose is a claim. Mark the weaker one rather than showing both as the
     // same number — this pill used to read "9d 11h" for a three-minute outage.
@@ -1130,16 +1148,32 @@ function incidentCard(it) {
 function incidentTimeline(it) {
     const steps = it.transitions;
     if (!Array.isArray(steps) || steps.length < 2) return null;
+    // Atlassian incidents keep ONE title across every update, so stripping the
+    // shared subject would leave the same single word on every row ("errors",
+    // "errors", ...). When the titles never change, the STATUS is what changed.
+    const first = (steps[0].title || '').trim().toLowerCase();
+    const uniformTitle = steps.every(step => (step.title || '').trim().toLowerCase() === first);
+    const startedDay = new Date(steps[0].ms).toDateString();
     const rows = steps.map((step, i) => {
         const prev = i > 0 ? steps[i - 1] : null;
         // Elapsed since the PREVIOUS step, so a long gap between "identified" and
         // "resolved" is visible rather than buried in two absolute timestamps.
         const gap = prev ? fmtDuration(step.ms - prev.ms) : null;
-        const statusClass = step.status ? String(step.status).toLowerCase().replace(/[^a-z]/g, '') : 'unknown';
+        const when = new Date(step.ms);
+        // A multi-day incident would otherwise show two bare clock times three days
+        // apart and read as an hour.
+        const sameDay = when.toDateString() === startedDay;
+        const stamp = sameDay
+            ? when.toLocaleTimeString()
+            : `${when.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${when.toLocaleTimeString()}`;
+        const label = uniformTitle
+            ? (step.status || step.title || '—')
+            : stripLifecycleSubject(step.title, it.openedTitle);
+        const token = statusToken(step.status);
         return el('li', { class: 'tl-step' }, [
-            el('span', { class: `tl-dot tl-dot-${statusClass}` }),
-            el('span', { class: 'tl-time', text: new Date(step.ms).toLocaleTimeString() }),
-            el('span', { class: 'tl-label', text: stripLifecycleSubject(step.title, it.openedTitle) }),
+            el('span', { class: `tl-dot${token ? ` st-${token}` : ''}` }),
+            el('span', { class: 'tl-time', text: stamp }),
+            el('span', { class: 'tl-label', text: label }),
             gap ? el('span', { class: 'tl-gap', text: `+${gap}` }) : null
         ]);
     });
