@@ -14,6 +14,9 @@ function ev(overrides = {}) {
     ongoing: false,
     impact: null,
     incidentId: 'quicknode:aaa',
+    // Window evidence: without it the activation is unknown and correlation is (correctly)
+    // impossible, so every fallout/context fixture needs it.
+    isWindowEntry: true,
     software: [{ client: 'nethermind', version: '1.39.2' }],
     urgency: 'standard',
     networkNames: ['Gnosis Chain'],
@@ -49,11 +52,11 @@ describe('networkSlug (contract copy)', () => {
 });
 
 describe('buildUpgradeEvents', () => {
-  it('builds one UpgradeEvent per incidentId, using the scheduled update for activation', () => {
+  it('builds one UpgradeEvent per incidentId, using the window entry for activation', () => {
     const events = [
       ev({ publishedAt: '2026-07-27T13:00:00.000Z', status: 'maintenance_scheduled' }),
-      // A later "completed" update must not move the activation time.
-      ev({ publishedAt: '2026-07-27T16:00:00.000Z', publishedMs: Date.parse('2026-07-27T16:00:00.000Z'), status: 'maintenance_completed' })
+      // A later "completed" update carries no banner, and must not move the activation time.
+      ev({ publishedAt: '2026-07-27T16:00:00.000Z', publishedMs: Date.parse('2026-07-27T16:00:00.000Z'), status: 'maintenance_completed', isWindowEntry: false })
     ];
     const [upgrade] = buildUpgradeEvents(events);
     expect(buildUpgradeEvents(events)).toHaveLength(1);
@@ -72,7 +75,7 @@ describe('buildUpgradeEvents', () => {
         status: 'investigating',
         publishedAt: '2026-07-27T19:00:00.000Z',
         publishedMs: Date.parse('2026-07-27T19:00:00.000Z'),
-        software: [], networkNames: [], networkSlugs: []
+        software: [], networkNames: [], networkSlugs: [], isWindowEntry: false
       })
     ];
     const [upgrade] = buildUpgradeEvents(events);
@@ -91,7 +94,7 @@ describe('buildUpgradeEvents', () => {
       ev({
         incidentId: 'q:inc', title: 'Major outage on Solana Mainnet nodes', status: 'major_outage',
         publishedAt: '2026-07-27T20:00:00.000Z', publishedMs: Date.parse('2026-07-27T20:00:00.000Z'),
-        chains: [], software: [], networkNames: ['Solana Mainnet'], networkSlugs: ['solana']
+        chains: [], software: [], networkNames: ['Solana Mainnet'], networkSlugs: ['solana'], isWindowEntry: false
       })
     ];
     const [upgrade] = buildUpgradeEvents(events);
@@ -154,7 +157,7 @@ describe('activation time — announcement vs window', () => {
     // announcement as the activation, so every pending window rendered as past —
     // live, the dashboard read "Upcoming — 0 scheduled" with eleven pending.
     const events = [
-      at('2026-07-22T13:50:00.000Z'),
+      at('2026-07-22T13:50:00.000Z', { isWindowEntry: false }),
       at('2026-08-03T14:00:00.000Z', { isWindowEntry: true })
     ];
     const [u] = buildUpgradeEvents(events, { now: NOW });
@@ -166,7 +169,7 @@ describe('activation time — announcement vs window', () => {
     // Hedera labels its window entries maintenance_completed up front; status
     // alone would miss them and fall back to the announcement.
     const events = [
-      at('2026-07-27T19:26:00.000Z', { status: 'maintenance_completed' }),
+      at('2026-07-27T19:26:00.000Z', { status: 'maintenance_completed', isWindowEntry: false }),
       at('2026-07-28T17:00:00.000Z', { status: 'maintenance_completed', isWindowEntry: true })
     ];
     const [u] = buildUpgradeEvents(events, { now: NOW });
@@ -175,9 +178,9 @@ describe('activation time — announcement vs window', () => {
 
   it('falls back to the most recent past window once every occurrence has run', () => {
     const events = [
-      at('2026-07-27T14:36:00.000Z'),
+      at('2026-07-27T14:36:00.000Z', { isWindowEntry: false }),
       at('2026-07-27T15:00:00.000Z', { isWindowEntry: true }),
-      at('2026-07-27T19:00:00.000Z', { status: 'maintenance_completed' })
+      at('2026-07-27T19:00:00.000Z', { status: 'maintenance_completed', isWindowEntry: false })
     ];
     const [u] = buildUpgradeEvents(events, { now: NOW });
     expect(u.activationAt).toBe('2026-07-27T15:00:00.000Z');
@@ -194,12 +197,133 @@ describe('activation time — announcement vs window', () => {
 
   it('orders pending windows soonest-first ahead of history newest-first', () => {
     const events = [
-      at('2026-07-20T10:00:00.000Z', { incidentId: 'a', title: 'Upgrade A' }),
-      at('2026-07-26T10:00:00.000Z', { incidentId: 'b', title: 'Upgrade B' }),
+      at('2026-07-20T10:00:00.000Z', { incidentId: 'a', title: 'Upgrade A', isWindowEntry: false }),
+      at('2026-07-26T10:00:00.000Z', { incidentId: 'b', title: 'Upgrade B', isWindowEntry: false }),
       at('2026-08-03T10:00:00.000Z', { incidentId: 'c', title: 'Upgrade C', isWindowEntry: true }),
       at('2026-07-29T10:00:00.000Z', { incidentId: 'd', title: 'Upgrade D', isWindowEntry: true })
     ];
     expect(buildUpgradeEvents(events, { now: NOW }).map((u) => u.incidentId)).toEqual(['d', 'c', 'b', 'a']);
+  });
+});
+
+describe('activation evidence', () => {
+  const NOW = Date.parse('2026-07-28T01:00:00.000Z');
+  const at = (iso, overrides = {}) => ev({ publishedAt: iso, publishedMs: Date.parse(iso), ...overrides });
+
+  it('reports an undated announcement as unknown rather than the announcement time', () => {
+    // The whole point: on live data 60 of 74 windows had activationAt === announcedAt, so a
+    // countdown, a sort and an assistant answer were all built on the announcement time as
+    // though it were the run time.
+    const [u] = buildUpgradeEvents([at('2026-07-27T18:47:00.000Z', { isWindowEntry: false })], { now: NOW });
+    expect(u.activationEvidence).toBe('announced');
+    expect(u.activationAt).toBeNull();
+    expect(u.announcedAt).toBe('2026-07-27T18:47:00.000Z');
+  });
+
+  it('lets a later exact window OVERRIDE an earlier undated announcement', () => {
+    // "Hard fork coming soon" first, the exact day and time later.
+    const soon = at('2026-07-20T09:00:00.000Z', { isWindowEntry: false });
+    const exact = at('2026-08-03T14:00:00.000Z', { isWindowEntry: true, windowEndMs: Date.parse('2026-08-03T18:00:00.000Z') });
+    const [u] = buildUpgradeEvents([soon, exact], { now: NOW });
+    expect(u.activationEvidence).toBe('window');
+    expect(u.activationAt).toBe('2026-08-03T14:00:00.000Z');
+    expect(u.windowMinutes).toBe(240);
+    expect(u.announcedAt).toBe('2026-07-20T09:00:00.000Z');
+  });
+
+  it('never lets a later WEAKER update downgrade a known window', () => {
+    // Strength decides, not recency — otherwise a trailing "completed" post with no banner
+    // would overwrite the exact window it completed.
+    const exact = at('2026-07-27T14:00:00.000Z', { isWindowEntry: true });
+    const vague = at('2026-07-27T22:00:00.000Z', { status: 'maintenance_completed', isWindowEntry: false });
+    const [u] = buildUpgradeEvents([exact, vague], { now: NOW });
+    expect(u.activationEvidence).toBe('window');
+    expect(u.activationAt).toBe('2026-07-27T14:00:00.000Z');
+  });
+
+  it('never dates an activation to a FUTURE completion post', () => {
+    // Some providers use a terminal status as a window marker, so the entry is dated ahead.
+    // Labelling that `completed` produced a countdown to something described as finished.
+    const [u] = buildUpgradeEvents([
+      ev({ publishedAt: '2026-08-04T09:00:00.000Z', publishedMs: Date.parse('2026-08-04T09:00:00.000Z'),
+        status: 'maintenance_completed', isWindowEntry: false })
+    ], { now: NOW });
+    expect(u.activationEvidence).toBe('scheduled');
+    expect(u.activationAt).toBe('2026-08-04T09:00:00.000Z');
+  });
+
+  it('labels a completion-only rollout as an upper bound, not a stated start', () => {
+    const [u] = buildUpgradeEvents([
+      at('2026-07-25T10:00:00.000Z', { status: 'maintenance_completed', isWindowEntry: false })
+    ], { now: NOW });
+    expect(u.activationEvidence).toBe('completed');
+    expect(u.activationAt).toBe('2026-07-25T10:00:00.000Z');
+  });
+
+  it('prefers an in-progress start over a completion upper bound', () => {
+    const [u] = buildUpgradeEvents([
+      at('2026-07-25T10:00:00.000Z', { isWindowEntry: false }),
+      at('2026-07-25T12:00:00.000Z', { status: 'maintenance_in_progress', isWindowEntry: false }),
+      at('2026-07-25T15:00:00.000Z', { status: 'maintenance_completed', isWindowEntry: false })
+    ], { now: NOW });
+    expect(u.activationEvidence).toBe('started');
+    expect(u.activationAt).toBe('2026-07-25T12:00:00.000Z');
+  });
+
+  it('attributes no fallout when the activation time is unknown', () => {
+    // Correlation needs an anchor. Guessing one would attribute an unrelated incident to an
+    // upgrade whose run time nobody published.
+    const events = [
+      at('2026-07-27T13:00:00.000Z', { isWindowEntry: false }),
+      ev({
+        incidentId: 'q:inc', title: 'RPC degraded on Gnosis', status: 'investigating',
+        publishedAt: '2026-07-27T19:00:00.000Z', publishedMs: Date.parse('2026-07-27T19:00:00.000Z'),
+        software: [], networkNames: [], networkSlugs: [], isWindowEntry: false
+      })
+    ];
+    const [u] = buildUpgradeEvents(events, { now: NOW });
+    expect(u.activationAt).toBeNull();
+    expect(u.followedByIncidents).toEqual([]);
+  });
+
+  it('orders an undated but still-open rollout with what is coming, not with history', () => {
+    const events = [
+      at('2026-07-10T10:00:00.000Z', { incidentId: 'past', title: 'Ran already', status: 'maintenance_completed', isWindowEntry: true }),
+      at('2026-07-26T10:00:00.000Z', { incidentId: 'undated', title: 'Fork coming soon', isWindowEntry: false }),
+      at('2026-07-29T10:00:00.000Z', { incidentId: 'pending', title: 'Dated window', isWindowEntry: true })
+    ];
+    expect(buildUpgradeEvents(events, { now: NOW }).map((u) => u.incidentId))
+      .toEqual(['pending', 'undated', 'past']);
+  });
+});
+
+describe('fallout duration evidence', () => {
+  const NOW = Date.parse('2026-07-28T01:00:00.000Z');
+
+  it('reports a resolution only when one was actually observed', () => {
+    const events = [
+      ev(),
+      ev({
+        incidentId: 'q:inc', title: 'Degraded on Gnosis', status: 'investigating', ongoing: true,
+        publishedAt: '2026-07-27T19:00:00.000Z', publishedMs: Date.parse('2026-07-27T19:00:00.000Z'),
+        software: [], networkNames: [], networkSlugs: [], isWindowEntry: false
+      })
+    ];
+    const [u] = buildUpgradeEvents(events, { now: NOW });
+    expect(u.followedByIncidents[0]).toMatchObject({ durationEvidence: 'ongoing', ongoing: true, resolvedAt: null });
+  });
+
+  it('carries the real resolution time when the page posted one', () => {
+    const inc = (iso, status, extra = {}) => ev({
+      incidentId: 'q:inc', title: 'Degraded on Gnosis', status,
+      publishedAt: iso, publishedMs: Date.parse(iso),
+      software: [], networkNames: [], networkSlugs: [], isWindowEntry: false, ...extra
+    });
+    const events = [ev(), inc('2026-07-27T19:00:00.000Z', 'investigating'), inc('2026-07-27T21:00:00.000Z', 'resolved')];
+    const [u] = buildUpgradeEvents(events, { now: NOW });
+    expect(u.followedByIncidents[0]).toMatchObject({
+      durationEvidence: 'observed', ongoing: false, resolvedAt: '2026-07-27T21:00:00.000Z'
+    });
   });
 });
 

@@ -185,6 +185,43 @@ consumers must exclude those incidents and say how many they excluded, never cha
 current downtime and reported 96% availability for a quiet day. Charge to `now` **only**
 when the feed still marks the incident `ongoing: true`.
 
+### 14. Derived values carry their evidence
+A consumer must be able to tell a value that was STATED from one that was inferred, observed,
+or is simply unknown. Serving both as a bare field is how a countdown, a sort and an assistant
+answer all came to be built on an announcement timestamp as though it were a run time — on live
+data 60 of 74 upgrade windows had `activationAt === announcedAt`.
+
+Two rules:
+
+- **Unknown is null, never a stand-in.** `activationAt` is null when only an announcement
+  exists; `resolvedAt` is null unless a resolution was actually observed. Substituting the
+  nearest available timestamp silently converts "we don't know" into a confident claim.
+- **Strength decides, not recency.** A provider posts "hard fork coming soon" first and the
+  exact window later, so a later WEAKER update must never overwrite an earlier precise one,
+  while the precise one must always override the earlier unknown. Recency breaks ties only
+  within one evidence level.
+
+`/upgrades.activationEvidence`, strongest first:
+
+| value | meaning |
+|---|---|
+| `window` | the body banner stated the window (carries a duration too) |
+| `scheduled` | an entry distinct from the announcement set the start |
+| `started` | seen in progress — the run had begun by then |
+| `completed` | only a completion post: an UPPER BOUND on the run, not its start |
+| `announced` | announced with no date — `activationAt` is null |
+
+`started` and `completed` are only ever in the past: a terminal entry dated ahead is a provider
+using a terminal status as a window marker, and ranks as `scheduled`.
+
+`/providers/stats.availability.durationEvidence` and `followedByIncidents[].durationEvidence`
+use the same idea for incidents: `observed` (a resolution was posted), `ongoing` (still live,
+charged to now), `unpublished` (posted once, duration unknowable — excluded from availability
+rather than charged).
+
+Consumers: only count down to `window`/`scheduled`; never plot an `announced` window on a time
+axis; and state the basis when reporting availability.
+
 ## Ordering constraint when rolling out
 
 A readiness probe pointing at `/ready` before the image exposing `/ready` is deployed
