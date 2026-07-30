@@ -497,6 +497,16 @@ a:hover { text-decoration: underline; }
 .tlx-tip-fallout { color: #fca5a5; }
 .tlx-tip-more { font-size: 10.5px; color: var(--text-muted); padding-top: 5px; }
 
+/* Evidence badges. Colour encodes how well the time is known, not severity: a reader must be
+   able to tell a stated window from a timestamp that merely records when someone posted. */
+.tlx-chip-ev { font-size: 10px; font-weight: 650; padding: 2px 7px; border-radius: 6px; white-space: nowrap; cursor: help; }
+.ev-exact { background: rgba(16, 185, 129, 0.14); color: #6ee7b7; }
+.ev-approx { background: rgba(255, 255, 255, 0.06); color: var(--text-muted); }
+.ev-unknown { background: rgba(251, 191, 36, 0.14); color: #fcd34d; }
+.tlx-when-tba { flex-shrink: 0; width: 92px; font-size: 11.5px; font-weight: 650; color: #fcd34d; cursor: help; }
+.tl-fallout-open { flex-shrink: 0; font-size: 11px; color: #fca5a5; font-weight: 650; }
+.tlx-omitted { padding: 5px 10px; font-size: 10.5px; color: #fcd34d; background: rgba(251, 191, 36, 0.07); border-top: 1px solid var(--panel-border); }
+
 .tlx-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 14px 0 10px; }
 .tlx-range { display: flex; gap: 4px; background: rgba(255, 255, 255, 0.04); border-radius: 999px; padding: 3px; }
 .tlx-range-btn { background: none; border: none; color: var(--text-muted); font-size: 11.5px; font-weight: 650; padding: 5px 12px; border-radius: 999px; cursor: pointer; }
