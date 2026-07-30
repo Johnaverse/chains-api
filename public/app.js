@@ -800,12 +800,39 @@ function parseIncidentTimes(ev) {
     if (iso.length >= 2) return { start: Math.min(...iso), end: Math.max(...iso) };
     return null;
 }
-// One incident = one block, keyed by status page + title. The feed emits a
-// separate event per poll/update for the same incident; we merge them, keep the
-// latest status, and measure the open span across all the events we've seen.
+// One incident = one block. The feed emits a separate event per state change and
+// stamps them all with a shared `incidentId` for exactly this purpose — so that
+// is the key.
+//
+// It used to key on status page + title, which breaks on the two feed styles that
+// matter. Uptime-monitor pages retitle every state ("Portal went down" then
+// "Portal recovered"), so one incident split into two cards. And a recurring
+// title collapsed UNRELATED outages into one block: Abstract's Portal went down
+// on Jul 20, Jul 21 and Jul 29, which showed as two cards, hid the third
+// occurrence, and reported a "9d 11h" duration that was really the gap between
+// the first and last separate outage.
+//
+// The statusPage|title form stays as the fallback for events cached before
+// incidentId existed; every one of 456 live events now carries it.
 function incidentKey(ev) {
+    if (ev.incidentId) return ev.incidentId;
     const sp = ev.statusPage?.id || (ev.chains?.[0]?.chainId ?? 'unknown');
     return `${sp}|${(ev.title || '').toLowerCase().trim()}`;
+}
+
+// Cap the per-incident transition list. An Atlassian incident can carry dozens of
+// updates; the card shows a lifecycle, not a changelog.
+const MAX_TRANSITIONS = 24;
+
+// Merge one event into an incident's ordered transition list, newest last and
+// deduped by event id (a re-broadcast must not double the timeline).
+function addTransition(list, ev, ms) {
+    if (ms == null) return list;
+    if (ev.id && list.some(t => t.id === ev.id)) return list;
+    list.push({ id: ev.id ?? null, ms, title: ev.title || '', status: parseIncidentStatus(ev) });
+    list.sort((a, b) => a.ms - b.ms);
+    if (list.length > MAX_TRANSITIONS) list.splice(0, list.length - MAX_TRANSITIONS);
+    return list;
 }
 function eventTimeMs(ev) {
     const t = Date.parse(ev.publishedAt || ev.updatedAt || '');
@@ -822,6 +849,15 @@ function incidentModel(ev) {
         whenMs,
         firstSeen: whenMs,
         lastSeen: whenMs,
+        // What happened, in order. One entry per state change the feed published,
+        // which is what turns "went down" + "recovered" into a readable lifecycle
+        // instead of two unrelated cards.
+        transitions: addTransition([], ev, whenMs),
+        // The title of the OPENING event, kept separately: the newest event wins for
+        // current status, but a card headlined "Portal recovered" describes the end of
+        // the story rather than the incident. Atlassian incidents keep one title
+        // throughout, so this is a no-op for them.
+        openedTitle: ev.title || '(untitled)',
         status: parseIncidentStatus(ev),
         // Authoritative active/resolved flag from the feed; null on older cached
         // events, where the card falls back to matching the status label.
@@ -859,8 +895,14 @@ function addIncidents(events) {
         if (!existing) { incidents.byKey.set(m.key, m); changed = true; continue; }
         // merge into the single block for this incident
         if (m.whenMs != null) {
+            const opening = existing.firstSeen == null || m.whenMs < existing.firstSeen;
             existing.firstSeen = Math.min(existing.firstSeen ?? m.whenMs, m.whenMs);
             existing.lastSeen = Math.max(existing.lastSeen ?? m.whenMs, m.whenMs);
+            addTransition(existing.transitions ??= [], ev, m.whenMs);
+            // An earlier event can arrive after a later one — the recovery is often
+            // parsed first, and a restart replays history out of order — so the
+            // headline follows the earliest event, not arrival order.
+            if (opening) existing.openedTitle = m.openedTitle;
             if (existing.whenMs == null || m.whenMs >= existing.whenMs) { // newest event wins for current status
                 existing.whenMs = m.whenMs; existing.status = m.status; existing.ongoing = m.ongoing; existing.url = m.url; existing.kind = m.kind;
                 if (m.affectedChains.length) existing.affectedChains = m.affectedChains;
@@ -872,8 +914,17 @@ function addIncidents(events) {
     if (!changed) return;
     for (const m of incidents.byKey.values()) {
         // Prefer the observed open span (first→last update); fall back to the
-        // duration parsed from a single summary.
-        if (m.firstSeen != null && m.lastSeen != null && m.lastSeen > m.firstSeen) m.durationMs = m.lastSeen - m.firstSeen;
+        // duration parsed from a single summary. The span is only trustworthy now
+        // that incidents are keyed by incidentId — keyed by title it measured the
+        // gap between unrelated recurrences and reported a 3-minute outage as 9d 11h.
+        if (m.firstSeen != null && m.lastSeen != null && m.lastSeen > m.firstSeen) {
+            m.durationMs = m.lastSeen - m.firstSeen;
+            m.durationEvidence = 'observed';
+        } else if (m.durationMs != null) {
+            // Read out of the entry's own prose rather than from two observed
+            // timestamps — weaker, and labelled so the card can say so.
+            m.durationEvidence = 'stated';
+        }
     }
     incidents.items = [...incidents.byKey.values()].sort((a, b) => (b.whenMs || 0) - (a.whenMs || 0));
     try { renderIncidents(); } catch (err) { console.error('incident render failed', err); }
@@ -997,7 +1048,12 @@ function incidentCard(it) {
     const open = it.ongoing != null
         ? it.ongoing
         : Boolean(it.status && !CLOSED_STATUSES.has(it.status.toLowerCase()));
-    const when = it.whenMs != null ? new Date(it.whenMs).toLocaleString() : null;
+    // When it STARTED, not when it last changed. The headline is the opening event, so
+    // pairing it with the recovery's timestamp read as a contradiction: "Portal went
+    // down · 7:58:10 PM" was the moment it came back. The timeline below carries the
+    // later steps. Identical to whenMs for a single-state incident.
+    const startedMs = it.firstSeen ?? it.whenMs;
+    const when = startedMs != null ? new Date(startedMs).toLocaleString() : null;
     const meta = [label, when, open ? 'ongoing' : null].filter(Boolean);
     const dur = fmtDuration(it.durationMs);
     const side = [];
@@ -1007,7 +1063,17 @@ function incidentCard(it) {
     const sevClass = enr?.severity ? String(enr.severity).toLowerCase().replace(/[^a-z]/g, '') : null;
     if (sevClass) side.push(el('span', { class: `pill sev-${sevClass}`, text: enr.severity }));
     if (it.status) side.push(el('span', { class: `pill st-${it.status.toLowerCase().replace(/\s+/g, '')}`, text: it.status }));
-    if (dur) side.push(el('span', { class: 'incident-dur', text: dur }));
+    // A duration measured between two published states is a fact; one read out of an
+    // entry's prose is a claim. Mark the weaker one rather than showing both as the
+    // same number — this pill used to read "9d 11h" for a three-minute outage.
+    if (dur) {
+        const stated = it.durationEvidence === 'stated';
+        side.push(el('span', {
+            class: `incident-dur${stated ? ' incident-dur-stated' : ''}`,
+            text: stated ? `~${dur}` : dur,
+            title: stated ? 'Duration stated in the incident text' : 'Measured between the first and last published update'
+        }));
+    }
 
     // Provider incidents map to the chains they hit: clickable chips (open the
     // drawer), else raw component names, else a "provider-wide" note.
@@ -1030,9 +1096,10 @@ function incidentCard(it) {
         el('div', { class: 'incident-body' }, [
             el('div', { class: 'incident-title' }, [
                 !isProvider && it.kind === 'scheduled' ? el('span', { class: 'kind-tag', text: 'Scheduled' }) : null,
-                el('span', { text: it.title })
+                el('span', { text: it.openedTitle || it.title })
             ]),
             el('div', { class: 'incident-meta', text: meta.join(' · ') }),
+            incidentTimeline(it),
             // LLM enrichment (chains-status-news): plain-language summary + any
             // required action. The "AI" tag carries class/confidence/model on hover.
             enr?.summary ? el('div', { class: 'incident-ai' }, [
@@ -1051,6 +1118,47 @@ function incidentCard(it) {
         ]),
         el('div', { class: 'incident-side' }, side)
     ]);
+}
+
+// The incident's lifecycle, one row per state the feed published: what changed,
+// when, and how long the step took. This is the whole point of keying on
+// incidentId — "Portal went down" at 19:55 and "Portal recovered" at 19:58 are one
+// three-minute incident, and used to render as two unrelated cards.
+//
+// Returns null for a single-state incident: a one-row "timeline" is just the
+// timestamp already shown in the meta line.
+function incidentTimeline(it) {
+    const steps = it.transitions;
+    if (!Array.isArray(steps) || steps.length < 2) return null;
+    const rows = steps.map((step, i) => {
+        const prev = i > 0 ? steps[i - 1] : null;
+        // Elapsed since the PREVIOUS step, so a long gap between "identified" and
+        // "resolved" is visible rather than buried in two absolute timestamps.
+        const gap = prev ? fmtDuration(step.ms - prev.ms) : null;
+        const statusClass = step.status ? String(step.status).toLowerCase().replace(/[^a-z]/g, '') : 'unknown';
+        return el('li', { class: 'tl-step' }, [
+            el('span', { class: `tl-dot tl-dot-${statusClass}` }),
+            el('span', { class: 'tl-time', text: new Date(step.ms).toLocaleTimeString() }),
+            el('span', { class: 'tl-label', text: stripLifecycleSubject(step.title, it.openedTitle) }),
+            gap ? el('span', { class: 'tl-gap', text: `+${gap}` }) : null
+        ]);
+    });
+    return el('ul', { class: 'incident-timeline' }, rows);
+}
+
+// The steps of one incident usually repeat its subject ("Portal went down",
+// "Portal recovered"); the card headline already carries it, so show only what
+// changed. Falls back to the full title when there is no shared prefix to strip.
+function stripLifecycleSubject(title, openedTitle) {
+    const text = (title || '').trim();
+    if (!text || !openedTitle) return text || '—';
+    const words = openedTitle.trim().split(/\s+/);
+    // Longest shared leading word run, so "Superposition Testnet RPC went down" and
+    // "… recovered" both reduce to their verb without hard-coding any vocabulary.
+    const own = text.split(/\s+/);
+    let shared = 0;
+    while (shared < words.length && shared < own.length - 1 && words[shared].toLowerCase() === own[shared].toLowerCase()) shared++;
+    return shared > 0 ? own.slice(shared).join(' ') : text;
 }
 
 function renderIncidentList() {
