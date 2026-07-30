@@ -19,6 +19,9 @@
     --radius-md: 12px;
     --radius-lg: 16px;
     --appbar-h: 66px;
+    /* The page ships Inter only; the existing .mono utility sets tabular figures
+       but no family. One token so a monospaced readout is defined in one place. */
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', system-ui, sans-serif; }
@@ -396,6 +399,31 @@ a:hover { text-decoration: underline; }
 .ai-summary { color: var(--text-muted); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .incident-action { margin-top: 3px; font-size: 12px; color: #fcd34d; }
 
+/* incident lifecycle — one row per state the feed published, down → recovered.
+   A rail down the left ties the steps together; the dot is coloured by that
+   step's status, reusing the status-pill palette so a red dot means the same
+   thing here as it does in the pills above. */
+.incident-timeline { list-style: none; margin: 6px 0 0; padding: 0 0 0 3px; border-left: 1px solid var(--panel-border); }
+.tl-step { display: flex; align-items: baseline; gap: 7px; font-size: 11.5px; line-height: 1.7; color: var(--text-muted); }
+/* The dot carries the SAME `st-*` class as the status pill above, so there is one
+   palette rather than two lists to keep in step — the duplicate list drifted
+   immediately, leaving 'Scheduled' and 'In progress' with no rule and every
+   maintenance step grey. Those rules set a translucent pill background and a text
+   colour, so the dot paints itself with that colour and overrides the background
+   (this rule comes later in the file, so it wins at equal specificity).
+   No `color` here: a dot with no `st-` class inherits the row's muted colour,
+   which is what "the feed did not classify this state" should look like. Nothing
+   guesses a colour from the step's wording. */
+.tl-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; margin-left: -6.5px; background: currentColor; }
+.tl-time { font-variant-numeric: tabular-nums; flex: none; color: var(--text-main); opacity: .75; }
+.tl-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Elapsed since the previous step — pushed right so the gaps line up and a slow
+   step is scannable without reading both timestamps. */
+.tl-gap { margin-left: auto; flex: none; font-variant-numeric: tabular-nums; opacity: .65; }
+/* A duration read out of prose rather than measured between two published
+   states; shown with a ~ and dimmed so it never reads as a measurement. */
+.incident-dur-stated { opacity: .7; font-style: italic; }
+
 /* ─── Timeline (activity chart + dense rows) ───
    Modelled on AppControl's activity view: a metric tab strip, a density chart
    over a real time axis with pinned events, a severity ribbon, a range control,
@@ -614,22 +642,45 @@ a.tlx-row-title:hover { color: var(--accent-hover); }
 .chat-send:hover:not(:disabled) { background: var(--accent-hover); }
 .chat-send:disabled { opacity: 0.45; cursor: default; }
 .chat-thinking { display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; }
-.chat-dots { display: flex; gap: 5px; }
-.chat-dots span { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); animation: chat-pulse 1.2s ease-in-out infinite; }
-.chat-dots span:nth-child(2) { animation-delay: 0.2s; }
-.chat-dots span:nth-child(3) { animation-delay: 0.4s; }
 .chat-dots-row { display: flex; align-items: center; gap: 10px; }
-.chat-elapsed { font-size: 10px; color: var(--text-muted); }
+/* Tabular figures so a tenths digit ticking over never shifts the text beside it. */
+.chat-elapsed { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+/* ─── Pixel-grid loader (see pixelLoader() in app.js) ───
+   A 3x3 grid of 4px cells. Per-cell delay and duration are set through the
+   CSSOM, because a style attribute would be dropped under `style-src 'self'`. */
+.pixel-grid { display: grid; grid-template-columns: repeat(3, 4px); gap: 1.5px; flex: none; }
+.pixel-cell { width: 4px; height: 4px; border-radius: 1px; background: var(--text-main); }
+.pixel-cell.round { border-radius: 50%; }
+@keyframes pixel-on { 0%, 100% { opacity: 0.15; } 45% { opacity: 1; } }
+
+/* The label reads as in-progress by moving light across the text, which replaces
+   the animated ellipsis it used to carry. background-clip:text needs a
+   transparent fill, so the text colour comes entirely from the gradient. */
+.chat-shimmer {
+    font-size: 13px; font-weight: 500; color: transparent;
+    -webkit-background-clip: text; background-clip: text;
+    background-image: linear-gradient(90deg, var(--text-muted) 35%, var(--text-main) 50%, var(--text-muted) 65%);
+    background-size: 200% 100%;
+    animation: shimmer-text 1.4s linear infinite;
+}
+@keyframes shimmer-text { from { background-position: 200% 0; } to { background-position: 0 0; } }
+
+/* Reduced motion: freeze the grid to its dim state and stop the shimmer, but
+   leave the elapsed timer ticking — that is information, not decoration. A
+   static gradient would render the label invisible against a transparent fill,
+   so the shimmer falls back to a plain colour. */
+@media (prefers-reduced-motion: reduce) {
+    .pixel-cell { animation: none !important; opacity: 0.35 !important; }
+    .chat-shimmer { animation: none; background-image: none; color: var(--text-main); }
+}
 .chat-trace { display: flex; flex-direction: column; gap: 3px; }
 .chat-trace-step { display: flex; align-items: baseline; gap: 7px; font-size: 11.5px; line-height: 1.4; }
 .chat-trace-step.done { color: var(--text-muted); }
-.chat-trace-step.active { color: var(--text-main); }
 .chat-trace-mark { width: 12px; flex-shrink: 0; text-align: center; }
 .chat-trace-step.done .chat-trace-mark { color: var(--good); }
-.chat-trace-step.active .chat-trace-mark { color: var(--accent); }
 .chat-new-btn { font-size: 11px; padding: 3px 10px; margin-left: auto; }
 .chat-new-btn:disabled { opacity: 0.4; cursor: default; }
-@keyframes chat-pulse { 0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }
 
 /* ─── Forum activity treemap ─── */
 .forum-treemap { position: relative; width: 100%; margin-bottom: 10px; border-radius: var(--radius-md); overflow: hidden; }

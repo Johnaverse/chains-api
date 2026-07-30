@@ -76,6 +76,11 @@ function fmtUsd(n) {
 }
 function fmtDuration(ms) {
     if (!ms || ms < 0) return null;
+    // Seconds below a minute. Rounding everything to minutes rendered a 35-second
+    // outage as "1m" and a 3-second step gap as "0m" — and uptime-monitor
+    // incidents are routinely tens of seconds long (Abstract's Portal recovered in
+    // 35s on Jul 20 and 3m on Jul 29).
+    if (ms < 60000) return `${Math.max(1, Math.round(ms / 1000))}s`;
     const m = Math.round(ms / 60000);
     if (m < 60) return `${m}m`;
     const h = Math.floor(m / 60);
@@ -736,6 +741,15 @@ const SERVER_STATUS_LABEL = {
     operational: 'Operational', degraded: 'Degraded', partial_outage: 'Partial outage', major_outage: 'Major outage'
 };
 const SCHEDULED_STATUSES = new Set(['maintenance_scheduled', 'maintenance_in_progress', 'maintenance_completed']);
+
+// The CSS token for a status label ('In progress' -> 'inprogress'). Shared by the
+// status pill and the timeline dot so the two cannot key on different strings —
+// the dot palette was originally written against the feed's raw enum
+// ('major_outage') while parseIncidentStatus returns a LABEL ('Major outage'),
+// which left every maintenance step grey.
+function statusToken(status) {
+    return status ? String(status).toLowerCase().replace(/\s+/g, '') : null;
+}
 const incidents = {
     items: [], byKey: new Map(), ws: null, retries: 0, groupBy: 'flat', dayFilter: null, category: 'all',
     // LLM enrichment (chains-status-news two-phase delivery): raw items arrive as
@@ -800,12 +814,43 @@ function parseIncidentTimes(ev) {
     if (iso.length >= 2) return { start: Math.min(...iso), end: Math.max(...iso) };
     return null;
 }
-// One incident = one block, keyed by status page + title. The feed emits a
-// separate event per poll/update for the same incident; we merge them, keep the
-// latest status, and measure the open span across all the events we've seen.
+// One incident = one block. The feed emits a separate event per state change and
+// stamps them all with a shared `incidentId` for exactly this purpose — so that
+// is the key.
+//
+// It used to key on status page + title, which breaks on the two feed styles that
+// matter. Uptime-monitor pages retitle every state ("Portal went down" then
+// "Portal recovered"), so one incident split into two cards. And a recurring
+// title collapsed UNRELATED outages into one block: Abstract's Portal went down
+// on Jul 20, Jul 21 and Jul 29, which showed as two cards, hid the third
+// occurrence, and reported a "9d 11h" duration that was really the gap between
+// the first and last separate outage.
+//
+// The statusPage|title form stays as the fallback for events cached before
+// incidentId existed; every one of 456 live events now carries it.
 function incidentKey(ev) {
+    if (ev.incidentId) return ev.incidentId;
     const sp = ev.statusPage?.id || (ev.chains?.[0]?.chainId ?? 'unknown');
     return `${sp}|${(ev.title || '').toLowerCase().trim()}`;
+}
+
+// Cap the per-incident transition list. An Atlassian incident can carry dozens of
+// updates; the card shows a lifecycle, not a changelog.
+const MAX_TRANSITIONS = 24;
+
+// Merge one event into an incident's ordered transition list, newest last and
+// deduped so a re-broadcast cannot double the timeline. addIncidents runs for
+// both the REST fetch and the WS replay, so the same event genuinely arrives
+// twice; an event with no id falls back to its timestamp+title rather than
+// skipping dedup entirely.
+function addTransition(list, ev, ms) {
+    if (ms == null) return list;
+    const id = ev.id ?? `${ms}|${ev.title || ''}`;
+    if (list.some(t => t.id === id)) return list;
+    list.push({ id, ms, title: ev.title || '', status: parseIncidentStatus(ev) });
+    list.sort((a, b) => a.ms - b.ms);
+    if (list.length > MAX_TRANSITIONS) list.splice(0, list.length - MAX_TRANSITIONS);
+    return list;
 }
 function eventTimeMs(ev) {
     const t = Date.parse(ev.publishedAt || ev.updatedAt || '');
@@ -822,6 +867,15 @@ function incidentModel(ev) {
         whenMs,
         firstSeen: whenMs,
         lastSeen: whenMs,
+        // What happened, in order. One entry per state change the feed published,
+        // which is what turns "went down" + "recovered" into a readable lifecycle
+        // instead of two unrelated cards.
+        transitions: addTransition([], ev, whenMs),
+        // The title of the OPENING event, kept separately: the newest event wins for
+        // current status, but a card headlined "Portal recovered" describes the end of
+        // the story rather than the incident. Atlassian incidents keep one title
+        // throughout, so this is a no-op for them.
+        openedTitle: ev.title || '(untitled)',
         status: parseIncidentStatus(ev),
         // Authoritative active/resolved flag from the feed; null on older cached
         // events, where the card falls back to matching the status label.
@@ -859,8 +913,14 @@ function addIncidents(events) {
         if (!existing) { incidents.byKey.set(m.key, m); changed = true; continue; }
         // merge into the single block for this incident
         if (m.whenMs != null) {
+            const opening = existing.firstSeen == null || m.whenMs < existing.firstSeen;
             existing.firstSeen = Math.min(existing.firstSeen ?? m.whenMs, m.whenMs);
             existing.lastSeen = Math.max(existing.lastSeen ?? m.whenMs, m.whenMs);
+            addTransition(existing.transitions ??= [], ev, m.whenMs);
+            // An earlier event can arrive after a later one — the recovery is often
+            // parsed first, and a restart replays history out of order — so the
+            // headline follows the earliest event, not arrival order.
+            if (opening) existing.openedTitle = m.openedTitle;
             if (existing.whenMs == null || m.whenMs >= existing.whenMs) { // newest event wins for current status
                 existing.whenMs = m.whenMs; existing.status = m.status; existing.ongoing = m.ongoing; existing.url = m.url; existing.kind = m.kind;
                 if (m.affectedChains.length) existing.affectedChains = m.affectedChains;
@@ -872,8 +932,17 @@ function addIncidents(events) {
     if (!changed) return;
     for (const m of incidents.byKey.values()) {
         // Prefer the observed open span (first→last update); fall back to the
-        // duration parsed from a single summary.
-        if (m.firstSeen != null && m.lastSeen != null && m.lastSeen > m.firstSeen) m.durationMs = m.lastSeen - m.firstSeen;
+        // duration parsed from a single summary. The span is only trustworthy now
+        // that incidents are keyed by incidentId — keyed by title it measured the
+        // gap between unrelated recurrences and reported a 3-minute outage as 9d 11h.
+        if (m.firstSeen != null && m.lastSeen != null && m.lastSeen > m.firstSeen) {
+            m.durationMs = m.lastSeen - m.firstSeen;
+            m.durationEvidence = 'observed';
+        } else if (m.durationMs != null) {
+            // Read out of the entry's own prose rather than from two observed
+            // timestamps — weaker, and labelled so the card can say so.
+            m.durationEvidence = 'stated';
+        }
     }
     incidents.items = [...incidents.byKey.values()].sort((a, b) => (b.whenMs || 0) - (a.whenMs || 0));
     try { renderIncidents(); } catch (err) { console.error('incident render failed', err); }
@@ -997,7 +1066,12 @@ function incidentCard(it) {
     const open = it.ongoing != null
         ? it.ongoing
         : Boolean(it.status && !CLOSED_STATUSES.has(it.status.toLowerCase()));
-    const when = it.whenMs != null ? new Date(it.whenMs).toLocaleString() : null;
+    // When it STARTED, not when it last changed. The headline is the opening event, so
+    // pairing it with the recovery's timestamp read as a contradiction: "Portal went
+    // down · 7:58:10 PM" was the moment it came back. The timeline below carries the
+    // later steps. Identical to whenMs for a single-state incident.
+    const startedMs = it.firstSeen ?? it.whenMs;
+    const when = startedMs != null ? new Date(startedMs).toLocaleString() : null;
     const meta = [label, when, open ? 'ongoing' : null].filter(Boolean);
     const dur = fmtDuration(it.durationMs);
     const side = [];
@@ -1006,8 +1080,18 @@ function incidentCard(it) {
     // inject stray classes); the raw value is still shown as the pill's text.
     const sevClass = enr?.severity ? String(enr.severity).toLowerCase().replace(/[^a-z]/g, '') : null;
     if (sevClass) side.push(el('span', { class: `pill sev-${sevClass}`, text: enr.severity }));
-    if (it.status) side.push(el('span', { class: `pill st-${it.status.toLowerCase().replace(/\s+/g, '')}`, text: it.status }));
-    if (dur) side.push(el('span', { class: 'incident-dur', text: dur }));
+    if (it.status) side.push(el('span', { class: `pill st-${statusToken(it.status)}`, text: it.status }));
+    // A duration measured between two published states is a fact; one read out of an
+    // entry's prose is a claim. Mark the weaker one rather than showing both as the
+    // same number — this pill used to read "9d 11h" for a three-minute outage.
+    if (dur) {
+        const stated = it.durationEvidence === 'stated';
+        side.push(el('span', {
+            class: `incident-dur${stated ? ' incident-dur-stated' : ''}`,
+            text: stated ? `~${dur}` : dur,
+            title: stated ? 'Duration stated in the incident text' : 'Measured between the first and last published update'
+        }));
+    }
 
     // Provider incidents map to the chains they hit: clickable chips (open the
     // drawer), else raw component names, else a "provider-wide" note.
@@ -1030,9 +1114,10 @@ function incidentCard(it) {
         el('div', { class: 'incident-body' }, [
             el('div', { class: 'incident-title' }, [
                 !isProvider && it.kind === 'scheduled' ? el('span', { class: 'kind-tag', text: 'Scheduled' }) : null,
-                el('span', { text: it.title })
+                el('span', { text: it.openedTitle || it.title })
             ]),
             el('div', { class: 'incident-meta', text: meta.join(' · ') }),
+            incidentTimeline(it),
             // LLM enrichment (chains-status-news): plain-language summary + any
             // required action. The "AI" tag carries class/confidence/model on hover.
             enr?.summary ? el('div', { class: 'incident-ai' }, [
@@ -1051,6 +1136,63 @@ function incidentCard(it) {
         ]),
         el('div', { class: 'incident-side' }, side)
     ]);
+}
+
+// The incident's lifecycle, one row per state the feed published: what changed,
+// when, and how long the step took. This is the whole point of keying on
+// incidentId — "Portal went down" at 19:55 and "Portal recovered" at 19:58 are one
+// three-minute incident, and used to render as two unrelated cards.
+//
+// Returns null for a single-state incident: a one-row "timeline" is just the
+// timestamp already shown in the meta line.
+function incidentTimeline(it) {
+    const steps = it.transitions;
+    if (!Array.isArray(steps) || steps.length < 2) return null;
+    // Atlassian incidents keep ONE title across every update, so stripping the
+    // shared subject would leave the same single word on every row ("errors",
+    // "errors", ...). When the titles never change, the STATUS is what changed.
+    const first = (steps[0].title || '').trim().toLowerCase();
+    const uniformTitle = steps.every(step => (step.title || '').trim().toLowerCase() === first);
+    const startedDay = new Date(steps[0].ms).toDateString();
+    const rows = steps.map((step, i) => {
+        const prev = i > 0 ? steps[i - 1] : null;
+        // Elapsed since the PREVIOUS step, so a long gap between "identified" and
+        // "resolved" is visible rather than buried in two absolute timestamps.
+        const gap = prev ? fmtDuration(step.ms - prev.ms) : null;
+        const when = new Date(step.ms);
+        // A multi-day incident would otherwise show two bare clock times three days
+        // apart and read as an hour.
+        const sameDay = when.toDateString() === startedDay;
+        const stamp = sameDay
+            ? when.toLocaleTimeString()
+            : `${when.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${when.toLocaleTimeString()}`;
+        const label = uniformTitle
+            ? (step.status || step.title || '—')
+            : stripLifecycleSubject(step.title, it.openedTitle);
+        const token = statusToken(step.status);
+        return el('li', { class: 'tl-step' }, [
+            el('span', { class: `tl-dot${token ? ` st-${token}` : ''}` }),
+            el('span', { class: 'tl-time', text: stamp }),
+            el('span', { class: 'tl-label', text: label }),
+            gap ? el('span', { class: 'tl-gap', text: `+${gap}` }) : null
+        ]);
+    });
+    return el('ul', { class: 'incident-timeline' }, rows);
+}
+
+// The steps of one incident usually repeat its subject ("Portal went down",
+// "Portal recovered"); the card headline already carries it, so show only what
+// changed. Falls back to the full title when there is no shared prefix to strip.
+function stripLifecycleSubject(title, openedTitle) {
+    const text = (title || '').trim();
+    if (!text || !openedTitle) return text || '—';
+    const words = openedTitle.trim().split(/\s+/);
+    // Longest shared leading word run, so "Superposition Testnet RPC went down" and
+    // "… recovered" both reduce to their verb without hard-coding any vocabulary.
+    const own = text.split(/\s+/);
+    let shared = 0;
+    while (shared < words.length && shared < own.length - 1 && words[shared].toLowerCase() === own[shared].toLowerCase()) shared++;
+    return shared > 0 ? own.slice(shared).join(' ') : text;
 }
 
 function renderIncidentList() {
@@ -2730,15 +2872,66 @@ function assistantStepsFrom(data) {
     return null;
 }
 
+/* ─── LLM loading state — pixel-grid loader for long-running work ───
+   Ported from a React/Tailwind original to this page's idiom: no build step, so
+   the grid is built with el() and the per-cell delays go through the CSSOM (a
+   style ATTRIBUTE is dropped under `style-src 'self'`). Tailwind's --ink/--ink-3
+   map onto this palette's --text-main/--text-muted.
+
+   Variants:
+     drive — square cells, chevron wavefront driving right; the 650ms cycle is
+             shorter than the sweep, so two fronts are always in flight
+     dots  — same wavefront, circular cells
+     orbit — a comet lapping the grid perimeter
+
+   Reduced motion freezes the grid to its dim state (see style.css); the elapsed
+   timer still ticks, because that is information rather than decoration. */
+const CHEVRON_DELAYS = Array.from({ length: 9 }, (_, i) => {
+    const r = Math.floor(i / 3), c = i % 3;
+    return (c + Math.abs(r - 1)) * 90;
+});
+
+const ORBIT_ORDER = [0, 1, 2, 5, 8, 7, 6, 3];
+const ORBIT_DELAYS = Array.from({ length: 9 }, (_, i) => {
+    const k = ORBIT_ORDER.indexOf(i);
+    return k === -1 ? null : k * 110;   // null = the centre cell, which never lights
+});
+
+const LOADER_PATTERNS = {
+    drive: { delays: CHEVRON_DELAYS, dur: 650, round: false },
+    dots: { delays: CHEVRON_DELAYS, dur: 650, round: true },
+    orbit: { delays: ORBIT_DELAYS, dur: 950, round: false }
+};
+
+function pixelLoader(variant = 'drive') {
+    const { delays, dur, round } = LOADER_PATTERNS[variant] ?? LOADER_PATTERNS.drive;
+    return el('span', { class: 'pixel-grid', 'aria-hidden': 'true' }, delays.map(d => el('span', {
+        class: `pixel-cell${round ? ' round' : ''}`,
+        style: d === null
+            ? { opacity: '0.07' }
+            : { opacity: '0.15', animation: `pixel-on ${dur}ms ease-in-out ${d}ms infinite` }
+    })));
+}
+
+// Tenths of a second, then minutes past 60s. Deliberately finer than the whole
+// seconds this used to show: a run here regularly takes one to three minutes,
+// and a figure that visibly moves is the difference between "working" and
+// "stuck" — the single most common question during a long answer.
+function fmtElapsed(ms) {
+    const total = ms / 1000;
+    if (total < 60) return `${total.toFixed(1)}s`;
+    return `${Math.floor(total / 60)}m ${(total % 60).toFixed(1)}s`;
+}
+
 function appendChatThinking() {
     const log = document.getElementById('assistantLog');
     const trace = el('div', { class: 'chat-trace hidden' });
     const elapsed = el('span', { class: 'chat-elapsed' });
+    // The label carries what is happening NOW; the trace below carries what is
+    // already done. Before, the current step appeared in both.
+    const label = el('span', { class: 'chat-shimmer', text: 'Thinking' });
     const bubble = el('div', { class: 'chat-bubble assistant chat-thinking', 'aria-label': 'Assistant is thinking' }, [
-        el('div', { class: 'chat-dots-row' }, [
-            el('div', { class: 'chat-dots' }, [el('span'), el('span'), el('span')]),
-            elapsed
-        ]),
+        el('div', { class: 'chat-dots-row' }, [pixelLoader('drive'), label, elapsed]),
         trace
     ]);
     log.appendChild(bubble);
@@ -2747,9 +2940,9 @@ function appendChatThinking() {
     // Elapsed timer; cleared deterministically by wrapping remove() — every
     // exit path in sendAssistantMessage goes through thinking.remove().
     const startedAt = Date.now();
-    const timer = setInterval(() => {
-        elapsed.textContent = `${Math.round((Date.now() - startedAt) / 1000)}s`;
-    }, 1000);
+    const tick = () => { elapsed.textContent = fmtElapsed(Date.now() - startedAt); };
+    tick();   // paint 0.0s immediately rather than showing an empty slot for the first tick
+    const timer = setInterval(tick, 100);
     const baseRemove = bubble.remove.bind(bubble);
     bubble.remove = () => { clearInterval(timer); baseRemove(); };
 
@@ -2769,19 +2962,22 @@ function appendChatThinking() {
         // Only auto-scroll if the user is already at the bottom — never yank
         // them away from history they scrolled up to read.
         const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 48;
+        // The newest step is the one in flight — it becomes the shimmering label,
+        // so it is not also listed below. The shimmer says "in progress" better
+        // than the animated ellipsis it replaces.
+        if (last.label) label.textContent = last.label;
         trace.textContent = '';
-        steps.forEach((s, i) => {
-            const current = i === steps.length - 1;
-            const durMs = !current && s.at != null && steps[i + 1]?.at != null ? steps[i + 1].at - s.at : null;
-            const text = current ? `${s.label}…`
-                : durMs != null && durMs >= 100 ? `${s.label} (${(durMs / 1000).toFixed(1)}s)`
-                : s.label;
-            trace.appendChild(el('div', { class: `chat-trace-step${current ? ' active' : ' done'}` }, [
-                el('span', { class: 'chat-trace-mark', text: current ? '›' : '✓' }),
+        steps.slice(0, -1).forEach((s, i) => {
+            const durMs = s.at != null && steps[i + 1]?.at != null ? steps[i + 1].at - s.at : null;
+            const text = durMs != null && durMs >= 100 ? `${s.label} (${(durMs / 1000).toFixed(1)}s)` : s.label;
+            trace.appendChild(el('div', { class: 'chat-trace-step done' }, [
+                el('span', { class: 'chat-trace-mark', text: '✓' }),
                 el('span', { text })
             ]));
         });
-        trace.classList.remove('hidden');
+        // Nothing finished yet on the first step, so an empty trace stays hidden
+        // rather than opening an empty box under the label.
+        trace.classList.toggle('hidden', trace.childElementCount === 0);
         if (nearBottom) log.scrollTop = log.scrollHeight;
     };
     return bubble;
