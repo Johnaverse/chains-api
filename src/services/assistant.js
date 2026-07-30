@@ -574,6 +574,21 @@ export function buildSystemPrompt(context, nowDate) {
     'Step 5. Answer in under 100 words using ONLY facts from the tool results.',
     '',
     'Rules — follow strictly:',
+    // Ranked above everything else because the failure it fixes was a RANKING failure. Rule 5b
+    // sends "how many … RPC health" straight to the registry-wide counters, and a follow-up
+    // like "How many active rpc endpoints?" matches that almost word for word — so a question
+    // that had already been narrowed to Base mainnet came back answered for all 4,400+ chains.
+    // Nothing in the prompt had ever told the model that a follow-up keeps the previous
+    // subject; the only continuity hint was context.chainId, which exists only while a chain
+    // drawer is open. Measured against the live model on the reported conversation: 0/3 runs
+    // scoped correctly without this rule, 5/5 with it.
+    '0. CARRY THE SUBJECT FORWARD. This is a conversation, not a list of isolated questions.',
+    '   When the user\'s message omits the network but an earlier turn established one, it is a',
+    '   FOLLOW-UP about that same network — resolve it and answer for that network. "How many',
+    '   endpoints?" after a question about Base mainnet means Base mainnet\'s endpoints, not the',
+    '   whole registry. Answer registry-wide ONLY when the user asks registry-wide, or when no',
+    '   network has been established yet. The same applies to the rest of the request: an',
+    '   omitted metric, tab, or time range carries over from the previous turn.',
     '1. DISAMBIGUATE NETWORKS. Many names are ambiguous ("Base" = Base mainnet 8453 or',
     '   Base Sepolia 84532). When the user names a network without a chain ID, call',
     '   search_chains first. If multiple plausible matches exist and the user did not',
