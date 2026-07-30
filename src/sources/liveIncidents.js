@@ -4,6 +4,8 @@ import {
   LIVE_INCIDENTS_FETCH_TIMEOUT_MS
 } from '../../config.js';
 import { proxyFetch } from '../../fetchUtil.js';
+import { resolveIncidentChain } from '../domain/incidentChains.js';
+import { correlateChainIncidents } from '../services/chainIncidents.js';
 import { hasWindowBanner, windowEndMs } from '../domain/maintenanceWindow.js';
 import { logger } from '../util/logger.js';
 
@@ -48,7 +50,15 @@ export async function getLiveIncidents({ type = 'all', chainId, provider, ongoin
   let filtered = incidents;
   if (type === 'chain') filtered = filtered.filter((it) => !it.isProvider);
   else if (type === 'provider') filtered = filtered.filter((it) => it.isProvider);
-  if (chainId != null) filtered = filtered.filter((it) => it.chains.some((c) => c.chainId === chainId));
+  // Match a chain the provider DECLARED or one derived from the incident title.
+  // Provider status pages are organised by provider, so a provider incident
+  // almost never declares a chain — 17 of 18 ongoing ones carried none. Filtering
+  // on declared chains alone answered "nothing ongoing" for a chain that three
+  // providers were reporting an outage on.
+  if (chainId != null) {
+    filtered = filtered.filter((it) => it.chains.some((c) => c.chainId === chainId)
+      || it.derivedChain?.chainId === chainId);
+  }
   if (typeof ongoing === 'boolean') filtered = filtered.filter((it) => it.ongoing === ongoing);
   if (status) filtered = filtered.filter((it) => it.status === status);
   if (provider) {
@@ -61,7 +71,11 @@ export async function getLiveIncidents({ type = 'all', chainId, provider, ongoin
     fetchedAt: new Date(cache.fetchedAt).toISOString(),
     count: sliced.length,
     totalMatched: filtered.length,
-    incidents: sliced
+    incidents: sliced,
+    // Correlated across ALL ongoing provider incidents, not just the filtered
+    // page: the question "is this chain in trouble" is answered by how many
+    // providers agree, and a chainId filter would leave only one of them.
+    chainLevel: correlateChainIncidents(incidents)
   };
 }
 
@@ -87,7 +101,7 @@ async function loadIncidents() {
     if (!response.ok) throw new Error(`Feed responded ${response.status}`);
     const body = await response.json();
     const events = Array.isArray(body?.events) ? body.events : [];
-    const normalized = events.map(normalizeEvent);
+    const normalized = events.map(normalizeEvent).map(attachChain);
     cache = { fetchedAt: Date.now(), incidents: dedupeEvents(normalized), events: normalized };
     return cache.incidents;
   } catch (err) {
@@ -155,6 +169,24 @@ function normalizeEvent(ev) {
       : [],
     affectedComponents: Array.isArray(ev.affectedComponents) ? ev.affectedComponents : []
   };
+}
+
+/**
+ * Attach the chain an incident is about, with the evidence for it.
+ *
+ * Separate from normalizeEvent because it needs the chain registry: resolution
+ * runs against searchChains, and a record built before the registry loaded would
+ * silently carry `derivedChain: null` forever. Called per load, so a registry that
+ * arrives late still attributes on the next refresh.
+ */
+function attachChain(incident) {
+  const resolved = resolveIncidentChain(incident);
+  // `derivedChain` is deliberately NOT merged into `chains`: a chain read out of
+  // a title is a weaker claim than one the provider declared, and collapsing them
+  // would make a guess indistinguishable from a fact (SERVICE-CONTRACT rule 14).
+  incident.derivedChain = resolved && resolved.evidence !== 'declared' ? resolved : null;
+  incident.chainEvidence = resolved?.evidence ?? null;
+  return incident;
 }
 
 function parseEventTime(ev) {
