@@ -261,7 +261,7 @@ function dailySeries(incidentGroups, maintenanceGroups, now) {
 
     // Same rule as the availability numerator: an unpublished duration
     // contributes no hours, so the sparkline and the percent agree.
-    const endMs = downtimeEndMs(g, now);
+    const { ms: endMs } = downtimeEnd(g, now);
     if (endMs == null) continue;
     const chains = Math.max(1, new Set(g.updates.flatMap((u) => (u.chains ?? []).map((c) => c?.chainId).filter((c) => c != null))).size);
     for (const b of buckets) {
@@ -320,9 +320,11 @@ function chainWeightedAvailability(incidentGroups, { chainsSupported, now, oldes
   const intervalsByChain = new Map();
   let measured = 0;
   let unknownDuration = 0;
+  const byEvidence = { observed: 0, ongoing: 0, unpublished: 0 };
   incidentGroups.forEach((g, idx) => {
     const startMs = g.first.publishedMs;
-    const endMs = downtimeEndMs(g, now);
+    const { ms: endMs, evidence } = downtimeEnd(g, now);
+    byEvidence[evidence] += 1;
     // An incident whose duration the page never published is UNKNOWN, not
     // ongoing. Treating it as "still down until now" charged Infura 21 days of
     // outage for an incident it resolved on 7 July and reported 96% for the
@@ -372,12 +374,17 @@ function chainWeightedAvailability(incidentGroups, { chainsSupported, now, oldes
   // now", not "a clean month" — consumers must be able to tell those apart.
   availability.measuredIncidents = measured;
   availability.unknownDurationIncidents = unknownDuration;
+  // The basis, broken out: `observed` are real durations, `ongoing` are charged to now and
+  // will change on the next poll, `unpublished` contributed nothing. A consumer ranking
+  // providers needs to know which of the three it is actually comparing.
+  availability.durationEvidence = byEvidence;
   if (notes.length) availability.note = notes.join('; ');
   return availability;
 }
 
 /**
- * When an incident stopped costing availability, or null when the page never said.
+ * When an incident stopped costing availability, and how we know — the same
+ * evidence idea `activationEvidence` applies to upgrade timing.
  *
  * Three cases, and the third is the common one:
  *   observed    a later update flips to resolved -> that timestamp, the real duration
@@ -386,13 +393,19 @@ function chainWeightedAvailability(incidentGroups, { chainsSupported, now, oldes
  *               only once, at resolution, so its start and duration are unknowable from
  *               the feed. Inventing "until now" is the worst of the three options —
  *               it silently converts old, closed incidents into current downtime.
+ *
+ * Evidence STRENGTH decides, not recency: a page that later posts a resolution upgrades an
+ * incident from unpublished to observed, and a real duration must never be replaced by a
+ * weaker guess just because a further update arrived.
+ *
+ * @returns {{ms: number|null, evidence: 'observed'|'ongoing'|'unpublished'}}
  */
-function downtimeEndMs(group, now) {
+export function downtimeEnd(group, now) {
   const startMs = group.first.publishedMs;
   const resolved = group.updates.find((u) => u !== group.first && u.status === 'resolved' && u.publishedMs != null);
-  if (resolved && resolved.publishedMs > startMs) return resolved.publishedMs;
-  if (group.latest.ongoing === true) return now;
-  return null;
+  if (resolved && resolved.publishedMs > startMs) return { ms: resolved.publishedMs, evidence: 'observed' };
+  if (group.latest.ongoing === true) return { ms: now, evidence: 'ongoing' };
+  return { ms: null, evidence: 'unpublished' };
 }
 
 /** Total time covered by `intervals` within [winStart, winEnd], overlaps merged. */

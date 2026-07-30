@@ -1855,9 +1855,23 @@ const TL_RANGES = [
     ['1D', 1], ['7D', 7], ['30D', 30], ['All', 0]
 ];
 
+// How well the feed knows when a window runs. A countdown, a position on the time axis and
+// a sort are only meaningful for the dated levels — 'announced' means the provider said an
+// upgrade is coming and never named the day, so it gets its own group rather than a fake time.
+const TL_EVIDENCE = {
+    window: { label: 'exact window', cls: 'ev-exact', title: 'The provider stated the window start (and usually its end).' },
+    scheduled: { label: 'scheduled', cls: 'ev-exact', title: 'A scheduled entry set the start time.' },
+    started: { label: 'observed start', cls: 'ev-approx', title: 'Seen in progress — the run had begun by this time.' },
+    completed: { label: 'completed by', cls: 'ev-approx', title: 'Only a completion post exists: an upper bound on the run, not its start.' },
+    announced: { label: 'date not announced', cls: 'ev-unknown', title: 'Announced with no date. The provider has not said when it runs.' }
+};
+function evidenceOf(u) { return TL_EVIDENCE[u.activationEvidence] ?? TL_EVIDENCE.announced; }
+function isDated(u) { return timelineActivationMs(u) != null; }
+
 const TL_STREAMS = [
     ['all', 'All windows'],
     ['upcoming', 'Upcoming'],
+    ['undated', 'Date TBA'],
     ['active', 'In progress'],
     ['fallout', 'With fallout'],
     ['done', 'Completed']
@@ -1913,7 +1927,10 @@ function timelineMatchesSearch(u, q) {
 // by status: providers leave a window labelled "scheduled" long after it ran.
 function timelineStreamOf(u, now) {
     const ms = timelineActivationMs(u);
-    if (ms != null && ms > now) return 'upcoming';
+    // Undated but not finished: announced, day unknown. Calling this 'done' would file a
+    // pending fork under history purely because nobody has named the date yet.
+    if (ms == null) return u.status === 'maintenance_completed' ? 'done' : 'undated';
+    if (ms > now) return 'upcoming';
     if (u.status === 'maintenance_in_progress') return 'active';
     return 'done';
 }
@@ -1924,11 +1941,15 @@ function timelineInStream(u, stream, now) {
     return timelineStreamOf(u, now) === stream;
 }
 
+// Undated windows cannot be placed on a time axis at all. They are excluded from the chart
+// and counted next to it, never silently dropped.
+function timelineUndated(items) { return items.filter((u) => !isDated(u)); }
+
 // The x-domain: `rangeDays` back from now, and forward to the last pending
 // window (bounded by the same span, so a window three weeks out never squashes
 // the last 24 hours into a pixel). 'All' fits every window in the payload.
 function timelineDomain(items, now) {
-    const times = items.map(timelineActivationMs).filter(t => t != null);
+    const times = items.filter(isDated).map(timelineActivationMs);
     if (timeline.rangeDays === 0) {
         const lo = times.length ? Math.min(...times, now) : now - 7 * 864e5;
         const hi = times.length ? Math.max(...times, now) : now + 864e5;
@@ -1970,14 +1991,21 @@ function renderTimeline() {
     // The chart shows everything the search matched inside the window; the tabs
     // then slice that set, so tab counts always describe what the chart draws.
     const inRange = searched.filter(u => { const t = timelineActivationMs(u); return t != null && t >= lo && t <= hi; });
-    const items = inRange.filter(u => timelineInStream(u, timeline.stream, now));
+    // Undated windows have no position on a time axis, so they are never plotted — but they
+    // ARE listed and counted, because "announced, day unknown" is information a reader needs
+    // rather than a row to hide.
+    const undated = timelineUndated(searched);
+    const tabbable = [...inRange, ...undated];
+    const items = tabbable.filter(u => timelineInStream(u, timeline.stream, now));
 
-    renderTimelineTabs(inRange, now);
-    renderTimelineChart(inRange, items, [lo, hi], now);
+    renderTimelineTabs(tabbable, now);
+    renderTimelineChart(inRange, items, [lo, hi], now, undated.length);
     renderTimelineRows(items, now);
 
     if (meta) meta.textContent = `${timeline.upgrades.length} windows`;
-    const nextUp = searched.map(timelineActivationMs).filter(t => t != null && t > now).sort((a, b) => a - b)[0];
+    // Only a DATED window can be counted down to. An undated announcement must never
+    // produce a "next window in ..." headline.
+    const nextUp = searched.filter(isDated).map(timelineActivationMs).filter(t => t > now).sort((a, b) => a - b)[0];
     const notice = document.getElementById('timelineNextNotice');
     if (notice) {
         notice.textContent = '';
@@ -2021,10 +2049,18 @@ const TL_CHART_W = 1000;   // viewBox units; the SVG scales to its container
 const TL_CHART_H = 150;
 const TL_BUCKETS = 96;
 
-function renderTimelineChart(inRange, selected, [lo, hi], now) {
+function renderTimelineChart(inRange, selected, [lo, hi], now, undatedCount = 0) {
     const host = document.getElementById('timelineChart');
     if (!host) return;
     host.textContent = '';
+    // Say what the chart cannot show. A silently short axis reads as "nothing else exists".
+    const omitted = document.getElementById('timelineOmitted');
+    if (omitted) {
+        omitted.textContent = undatedCount
+            ? `${undatedCount} window${undatedCount === 1 ? '' : 's'} not plotted — no date announced`
+            : '';
+        omitted.hidden = !undatedCount;
+    }
     const span = Math.max(hi - lo, 1);
     const x = (t) => ((t - lo) / span) * TL_CHART_W;
 
@@ -2318,7 +2354,7 @@ function renderTimelineRows(items, now) {
 }
 
 function timelineDayBucket(ms, now) {
-    if (ms == null) return 'Unscheduled';
+    if (ms == null) return 'Date not announced';
     const d = new Date(ms);
     const today = new Date(now);
     const days = Math.round((Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())) / 864e5);
@@ -2374,11 +2410,26 @@ function urgencyPill(urgency) {
 // Fallout: incidents that started on the same network within the follow
 // window after activation — the "what did this upgrade cause?" rows.
 function timelineFalloutRows(u) {
+    // durationEvidence distinguishes "we watched it resolve" from "the page mentioned it once
+    // and never said when it ended" — a reader comparing incidents needs that, not a number
+    // that silently means different things.
+    const durationOf = (inc) => {
+        if (inc.durationEvidence === 'observed' && inc.resolvedAt && inc.startedAt) {
+            const ms = Date.parse(inc.resolvedAt) - Date.parse(inc.startedAt);
+            return ms > 0 ? `lasted ${fmtDuration(ms)}` : 'resolved';
+        }
+        if (inc.durationEvidence === 'ongoing') return 'still open';
+        return 'duration not published';
+    };
     return (u.followedByIncidents || []).slice(0, 4).map(inc =>
         el('div', { class: 'tl-fallout' }, [
             el('span', { class: 'tl-fallout-arrow', text: '↳' }),
             inc.url ? el('a', { href: inc.url, target: '_blank', rel: 'noopener', text: inc.title }) : el('span', { text: inc.title }),
-            el('span', { class: 'muted', text: `+${inc.hoursAfterActivation}h after activation (suspected)` })
+            el('span', { class: 'muted', text: `+${inc.hoursAfterActivation}h after activation (suspected)` }),
+            el('span', {
+                class: inc.durationEvidence === 'ongoing' ? 'tl-fallout-open' : 'muted',
+                text: durationOf(inc)
+            })
         ]));
 }
 
@@ -2415,18 +2466,27 @@ function timelineRow(u, now) {
     const chainId = (u.chainIds || [])[0] ?? null;
     const fallout = u.followedByIncidents?.length || 0;
 
-    const when = pending
-        ? el('span', { class: 'tlx-when mono tl-countdown', 'data-at': String(actMs), text: countdownText(actMs - now) })
-        : el('span', {
-            class: 'tlx-when past',
-            text: actMs != null ? new Date(actMs).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : '—'
-        });
+    // A countdown is a claim about a known instant. With no date announced there is nothing
+    // to count down to, so the slot says so instead of rendering a dash that looks like a
+    // missing value.
+    const ev = evidenceOf(u);
+    const when = actMs == null
+        ? el('span', { class: 'tlx-when tlx-when-tba', title: ev.title, text: 'date TBA' })
+        : pending
+            ? el('span', { class: 'tlx-when mono tl-countdown', 'data-at': String(actMs), text: countdownText(actMs - now) })
+            : el('span', {
+                class: 'tlx-when past',
+                text: new Date(actMs).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+            });
 
     const chips = [];
     for (const s of (u.software || []).slice(0, 3)) {
         chips.push(el('span', { class: 'sw-chip mono', text: [s.client, s.version].filter(Boolean).join(' ') }));
     }
     if (u.windowMinutes) chips.push(el('span', { class: 'tlx-chip-dim mono', text: fmtDuration(u.windowMinutes * 60000) }));
+    // How well the time is known, on every row — the reader should never have to guess
+    // whether "02:36 PM" is a stated window or the moment someone posted a notice.
+    chips.push(el('span', { class: `tlx-chip-ev ${ev.cls}`, title: ev.title, text: ev.label }));
     if (fallout) chips.push(el('span', { class: 'tlx-chip-fallout', text: `↯ ${fallout} incident${fallout === 1 ? '' : 's'} after` }));
 
     const detail = [...timelineFalloutRows(u), ...timelineContextRows(u)];

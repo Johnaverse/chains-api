@@ -2,14 +2,16 @@ import { getLiveEvents } from '../sources/liveIncidents.js';
 import { getForumNews } from '../sources/forumNews.js';
 import { getWeb3News } from '../sources/web3News.js';
 import { networkSlug, networkSlugs } from '../domain/networkSlug.js';
+import { downtimeEnd } from './providerStats.js';
 import { logger } from '../util/logger.js';
 
 /**
  * The correlation layer: one UpgradeEvent per scheduled upgrade/maintenance window,
  * carrying everything the three feeds know about it —
  *
- *   when        activation time — the scheduled WINDOW's own timestamp, not the
- *               announcement that preceded it (see activationMsFor)
+ *   when        activation time AND how well we know it (see activationFor): a stated
+ *               window, a scheduled entry, an observed run, or merely announced — in which
+ *               case activationAt is null rather than the announcement time in disguise
  *   what        required software [{client, version}] and urgency
  *   fallout     incidents on the same network within FOLLOW_WINDOW_MS after activation,
  *               labelled suspected (temporal correlation, never asserted causation)
@@ -100,19 +102,38 @@ export function buildUpgradeEvents(events, { forumPosts = [], newsItems = [], no
     else if (INCIDENT_STATUSES.has(group.latest.status)) incidentGroups.push(group);
   }
 
-  // Soonest-first for what hasn't happened, most-recent-first for what has. A caller
-  // asking for 20 upgrades wants every pending window plus the freshest history, not
-  // the twenty furthest-future dates.
+  // Soonest-first for what hasn't happened, most-recent-first for what has, and an
+  // undated-but-still-open rollout sits with what is coming rather than under history — a
+  // reader planning for a fork cares that it is pending even before the day is named.
   return upgradeGroups
     .map((group) => toUpgradeEvent(group, incidentGroups, forumPosts, newsItems, now))
     .sort((a, b) => {
+      const bucketA = orderBucket(a, now);
+      const bucketB = orderBucket(b, now);
+      if (bucketA !== bucketB) return bucketA - bucketB;
       const ta = Date.parse(a.activationAt ?? '') || 0;
       const tb = Date.parse(b.activationAt ?? '') || 0;
-      const aPending = ta > now;
-      const bPending = tb > now;
-      if (aPending !== bPending) return aPending ? -1 : 1;
-      return aPending ? ta - tb : tb - ta;
+      if (bucketA === 0) return ta - tb;   // pending: soonest first
+      if (bucketA === 2) return tb - ta;   // history: newest first
+      // Undated: the announcement is the only thing left to order by.
+      return (Date.parse(b.announcedAt ?? '') || 0) - (Date.parse(a.announcedAt ?? '') || 0);
     });
+}
+
+/**
+ * Ordering buckets:
+ *   0 dated and pending      what is coming, soonest first
+ *   1 undated and still open  announced with no day named — still forward-looking, so it
+ *                             belongs here rather than buried under history
+ *   2 dated and past          history, newest first
+ *   3 undated and completed   nothing to place it by but the announcement
+ */
+function orderBucket(u, now) {
+  const t = Date.parse(u.activationAt ?? '');
+  if (Number.isFinite(t) && t > now) return 0;
+  if (u.activationAt == null && u.status !== 'maintenance_completed') return 1;
+  if (Number.isFinite(t)) return 2;
+  return 3;
 }
 
 // Severity/urgency decorations providers bolt onto a title, in every casing and
@@ -177,32 +198,81 @@ export function groupEventsByIncident(events) {
 }
 
 /**
- * When the upgrade actually runs.
+ * How well we actually know when an upgrade runs, strongest first.
+ *
+ * This is the freshness-EVIDENCE idea: a consumer must be able to tell "the window starts at
+ * 14:00" from "someone announced this at 14:00 and never said when it runs". Both used to be
+ * served as a bare `activationAt`, and on live data 60 of 74 windows were the second kind —
+ * so a countdown, a sort and an assistant answer were all built on the announcement time as
+ * though it were the run time.
+ *
+ * Strength, not recency, decides: a provider often posts "upgrade coming soon" first and the
+ * exact window later, so a later WEAKER update must never overwrite an earlier precise one,
+ * while the precise one must always override the earlier unknown. Recency only breaks ties
+ * within one evidence level.
+ */
+export const ACTIVATION_EVIDENCE = ['window', 'scheduled', 'started', 'completed', 'announced'];
+
+/**
+ * When the upgrade actually runs, and how we know.
  *
  * A provider posts a window at least twice: an ANNOUNCEMENT ("we will upgrade on Aug 3")
  * and a WINDOW entry whose own publishedAt is the window start — often weeks later, and
  * frequently in the future. Taking the first `maintenance_scheduled` update reported the
- * announcement as the activation, which pushed every pending window into the past: the
- * dashboard read "Upcoming — 0 scheduled" while eleven windows were genuinely pending.
+ * announcement as the activation, which pushed every pending window into the past.
  *
  * Window entries are identified by the body banner (`isWindowEntry`) as well as by status,
  * because some providers label the window entry `maintenance_completed` up front — status
  * alone misses those. Of the candidates we take the NEXT future one (that is the occurrence
  * a reader is waiting for) and otherwise the most recent past one (the run that happened).
+ *
+ * When nothing carries window evidence the activation is UNKNOWN and reported as null —
+ * never silently substituted with the announcement timestamp.
+ *
+ * @returns {{ms: number|null, evidence: 'window'|'scheduled'|'announced'}}
  */
-function activationMsFor(updates, first, now) {
-  const candidates = updates
-    .filter((u) => u.isWindowEntry || u.status === 'maintenance_scheduled')
-    .map((u) => u.publishedMs)
-    .filter((ms) => Number.isFinite(ms))
-    .sort((a, b) => a - b);
-  if (!candidates.length) return first.publishedMs ?? null;
-  return candidates.find((ms) => ms > now) ?? candidates[candidates.length - 1];
+function activationFor(updates, first, now) {
+  const dated = (list) => list.map((u) => u.publishedMs).filter((ms) => Number.isFinite(ms)).sort((a, b) => a - b);
+  // The banner is the only source that states a window explicitly, so it outranks a bare
+  // scheduled entry whose timestamp merely happens to be the start.
+  const byBanner = dated(updates.filter((u) => u.isWindowEntry));
+  // A scheduled entry only tells us the run time if it is NOT just the announcement — an
+  // announcement is itself a maintenance_scheduled post at the moment it was written.
+  const announcedMs = first.publishedMs ?? null;
+  const byStatus = dated(updates.filter((u) => u.status === 'maintenance_scheduled' && u.publishedMs !== announcedMs));
+
+  // A rollout that has visibly started or finished bounds its own run time, even with no
+  // banner. Approximate rather than unknown, and far more useful than null for history — but
+  // distinct from a stated window, and the two are distinguished from each other because a
+  // completion post is an upper bound while an in-progress post is a real start.
+  //
+  // Both are only meaningful in the PAST: a "completed" or "in progress" entry dated in the
+  // future is a provider using a terminal status as a window marker (Hedera does this), and
+  // its timestamp is a stated time rather than an observation. Live data had one such entry
+  // producing a future activation labelled `completed`, which would render a countdown to
+  // something already described as finished.
+  const terminal = (status) => updates.filter((u) => u.status === status);
+  const past = (list) => dated(list).filter((ms) => ms <= now);
+  const byFutureTerminal = dated([...terminal('maintenance_completed'), ...terminal('maintenance_in_progress')])
+    .filter((ms) => ms > now);
+  const byProgress = past(terminal('maintenance_in_progress'));
+  const byCompletion = past(terminal('maintenance_completed'));
+
+  const pick = (candidates) => candidates.find((ms) => ms > now) ?? candidates[candidates.length - 1];
+  if (byBanner.length) return { ms: pick(byBanner), evidence: 'window' };
+  if (byStatus.length) return { ms: pick(byStatus), evidence: 'scheduled' };
+  // A future-dated terminal entry states a planned time, so it ranks with `scheduled`.
+  if (byFutureTerminal.length) return { ms: byFutureTerminal[0], evidence: 'scheduled' };
+  if (byProgress.length) return { ms: pick(byProgress), evidence: 'started' };
+  // Completion only: an UPPER BOUND on the run, not its start. Named for what it is so a
+  // consumer never reads it as a stated start time.
+  if (byCompletion.length) return { ms: pick(byCompletion), evidence: 'completed' };
+  return { ms: null, evidence: 'announced' };
 }
 
 function toUpgradeEvent(group, incidentGroups, forumPosts, newsItems, now) {
   const { updates, latest } = group;
-  const activationMs = activationMsFor(updates, group.first, now);
+  const { ms: activationMs, evidence: activationEvidence } = activationFor(updates, group.first, now);
   // The window entry for THIS activation carries the only duration the feed exposes.
   const windowEnd = updates.find((u) => u.publishedMs === activationMs && u.windowEndMs != null)?.windowEndMs ?? null;
 
@@ -217,17 +287,27 @@ function toUpgradeEvent(group, incidentGroups, forumPosts, newsItems, now) {
       if (delta <= 0 || delta > FOLLOW_WINDOW_MS) return false;
       return sharesNetwork(chainIds, slugs, uniqueChainIds(inc.updates), collectSlugs(inc.updates));
     })
-    .map((inc) => ({
-      title: inc.latest.title,
-      url: inc.latest.url,
-      status: inc.latest.status,
-      startedAt: inc.first.publishedAt,
-      hoursAfterActivation: Math.round((inc.first.publishedMs - activationMs) / 3600000 * 10) / 10,
-      chainIds: uniqueChainIds(inc.updates),
-      // Temporal correlation on the same network — never asserted as causation. The honest
-      // label is what makes the field trustworthy.
-      suspectedCause: 'upgrade'
-    }))
+    .map((inc) => {
+      // Same evidence rule the provider board uses, so "how long did it last" gets one
+      // answer across surfaces: observed = a resolution was posted, ongoing = still live,
+      // unpublished = the page said it once and never said when it ended.
+      const { ms: endMs, evidence } = downtimeEnd(inc, now);
+      return {
+        title: inc.latest.title,
+        url: inc.latest.url,
+        status: inc.latest.status,
+        startedAt: inc.first.publishedAt,
+        hoursAfterActivation: Math.round((inc.first.publishedMs - activationMs) / 3600000 * 10) / 10,
+        // null unless a resolution was actually observed — never "now" standing in for it.
+        resolvedAt: evidence === 'observed' && endMs != null ? new Date(endMs).toISOString() : null,
+        ongoing: evidence === 'ongoing',
+        durationEvidence: evidence,
+        chainIds: uniqueChainIds(inc.updates),
+        // Temporal correlation on the same network — never asserted as causation. The honest
+        // label is what makes the field trustworthy.
+        suspectedCause: 'upgrade'
+      };
+    })
     .sort((a, b) => a.hoursAfterActivation - b.hoursAfterActivation);
 
   const inContext = (item) => {
@@ -252,7 +332,15 @@ function toUpgradeEvent(group, incidentGroups, forumPosts, newsItems, now) {
     status: latest.status,
     urgency: latest.urgency ?? 'standard',
     software: latest.software ?? [],
+    // null when the run time is genuinely unknown. Read `activationEvidence` before trusting
+    // this for a countdown, a sort, or an answer.
     activationAt: activationMs != null ? new Date(activationMs).toISOString() : null,
+    // 'window'    the body banner stated the window (strongest; carries a duration too)
+    // 'scheduled' a scheduled entry distinct from the announcement set the start
+    // 'started'   an in-progress update — the run had begun by then
+    // 'completed'  only a completion post — an UPPER BOUND on the run, not its start
+    // 'announced' only an announcement exists — the run time is NOT known, activationAt null
+    activationEvidence,
     // The window's end and, with it, its duration — present only for providers whose
     // bodies carry the scheduled-event banner. Null means "we don't know how long".
     windowEndAt: windowEnd != null ? new Date(windowEnd).toISOString() : null,
