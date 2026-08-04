@@ -4,258 +4,587 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chains — Blockchain Networks Dashboard</title>
-    <meta name="description" content="Explore blockchain networks: chain info, RPC endpoints and health, L2 scaling, relationships, and operator incidents — aggregated from multiple sources.">
+    <title>Chains — Blockchain Network Analytics</title>
+    <meta name="description" content="Analytics for blockchain networks: live operator and RPC-provider incidents joined to the chains they affect, L2 scaling value by stage, stack and data-availability layer, chain relationships, RPC endpoint health and cross-source data quality.">
 
     <!-- Warm up the API + live-feed origins before the first fetch -->
     <link rel="preconnect" href="https://chains-api.johnaverse.cc" crossorigin>
     <link rel="preconnect" href="https://chains-status-news.johnaverse.cc" crossorigin>
 
+    <!-- Body weight is preloaded because it would otherwise be discovered only
+         after fonts/inter.css parses — a serial request on the critical path.
+         The 600/700 weights are left to normal discovery: they are needed a few
+         milliseconds later and font-display:swap covers the gap. -->
+    <link rel="preload" href="fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin>
+
+    <!-- Inline SVG favicon: avoids a 404 round-trip and needs no asset. -->
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%233987e5'/%3E%3Cpath d='M11 21V11h3.2v3.4h3.6V11H21v10h-3.2v-3.6h-3.6V21z' fill='white'/%3E%3C/svg%3E">
+
     <link rel="stylesheet" href="fonts/inter.css">
     <link rel="stylesheet" href="style.css">
+    <!-- Set the theme before first paint so a saved light preference never
+         flashes the dark default. -->
+    <script>
+        try {
+            var t = localStorage.getItem('chains:theme');
+            if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+        } catch (e) { /* private mode — fall back to prefers-color-scheme */ }
+    </script>
+    <script src="charts.js" defer></script>
     <!-- 3d-force-graph (1.2 MB) is injected lazily on first visit to the
          Relationships tab — see ensureGraphLib() in app.js. -->
     <script src="app.js" defer></script>
 </head>
 
 <body>
-    <!-- ─── Top App Bar ─── -->
+    <!-- ─── Top app bar ─── -->
     <header id="appbar">
         <div class="appbar-brand">
-            <span class="brand-mark">⬡</span>
+            <span class="brand-mark" aria-hidden="true">CH</span>
             <div class="brand-text">
                 <h1>Chains</h1>
-                <span class="subtitle" id="statsLine">Loading…</span>
             </div>
         </div>
 
         <div class="search-box">
-            <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="11" cy="11" r="8"></circle>
+            <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
+                <circle cx="11" cy="11" r="7"></circle>
                 <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
             </svg>
-            <input type="text" id="searchInput" placeholder="Find a network — id or name…" autocomplete="off">
-            <kbd class="search-hint">/</kbd>
-            <div id="searchDropdown" class="search-dropdown hidden"></div>
+            <input type="text" id="searchInput" placeholder="Search networks — id or name…" autocomplete="off"
+                aria-label="Search networks" aria-describedby="searchHint">
+            <kbd class="search-hint" id="searchHint">/</kbd>
+            <div id="searchDropdown" class="search-dropdown hidden" role="listbox" aria-label="Network results"></div>
         </div>
 
-        <nav class="tabs" id="tabs" role="tablist">
-            <button class="tab active" data-view="networks" role="tab">Networks</button>
-            <button class="tab" data-view="graph" role="tab">Relationships</button>
-            <button class="tab" data-view="incidents" role="tab">Incidents</button>
-            <button class="tab" data-view="providers" role="tab">Providers</button>
-            <button class="tab" data-view="forum" role="tab">Forum</button>
+        <div class="appbar-spacer"></div>
+
+        <!-- Data currency is a first-class signal for an analytics audience:
+             say when the registry was last built and when L2BEAT was fetched. -->
+        <div class="appbar-meta" id="appbarMeta">
+            <span class="meta-primary" id="metaChains">—</span>
+            <span class="meta-secondary" id="metaAsOf">loading…</span>
+        </div>
+
+        <div class="appbar-tools">
+            <button id="themeToggle" class="icon-btn" type="button" aria-label="Switch colour theme"
+                title="Switch between light and dark">
+                <svg class="theme-icon-dark" width="15" height="15" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                    <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"></path>
+                </svg>
+                <svg class="theme-icon-light" width="15" height="15" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="4"></circle>
+                    <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path>
+                </svg>
+            </button>
+        </div>
+
+        <nav class="tabs" id="tabs" role="tablist" aria-label="Dashboard sections">
+            <button class="tab" id="tab-overview" data-view="overview" role="tab" aria-selected="true"
+                aria-controls="view-overview">Overview</button>
+            <button class="tab" id="tab-networks" data-view="networks" role="tab" aria-selected="false"
+                aria-controls="view-networks">Networks</button>
+            <button class="tab" id="tab-graph" data-view="graph" role="tab" aria-selected="false"
+                aria-controls="view-graph">Relationships</button>
+            <button class="tab" id="tab-incidents" data-view="incidents" role="tab" aria-selected="false"
+                aria-controls="view-incidents">Incidents<span class="tab-badge hidden" id="tabBadgeIncidents"></span></button>
+            <button class="tab" id="tab-providers" data-view="providers" role="tab" aria-selected="false"
+                aria-controls="view-providers">Providers</button>
+            <button class="tab" id="tab-news" data-view="news" role="tab" aria-selected="false"
+                aria-controls="view-news">News</button>
+            <button class="tab" id="tab-forum" data-view="forum" role="tab" aria-selected="false"
+                aria-controls="view-forum">Forum</button>
         </nav>
     </header>
 
     <!-- Load-failure banner (hidden unless the bulk fetch fails everywhere) -->
-    <div id="loadErrorBanner" class="load-error hidden">
-        <span id="loadErrorText">Failed to load network data.</span>
-        <button id="loadRetryBtn" class="chip">Retry</button>
+    <div id="loadErrorBanner" class="banner hidden" role="alert">
+        <svg class="banner-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9"></circle>
+            <path d="M12 8v4M12 16h.01"></path>
+        </svg>
+        <span id="loadErrorText">Could not load network data.</span>
+        <button id="loadRetryBtn" class="chip" type="button">Retry</button>
     </div>
 
-    <!-- ─── View: Networks (default landing) ─── -->
-    <section id="view-networks" class="view scroll-view active">
+    <!-- ═══ View: Overview (default landing) ═══════════════════════════ -->
+    <section id="view-overview" class="view scroll-view active" role="tabpanel" aria-labelledby="tab-overview" tabindex="0">
         <div class="view-inner">
-            <!-- Hero KPI strip -->
-            <div class="stat-cards summary" id="summaryCards">
-                <div class="stat-card skeleton"><div class="stat-value">…</div><div class="stat-label">Loading</div></div>
+            <div class="view-head">
+                <h2 class="view-title">Operational overview</h2>
+                <p class="view-lead">Current state of <span id="ovChainCount">the</span> tracked networks: who is
+                    affected by an open incident right now, where L2 value sits, and how trustworthy the underlying
+                    data is. Every figure is a point-in-time reading — this API keeps no historical series, so
+                    nothing here is a trend.</p>
             </div>
 
-            <!-- Compact top-L2s-by-TVS chart -->
-            <h2 class="section-title">Top L2s by TVS <span class="src-pill" id="scalingMeta"></span></h2>
-            <div class="scaling-chart" id="scalingChart"></div>
-
-            <!-- One unified networks table -->
-            <h2 class="section-title">All networks <span class="toolbar-count" id="chainsCount"></span></h2>
-            <div class="toolbar">
-                <div class="chip-row" id="chainTagChips">
-                    <button class="chip active" data-tag="all">All</button>
-                    <button class="chip" data-tag="Mainnet">Mainnet</button>
-                    <button class="chip" data-tag="L2">L2</button>
-                    <button class="chip" data-tag="Testnet">Testnet</button>
-                    <button class="chip" data-tag="Beacon">Beacon</button>
-                    <button class="chip" data-tag="ZK">ZK</button>
+            <!-- Skeleton tiles reserve the row's exact height before app.js runs.
+                 On a slow link the script lands ~2s after the HTML, and an empty
+                 row meant six tiles appeared at once and pushed everything below
+                 down 400px — the single biggest layout shift on the page. The
+                 markup mirrors a real tile (label / value / sub) so the reserved
+                 height is right by construction rather than a guessed min-height.
+                 JS replaces the whole row on first render. -->
+            <div class="stat-row" id="overviewStats" aria-live="polite" aria-busy="true">
+                <div class="stat-tile is-skeleton is-hero" aria-hidden="true">
+                    <div class="stat-label">&nbsp;</div><div class="stat-value">&nbsp;</div><div class="stat-sub">&nbsp;</div>
+                </div>
+                <div class="stat-tile is-skeleton" aria-hidden="true">
+                    <div class="stat-label">&nbsp;</div><div class="stat-value">&nbsp;</div><div class="stat-sub">&nbsp;</div>
+                </div>
+                <div class="stat-tile is-skeleton" aria-hidden="true">
+                    <div class="stat-label">&nbsp;</div><div class="stat-value">&nbsp;</div><div class="stat-sub">&nbsp;</div>
+                </div>
+                <div class="stat-tile is-skeleton" aria-hidden="true">
+                    <div class="stat-label">&nbsp;</div><div class="stat-value">&nbsp;</div><div class="stat-sub">&nbsp;</div>
+                    <div class="meter"></div>
+                </div>
+                <div class="stat-tile is-skeleton" aria-hidden="true">
+                    <div class="stat-label">&nbsp;</div><div class="stat-value">&nbsp;</div><div class="stat-sub">&nbsp;</div>
+                </div>
+                <div class="stat-tile is-skeleton" aria-hidden="true">
+                    <div class="stat-label">&nbsp;</div><div class="stat-value">&nbsp;</div><div class="stat-sub">&nbsp;</div>
                 </div>
             </div>
+
+            <!-- The join that does not exist anywhere else in the product:
+                 open incidents (chain operators AND RPC providers) resolved to
+                 the specific chains they affect. -->
+            <div class="card" style="margin-top: var(--sp-4)">
+                <div class="card-head">
+                    <h3 class="card-title">Live incident impact</h3>
+                    <span class="pill-meta live-pill" id="impactMeta">live</span>
+                    <div class="card-actions">
+                        <div class="chip-row" id="impactScope" role="group" aria-label="Impact scope">
+                            <button class="chip" type="button" data-scope="all" aria-pressed="true">All open</button>
+                            <button class="chip" type="button" data-scope="chain" aria-pressed="false">Chain operators</button>
+                            <button class="chip" type="button" data-scope="provider" aria-pressed="false">RPC providers</button>
+                        </div>
+                    </div>
+                    <p class="card-sub">Unresolved incidents from operator and RPC-provider status pages, joined to
+                        the registry by chain ID. A provider incident fans out to every chain it names, so one
+                        outage can appear against many networks.</p>
+                </div>
+                <div id="impactBody" class="live-panel"></div>
+            </div>
+
+            <div class="grid grid-2" style="margin-top: var(--sp-4)">
+                <div class="card">
+                    <div class="card-head">
+                        <h3 class="card-title">Value secured by rollup stage</h3>
+                        <div class="card-actions" id="tvsStageActions"></div>
+                        <p class="card-sub">L2BEAT's decentralisation maturity ladder. Stage 0 is training wheels,
+                            Stage 2 is fully permissionless.</p>
+                    </div>
+                    <div id="chartTvsStage"></div>
+                </div>
+
+                <div class="card">
+                    <div class="card-head">
+                        <h3 class="card-title">Value secured by data-availability layer</h3>
+                        <div class="card-actions" id="tvsDaActions"></div>
+                        <p class="card-sub">Where each rollup publishes its data. Concentration here is systemic
+                            risk: a single DA layer holding most value is a single point of failure.</p>
+                    </div>
+                    <div id="chartTvsDa"></div>
+                </div>
+
+                <div class="card">
+                    <div class="card-head">
+                        <h3 class="card-title">Value secured by stack</h3>
+                        <div class="card-actions" id="tvsStackActions"></div>
+                        <p class="card-sub">The framework each rollup is built on.</p>
+                    </div>
+                    <div id="chartTvsStack"></div>
+                </div>
+
+                <div class="card">
+                    <div class="card-head">
+                        <h3 class="card-title">Largest networks by value secured</h3>
+                        <div class="card-actions" id="tvsTopActions"></div>
+                        <p class="card-sub">Click a bar to open the network. Only projects the registry could match
+                            to a chain ID are clickable.</p>
+                    </div>
+                    <div id="chartTvsTop"></div>
+                </div>
+            </div>
+
+            <div class="card" style="margin-top: var(--sp-4)">
+                <div class="card-head">
+                    <h3 class="card-title">How concentrated is L2 value?</h3>
+                    <div class="card-actions" id="concentrationActions"></div>
+                    <p class="card-sub">Share of total value secured held by the largest projects.</p>
+                </div>
+                <div id="chartConcentration"></div>
+            </div>
+
+            <div class="grid grid-2" style="margin-top: var(--sp-4)">
+                <div class="card">
+                    <div class="card-head">
+                        <h3 class="card-title">Cross-source data quality</h3>
+                        <span class="pill-meta" id="validateMeta"></span>
+                        <p class="card-sub">Disagreements between the five upstream sources, found by the API's
+                            validation rules. These are known data conflicts, not service errors.</p>
+                    </div>
+                    <div id="dataQualityBody"><div class="feed-empty">Loading validation report…</div></div>
+                </div>
+
+                <div class="card">
+                    <div class="card-head">
+                        <h3 class="card-title">Source freshness</h3>
+                        <span class="pill-meta" id="healthMeta"></span>
+                        <p class="card-sub">How long ago each upstream source was last read, and whether the
+                            background refreshers are running.</p>
+                    </div>
+                    <div id="freshnessBody"><div class="feed-empty">Loading health…</div></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ═══ View: Networks ═════════════════════════════════════════════ -->
+    <section id="view-networks" class="view scroll-view" role="tabpanel" aria-labelledby="tab-networks" tabindex="0">
+        <div class="view-inner">
+            <div class="view-head">
+                <h2 class="view-title">Networks</h2>
+                <p class="view-lead">Every chain in the registry, with its L2BEAT classification, registry RPC
+                    endpoint count and any open incident. Sort any column; click a row for detail.</p>
+            </div>
+
+            <div class="toolbar">
+                <div class="toolbar-group">
+                    <span class="toolbar-label" id="lblType">Type</span>
+                    <div class="chip-row" id="chainTypeChips" role="group" aria-labelledby="lblType"></div>
+                </div>
+                <div class="toolbar-group">
+                    <span class="toolbar-label" id="lblStatus">Status</span>
+                    <div class="chip-row" id="chainStatusChips" role="group" aria-labelledby="lblStatus"></div>
+                </div>
+                <div class="toolbar-group">
+                    <div class="chip-row">
+                        <button class="chip" type="button" id="chipIncidentOnly" aria-pressed="false">
+                            <span class="chip-dot" style="background: var(--critical)"></span>Open incident only
+                            <span class="chip-count" id="chipIncidentCount"></span>
+                        </button>
+                        <button class="chip" type="button" id="chipTvsOnly" aria-pressed="false">
+                            Has L2BEAT value
+                        </button>
+                    </div>
+                </div>
+                <span class="toolbar-count" id="chainsCount"></span>
+            </div>
+
             <div class="table-wrap">
-                <table class="data-table" id="chainsTable">
+                <table class="data-table data-table--stack" id="chainsTable">
+                    <caption class="sr-only">Blockchain networks with type, rollup stage, value secured, RPC endpoint
+                        count, lifecycle status and open incidents</caption>
                     <thead>
                         <tr>
-                            <th data-sort="chainId" class="num">ID</th>
-                            <th data-sort="name">Name</th>
-                            <th data-sort="type">Type</th>
-                            <th data-sort="stage">Stage</th>
-                            <th data-sort="tvs" class="num">TVS</th>
-                            <th data-sort="rpcs" class="num">RPCs</th>
-                            <th data-sort="status">Status</th>
+                            <th class="num" data-sort="chainId" aria-sort="ascending" scope="col">ID<span class="sort-caret">▲</span></th>
+                            <th data-sort="name" aria-sort="none" scope="col">Network<span class="sort-caret">▲</span></th>
+                            <th data-sort="type" aria-sort="none" scope="col">Type<span class="sort-caret">▲</span></th>
+                            <th data-sort="stage" aria-sort="none" scope="col">Stage<span class="sort-caret">▲</span></th>
+                            <th class="num" data-sort="tvs" aria-sort="none" scope="col">Value secured<span class="sort-caret">▲</span></th>
+                            <th class="num" data-sort="rpcs" aria-sort="none" scope="col">RPCs<span class="sort-caret">▲</span></th>
+                            <th data-sort="status" aria-sort="none" scope="col">Status<span class="sort-caret">▲</span></th>
+                            <th data-sort="incident" aria-sort="none" scope="col">Incident<span class="sort-caret">▲</span></th>
                         </tr>
                     </thead>
                     <tbody id="chainsTableBody"></tbody>
                 </table>
-                <div class="table-more" id="chainsTableMore"></div>
+                <div class="table-foot hidden" id="chainsTableMore"></div>
             </div>
+            <p class="note">Type is a single taxonomy with four exclusive groups, so an L2 running on a testnet is
+                counted as <em>Testnet</em>, not as <em>L2 / rollup</em> — that is why the L2 chip is smaller than
+                the registry's total L2 tag count. Value secured comes from L2BEAT and exists only for classified
+                rollups, and L2BEAT could match only a minority of its projects to a chain ID. “RPCs” is the number
+                of usable endpoint URLs in the registry, which is larger than the up-to-5 sample the health monitor
+                probes per chain.</p>
         </div>
     </section>
 
-    <!-- ─── View: Relationships (3D graph, lazy-loaded) ─── -->
-    <section id="view-graph" class="view">
-        <div id="3d-graph"></div>
+    <!-- ═══ View: Relationships (3D graph, lazy-loaded) ════════════════ -->
+    <section id="view-graph" class="view" role="tabpanel" aria-labelledby="tab-graph" tabindex="0">
+        <div id="graph-canvas"></div>
 
         <div class="graph-overlay">
-            <div class="filters glass-panel">
-                <button class="filter-btn active" data-filter="all"><span class="filter-dot dot-all"></span>All</button>
-                <button class="filter-btn" data-filter="Mainnet"><span class="filter-dot dot-mainnet"></span>Mainnets</button>
-                <button class="filter-btn" data-filter="Testnet"><span class="filter-dot dot-testnet"></span>Testnets</button>
-                <button class="filter-btn" data-filter="L2"><span class="filter-dot dot-l2"></span>L2s</button>
-                <button class="filter-btn" data-filter="Beacon"><span class="filter-dot dot-beacon"></span>Beacons</button>
-            </div>
+            <div class="panel graph-controls">
+                <div class="graph-controls-title">Show</div>
+                <div class="chip-row" id="graphFilterChips" role="group" aria-label="Filter node types"></div>
 
-            <div id="sourcesPanel" class="glass-panel sources-panel">
-                <button id="sourcesToggle" class="sources-toggle" aria-label="Toggle data sources">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                        stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="12" cy="12" r="3"></circle>
-                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-                    </svg>
-                    <span>Sources</span>
-                </button>
-                <div id="sourcesDropdown" class="sources-dropdown hidden">
-                    <label class="source-toggle"><input type="checkbox" data-source="chains" checked><span class="source-dot" style="background:#3b82f6"></span>Chain ID Network</label>
-                    <label class="source-toggle"><input type="checkbox" data-source="chainlist" checked><span class="source-dot" style="background:#10b981"></span>Chainlist</label>
-                    <label class="source-toggle"><input type="checkbox" data-source="theGraph" checked><span class="source-dot" style="background:#8b5cf6"></span>The Graph</label>
-                    <label class="source-toggle"><input type="checkbox" data-source="slip44" checked><span class="source-dot" style="background:#f59e0b"></span>SLIP-0044</label>
-                    <label class="source-toggle"><input type="checkbox" data-source="l2beat" checked><span class="source-dot" style="background:#06b6d4"></span>L2BEAT</label>
+                <div class="graph-controls-title" style="margin-top: var(--sp-3)">Size nodes by</div>
+                <div class="chip-row" id="graphSizeChips" role="group" aria-label="Node size encoding">
+                    <button class="chip" type="button" data-size="tvs" aria-pressed="true">Value secured</button>
+                    <button class="chip" type="button" data-size="rpc" aria-pressed="false">RPC count</button>
+                    <button class="chip" type="button" data-size="flat" aria-pressed="false">Uniform</button>
+                </div>
+
+                <div class="graph-controls-title" style="margin-top: var(--sp-3)">Highlight</div>
+                <div class="chip-row">
+                    <button class="chip" type="button" id="graphIncidentEmphasis" aria-pressed="false">
+                        <span class="chip-dot" style="background: var(--critical)"></span>Open incident
+                    </button>
+                </div>
+
+                <div class="graph-controls-title" style="margin-top: var(--sp-3)">Sources</div>
+                <div id="graphSources"></div>
+
+                <div style="margin-top: var(--sp-3)">
+                    <button class="btn" type="button" id="graphReset">Reset view</button>
                 </div>
             </div>
 
-            <div class="legend glass-panel">
-                <div class="legend-item"><span class="legend-dot" style="background:var(--color-mainnet)"></span>Mainnet</div>
-                <div class="legend-item"><span class="legend-dot" style="background:var(--color-l2)"></span>L2</div>
-                <div class="legend-item"><span class="legend-dot" style="background:var(--color-testnet)"></span>Testnet</div>
-                <div class="legend-item"><span class="legend-dot" style="background:var(--color-beacon)"></span>Beacon</div>
+            <div class="panel graph-stats">
+                <div class="graph-stat-value" id="graphNodeCount">—</div>
+                <div class="graph-stat-label">networks shown</div>
+                <div class="graph-stat-value" id="graphLinkCount" style="margin-top: var(--sp-2)">—</div>
+                <div class="graph-stat-label">relationships</div>
             </div>
 
-            <div id="loadingOverlay" class="glass-panel loading-overlay">
-                <div class="spinner"></div>
-                <p>Loading graph…</p>
-                <p class="loading-sub">Fetching the 3D engine and building the network graph</p>
+            <div class="panel graph-legend">
+                <div class="legend-section">
+                    <div class="legend-title">Node colour — type</div>
+                    <div class="chart-legend" id="graphLegendColor"></div>
+                </div>
+                <div class="legend-section">
+                    <div class="legend-title">Node size</div>
+                    <div class="chart-legend" id="graphLegendSize"></div>
+                </div>
+                <div class="legend-section">
+                    <div class="legend-title">Link — relationship</div>
+                    <div class="chart-legend" id="graphLegendLinks"></div>
+                </div>
+                <div class="legend-section" id="graphLegendEmphasis"></div>
+            </div>
+
+            <div id="loadingOverlay" class="panel loading-overlay">
+                <div class="spinner" role="status" aria-label="Loading"></div>
+                <p>Loading relationship graph</p>
+                <p class="loading-sub">Fetching the 3D engine and laying out the network</p>
             </div>
         </div>
     </section>
 
-    <!-- ─── View: Incidents ─── -->
-    <section id="view-incidents" class="view scroll-view">
+    <!-- ═══ View: Incidents ════════════════════════════════════════════ -->
+    <section id="view-incidents" class="view scroll-view" role="tabpanel" aria-labelledby="tab-incidents" tabindex="0">
         <div class="view-inner">
-            <h2 class="section-title">Incidents
-                <span class="src-pill" id="incidentsMeta">live</span>
-            </h2>
-            <div class="calendars" id="incidentCalendar"></div>
+            <div class="view-head">
+                <h2 class="view-title">Chain incidents</h2>
+                <p class="view-lead">Incidents and scheduled maintenance published by chain operators and coin
+                    status pages. This is everything the feed still retains — a rolling window of recent events,
+                    not a complete history.</p>
+            </div>
 
-            <div class="toolbar">
-                <div class="chip-row" id="incidentCategory">
-                    <button class="chip active" data-cat="all">All</button>
-                    <button class="chip" data-cat="incident">Incidents</button>
-                    <button class="chip" data-cat="scheduled">Scheduled</button>
+            <div class="stat-row" id="incidentStats" style="margin-bottom: var(--sp-4)"></div>
+
+            <div class="card">
+                <div class="card-head">
+                    <h3 class="card-title">Events per day</h3>
+                    <span class="pill-meta live-pill" id="incidentsMeta">live</span>
+                    <div class="card-actions" id="incidentHistActions"></div>
+                    <p class="card-sub">Count of events the feed retained per day. Click a bar or a calendar day to
+                        filter the list below.</p>
                 </div>
-                <div class="chip-row">
-                    <button class="chip active" id="grpFlat">Chronological</button>
-                    <button class="chip" id="grpNetwork">Group by network</button>
+                <div id="incidentHistogram"></div>
+                <div class="calendars" id="incidentCalendar" style="margin-top: var(--sp-5)"></div>
+                <div class="scale-legend" id="incidentScaleLegend"></div>
+            </div>
+
+            <div class="toolbar" style="margin-top: var(--sp-4)">
+                <div class="toolbar-group">
+                    <span class="toolbar-label" id="lblKind">Kind</span>
+                    <div class="chip-row" id="incidentCategory" role="group" aria-labelledby="lblKind">
+                        <button class="chip" type="button" data-cat="all" aria-pressed="true">All</button>
+                        <button class="chip" type="button" data-cat="incident" aria-pressed="false">Incidents</button>
+                        <button class="chip" type="button" data-cat="scheduled" aria-pressed="false">Scheduled</button>
+                    </div>
+                </div>
+                <div class="toolbar-group">
+                    <span class="toolbar-label" id="lblSev">AI severity</span>
+                    <div class="chip-row" id="incidentSeverity" role="group" aria-labelledby="lblSev"></div>
+                </div>
+                <div class="toolbar-group">
+                    <span class="toolbar-label" id="lblGroup">Group</span>
+                    <div class="chip-row" role="group" aria-labelledby="lblGroup">
+                        <button class="chip" type="button" id="grpFlat" aria-pressed="true">Newest first</button>
+                        <button class="chip" type="button" id="grpNetwork" aria-pressed="false">By network</button>
+                    </div>
                 </div>
                 <span class="toolbar-count" id="incidentsCount"></span>
             </div>
-            <div id="incidentsList" class="incidents-list"><div class="feed-empty">Connecting to live status feed…</div></div>
+            <div id="incidentsList" class="feed-list" aria-live="polite">
+                <div class="feed-empty">Connecting to the live status feed…</div>
+            </div>
         </div>
     </section>
 
-    <!-- ─── View: Providers (RPC provider incidents) ─── -->
-    <section id="view-providers" class="view scroll-view">
+    <!-- ═══ View: Providers ════════════════════════════════════════════ -->
+    <section id="view-providers" class="view scroll-view" role="tabpanel" aria-labelledby="tab-providers" tabindex="0">
         <div class="view-inner">
-            <h2 class="section-title">RPC provider incidents
-                <span class="src-pill" id="providersMeta">live</span>
-            </h2>
-            <p class="view-lead">Status of public RPC providers (Infura, QuickNode, dRPC, Pinax). Each incident is
-                mapped to the chains it affects.</p>
-            <div class="calendars" id="providerCalendar"></div>
+            <div class="view-head">
+                <h2 class="view-title">RPC provider incidents</h2>
+                <p class="view-lead">Status of the commercial RPC providers many applications depend on. Each
+                    incident is mapped to the chains the provider named, so you can see which networks are affected
+                    even when the chain itself is healthy.</p>
+            </div>
 
-            <div class="toolbar">
-                <div class="chip-row" id="providerFilter">
-                    <button class="chip active" data-prov="all">All</button>
+            <div class="stat-row" id="providerStats" style="margin-bottom: var(--sp-4)"></div>
+
+            <div class="card">
+                <div class="card-head">
+                    <h3 class="card-title">Events per day</h3>
+                    <span class="pill-meta live-pill" id="providersMeta">live</span>
+                    <div class="card-actions" id="providerHistActions"></div>
+                </div>
+                <div id="providerHistogram"></div>
+                <div class="calendars" id="providerCalendar" style="margin-top: var(--sp-5)"></div>
+                <div class="scale-legend" id="providerScaleLegend"></div>
+            </div>
+
+            <div class="toolbar" style="margin-top: var(--sp-4)">
+                <div class="toolbar-group">
+                    <span class="toolbar-label" id="lblProv">Provider</span>
+                    <div class="chip-row" id="providerFilter" role="group" aria-labelledby="lblProv"></div>
                 </div>
                 <span class="toolbar-count" id="providersCount"></span>
             </div>
-            <div id="providersList" class="incidents-list"><div class="feed-empty">Connecting to live status feed…</div></div>
+            <div id="providersList" class="feed-list" aria-live="polite">
+                <div class="feed-empty">Connecting to the live status feed…</div>
+            </div>
         </div>
     </section>
 
-    <!-- ─── View: Forum (governance/community posts by chain) ─── -->
-    <section id="view-forum" class="view scroll-view">
+    <!-- ═══ View: News (chains-news ecosystem relay) ═══════════════════ -->
+    <section id="view-news" class="view scroll-view" role="tabpanel" aria-labelledby="tab-news" tabindex="0">
         <div class="view-inner">
-            <h2 class="section-title">Forum activity
-                <span class="src-pill" id="forumMeta"></span>
-            </h2>
-            <p class="view-lead">Recent posts from official community and governance forums. Each tile is a
-                forum, sized by how much it's being discussed and colored by momentum — green is heating up
-                this week, red is cooling. Click a tile to filter the posts below.</p>
-
-            <div class="forum-treemap" id="forumTreemap"></div>
-            <div class="forum-legend">
-                <span>cooling</span>
-                <span class="fl-swatch fl-cool3"></span><span class="fl-swatch fl-cool2"></span><span class="fl-swatch fl-cool1"></span>
-                <span class="fl-swatch fl-flat"></span>
-                <span class="fl-swatch fl-hot1"></span><span class="fl-swatch fl-hot2"></span><span class="fl-swatch fl-hot3"></span>
-                <span>heating up</span>
+            <div class="view-head">
+                <h2 class="view-title">Ecosystem news</h2>
+                <p class="view-lead">Articles from curated industry and project sources, grouped into stories so the
+                    same event reported by several publishers counts once. Only a minority of articles name a chain
+                    the registry recognises — most ecosystem news is not chain-specific, and none of it is
+                    filtered out for being off-chain.</p>
             </div>
 
-            <div class="toolbar">
+            <div class="stat-row" id="newsStats" style="margin-bottom: var(--sp-4)"></div>
+
+            <div class="card">
+                <div class="card-head">
+                    <h3 class="card-title">Coverage by source</h3>
+                    <span class="pill-meta live-pill" id="newsMeta">live</span>
+                    <div class="card-actions" id="newsSourceActions"></div>
+                    <p class="card-sub">Articles retained per publisher. Volume reflects how often each source
+                        publishes, not how important it is.</p>
+                </div>
+                <div id="chartNewsSources"></div>
+            </div>
+
+            <div class="toolbar" style="margin-top: var(--sp-4)">
+                <div class="toolbar-group">
+                    <span class="toolbar-label" id="lblNewsScope">Show</span>
+                    <div class="chip-row" id="newsScope" role="group" aria-labelledby="lblNewsScope">
+                        <button class="chip" type="button" data-scope="all" aria-pressed="true">All stories</button>
+                        <button class="chip" type="button" data-scope="chain" aria-pressed="false">
+                            Mentions a chain <span class="chip-count" id="newsChainCount"></span>
+                        </button>
+                        <button class="chip" type="button" data-scope="multi" aria-pressed="false">
+                            Multi-source <span class="chip-count" id="newsMultiCount"></span>
+                        </button>
+                    </div>
+                </div>
+                <div class="toolbar-group" id="newsClassGroup">
+                    <span class="toolbar-label" id="lblNewsClass">Classification</span>
+                    <div class="chip-row" id="newsClassChips" role="group" aria-labelledby="lblNewsClass"></div>
+                </div>
+                <span class="toolbar-count" id="newsCount"></span>
+            </div>
+
+            <div id="newsList" class="feed-list" aria-live="polite">
+                <div class="feed-empty">Loading ecosystem news…</div>
+            </div>
+            <p class="note" id="newsNote"></p>
+        </div>
+    </section>
+
+    <!-- ═══ View: Forum ════════════════════════════════════════════════ -->
+    <section id="view-forum" class="view scroll-view" role="tabpanel" aria-labelledby="tab-forum" tabindex="0">
+        <div class="view-inner">
+            <div class="view-head">
+                <h2 class="view-title">Governance &amp; community activity</h2>
+                <p class="view-lead">Recent posts from official community and governance forums. Each tile is one
+                    forum: area is how many posts it has in the retained window, colour is this week's post count
+                    against last week's. Click a tile to filter the posts below.</p>
+            </div>
+
+            <div class="card">
+                <div class="card-head">
+                    <h3 class="card-title">Forum volume and weekly momentum</h3>
+                    <span class="pill-meta live-pill" id="forumMeta">live</span>
+                    <div class="card-actions" id="forumActions"></div>
+                </div>
+                <div class="treemap" id="forumTreemap"></div>
+                <div class="scale-legend" id="forumScaleLegend"></div>
+                <p class="note" id="forumNote"></p>
+            </div>
+
+            <div class="toolbar" style="margin-top: var(--sp-4)">
                 <span class="toolbar-count" id="forumCount"></span>
             </div>
-            <div id="forumList" class="incidents-list"><div class="feed-empty">Loading forum activity…</div></div>
+            <div id="forumList" class="feed-list" aria-live="polite">
+                <div class="feed-empty">Loading forum activity…</div>
+            </div>
         </div>
     </section>
 
-    <!-- ─── Unified Chain Detail Drawer ─── -->
-    <aside id="detailDrawer" class="detail-drawer hidden">
+    <!-- ═══ Chain detail drawer ════════════════════════════════════════ -->
+    <aside id="detailDrawer" class="drawer hidden" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
         <div class="drawer-scrim" id="drawerScrim"></div>
-        <div class="drawer-panel glass-panel">
-            <button id="closeDrawer" class="close-btn" aria-label="Close">&times;</button>
+        <div class="drawer-panel">
+            <button id="closeDrawer" class="close-btn" type="button" aria-label="Close detail">&times;</button>
             <div id="drawerBody"></div>
         </div>
     </aside>
 
-    <!-- ─── Assistant (floating chat overlay, available on every view) ─── -->
-    <button id="assistantFab" class="assistant-fab" aria-label="Open assistant" title="Ask the assistant">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-            stroke-linecap="round" stroke-linejoin="round">
+    <!-- ═══ Assistant ══════════════════════════════════════════════════ -->
+    <button id="assistantFab" class="assistant-fab" type="button" aria-label="Open the data assistant"
+        aria-expanded="false" aria-controls="assistantOverlay">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" aria-hidden="true">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
         </svg>
+        <span>Ask</span>
     </button>
 
     <aside id="assistantOverlay" class="assistant-overlay hidden">
-        <div class="chat-panel glass-panel">
+        <div class="chat-panel">
             <div class="chat-head">
-                <span class="chat-title">Assistant</span>
-                <span class="src-pill" id="assistantMeta"></span>
-                <button id="assistantNew" class="chip chat-new-btn" title="Start a new conversation">New chat</button>
-                <button id="assistantClose" class="close-btn chat-close" aria-label="Close">&times;</button>
+                <span class="chat-title">Data assistant</span>
+                <span class="pill-meta" id="assistantMeta"></span>
+                <button id="assistantNew" class="chip chat-new-btn" type="button"
+                    title="Start a new conversation">New</button>
+                <button id="assistantClose" class="close-btn chat-close" type="button" aria-label="Close">&times;</button>
             </div>
-            <p class="chat-lead">Ask about any network, its RPC endpoints and health, L2 scaling, relationships,
-                live incidents, or forum news.</p>
+            <p class="chat-lead">Answers are produced by calling this API's own endpoints; each reply lists the
+                tools it used so you can check the source. It cannot see anything the API does not expose — and
+                there is no historical data to ask about.</p>
 
             <div id="assistantLog" class="chat-log" role="log" aria-live="polite"></div>
 
             <div id="assistantChips" class="chip-row chat-chips">
-                <button class="chip chat-chip">Is Base mainnet healthy right now?</button>
-                <button class="chip chat-chip">Any RPC provider incidents today?</button>
-                <button class="chip chat-chip">What L2BEAT stage is Arbitrum One?</button>
-                <button class="chip chat-chip">Which chain ID is Sepolia?</button>
+                <button class="chip chat-chip" type="button">Which chains have an open incident right now?</button>
+                <button class="chip chat-chip" type="button">Is Base mainnet healthy?</button>
+                <button class="chip chat-chip" type="button">What L2BEAT stage is Arbitrum One?</button>
+                <button class="chip chat-chip" type="button">Which chain ID is Sepolia?</button>
             </div>
 
             <form id="assistantForm" class="chat-form">
-                <textarea id="assistantInput" rows="2" placeholder="Ask about a network, incident, or RPC provider…"
+                <label class="sr-only" for="assistantInput">Ask a question about the network data</label>
+                <textarea id="assistantInput" rows="2" placeholder="Ask about a network, incident or provider…"
                     autocomplete="off"></textarea>
-                <button type="submit" id="assistantSend" class="chat-send" aria-label="Send">Send</button>
+                <button type="submit" id="assistantSend" class="chat-send">Send</button>
             </form>
         </div>
     </aside>
