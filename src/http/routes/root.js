@@ -8,7 +8,8 @@ import {
 } from '../../../config.js';
 
 const ENDPOINTS = {
-  '/health': 'Health check and data status',
+  '/health': 'Health check and data status (liveness; always 200 while the process is up)',
+  '/ready': 'Readiness probe (503 until the first data load completes)',
   '/chains': 'Get all chains (optional ?tag=Testnet|L2|Beacon)',
   '/chains/:id': 'Get chain by ID',
   '/search?q={query}': 'Search chains by name or ID',
@@ -26,6 +27,9 @@ const ENDPOINTS = {
   '/rpc-monitor': 'Get RPC endpoint monitoring results',
   '/rpc-monitor/:id': 'Get RPC monitoring results for a specific chain by ID',
   '/stats': 'Get aggregate stats (chain counts, RPC health percentage)',
+  '/upgrades': 'Cross-feed upgrade timeline: scheduled upgrades with required software, urgency, follow-on incidents, and forum/news context',
+  '/providers/stats': 'Per-RPC-provider quality indicators: incidents/resolution/availability derived from the provider\'s own status page (self-reported), plus registry-endpoint reachability (optional ?provider=)',
+  '/feedback': 'Report wrong or misattributed info (POST) / review submitted reports newest-first (GET ?kind=&limit=)',
   '/summary': 'Slim dashboard projection: all chains (id, name, tags, relations, RPC count) + L2BEAT headline data, with ETag revalidation',
   '/relations/:id/graph?depth=N': 'BFS graph traversal of chain relations (default depth: 2)',
   '/scaling': 'Get all chains with L2BEAT scaling data (stage, category, DA layer, TVS)',

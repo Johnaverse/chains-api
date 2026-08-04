@@ -538,14 +538,57 @@ export function buildSystemPrompt(context, nowDate) {
     'category, DA layer, TVS), SLIP-0044 coin types, execution clients, aggregate',
     'registry stats (get_stats: totals + active/deprecated breakdown + RPC health),',
     'operator status pages, LIVE incidents from chain and RPC-provider status pages,',
-    'and recent posts from official community/governance forums (get_forum_news).',
+    'recent posts from official community/governance forums (get_forum_news), and curated',
+    'blockchain/web3 ecosystem news from publishers like the Ethereum Foundation blog,',
+    'Consensys, CoinDesk and The Block (get_web3_news), and a cross-feed upgrade timeline',
+    '(get_chain_upgrades: scheduled upgrades with required software versions, urgency,',
+    'incidents that followed on the same network, and related discussion/coverage — use it',
+    'for "when is the next upgrade", "what version is required", "did the upgrade cause',
+    'incidents", including networks with no EVM chain ID via its `network` parameter),',
+    'and per-RPC-provider quality indicators (get_provider_stats: incidents, resolution',
+    'times, and chain-weighted availability over 24h/7d/30d windows derived from',
+    'status-page incidents — use it for "which provider is most reliable", always noting',
+    'it is self-reported (a silent page looks perfect; null percents mean the status page',
+    'exposes no chain coverage); endpointReachability there is registry data quality,',
+    'NOT uptime).',
     // Explicit manifest: some serving stacks render tool schemas in ways weak
     // models under-attend to; naming every tool here keeps the full toolbox
     // discoverable even then.
     `ALL of these tools exist and are callable: ${getOpenAiTools().map((t) => t.function.name).join(', ')}.`,
     'Never claim a tool from this list is unavailable.',
     '',
+    // Small models follow an ordered checklist far better than prose rules alone; this
+    // procedure is the per-turn spine, and the numbered rules below are the constraints.
+    'PROCEDURE — work through these steps IN ORDER on every user question:',
+    'Step 1. Classify the question: live status (down/outage/now)? upgrade/hard-fork',
+    '  (schedule/version/fallout)? governance/news? registry-wide count? static metadata?',
+    'Step 2. Resolve the network: if named without a chain ID, call search_chains first;',
+    '  ask when ambiguous (rule 1). Non-EVM networks (Solana, Canton) have no chain ID —',
+    '  pass their NAME to tools that accept `network`.',
+    'Step 3. Call the ONE most specific tool for the question type: down-now →',
+    '  get_live_incidents(ongoing=true); upgrade/version → get_chain_upgrades; counts →',
+    '  get_stats; governance → get_forum_news; ecosystem news → get_web3_news; otherwise',
+    '  the matching *_by_id tool.',
+    'Step 4. Check the result before answering: if truncated is true, say you are showing',
+    '  count of totalMatched; if it is empty or errors, say so plainly (rule 4).',
+    'Step 5. Answer in under 100 words using ONLY facts from the tool results.',
+    '',
     'Rules — follow strictly:',
+    // Ranked above everything else because the failure it fixes was a RANKING failure. Rule 5b
+    // sends "how many … RPC health" straight to the registry-wide counters, and a follow-up
+    // like "How many active rpc endpoints?" matches that almost word for word — so a question
+    // that had already been narrowed to Base mainnet came back answered for all 4,400+ chains.
+    // Nothing in the prompt had ever told the model that a follow-up keeps the previous
+    // subject; the only continuity hint was context.chainId, which exists only while a chain
+    // drawer is open. Measured against the live model on the reported conversation: 0/3 runs
+    // scoped correctly without this rule, 5/5 with it.
+    '0. CARRY THE SUBJECT FORWARD. This is a conversation, not a list of isolated questions.',
+    '   When the user\'s message omits the network but an earlier turn established one, it is a',
+    '   FOLLOW-UP about that same network — resolve it and answer for that network. "How many',
+    '   endpoints?" after a question about Base mainnet means Base mainnet\'s endpoints, not the',
+    '   whole registry. Answer registry-wide ONLY when the user asks registry-wide, or when no',
+    '   network has been established yet. The same applies to the rest of the request: an',
+    '   omitted metric, tab, or time range carries over from the previous turn.',
     '1. DISAMBIGUATE NETWORKS. Many names are ambiguous ("Base" = Base mainnet 8453 or',
     '   Base Sepolia 84532). When the user names a network without a chain ID, call',
     '   search_chains first. If multiple plausible matches exist and the user did not',

@@ -41,6 +41,9 @@ import { rpcMonitorRoutes } from './routes/rpcMonitor.js';
 import { clientsRoutes } from './routes/clients.js';
 import { scalingRoutes } from './routes/scaling.js';
 import { statusPagesRoutes } from './routes/statusPages.js';
+import { upgradesRoutes } from './routes/upgrades.js';
+import { providersRoutes } from './routes/providers.js';
+import { feedbackRoutes } from './routes/feedback.js';
 import { adminRoutes } from './routes/admin.js';
 import { metricsRoute } from './routes/metrics.js';
 import { refresherRoute } from './routes/refresher.js';
@@ -111,7 +114,8 @@ const TAG_BY_SEGMENT = {
   export: 'Meta',
   summary: 'Meta',
   reload: 'Admin',
-  assistant: 'Assistant'
+  assistant: 'Assistant',
+  feedback: 'Feedback'
 };
 
 function tagForUrl(url) {
@@ -146,6 +150,7 @@ const OPENAPI_TAGS = [
   { name: 'Observability', description: 'Prometheus metrics and refresher status' },
   { name: 'Admin', description: 'Data reload' },
   { name: 'Assistant', description: 'LLM chat assistant over the chains registry and live incidents' },
+  { name: 'Feedback', description: 'User reports of wrong or misattributed information' },
   { name: 'Meta', description: 'Service info, health, and data sources' }
 ];
 
@@ -266,7 +271,17 @@ export async function buildApp(options = {}) {
 
   await fastify.register(rateLimit, {
     max: RATE_LIMIT_MAX,
-    timeWindow: RATE_LIMIT_WINDOW_MS
+    timeWindow: RATE_LIMIT_WINDOW_MS,
+    // Probe endpoints must never be rate-limited. A 429 on /ready reads to kubelet as
+    // "not ready", which removes the pod from the Service — so an exhausted bucket would
+    // turn a traffic spike into a self-inflicted outage. /health has the same problem via
+    // the liveness probe, where a 429 gets the container restarted.
+    // Matched on the path, not request.url: the latter carries the query string, so a probe
+    // configured with any parameter would silently fall back into the limited bucket.
+    allowList: (request) => {
+      const path = (request.url ?? '').split('?')[0];
+      return path === '/health' || path === '/ready';
+    }
   });
 
   if (loadDataOnStartup) {
@@ -296,6 +311,9 @@ export async function buildApp(options = {}) {
   await fastify.register(clientsRoutes);
   await fastify.register(scalingRoutes);
   await fastify.register(statusPagesRoutes);
+  await fastify.register(upgradesRoutes);
+  await fastify.register(providersRoutes);
+  await fastify.register(feedbackRoutes);
   await fastify.register(metricsRoute);
   await fastify.register(refresherRoute);
   await fastify.register(summaryRoute);

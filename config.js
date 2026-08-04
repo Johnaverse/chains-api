@@ -42,6 +42,7 @@ export const MAX_PARAM_LENGTH = parseIntEnv('MAX_PARAM_LENGTH', 200);
 export const RATE_LIMIT_MAX = parseIntEnv('RATE_LIMIT_MAX', 100);
 export const RATE_LIMIT_WINDOW_MS = parseIntEnv('RATE_LIMIT_WINDOW_MS', 60000); // 1 minute
 export const RELOAD_RATE_LIMIT_MAX = parseIntEnv('RELOAD_RATE_LIMIT_MAX', 5);
+export const FEEDBACK_RATE_LIMIT_MAX = parseIntEnv('FEEDBACK_RATE_LIMIT_MAX', 5);
 export const SEARCH_RATE_LIMIT_MAX = parseIntEnv('SEARCH_RATE_LIMIT_MAX', 30);
 
 // RPC health check
@@ -137,6 +138,16 @@ export const FORUM_NEWS_URL = parseStringEnv(
   'FORUM_NEWS_URL',
   'https://chains-forum-news.johnaverse.cc'
 );
+// Ecosystem/editorial news feed (chains-news). Cluster DNS in deployment; the public host
+// is only a local-dev convenience — see docs/SERVICE-CONTRACT.md rule 1 on why an unset
+// var must not silently leave the cluster.
+export const WEB3_NEWS_URL = parseStringEnv(
+  'WEB3_NEWS_URL',
+  'https://chains-news.johnaverse.cc'
+);
+export const WEB3_NEWS_CACHE_TTL_MS = parseIntEnv('WEB3_NEWS_CACHE_TTL_MS', 60000);
+export const WEB3_NEWS_FETCH_TIMEOUT_MS = parseIntEnv('WEB3_NEWS_FETCH_TIMEOUT_MS', 10000);
+
 export const FORUM_NEWS_CACHE_TTL_MS = parseIntEnv('FORUM_NEWS_CACHE_TTL_MS', 60000);
 export const FORUM_NEWS_FETCH_TIMEOUT_MS = parseIntEnv('FORUM_NEWS_FETCH_TIMEOUT_MS', 10000);
 

@@ -26,6 +26,9 @@ import {
 } from './src/sources/statusPages.js';
 import { getLiveIncidents } from './src/sources/liveIncidents.js';
 import { getForumNews } from './src/sources/forumNews.js';
+import { getWeb3News } from './src/sources/web3News.js';
+import { getChainUpgrades } from './src/services/upgrades.js';
+import { getProviderStats } from './src/services/providerStats.js';
 
 /**
  * Get the list of MCP tool definitions (schemas)
@@ -278,7 +281,7 @@ export function getToolDefinitions() {
     {
       name: 'get_live_incidents',
       description:
-        'Get LIVE incidents and scheduled maintenance from chain operator status pages and RPC provider status pages (Infura, QuickNode, dRPC, Pinax). Use for questions like "is X down", "any incidents today", "provider outages". Each item carries a lifecycle `status` and an `ongoing` flag: for "is X down right now" pass ongoing=true; for "scheduled/upcoming maintenance" pass status="maintenance_scheduled" (its publishedAt is when the maintenance starts). Near-real-time (cached ~60s).',
+        'Get LIVE incidents and scheduled maintenance from chain operator status pages and RPC provider status pages (Infura, QuickNode, dRPC, Pinax). Use for questions like "is X down", "any incidents today", "provider outages". Each item carries a lifecycle `status` and an `ongoing` flag: for "is X down right now" pass ongoing=true; for "scheduled/upcoming maintenance" pass status="maintenance_scheduled" (its publishedAt is when the maintenance starts). `chainLevel` is the important one for "is CHAIN X healthy": each entry is a chain that TWO OR MORE independent RPC providers are reporting at the same time, which is evidence about the chain rather than about one provider — lead with it and say how many providers agree. It is computed across all ongoing provider incidents, so it is present even when a chainId filter narrowed `incidents`. A provider incident usually does not declare a chain, so `chainId` also matches a chain read from the incident title; `chainEvidence` says which ("declared" or "title"), and an incident naming a non-EVM network with no chainId in the registry is never attributed at all. Near-real-time (cached ~60s).',
       inputSchema: {
         type: 'object',
         properties: {
@@ -333,6 +336,69 @@ export function getToolDefinitions() {
           limit: {
             type: 'number',
             description: 'Max posts to return (default 15, max 50)',
+          },
+        },
+      },
+    },
+    {
+      name: 'get_chain_upgrades',
+      description:
+        'Get the cross-feed upgrade timeline: scheduled/completed network upgrades and maintenance windows with the REQUIRED SOFTWARE ({client, version} operators must run), urgency (standard/urgent/mandatory), activation time WITH ITS EVIDENCE, incidents that followed on the same network within 24h (labelled suspectedCause: "upgrade" — temporal correlation, not asserted causation), and related forum discussion + news coverage. Use for "when is the next upgrade for X", "what version is required", "did the upgrade cause incidents", "hard fork schedule". `network` accepts a name for chains with no EVM chain ID (e.g. "Solana", "Canton"). NEVER read `activationAt` without `activationEvidence`: `window`/`scheduled` mean a stated time you may count down to; `started`/`completed` are OBSERVED and approximate (`completed` is an upper bound on the run, not its start, so say "completed by"); `announced` means the provider announced the upgrade and never named a day — `activationAt` is null and you must say the date is not announced yet rather than implying one. Evidence strength wins over recency, so a later exact window overrides an earlier undated announcement. `windowMinutes`/`windowEndAt` exist only for `window` evidence. On followedByIncidents, `durationEvidence` is `observed` (resolvedAt is real), `ongoing` (still open), or `unpublished` (the page never said when it ended — do not state a duration). Returns a capped list with totalMatched/truncated — say when you are showing a subset.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          chainId: {
+            type: 'number',
+            description: 'Only upgrades touching this chain ID',
+          },
+          network: {
+            type: 'string',
+            description: 'Network name or slug (e.g. "Solana Mainnet", "gnosis") — use for networks that have no EVM chain ID',
+          },
+          limit: {
+            type: 'number',
+            description: 'Max upgrades to return (default 20, max 50)',
+          },
+        },
+      },
+    },
+    {
+      name: 'get_provider_stats',
+      description:
+        'Get per-RPC-provider quality indicators (Infura, QuickNode, Alchemy, dRPC, Chainstack, …): incidents30d, ongoingNow (open INCIDENTS only), ongoingMaintenance (planned windows in progress — never call these outages), maintenance30d, chainsAffected30d, oldestOngoingAt (start of the longest-running open incident), resolutionHours (median/avg time-to-resolve, usually null), availability, endpointReachability, and chain coverage. For "which provider is most reliable/available" use `availability`: CHAIN-WEIGHTED over three windows (last24h/last7d/last30d), each {percent, chainHoursLost} where percent = 1 − chain-hours lost / (chainsSupported × window hours) — so 1 of 10 supported chains down for a full 24h window is 90%, not 0%. chainsSupported is ONLY what the provider lists on its own status page; when that coverage is unavailable the percents are null with a note. It is SELF-REPORTED: a provider that never posts incidents scores a perfect 100 (a silent status page looks perfect), so always say it is self-reported. Most status pages publish an incident only ONCE, at resolution, so its duration is unknown and it is EXCLUDED from the percent rather than charged as downtime — compare availability.measuredIncidents against unknownDurationIncidents before ranking providers on it, and when measuredIncidents is 0 say the percent means "nothing open right now", not "a clean month". Use disclosure.comparable to decide whether a provider belongs in a ranking at all; a "partial window" note means feed retention is younger than the window. `endpointReachability` ({working, total, percent, registryChains}) measures whether REGISTRY-LISTED endpoint URLs answer chains-api\'s probes — keyed/stale/geo-blocked registry URLs fail by design, so it is a registry data-quality signal; do NOT present it as provider uptime.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          provider: {
+            type: 'string',
+            description: 'Only this provider id (e.g. "infura", "quicknode", "alchemy"). Omit for all providers, sorted by incidents30d descending',
+          },
+        },
+      },
+    },
+    {
+      name: 'get_web3_news',
+      description:
+        'Get recent blockchain/web3 ecosystem news from curated publishers (Ethereum Foundation blog, Vitalik\'s blog, Consensys, CoinDesk, Decrypt, The Block). Use for "what is new with X", upgrade/hard-fork announcements, research, funding and ecosystem developments. Distinct from the other feeds: get_live_incidents is outages/maintenance and get_forum_news is governance discussion — this is what the ecosystem publishes about itself. `weight` separates protocol/research sources ("primary") from news desks that also cover markets ("secondary"); prefer primary for protocol facts. Returns a capped list (default 15, max 50) with `totalMatched`; when it exceeds `count`, say you are showing the most recent subset. Near-real-time (cached ~60s).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          chainId: {
+            type: 'number',
+            description: 'Only news mapped to this chain ID. Mapping is precision-first, so many articles carry no chain — omit this for broad questions',
+          },
+          sourceId: {
+            type: 'string',
+            description: 'Only news from this source id (e.g. "ethereum-foundation", "coindesk", "vitalik")',
+          },
+          weight: {
+            type: 'string',
+            enum: ['primary', 'secondary'],
+            description: 'primary = protocol/research publishing (EF, Vitalik, Consensys), secondary = news desks including market coverage',
+          },
+          limit: {
+            type: 'number',
+            description: 'Max articles to return (default 15, max 50)',
           },
         },
       },
@@ -745,6 +811,40 @@ async function handleGetForumNews(args) {
   }
 }
 
+async function handleGetChainUpgrades(args) {
+  const { chainId, network, limit } = args ?? {};
+  try {
+    const result = await getChainUpgrades({ chainId, network, limit });
+    return textResponse(result);
+  } catch (error) {
+    return errorResponse('Upgrade timeline unavailable', error.message);
+  }
+}
+
+async function handleGetProviderStats(args) {
+  const { provider } = args ?? {};
+  try {
+    const result = await getProviderStats({ provider });
+    return textResponse(result);
+  } catch (error) {
+    return errorResponse('Provider stats unavailable', error.message);
+  }
+}
+
+async function handleGetWeb3News(args) {
+  const { chainId, sourceId, weight, limit } = args ?? {};
+  try {
+    const result = await getWeb3News({ chainId, sourceId, weight, limit });
+    // publishedMs is an internal sort key; drop it from tool output.
+    return textResponse({
+      ...result,
+      news: result.news.map(({ publishedMs: _publishedMs, ...rest }) => rest),
+    });
+  } catch (error) {
+    return errorResponse('Web3 news feed unavailable', error.message);
+  }
+}
+
 async function handleGetLiveIncidents(args) {
   const { type, chainId, provider, ongoing, status, limit } = args ?? {};
   try {
@@ -782,6 +882,9 @@ const toolHandlers = {
   get_status_page_by_symbol: handleGetStatusPageBySymbol,
   get_live_incidents: handleGetLiveIncidents,
   get_forum_news: handleGetForumNews,
+  get_web3_news: handleGetWeb3News,
+  get_chain_upgrades: handleGetChainUpgrades,
+  get_provider_stats: handleGetProviderStats,
 };
 
 /**

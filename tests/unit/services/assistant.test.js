@@ -245,6 +245,26 @@ describe('buildSystemPrompt', () => {
     expect(prompt).not.toContain('undefined');
   });
 
+  it('carries the small-model procedure spine', () => {
+    const prompt = buildSystemPrompt(undefined, new Date('2026-07-06T12:00:00Z'));
+    // An ordered per-turn checklist is what small tool-calling models actually follow;
+    // losing it silently degrades every weak-model deployment.
+    expect(prompt).toContain('PROCEDURE');
+    expect(prompt).toContain('Step 1.');
+    expect(prompt).toContain('Step 5.');
+    expect(prompt).toContain('get_chain_upgrades');
+  });
+
+  it('tells the model a follow-up keeps the previous turn\'s network, ABOVE the registry-wide rule', () => {
+    const prompt = buildSystemPrompt(undefined, new Date('2026-07-06T12:00:00Z'));
+    expect(prompt).toContain('CARRY THE SUBJECT FORWARD');
+    // Ordering is the entire fix, not a detail. "How many active rpc endpoints?" asked straight
+    // after a question about Base mainnet matches the registry-wide rule almost word for word,
+    // so the carry-over rule has to be READ FIRST or the model answers for all chains — which
+    // is exactly what production did (0/3 runs scoped correctly; 5/5 once this rule was added).
+    expect(prompt.indexOf('CARRY THE SUBJECT FORWARD')).toBeLessThan(prompt.indexOf('SUMMARY / "HOW MANY"'));
+  });
+
   it('tells the model to use get_stats for summary / "how many" questions', () => {
     const prompt = buildSystemPrompt(undefined, new Date('2026-07-06T12:00:00Z'));
     expect(prompt).toContain('get_stats');

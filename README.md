@@ -382,6 +382,9 @@ Behavior:
 - `ASSISTANT_FALLBACK_MODEL` defaults to `ASSISTANT_MODEL` when unset, and the key is only needed for auth-protected backups.
 - `LIVE_INCIDENTS_URL`: Live incident feed for the `get_live_incidents` tool (default: `https://chains-status-news.johnaverse.cc`)
 - `FORUM_NEWS_URL`: Forum/governance news feed for the `get_forum_news` tool (default: `https://chains-forum-news.johnaverse.cc`)
+- `GET /upgrades?chainId=&network=&limit=`: cross-feed upgrade timeline — scheduled upgrades/maintenance with required software (`[{client, version}]`), urgency, activation time, incidents that followed on the same network within 24h (`suspectedCause: "upgrade"` — temporal correlation, not asserted causation), and related forum/news context. `network` accepts a name for chains with no EVM chain ID ("Solana", "Canton"). Also exposed as the `get_chain_upgrades` MCP tool.
+- `WEB3_NEWS_URL`: Ecosystem/editorial news feed for the `get_web3_news` tool (default: `https://chains-news.johnaverse.cc`). In-cluster deployments should set this to the Service DNS name.
+- `WEB3_NEWS_CACHE_TTL_MS` / `WEB3_NEWS_FETCH_TIMEOUT_MS`: cache window and per-request timeout for that feed (defaults `60000` / `10000`)
 
 ### Other
 - `BODY_LIMIT`: Maximum request body size in bytes (default: 1048576 = 1 MB)

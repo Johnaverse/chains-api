@@ -352,6 +352,29 @@ describe('API Endpoints', () => {
       expect(data.refreshers.l2beat).toHaveProperty('lastRefreshAt');
       expect(data.refreshers.l2beat).toHaveProperty('intervalMs');
     });
+
+    it('reports the running version so a deploy is identifiable from the API', async () => {
+      const response = await app.inject({ method: 'GET', url: '/health' });
+      expect(JSON.parse(response.payload).version).toBe(PKG_VERSION);
+    });
+  });
+
+  describe('GET /ready', () => {
+    it('is ready once the index is loaded', async () => {
+      const response = await app.inject({ method: 'GET', url: '/ready' });
+      expect(response.statusCode).toBe(200);
+      const data = JSON.parse(response.payload);
+      expect(data).toMatchObject({ status: 'ok', dataLoaded: true });
+      expect(data).toHaveProperty('totalChains');
+    });
+
+    it('503s before the first load so a starting pod stays out of the Service', async () => {
+      // /health would still be 200 here (liveness) — readiness is what must fail.
+      mocks.getCachedData.mockReturnValueOnce({ indexed: null, lastUpdated: null });
+      const response = await app.inject({ method: 'GET', url: '/ready' });
+      expect(response.statusCode).toBe(503);
+      expect(JSON.parse(response.payload)).toMatchObject({ status: 'starting', dataLoaded: false });
+    });
   });
 
   describe('GET /refresher', () => {

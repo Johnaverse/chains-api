@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFile, stat } from 'node:fs/promises';
+import pkg from '../../../package.json' with { type: 'json' };
 import { basename, resolve } from 'node:path';
 import { getCachedData } from '../../store/cache.js';
 import {
@@ -94,6 +95,9 @@ export async function adminRoutes(fastify) {
 
     return {
       status: deriveOverallStatus(sources, refreshers),
+      // The running build, so a deployed version is identifiable from the API
+      // rather than only from the container image tag.
+      version: pkg.version,
       dataLoaded: cachedData.indexed !== null,
       lastUpdated: cachedData.lastUpdated,
       totalChains: cachedData.indexed ? cachedData.indexed.all.length : 0,
@@ -103,6 +107,24 @@ export async function adminRoutes(fastify) {
       // degrade the data API's overall status, so it stays out of
       // deriveOverallStatus and the key is omitted entirely when disabled.
       ...(ASSISTANT_ENABLED ? { assistant: { enabled: true, model: ASSISTANT_MODEL } } : {})
+    };
+  });
+
+  // Readiness is distinct from liveness. /health stays 200 whenever the process
+  // is alive (it reports degradation in its body), which is right for a liveness
+  // probe but wrong for routing: before the first load the index is empty, so
+  // every query would truthfully answer "no chains". 503 here keeps a starting
+  // pod out of the Service instead of serving confidently empty results.
+  fastify.get('/ready', async (_request, reply) => {
+    const cachedData = getCachedData();
+    if (cachedData.indexed === null) {
+      return reply.code(503).send({ status: 'starting', dataLoaded: false });
+    }
+    return {
+      status: 'ok',
+      dataLoaded: true,
+      totalChains: cachedData.indexed.all.length,
+      lastUpdated: cachedData.lastUpdated
     };
   });
 

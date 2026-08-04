@@ -4,6 +4,9 @@ import {
   LIVE_INCIDENTS_FETCH_TIMEOUT_MS
 } from '../../config.js';
 import { proxyFetch } from '../../fetchUtil.js';
+import { resolveIncidentChain } from '../domain/incidentChains.js';
+import { correlateChainIncidents } from '../services/chainIncidents.js';
+import { hasWindowBanner, windowEndMs } from '../domain/maintenanceWindow.js';
 import { logger } from '../util/logger.js';
 
 /**
@@ -18,10 +21,14 @@ const DEFAULT_LIMIT = 30;
 // The feed retains a few hundred events; 500 is "everything it has".
 const FEED_FETCH_LIMIT = 500;
 
-let cache = { fetchedAt: 0, incidents: null };
+// `incidents` is the deduped per-incident view (newest update wins) that the tools serve.
+// `events` is the full normalized update stream, kept because the upgrade-correlation layer
+// needs update history (a maintenance_scheduled entry's own timestamp is the activation
+// time, and dedup would replace it with the newest update's).
+let cache = { fetchedAt: 0, incidents: null, events: null };
 
 export function _resetLiveIncidentsCacheForTests() {
-  cache = { fetchedAt: 0, incidents: null };
+  cache = { fetchedAt: 0, incidents: null, events: null };
 }
 
 /**
@@ -43,7 +50,15 @@ export async function getLiveIncidents({ type = 'all', chainId, provider, ongoin
   let filtered = incidents;
   if (type === 'chain') filtered = filtered.filter((it) => !it.isProvider);
   else if (type === 'provider') filtered = filtered.filter((it) => it.isProvider);
-  if (chainId != null) filtered = filtered.filter((it) => it.chains.some((c) => c.chainId === chainId));
+  // Match a chain the provider DECLARED or one derived from the incident title.
+  // Provider status pages are organised by provider, so a provider incident
+  // almost never declares a chain — 17 of 18 ongoing ones carried none. Filtering
+  // on declared chains alone answered "nothing ongoing" for a chain that three
+  // providers were reporting an outage on.
+  if (chainId != null) {
+    filtered = filtered.filter((it) => it.chains.some((c) => c.chainId === chainId)
+      || it.derivedChain?.chainId === chainId);
+  }
   if (typeof ongoing === 'boolean') filtered = filtered.filter((it) => it.ongoing === ongoing);
   if (status) filtered = filtered.filter((it) => it.status === status);
   if (provider) {
@@ -56,8 +71,22 @@ export async function getLiveIncidents({ type = 'all', chainId, provider, ongoin
     fetchedAt: new Date(cache.fetchedAt).toISOString(),
     count: sliced.length,
     totalMatched: filtered.length,
-    incidents: sliced
+    incidents: sliced,
+    // Correlated across ALL ongoing provider incidents, not just the filtered
+    // page: the question "is this chain in trouble" is answered by how many
+    // providers agree, and a chainId filter would leave only one of them.
+    chainLevel: correlateChainIncidents(incidents)
   };
+}
+
+/**
+ * The full normalized update stream (no dedup), for the upgrade-correlation
+ * layer. Shares the cache/TTL with getLiveIncidents, so enabling correlation
+ * adds zero upstream requests.
+ */
+export async function getLiveEvents() {
+  await loadIncidents();
+  return cache.events ?? [];
 }
 
 async function loadIncidents() {
@@ -72,7 +101,8 @@ async function loadIncidents() {
     if (!response.ok) throw new Error(`Feed responded ${response.status}`);
     const body = await response.json();
     const events = Array.isArray(body?.events) ? body.events : [];
-    cache = { fetchedAt: Date.now(), incidents: normalizeEvents(events) };
+    const normalized = events.map(normalizeEvent).map(attachChain);
+    cache = { fetchedAt: Date.now(), incidents: dedupeEvents(normalized), events: normalized };
     return cache.incidents;
   } catch (err) {
     if (cache.incidents) {
@@ -84,39 +114,79 @@ async function loadIncidents() {
 }
 
 /**
- * Normalize raw feed events into compact, token-cheap incident records and
- * dedupe them. The feed emits one event per status update; the dashboard
- * merges them by status page + title, keeping the newest — same rule here.
+ * The feed emits one event per status update; the tool view keeps the newest
+ * per incident. Grouping prefers the feed's stable `incidentId` (survives
+ * retitles) and falls back to statusPage+title while deployed feeds predate
+ * that field.
  */
-function normalizeEvents(events) {
+function dedupeEvents(normalized) {
   const byKey = new Map();
-  for (const ev of events) {
-    const statusPage = ev.statusPage || {};
-    const publishedMs = parseEventTime(ev);
-    const key = `${statusPage.id || 'unknown'}|${(ev.title || '').toLowerCase().trim()}`;
+  for (const ev of normalized) {
+    const key = ev.incidentId ?? `${ev.statusPage.id || 'unknown'}|${ev.title.toLowerCase().trim()}`;
     const existing = byKey.get(key);
-    if (existing && (existing.publishedMs ?? 0) >= (publishedMs ?? 0)) continue;
-    byKey.set(key, {
-      title: ev.title || '(untitled)',
-      url: ev.url || null,
-      publishedAt: publishedMs != null ? new Date(publishedMs).toISOString() : null,
-      publishedMs,
-      // Structured incident state from the feed (Atlassian/webhook exact, or
-      // text-derived server-side for feed-only providers). Kept so the assistant
-      // and MCP tools can tell an active incident from a long-resolved one
-      // without re-parsing titles.
-      status: ev.status ?? null,
-      ongoing: typeof ev.ongoing === 'boolean' ? ev.ongoing : null,
-      impact: ev.impact ?? null,
-      statusPage: { id: statusPage.id || null, name: statusPage.name || null, kind: statusPage.kind || null },
-      isProvider: statusPage.kind === 'rpc-provider',
-      chains: Array.isArray(ev.chains)
-        ? ev.chains.filter((c) => c?.chainId != null).map((c) => ({ chainId: c.chainId, name: c.name ?? null }))
-        : [],
-      affectedComponents: Array.isArray(ev.affectedComponents) ? ev.affectedComponents : []
-    });
+    if (existing && (existing.publishedMs ?? 0) >= (ev.publishedMs ?? 0)) continue;
+    byKey.set(key, ev);
   }
   return [...byKey.values()].sort((a, b) => (b.publishedMs ?? 0) - (a.publishedMs ?? 0));
+}
+
+/** One raw feed event -> the compact, token-cheap record the tools serve. */
+function normalizeEvent(ev) {
+  const statusPage = ev.statusPage || {};
+  const publishedMs = parseEventTime(ev);
+  return {
+    title: ev.title || '(untitled)',
+    url: ev.url || null,
+    publishedAt: publishedMs != null ? new Date(publishedMs).toISOString() : null,
+    publishedMs,
+    // Structured incident state from the feed (Atlassian/webhook exact, or
+    // text-derived server-side for feed-only providers). Kept so the assistant
+    // and MCP tools can tell an active incident from a long-resolved one
+    // without re-parsing titles.
+    status: ev.status ?? null,
+    ongoing: typeof ev.ongoing === 'boolean' ? ev.ongoing : null,
+    impact: ev.impact ?? null,
+    // Correlation fields (chains-status-news >= 0.1.7). Null/empty on older
+    // deployments — every consumer must tolerate their absence.
+    incidentId: ev.incidentId ?? null,
+    software: Array.isArray(ev.software)
+      ? ev.software.filter((s) => s?.version).map((s) => ({ client: s.client ?? null, version: s.version }))
+      : [],
+    urgency: ev.urgency ?? null,
+    networkNames: Array.isArray(ev.networkNames) ? ev.networkNames.filter((n) => typeof n === 'string') : [],
+    networkSlugs: Array.isArray(ev.networkSlugs) ? ev.networkSlugs.filter((s) => typeof s === 'string') : [],
+    // Scheduled-window facts derived from the entry body, which we then drop:
+    // the body is multi-KB of provider HTML and every consumer of this record
+    // (assistant, MCP tools) pays for it in tokens. `isWindowEntry` marks the
+    // update whose publishedAt IS the window start — the activation time —
+    // and `windowEndMs` is the only source of window duration in the feed.
+    isWindowEntry: hasWindowBanner(ev.summary),
+    windowEndMs: windowEndMs(ev.summary, publishedMs),
+    statusPage: { id: statusPage.id || null, name: statusPage.name || null, kind: statusPage.kind || null },
+    isProvider: statusPage.kind === 'rpc-provider',
+    chains: Array.isArray(ev.chains)
+      ? ev.chains.filter((c) => c?.chainId != null).map((c) => ({ chainId: c.chainId, name: c.name ?? null }))
+      : [],
+    affectedComponents: Array.isArray(ev.affectedComponents) ? ev.affectedComponents : []
+  };
+}
+
+/**
+ * Attach the chain an incident is about, with the evidence for it.
+ *
+ * Separate from normalizeEvent because it needs the chain registry: resolution
+ * runs against searchChains, and a record built before the registry loaded would
+ * silently carry `derivedChain: null` forever. Called per load, so a registry that
+ * arrives late still attributes on the next refresh.
+ */
+function attachChain(incident) {
+  const resolved = resolveIncidentChain(incident);
+  // `derivedChain` is deliberately NOT merged into `chains`: a chain read out of
+  // a title is a weaker claim than one the provider declared, and collapsing them
+  // would make a guess indistinguishable from a fact (SERVICE-CONTRACT rule 14).
+  incident.derivedChain = resolved && resolved.evidence !== 'declared' ? resolved : null;
+  incident.chainEvidence = resolved?.evidence ?? null;
+  return incident;
 }
 
 function parseEventTime(ev) {
