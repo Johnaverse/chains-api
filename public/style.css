@@ -680,7 +680,12 @@ button, input, textarea, select { font: inherit; color: inherit; }
     }
     .data-table--stack tbody tr:last-child td { border-bottom: none; }
 
-    .data-table--stack td {
+    /* `tbody` is here for specificity, not for scope: the desktop rule is
+       `.data-table tbody td` (0,1,2), which outranks a bare `.data-table--stack td` (0,1,1),
+       so every declaration below was silently losing to it on phones — cells kept their
+       desktop padding and bottom border, and `white-space: normal` never applied, so any
+       cell text long enough to matter pushed the page sideways instead of wrapping. */
+    .data-table--stack tbody td {
         border: none; padding: 3px 0; white-space: normal;
         display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-4);
         text-align: right;
