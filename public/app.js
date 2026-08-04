@@ -88,12 +88,29 @@ const state = {
 };
 
 // ─── DOM helpers ─────────────────────────────────────────────────────────
+// Both spellings are accepted — an object ({ width: '40%' }) and a declaration string
+// ('width: 40%') — because the two halves of this file were written to different
+// conventions and a mismatch here fails silently rather than loudly. Everything routes
+// through setProperty, which also means custom properties (--x: y) work.
+function applyStyle(node, v) {
+    const decls = typeof v === 'string'
+        ? v.split(';').map(d => d.split(':')).filter(p => p.length >= 2)
+            .map(([prop, ...rest]) => [prop.trim(), rest.join(':').trim()])
+        : Object.entries(v).map(([prop, val]) => [prop.replace(/[A-Z]/g, m => `-${m.toLowerCase()}`), String(val)]);
+    for (const [prop, val] of decls) node.style.setProperty(prop, val);
+}
 function el(tag, props = {}, children = []) {
     const node = document.createElement(tag);
     for (const [k, v] of Object.entries(props)) {
         if (v === null || v === undefined) continue;
         if (k === 'class') node.className = v;
         else if (k === 'text') node.textContent = v;
+        // Styles go through the CSSOM, never through a style ATTRIBUTE. The API serves this
+        // dashboard at /ui under `style-src 'self'` with no 'unsafe-inline', so a style
+        // attribute is dropped there by the browser with NO console error — while the same
+        // page on GitHub Pages (which sends no CSP) looks fine. Anything positioned or
+        // coloured from JS therefore has to be assigned, or it silently collapses on /ui only.
+        else if (k === 'style') applyStyle(node, v);
         else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2), v);
         else node.setAttribute(k, v);
     }

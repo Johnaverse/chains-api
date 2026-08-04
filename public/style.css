@@ -731,6 +731,19 @@ button, input, textarea, select { font: inherit; color: inherit; }
 }
 .chip-count { color: var(--ink-3); font-variant-numeric: tabular-nums; font-size: var(--fs-100); }
 .chip-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.chip-dot--critical { background: var(--critical); }
+
+/* Spacing utilities exist for ONE reason: the API serves this page at /ui under
+   `style-src 'self'` with no 'unsafe-inline', so a style ATTRIBUTE in the markup is
+   dropped there — with no console error — while the same file on GitHub Pages (no CSP)
+   renders correctly. Every layout value therefore has to arrive via a class, or the two
+   deployments of the identical file disagree about their spacing. Kept to the handful of
+   steps actually used; this is not an invitation to a utility framework. */
+.u-mt-2 { margin-top: var(--sp-2); }
+.u-mt-3 { margin-top: var(--sp-3); }
+.u-mt-4 { margin-top: var(--sp-4); }
+.u-mt-5 { margin-top: var(--sp-5); }
+.u-mb-4 { margin-bottom: var(--sp-4); }
 
 /* ═══ Tags / pills / badges ══════════════════════════════════════════ */
 .tag {

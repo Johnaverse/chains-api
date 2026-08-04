@@ -22,14 +22,10 @@
 
     <link rel="stylesheet" href="fonts/inter.css">
     <link rel="stylesheet" href="style.css">
-    <!-- Set the theme before first paint so a saved light preference never
-         flashes the dark default. -->
-    <script>
-        try {
-            var t = localStorage.getItem('chains:theme');
-            if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
-        } catch (e) { /* private mode — fall back to prefers-color-scheme */ }
-    </script>
+    <!-- Sets the theme before first paint so a saved light preference never flashes the
+         dark default. Must stay a same-origin FILE and stay synchronous: the /ui copy is
+         served under `script-src 'self'`, which refuses an inline block outright. -->
+    <script src="theme-init.js"></script>
     <script src="charts.js" defer></script>
     <!-- 3d-force-graph (1.2 MB) is injected lazily on first visit to the
          Relationships tab — see ensureGraphLib() in app.js. -->
@@ -154,7 +150,7 @@
             <!-- The join that does not exist anywhere else in the product:
                  open incidents (chain operators AND RPC providers) resolved to
                  the specific chains they affect. -->
-            <div class="card" style="margin-top: var(--sp-4)">
+            <div class="card u-mt-4">
                 <div class="card-head">
                     <h3 class="card-title">Live incident impact</h3>
                     <span class="pill-meta live-pill" id="impactMeta">live</span>
@@ -172,7 +168,7 @@
                 <div id="impactBody" class="live-panel"></div>
             </div>
 
-            <div class="grid grid-2" style="margin-top: var(--sp-4)">
+            <div class="grid grid-2 u-mt-4">
                 <div class="card">
                     <div class="card-head">
                         <h3 class="card-title">Value secured by rollup stage</h3>
@@ -213,7 +209,7 @@
                 </div>
             </div>
 
-            <div class="card" style="margin-top: var(--sp-4)">
+            <div class="card u-mt-4">
                 <div class="card-head">
                     <h3 class="card-title">How concentrated is L2 value?</h3>
                     <div class="card-actions" id="concentrationActions"></div>
@@ -222,7 +218,7 @@
                 <div id="chartConcentration"></div>
             </div>
 
-            <div class="grid grid-2" style="margin-top: var(--sp-4)">
+            <div class="grid grid-2 u-mt-4">
                 <div class="card">
                     <div class="card-head">
                         <h3 class="card-title">Cross-source data quality</h3>
@@ -267,7 +263,7 @@
                 <div class="toolbar-group">
                     <div class="chip-row">
                         <button class="chip" type="button" id="chipIncidentOnly" aria-pressed="false">
-                            <span class="chip-dot" style="background: var(--critical)"></span>Open incident only
+                            <span class="chip-dot chip-dot--critical"></span>Open incident only
                             <span class="chip-count" id="chipIncidentCount"></span>
                         </button>
                         <button class="chip" type="button" id="chipTvsOnly" aria-pressed="false">
@@ -316,24 +312,24 @@
                 <div class="graph-controls-title">Show</div>
                 <div class="chip-row" id="graphFilterChips" role="group" aria-label="Filter node types"></div>
 
-                <div class="graph-controls-title" style="margin-top: var(--sp-3)">Size nodes by</div>
+                <div class="graph-controls-title u-mt-3">Size nodes by</div>
                 <div class="chip-row" id="graphSizeChips" role="group" aria-label="Node size encoding">
                     <button class="chip" type="button" data-size="tvs" aria-pressed="true">Value secured</button>
                     <button class="chip" type="button" data-size="rpc" aria-pressed="false">RPC count</button>
                     <button class="chip" type="button" data-size="flat" aria-pressed="false">Uniform</button>
                 </div>
 
-                <div class="graph-controls-title" style="margin-top: var(--sp-3)">Highlight</div>
+                <div class="graph-controls-title u-mt-3">Highlight</div>
                 <div class="chip-row">
                     <button class="chip" type="button" id="graphIncidentEmphasis" aria-pressed="false">
-                        <span class="chip-dot" style="background: var(--critical)"></span>Open incident
+                        <span class="chip-dot chip-dot--critical"></span>Open incident
                     </button>
                 </div>
 
-                <div class="graph-controls-title" style="margin-top: var(--sp-3)">Sources</div>
+                <div class="graph-controls-title u-mt-3">Sources</div>
                 <div id="graphSources"></div>
 
-                <div style="margin-top: var(--sp-3)">
+                <div class="u-mt-3">
                     <button class="btn" type="button" id="graphReset">Reset view</button>
                 </div>
             </div>
@@ -341,7 +337,7 @@
             <div class="panel graph-stats">
                 <div class="graph-stat-value" id="graphNodeCount">—</div>
                 <div class="graph-stat-label">networks shown</div>
-                <div class="graph-stat-value" id="graphLinkCount" style="margin-top: var(--sp-2)">—</div>
+                <div class="graph-stat-value u-mt-2" id="graphLinkCount">—</div>
                 <div class="graph-stat-label">relationships</div>
             </div>
 
@@ -379,7 +375,7 @@
                     not a complete history.</p>
             </div>
 
-            <div class="stat-row" id="incidentStats" style="margin-bottom: var(--sp-4)"></div>
+            <div class="stat-row u-mb-4" id="incidentStats"></div>
 
             <div class="card">
                 <div class="card-head">
@@ -390,11 +386,11 @@
                         filter the list below.</p>
                 </div>
                 <div id="incidentHistogram"></div>
-                <div class="calendars" id="incidentCalendar" style="margin-top: var(--sp-5)"></div>
+                <div class="calendars u-mt-5" id="incidentCalendar"></div>
                 <div class="scale-legend" id="incidentScaleLegend"></div>
             </div>
 
-            <div class="toolbar" style="margin-top: var(--sp-4)">
+            <div class="toolbar u-mt-4">
                 <div class="toolbar-group">
                     <span class="toolbar-label" id="lblKind">Kind</span>
                     <div class="chip-row" id="incidentCategory" role="group" aria-labelledby="lblKind">
@@ -432,7 +428,7 @@
                     even when the chain itself is healthy.</p>
             </div>
 
-            <div class="stat-row" id="providerStats" style="margin-bottom: var(--sp-4)"></div>
+            <div class="stat-row u-mb-4" id="providerStats"></div>
 
             <div class="card">
                 <div class="card-head">
@@ -441,11 +437,11 @@
                     <div class="card-actions" id="providerHistActions"></div>
                 </div>
                 <div id="providerHistogram"></div>
-                <div class="calendars" id="providerCalendar" style="margin-top: var(--sp-5)"></div>
+                <div class="calendars u-mt-5" id="providerCalendar"></div>
                 <div class="scale-legend" id="providerScaleLegend"></div>
             </div>
 
-            <div class="toolbar" style="margin-top: var(--sp-4)">
+            <div class="toolbar u-mt-4">
                 <div class="toolbar-group">
                     <span class="toolbar-label" id="lblProv">Provider</span>
                     <div class="chip-row" id="providerFilter" role="group" aria-labelledby="lblProv"></div>
@@ -469,7 +465,7 @@
                     filtered out for being off-chain.</p>
             </div>
 
-            <div class="stat-row" id="newsStats" style="margin-bottom: var(--sp-4)"></div>
+            <div class="stat-row u-mb-4" id="newsStats"></div>
 
             <div class="card">
                 <div class="card-head">
@@ -482,7 +478,7 @@
                 <div id="chartNewsSources"></div>
             </div>
 
-            <div class="toolbar" style="margin-top: var(--sp-4)">
+            <div class="toolbar u-mt-4">
                 <div class="toolbar-group">
                     <span class="toolbar-label" id="lblNewsScope">Show</span>
                     <div class="chip-row" id="newsScope" role="group" aria-labelledby="lblNewsScope">
@@ -530,7 +526,7 @@
                 <p class="note" id="forumNote"></p>
             </div>
 
-            <div class="toolbar" style="margin-top: var(--sp-4)">
+            <div class="toolbar u-mt-4">
                 <span class="toolbar-count" id="forumCount"></span>
             </div>
             <div id="forumList" class="feed-list" aria-live="polite">
