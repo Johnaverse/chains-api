@@ -143,6 +143,18 @@ function fmtDateTime(ms) {
         ? new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
         : null;
 }
+// Only an http(s) URL may become an href. Feed and registry data is third-party, so a
+// `javascript:` URL here would be a clickable XSS — CodeQL flagged exactly this class. Returns
+// null on anything else, and el() drops a null attribute, so the title still renders as text
+// while ceasing to be a link. safeHost() below already applied this rule to the display label;
+// this applies it to the destination.
+function safeUrl(url) {
+    try {
+        const u = new URL(url);
+        return (u.protocol === 'http:' || u.protocol === 'https:') ? u.href : null;
+    } catch { return null; }
+}
+
 function safeHost(url) {
     try {
         const u = new URL(url);
@@ -1247,7 +1259,7 @@ function renderImpact() {
             td('Incident', [el('div', { class: 'cell-stack' }, [
                 it.url
                     ? el('a', {
-                        href: it.url, target: '_blank', rel: 'noopener',
+                        href: safeUrl(it.url), target: '_blank', rel: 'noopener',
                         text: it.title, title: it.title,
                         // The row opens the chain drawer; the link opens the
                         // upstream report. Don't fire both.
@@ -1414,16 +1426,19 @@ function renderConcentration({ force = false } = {}) {
         .sort((a, b) => b.tvs - a.tvs);
     if (!sorted.length) return;
 
-    const parts = sorted.slice(0, 4).map(p => ({ label: p.displayName || p.slug, value: p.tvs }));
-    const restVal = sorted.slice(4).reduce((s, p) => s + p.tvs, 0);
-    if (restVal > 0) parts.push({ label: `Other (${sorted.length - 4})`, value: restVal });
+    // Three named segments plus a neutral remainder: three is the validated all-pairs colour cap,
+    // so a fourth named segment would have to reuse a hue already on screen.
+    const TOP_N = 3;
+    const parts = sorted.slice(0, TOP_N).map(p => ({ label: p.displayName || p.slug, value: p.tvs }));
+    const restVal = sorted.slice(TOP_N).reduce((sum, p) => sum + p.tvs, 0);
+    if (restVal > 0) parts.push({ label: `Other (${sorted.length - TOP_N})`, value: restVal });
 
     renderWhenVisible(host, () => paintConcentration(host, sorted, parts));
 }
 
 function paintConcentration(host, sorted, parts) {
     const res = Viz.compositionBar(host, {
-        parts, valueFmt: fmtUsd, maxSlots: 4,
+        parts, valueFmt: fmtUsd, maxSlots: 3,
         tableCaption: 'Share of total value secured'
     });
     const actions = byId('concentrationActions');
@@ -1433,10 +1448,11 @@ function paintConcentration(host, sorted, parts) {
         Viz.attachTableToggle(host, res.table, actions);
     }
     const total = totalTvs();
-    const top4 = sorted.slice(0, 4).reduce((s, p) => s + p.tvs, 0);
+    const topN = 3;
+    const topShare = sorted.slice(0, topN).reduce((sum, p) => sum + p.tvs, 0);
     host.appendChild(el('p', {
         class: 'note',
-        text: `The four largest projects hold ${Viz.fmtPct((top4 / total) * 100)} of ${fmtUsd(total)} total value secured across ${fmtNum(sorted.length)} projects reporting a non-zero figure.`
+        text: `The ${topN} largest projects hold ${Viz.fmtPct((topShare / total) * 100)} of ${fmtUsd(total)} total value secured across ${fmtNum(sorted.length)} projects reporting a non-zero figure.`
     }));
 }
 
@@ -2280,7 +2296,7 @@ function incidentCard(it) {
             it.kind === 'scheduled' ? el('span', { class: 'kind-tag', text: 'Scheduled' }) : null,
             el('span', { class: 'incident-title-text' }, [
                 it.url
-                    ? el('a', { href: it.url, target: '_blank', rel: 'noopener', text: it.title })
+                    ? el('a', { href: safeUrl(it.url), target: '_blank', rel: 'noopener', text: it.title })
                     : el('span', { text: it.title })
             ])
         ]),
@@ -2854,7 +2870,7 @@ function renderForumList() {
                 el('div', { class: 'incident-main' }, [
                     el('div', { class: 'incident-title' }, [
                         el('span', { class: 'incident-title-text' }, [
-                            el('a', { href: p.url, target: '_blank', rel: 'noopener', text: p.title })
+                            el('a', { href: safeUrl(p.url), target: '_blank', rel: 'noopener', text: p.title })
                         ])
                     ]),
                     el('div', {
@@ -2957,7 +2973,7 @@ function openChainDetail(chainId, opts = {}) {
                 el('div', { class: 'incident-main' }, [
                     el('div', { class: 'incident-title' }, [
                         el('span', { class: 'incident-title-text' }, [
-                            it.url ? el('a', { href: it.url, target: '_blank', rel: 'noopener', text: it.title })
+                            it.url ? el('a', { href: safeUrl(it.url), target: '_blank', rel: 'noopener', text: it.title })
                                 : el('span', { text: it.title })
                         ])
                     ]),
@@ -3010,7 +3026,7 @@ function openChainDetail(chainId, opts = {}) {
     infoSec.appendChild(extraBox);
     if (sp) {
         infoSec.appendChild(detailRow('Status page',
-            el('a', { href: sp.url, target: '_blank', rel: 'noopener', text: safeHost(sp.url) || sp.name })));
+            el('a', { href: safeUrl(sp.url), target: '_blank', rel: 'noopener', text: safeHost(sp.url) || sp.name })));
     }
     body.appendChild(infoSec);
 
@@ -3064,15 +3080,15 @@ async function loadChainDetail(chainId, box) {
     }
     if (d.explorers?.length) {
         box.appendChild(detailRow('Explorers', d.explorers.slice(0, 6).map(x =>
-            el('a', { href: x.url, target: '_blank', rel: 'noopener', text: x.name || safeHost(x.url) }))));
+            el('a', { href: safeUrl(x.url), target: '_blank', rel: 'noopener', text: x.name || safeHost(x.url) }))));
     }
     if (d.infoURL) {
         box.appendChild(detailRow('Website',
-            el('a', { href: d.infoURL, target: '_blank', rel: 'noopener', text: safeHost(d.infoURL) || d.infoURL })));
+            el('a', { href: safeUrl(d.infoURL), target: '_blank', rel: 'noopener', text: safeHost(d.infoURL) || d.infoURL })));
     }
     if (d.forumUrl) {
         box.appendChild(detailRow('Forum',
-            el('a', { href: d.forumUrl, target: '_blank', rel: 'noopener', text: safeHost(d.forumUrl) || d.forumUrl })));
+            el('a', { href: safeUrl(d.forumUrl), target: '_blank', rel: 'noopener', text: safeHost(d.forumUrl) || d.forumUrl })));
     }
     if (d.slip44 != null) box.appendChild(detailRow('SLIP-44', el('span', { class: 'mono', text: String(d.slip44) })));
     if (d.statusReason) box.appendChild(detailRow('Status note', el('span', { class: 'dim', text: d.statusReason })));
@@ -3092,7 +3108,7 @@ async function loadForumNews(chainId, box, section) {
         clear(box);
         for (const p of posts) {
             box.appendChild(el('div', { class: 'forum-post' }, [
-                el('a', { href: p.url, target: '_blank', rel: 'noopener', text: p.title }),
+                el('a', { href: safeUrl(p.url), target: '_blank', rel: 'noopener', text: p.title }),
                 el('span', { class: 'forum-when', text: relTime(p.publishedAt) })
             ]));
         }
@@ -3416,7 +3432,7 @@ function resetAssistantChat() {
 function appendChatBubble(role, text, { toolCalls, degraded, viaFallback } = {}) {
     const log = byId('assistantLog');
     const body = el('div', { class: 'chat-bubble-body' });
-    body.innerHTML = renderAssistantMarkdown(text);
+    renderAssistantMarkdown(text, body);
     const extras = [];
 
     if (role === 'assistant') {
@@ -3548,22 +3564,70 @@ function appendChatThinking() {
     return bubble;
 }
 
-// Minimal markdown for assistant replies. HTML-escapes FIRST, then layers
-// formatting on the escaped text, so model output can never inject markup.
-function renderAssistantMarkdown(text) {
-    const escaped = String(text)
-        .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    return escaped.split(/\n{2,}/).map(block => {
+// Minimal markdown for assistant replies, built as DOM NODES rather than an HTML string.
+//
+// This used to assemble markup by hand and assign innerHTML, escaping &<>" first. That escaping
+// was correct as far as I could reason about it, but it left model output one regex edit away
+// from XSS, and CodeQL flagged the sink (js/xss, high). createTextNode cannot execute anything,
+// so the bug class is removed rather than guarded: there is no HTML string left to get wrong.
+//
+// Supports: `code`, **bold**, bullet lists, bare http(s) URLs, paragraphs.
+function renderAssistantMarkdown(text, target) {
+    for (const block of String(text).split(/\n{2,}/)) {
         const lines = block.split('\n');
-        const isList = lines.every(l => /^\s*[-*] /.test(l) || l.trim() === '');
-        if (isList && lines.some(l => l.trim())) {
-            const items = lines.filter(l => l.trim())
-                .map(l => `<li>${inlineMd(l.replace(/^\s*[-*] /, ''))}</li>`).join('');
-            return `<ul>${items}</ul>`;
+        const isList = lines.every(line => /^\s*[-*] /.test(line) || line.trim() === '');
+        if (isList && lines.some(line => line.trim())) {
+            const ul = document.createElement('ul');
+            for (const line of lines.filter(l => l.trim())) {
+                const li = document.createElement('li');
+                appendInlineMd(li, line.replace(/^\s*[-*] /, ''));
+                ul.appendChild(li);
+            }
+            target.appendChild(ul);
+            continue;
         }
-        return `<p>${lines.map(inlineMd).join('<br>')}</p>`;
-    }).join('');
+        const p = document.createElement('p');
+        lines.forEach((line, i) => {
+            if (i) p.appendChild(document.createElement('br'));
+            appendInlineMd(p, line);
+        });
+        target.appendChild(p);
+    }
+}
+
+// One pass over the alternatives, so a span produced by one rule is never rescanned by another —
+// the old chained .replace() calls could reprocess their own output.
+const INLINE_MD = /`([^`]+)`|\*\*([^*]+)\*\*|(https?:\/\/[^\s<)]+)/g;
+function appendInlineMd(target, text) {
+    const source = String(text);
+    let last = 0;
+    for (const m of source.matchAll(INLINE_MD)) {
+        if (m.index > last) target.appendChild(document.createTextNode(source.slice(last, m.index)));
+        if (m[1] != null) {
+            const code = document.createElement('code');
+            code.textContent = m[1];
+            target.appendChild(code);
+        } else if (m[2] != null) {
+            const strong = document.createElement('strong');
+            strong.textContent = m[2];
+            target.appendChild(strong);
+        } else {
+            // Same protocol rule as every other link on the page; a non-http(s) match stays text.
+            const href = safeUrl(m[3]);
+            if (href) {
+                const a = document.createElement('a');
+                a.href = href;
+                a.target = '_blank';
+                a.rel = 'noopener';
+                a.textContent = m[3];
+                target.appendChild(a);
+            } else {
+                target.appendChild(document.createTextNode(m[3]));
+            }
+        }
+        last = m.index + m[0].length;
+    }
+    if (last < source.length) target.appendChild(document.createTextNode(source.slice(last)));
 }
 function inlineMd(s) {
     return s
@@ -3927,7 +3991,7 @@ function newsCard(s) {
                 : null,
             el('span', { class: 'incident-title-text' }, [
                 s.url
-                    ? el('a', { href: s.url, target: '_blank', rel: 'noopener', text: s.title })
+                    ? el('a', { href: safeUrl(s.url), target: '_blank', rel: 'noopener', text: s.title })
                     : el('span', { text: s.title })
             ])
         ]),

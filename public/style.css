@@ -538,7 +538,14 @@ button, input, textarea, select { font: inherit; color: inherit; }
 /* 4px rounded data-end, square at the baseline (see the path builder in
    charts.js — the geometry is drawn, not stroked). */
 .chart-bar { transition: opacity var(--dur-fast) var(--ease); }
-.chart-row:hover .chart-bar, .chart-row:focus-visible .chart-bar { opacity: .82; }
+/* Focus lands on the .chart-hit rect (charts.js gives it tabindex), not on the row, so
+   `.chart-row:focus-visible` never matched and keyboard users got no feedback at all. The bar
+   is a following sibling of the hit rect, hence the sibling combinator. */
+.chart-row:hover .chart-bar,
+.chart-hit:focus-visible ~ .chart-bar { opacity: .82; }
+/* An outline on an SVG child is unreliable across browsers — stroke the hit rect instead, so
+   the focused mark is actually visible and not merely dimmed. */
+.chart-hit:focus-visible { stroke: var(--focus); stroke-width: 2; outline: none; }
 .chart-row { cursor: default; }
 .chart-row.is-clickable { cursor: pointer; }
 .chart-hit { fill: transparent; }

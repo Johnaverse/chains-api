@@ -40,7 +40,6 @@
             if (v === null || v === undefined) continue;
             if (k === 'class') n.className = v;
             else if (k === 'text') n.textContent = v;
-            else if (k === 'html') n.innerHTML = v;
             else if (k.startsWith('on') && typeof v === 'function') n.addEventListener(k.slice(2), v);
             else n.setAttribute(k, v);
         }
@@ -383,7 +382,7 @@
     // opts: { parts:[{label,value}], total?, valueFmt, tableCaption }
     // ═════════════════════════════════════════════════════════════════════
     function compositionBar(container, opts) {
-        const { parts = [], valueFmt = fmtUsd, tableCaption = '', maxSlots = 4 } = opts;
+        const { parts = [], valueFmt = fmtUsd, tableCaption = '', maxSlots = 3 } = opts;
         container.textContent = '';
 
         const clean = parts.filter(p => Number.isFinite(p.value) && p.value > 0)
@@ -392,19 +391,24 @@
             container.appendChild(h('div', { class: 'chart-empty', text: 'No data available.' }));
             return;
         }
-        // Fold the tail into "Other" rather than generating a 5th+ hue.
-        let shown = clean;
-        if (clean.length > maxSlots + 1) {
-            const head = clean.slice(0, maxSlots);
-            const tail = clean.slice(maxSlots);
-            shown = head.concat([{
-                label: `Other (${tail.length})`,
-                value: tail.reduce((s, p) => s + p.value, 0),
-                isOther: true
-            }]);
-        }
+    // Fold the tail rather than generating a 4th hue: three is the validated all-pairs cap, and
+    // the previous `(i % 3) + 1` quietly reused --cat-1 for a 4th segment, so two segments shared
+    // a colour and the legend could not be read. A tail of exactly one keeps its own name — the
+    // slot is still the neutral one, which reads as "the remainder" either way.
+    let shown = clean;
+    if (clean.length > maxSlots) {
+        const head = clean.slice(0, maxSlots);
+        const tail = clean.slice(maxSlots);
+        shown = head.concat([{
+            label: tail.length === 1 ? tail[0].label : `Other (${tail.length})`,
+            value: tail.reduce((sum, p) => sum + p.value, 0),
+            isOther: true
+        }]);
+    }
         const total = shown.reduce((s, p) => s + p.value, 0);
-        const slotVar = (i, isOther) => isOther ? '--cat-0' : `--cat-${(i % 3) + 1}`;
+        // No modulo: the fold above guarantees at most `maxSlots` categorical segments, so a
+        // slot index can never wrap onto a colour already in use.
+        const slotVar = (i, isOther) => (isOther || i >= maxSlots) ? '--cat-0' : `--cat-${i + 1}`;
 
         const BAR_H = 26, GAP = 2;
         const W = Math.max(container.clientWidth || 760, 240);
