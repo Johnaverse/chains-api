@@ -930,10 +930,16 @@ function repaintIncidentSurfaces() {
     if (graphEmphasizeIncidents && myGraph) applyGraphFilter();
 }
 
+// The ONE door from a feed-supplied severity to anything rendered. Every label and
+// every `sev-*` class comes out of SEVERITY_META, so an unexpected value degrades to
+// "Not classified" instead of printing itself — and no feed string ever reaches the DOM
+// or a class attribute. Both call paths (incident cards, news cards) go through here.
+function severityMeta(raw) {
+    const key = raw ? String(raw).toLowerCase() : null;
+    return SEVERITY_META[key] || SEVERITY_META.none;
+}
 function severityOf(it) {
-    const enr = incidents.enrichByKey.get(it.key);
-    const raw = enr?.severity ? String(enr.severity).toLowerCase() : null;
-    return SEVERITY_META[raw] || SEVERITY_META.none;
+    return severityMeta(incidents.enrichByKey.get(it.key)?.severity);
 }
 function enrichmentOf(it) { return incidents.enrichByKey.get(it.key) || null; }
 
@@ -3986,6 +3992,7 @@ function renderNewsClassChips() {
 
 function newsCard(s) {
     const enr = enrichmentOfStory(s);
+    const sev = severityMeta(enr?.severity);
     const when = s.whenMs ? relTime(new Date(s.whenMs).toISOString()) : null;
     const publishers = s.sources.map(x => x.name || x.id).filter(Boolean);
 
@@ -4018,8 +4025,7 @@ function newsCard(s) {
         const conf = Number.isFinite(enr.confidence) ? enr.confidence : null;
         const head = el('div', { class: 'ai-head' }, [
             el('span', { class: 'ai-tag', text: 'AI' }),
-            enr.class ? el('span', { class: 'ai-class', text: String(enr.class).replace(/_/g, ' ') }) : null,
-            enr.severity ? el('span', { text: `· ${enr.severity}` }) : null
+            enr.class ? el('span', { class: 'ai-class', text: String(enr.class).replace(/_/g, ' ') }) : null
         ]);
         if (conf != null) {
             const bar = el('span', { class: 'ai-conf-bar' }, [el('span', { class: 'ai-conf-fill' })]);
@@ -4050,9 +4056,7 @@ function newsCard(s) {
 
     const side = el('div', { class: 'incident-side' }, [
         enr?.severity
-            ? el('span', { class: `sev sev-${String(enr.severity).toLowerCase().replace(/[^a-z]/g, '') || 'none'}` }, [
-                el('span', { class: 'sev-mark' }), String(enr.severity)
-            ])
+            ? el('span', { class: `sev sev-${sev.key}` }, [el('span', { class: 'sev-mark' }), sev.label])
             : null,
         s.chains.length
             ? el('span', { class: 'pill', text: `${s.chains.length} chain${s.chains.length === 1 ? '' : 's'}` })
