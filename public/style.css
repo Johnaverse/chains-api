@@ -781,6 +781,40 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .sev-minor .sev-mark { background: var(--warn); }
 .sev-none .sev-mark { background: var(--cat-0); }
 
+/* ── incident lifecycle ─────────────────────────────────────────────────
+   One row per state the feed published, down → recovered. A rail down the left ties the
+   steps together and each dot is coloured by that step's status. */
+.incident-timeline {
+    list-style: none; margin: var(--sp-2) 0 0; padding: 0 0 0 3px;
+    border-left: 1px solid var(--rule);
+}
+.tl-step {
+    display: flex; align-items: baseline; gap: 7px;
+    font-size: var(--fs-100); line-height: 1.7; color: var(--ink-3);
+}
+/* No `color` of its own: a step the feed did not classify inherits the row's muted ink,
+   which is what "no published status" should look like. Nothing guesses a colour from the
+   step's wording. */
+.tl-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; margin-left: -6.5px; background: currentColor; }
+.tl-time { font-variant-numeric: tabular-nums; flex: none; color: var(--ink-2); }
+.tl-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Elapsed since the previous step — pushed right so the gaps line up and a slow step is
+   scannable without reading both timestamps. */
+.tl-gap { margin-left: auto; flex: none; font-variant-numeric: tabular-nums; color: var(--ink-3); }
+
+/* Status → colour, as ONE list. Anything that needs a status colour reads it from here;
+   the second copy this replaces was keyed on the feed's raw enum while the labels are
+   display strings, so it silently matched nothing for maintenance.
+   Maintenance is deliberately NOT red. A window running to schedule is planned work, and
+   reserving red for real incidents is the same rule the provider board states and the same
+   one the severity floor in chains-status-news enforces — the palette this was ported from
+   painted 'Scheduled' and 'In progress' the same red as a major outage, contradicting both. */
+.st-resolved, .st-completed, .st-operational { color: var(--good); }
+.st-monitoring, .st-verifying { color: var(--accent); }
+.st-identified, .st-update, .st-degraded { color: var(--warn); }
+.st-investigating, .st-partialoutage, .st-majoroutage { color: var(--critical); }
+.st-scheduled, .st-inprogress { color: var(--cat-0); }
+
 .badge {
     display: inline-block; font-size: var(--fs-100); font-weight: 600;
     padding: 2px var(--sp-2); border-radius: var(--r-sm);

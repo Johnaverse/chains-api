@@ -23,7 +23,11 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 const SAME_ORIGIN_API =
-    location.port === '3000' || location.hostname === 'chains-api.johnaverse.cc';
+    location.port === '3000' || location.hostname === 'chains-api.johnaverse.cc'
+    // The API serves this dashboard itself at /ui/ (any port) — those calls must stay
+    // same-origin, or a local or staging server's own UI silently shows production data
+    // while looking like it shows that deployment's.
+    || location.pathname.startsWith('/ui');
 const API_BASE = SAME_ORIGIN_API ? '' : 'https://chains-api.johnaverse.cc';
 const STATUS_NEWS_BASE = 'https://chains-status-news.johnaverse.cc';
 const FORUM_NEWS_BASE = 'https://chains-forum-news.johnaverse.cc';
@@ -138,8 +142,13 @@ const fmtNum = n => Viz.fmtNum(n);
 
 function fmtDuration(ms) {
     if (!Number.isFinite(ms) || ms < 0) return null;
+    // Seconds below a minute. Rounding everything to minutes rendered a 35-second outage as
+    // "1m" and a 3-second step gap as "0m", and uptime-monitor incidents are routinely tens
+    // of seconds long. The previous fallback here read "under a minute", which is honest
+    // about the magnitude but composes into "+under a minute" in a lifecycle gap and
+    // "seen over under a minute" in a duration pill, and cannot tell 3s from 55s.
+    if (ms < 60000) return `${Math.max(1, Math.round(ms / 1000))}s`;
     const m = Math.round(ms / 60000);
-    if (m < 1) return 'under a minute';
     if (m < 60) return `${m}m`;
     const h = Math.floor(m / 60);
     if (h < 24) return `${h}h ${m % 60}m`;
@@ -182,6 +191,44 @@ function safeHost(url) {
         const u = new URL(url);
         return (u.protocol === 'http:' || u.protocol === 'https:') ? u.host : null;
     } catch { return null; }
+}
+
+// Provider status pages emit HTML bodies, and when the LLM enrichment falls back to the raw
+// body the summary rendered the markup as literal text — "<p><strong>THIS IS A SCHEDULED
+// EVENT Aug <var data-var='date'>5</var>…". Tags out, entities decoded, whitespace collapsed.
+//
+// Deliberately NOT DOMParser: an inert parsed document read via textContent is safe, but
+// handing untrusted markup to a parser at all is the wrong shape and CodeQL is right to flag
+// it. Plain string work raises no such question, and the only entities these feeds emit are
+// the handful mapped below. Every caller assigns the result with textContent.
+const NAMED_ENTITIES = {
+    amp: '&', lt: '<', gt: '>', quot: '"', apos: '\'', nbsp: ' ',
+    mdash: '—', ndash: '–', hellip: '…', rsquo: '’', lsquo: '‘', ldquo: '“', rdquo: '”'
+};
+
+function plainText(s) {
+    if (typeof s !== 'string') return '';
+    if (!/[<&]/.test(s)) return s;
+    // Block-ish tags become a space so words either side don't run together.
+    let out = s.replace(/<(?:br|\/p|\/div|\/li|\/tr|\/h[1-6])\s*\/?>/gi, ' ');
+    // Repeat until stable: one pass over `<[^>]*>` reassembles nested tags.
+    let previous;
+    do {
+        previous = out;
+        out = out.replace(/<[^>]*>/g, '');
+    } while (out !== previous);
+    return out.replace(/&(#[0-9]+|#[xX][0-9a-fA-F]+|[a-zA-Z]+);/g, (match, ref) => decodeEntity(ref) ?? match)
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function decodeEntity(ref) {
+    if (ref[0] !== '#') return NAMED_ENTITIES[ref.toLowerCase()] ?? null;
+    const code = /^#[xX]/.test(ref) ? parseInt(ref.slice(2), 16) : Number(ref.slice(1));
+    if (!Number.isInteger(code) || code <= 0 || code > 0x10ffff) return null;
+    // Surrogate halves are not standalone code points.
+    if (code >= 0xd800 && code <= 0xdfff) return null;
+    return String.fromCodePoint(code);
 }
 function dayKey(ms) {
     return ms != null && !Number.isNaN(ms) ? new Date(ms).toISOString().slice(0, 10) : null;
@@ -730,6 +777,39 @@ const STATUS_LABEL = {
     operational: 'Operational', degraded: 'Degraded',
     partial_outage: 'Partial outage', major_outage: 'Major outage'
 };
+
+// The CSS token for a status label ('In progress' → 'inprogress'). One list maps a
+// status to a colour (see `.st-*` in style.css) and everything that needs one reads it
+// from there — the lifecycle dots originally shipped a second copy of the palette keyed
+// on the feed's RAW enum ('major_outage') while the labels are display strings ('Major
+// outage'), so every maintenance step rendered grey.
+function statusToken(status) {
+    return status ? String(status).toLowerCase().replace(/\s+/g, '') : null;
+}
+
+// Cap the per-incident transition list. An Atlassian incident can carry dozens of
+// updates; the card shows a lifecycle, not a changelog.
+const MAX_TRANSITIONS = 24;
+
+// Merge one event into an incident's ordered transition list, newest last and deduped so
+// a re-broadcast cannot double the strip. Both the REST backfill and the WS replay call
+// this, so the same event genuinely arrives twice; an event with no id falls back to its
+// timestamp+title rather than skipping dedup entirely.
+//
+// Mutates the list in place AND returns it — incidentModel uses the return value while
+// addIncidents relies on the mutation, so it must keep doing both.
+function addTransition(list, ev, ms) {
+    if (ms == null) return list;
+    const id = ev.id ?? `${ms}|${ev.title || ''}`;
+    if (list.some(t => t.id === id)) return list;
+    // Status comes from the feed's normalized enum only. Older cached events that predate
+    // the field get a null status, which paints an uncoloured dot — the honest rendering
+    // of "the feed did not classify this state". Nothing is inferred from the wording.
+    list.push({ id, ms, title: ev.title || '', status: STATUS_LABEL[ev.status] || null });
+    list.sort((a, b) => a.ms - b.ms);
+    if (list.length > MAX_TRANSITIONS) list.splice(0, list.length - MAX_TRANSITIONS);
+    return list;
+}
 const SCHEDULED_STATUSES = new Set([
     'maintenance_scheduled', 'maintenance_in_progress', 'maintenance_completed'
 ]);
@@ -777,7 +857,14 @@ const MAX_EVENT_KEYS = 5000;
 const MAX_ENRICH_PENDING = 500;
 function capMap(map, max) { while (map.size > max) map.delete(map.keys().next().value); }
 
+// The feed publishes a stable per-INCIDENT id alongside the per-event one; use it. The
+// fallback below keys on source+title, which merges every incident a provider ever gave
+// the same name: on 500 live events that collapsed 274 real incidents into 172 cards, 80
+// of which fused more than one distinct incident. The lifecycle strip is what exposed it —
+// four "Resolved" steps three days apart are not one incident's history. Kept only for
+// older cached events that predate the field.
 function incidentKey(ev) {
+    if (ev.incidentId) return ev.incidentId;
     const sp = ev.statusPage?.id || (ev.chains?.[0]?.chainId ?? 'unknown');
     return `${sp}|${(ev.title || '').toLowerCase().trim()}`;
 }
@@ -814,6 +901,15 @@ function incidentModel(ev) {
         lastSeen: whenMs,
         status: STATUS_LABEL[ev.status] || null,
         rawStatus: ev.status || null,
+        // What happened, in order — one entry per state the feed published. This is what
+        // turns "went down" + "recovered" from two unrelated cards into one readable
+        // lifecycle.
+        transitions: addTransition([], ev, whenMs),
+        // The title of the OPENING event, kept separately: the newest event wins for
+        // current state, but a card headlined "Portal recovered" describes the end of the
+        // story rather than the incident. Atlassian incidents keep one title throughout,
+        // so this is a no-op for them.
+        openedTitle: ev.title || '(untitled)',
         ongoing: typeof ev.ongoing === 'boolean' ? ev.ongoing : null,
         // Authoritative start of an open incident. This is what makes an honest
         // duration possible; the previous implementation scraped timestamps out
@@ -859,8 +955,14 @@ function addIncidents(events) {
         if (!existing) { incidents.byKey.set(m.key, m); changed = true; continue; }
 
         if (m.whenMs != null) {
+            const opening = existing.firstSeen == null || m.whenMs < existing.firstSeen;
             existing.firstSeen = Math.min(existing.firstSeen ?? m.whenMs, m.whenMs);
             existing.lastSeen = Math.max(existing.lastSeen ?? m.whenMs, m.whenMs);
+            addTransition(existing.transitions ??= [], ev, m.whenMs);
+            // An earlier event can arrive after a later one — the recovery is often parsed
+            // first, and a restart replays history out of order — so the headline follows
+            // the earliest event, not arrival order.
+            if (opening) existing.openedTitle = m.openedTitle;
             if (existing.whenMs == null || m.whenMs >= existing.whenMs) {
                 // Newest event wins for current state.
                 Object.assign(existing, {
@@ -1288,12 +1390,12 @@ function renderImpact() {
                 it.url
                     ? el('a', {
                         href: safeUrl(it.url), target: '_blank', rel: 'noopener',
-                        text: it.title, title: it.title,
+                        text: it.openedTitle || it.title, title: it.openedTitle || it.title,
                         // The row opens the chain drawer; the link opens the
                         // upstream report. Don't fire both.
                         onclick: e => e.stopPropagation()
                     })
-                    : el('span', { text: it.title, title: it.title }),
+                    : el('span', { text: it.openedTitle || it.title, title: it.openedTitle || it.title }),
                 el('span', {
                     class: 'cell-sub',
                     text: `${it.isProvider ? it.spName : it.netName} · ${it.isProvider ? 'RPC provider' : it.pageKind === 'coin' ? 'coin status page' : 'chain operator'}`
@@ -2299,13 +2401,71 @@ function renderIncidentCalendar() {
     if (legend) Viz.scaleLegend(legend, { max: res?.max, noun: 'events' });
 }
 
+// The lifecycle of one incident: a row per state the feed published, down → recovered.
+// Suppressed below two steps, where there is no lifecycle to show — just a single state.
+function incidentTimeline(it) {
+    const steps = it.transitions;
+    if (!Array.isArray(steps) || steps.length < 2) return null;
+    // Atlassian incidents keep ONE title across every update, so stripping the shared
+    // subject would leave the same single word on every row ("errors", "errors", …).
+    // When the titles never change, the STATUS is what changed.
+    const first = (steps[0].title || '').trim().toLowerCase();
+    const uniformTitle = steps.every(step => (step.title || '').trim().toLowerCase() === first);
+    const startedDay = new Date(steps[0].ms).toDateString();
+    const rows = steps.map((step, i) => {
+        const prev = i > 0 ? steps[i - 1] : null;
+        // Elapsed since the PREVIOUS step, so a long gap between "identified" and
+        // "resolved" is visible rather than buried in two absolute timestamps.
+        const gap = prev ? fmtDuration(step.ms - prev.ms) : null;
+        const when = new Date(step.ms);
+        // A multi-day incident would otherwise show two bare clock times three days apart
+        // and read as an hour.
+        const sameDay = when.toDateString() === startedDay;
+        const stamp = sameDay
+            ? when.toLocaleTimeString()
+            : `${when.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} ${when.toLocaleTimeString()}`;
+        const label = uniformTitle
+            ? (step.status || step.title || '—')
+            : stripLifecycleSubject(step.title, it.openedTitle);
+        const token = statusToken(step.status);
+        return el('li', { class: 'tl-step' }, [
+            el('span', { class: `tl-dot${token ? ` st-${token}` : ''}` }),
+            el('span', { class: 'tl-time', text: stamp }),
+            el('span', { class: 'tl-label', text: label }),
+            gap ? el('span', { class: 'tl-gap', text: `+${gap}` }) : null
+        ]);
+    });
+    return el('ul', { class: 'incident-timeline' }, rows);
+}
+
+// The steps of one incident usually repeat its subject ("Portal went down", "Portal
+// recovered"); the card headline already carries it, so show only what changed. Falls
+// back to the full title when there is no shared prefix to strip.
+function stripLifecycleSubject(title, openedTitle) {
+    const text = (title || '').trim();
+    if (!text || !openedTitle) return text || '—';
+    const words = openedTitle.trim().split(/\s+/);
+    // Longest shared leading word run, so "Superposition Testnet RPC went down" and
+    // "… recovered" both reduce to their verb without hard-coding any vocabulary.
+    const own = text.split(/\s+/);
+    let shared = 0;
+    while (shared < words.length && shared < own.length - 1 && words[shared].toLowerCase() === own[shared].toLowerCase()) shared++;
+    return shared > 0 ? own.slice(shared).join(' ') : text;
+}
+
 // One card builder for chain, coin and provider incidents.
 function incidentCard(it) {
     const enr = enrichmentOf(it);
     const sev = severityOf(it);
     const open = isOpen(it);
     const dur = durationInfo(it);
-    const when = fmtDateTime(it.whenMs);
+    // When it STARTED, not when it last changed. Pairing the opening headline below with the
+    // newest event's timestamp produced "Portal went down · 7:58:10 PM" where 7:58 was the
+    // moment it came back; the lifecycle strip is what carries the later steps.
+    const when = fmtDateTime(it.firstSeen ?? it.whenMs);
+    // The opening event's title. The newest event wins for current state, but a card
+    // headlined "Portal recovered" describes the end of the story rather than the incident.
+    const headline = it.openedTitle || it.title;
 
     const cls = ['incident-card'];
     if (open) cls.push('is-open');
@@ -2324,11 +2484,14 @@ function incidentCard(it) {
             it.kind === 'scheduled' ? el('span', { class: 'kind-tag', text: 'Scheduled' }) : null,
             el('span', { class: 'incident-title-text' }, [
                 it.url
-                    ? el('a', { href: safeUrl(it.url), target: '_blank', rel: 'noopener', text: it.title })
-                    : el('span', { text: it.title })
+                    ? el('a', { href: safeUrl(it.url), target: '_blank', rel: 'noopener', text: headline })
+                    : el('span', { text: headline })
             ])
         ]),
-        el('div', { class: 'incident-meta', text: meta.join(' · ') })
+        el('div', { class: 'incident-meta', text: meta.join(' · ') }),
+        // Published states before anything the model inferred: what the operator actually
+        // said outranks a classification of it.
+        incidentTimeline(it)
     ]);
 
     // ── AI enrichment, fully attributed ──
@@ -2349,7 +2512,7 @@ function incidentCard(it) {
 
         const block = el('div', { class: 'ai-block' }, [
             head,
-            el('div', { class: 'ai-summary', text: enr.summary })
+            el('div', { class: 'ai-summary', text: plainText(enr.summary) })
         ]);
         const action = enr.context?.actionRequired;
         if (action && String(action).toLowerCase() !== 'none') {
@@ -2408,6 +2571,7 @@ function renderIncidentList() {
         items = items.filter(it =>
             it.netName?.toLowerCase().includes(searchQuery)
             || it.title?.toLowerCase().includes(searchQuery)
+            || it.openedTitle?.toLowerCase().includes(searchQuery)
             || String(it.chainId).includes(searchQuery));
     }
 
@@ -2468,7 +2632,8 @@ function visibleProviderIncidents() {
     return providers.filter === 'all' ? all : all.filter(it => it.spId === providers.filter);
 }
 function providerMatchesSearch(it, q) {
-    if (it.spName?.toLowerCase().includes(q) || it.title?.toLowerCase().includes(q)) return true;
+    if (it.spName?.toLowerCase().includes(q) || it.title?.toLowerCase().includes(q)
+        || it.openedTitle?.toLowerCase().includes(q)) return true;
     if ((it.affectedComponents || []).some(c => c.toLowerCase().includes(q))) return true;
     return it.chainIds.some(id => String(id).includes(q) || state.byId.get(id)?.name?.toLowerCase().includes(q));
 }
@@ -3001,8 +3166,8 @@ function openChainDetail(chainId, opts = {}) {
                 el('div', { class: 'incident-main' }, [
                     el('div', { class: 'incident-title' }, [
                         el('span', { class: 'incident-title-text' }, [
-                            it.url ? el('a', { href: safeUrl(it.url), target: '_blank', rel: 'noopener', text: it.title })
-                                : el('span', { text: it.title })
+                            it.url ? el('a', { href: safeUrl(it.url), target: '_blank', rel: 'noopener', text: it.openedTitle || it.title })
+                                : el('span', { text: it.openedTitle || it.title })
                         ])
                     ]),
                     el('div', {
@@ -4034,7 +4199,7 @@ function newsCard(s) {
     ]);
 
     if (s.summary) {
-        main.appendChild(el('div', { class: 'ai-summary', style: 'margin-top:6px', text: Viz.truncate(s.summary, 260) }));
+        main.appendChild(el('div', { class: 'ai-summary', style: 'margin-top:6px', text: Viz.truncate(plainText(s.summary), 260) }));
     }
 
     // AI classification, attributed exactly like the incident cards.
@@ -4054,7 +4219,7 @@ function newsCard(s) {
         if (enr.model) head.appendChild(el('span', { text: `· ${enr.model}` }));
         const block = el('div', { class: 'ai-block' }, [head]);
         if (enr.summary && enr.summary !== s.summary) {
-            block.appendChild(el('div', { class: 'ai-summary', text: enr.summary }));
+            block.appendChild(el('div', { class: 'ai-summary', text: plainText(enr.summary) }));
         }
         main.appendChild(block);
     }
