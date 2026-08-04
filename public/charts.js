@@ -45,10 +45,10 @@
         }
         for (const c of [].concat(children)) {
             if (c == null) continue;
-            // Explicit branches, not a ternary — see the matching helper in app.js: a string child
-            // is always text, and separating the paths keeps that provable.
-            if (typeof c === 'string') n.appendChild(document.createTextNode(c));
-            else n.appendChild(c);
+            // Same contract as the matching helper in app.js: a string child is always text, and
+            // only a real Node may be appended directly.
+            if (typeof c === 'string') { n.appendChild(document.createTextNode(c)); continue; }
+            if (c instanceof Node) n.appendChild(c);
         }
         return n;
     }
