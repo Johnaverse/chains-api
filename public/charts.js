@@ -9,10 +9,24 @@
 //   • Colors come from CSS custom properties, never from literals here, so
 //     light/dark theming happens in one place and the validated palette
 //     can't drift between CSS and JS.
-//   • NO time-series forms. This API stores only current snapshots (see
-//     README of the redesign): the one exception is event feeds, which get
-//     an explicit day-bucket histogram of observed events — a count of
-//     things that happened, not a trend line through a persisted metric.
+//   • Time series live OUTSIDE this module, and that is a boundary rather than
+//     a claim about the data. This header used to assert the API stores only
+//     current snapshots and therefore has no series to draw. That is no longer
+//     true: /providers/stats returns 24h/7d/30d availability windows plus a
+//     per-day chainHoursLost series, and /upgrades supports a real density
+//     chart over a time axis. What remains true is the RULE — anything shipped
+//     from here carries axes, a tooltip and a table twin, so a reader can get
+//     the numbers without a mouse.
+//
+//     The two series-shaped things in the dashboard are deliberately not Viz
+//     charts, for opposite reasons. The provider sparkline (app.js) is a 96×26
+//     glyph in a table cell whose values are all present in the columns beside
+//     it; it is marked aria-hidden and is decoration. The timeline density
+//     chart (app.js) is the reverse — a full interactive chart with its own
+//     axis, crosshair and tooltip, whose geometry is coupled to the surrounding
+//     layout in ways a generic primitive would have to expose anyway. Adding
+//     either here would mean loosening this module's rules to fit them, so they
+//     stay where their coupling is visible.
 //
 // Public surface: globalThis.Viz
 // ─────────────────────────────────────────────────────────────────────────

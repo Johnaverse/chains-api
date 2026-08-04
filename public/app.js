@@ -1201,8 +1201,11 @@ async function statusFeedBackfill() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════
-// Overview — the cross-cutting view. Everything here is a current reading;
-// nothing implies a trend, because the API stores no history.
+// Overview — the cross-cutting view. Everything on THIS page is a current reading and nothing
+// here implies a trend. That is a choice about the page, not a fact about the API: provider
+// availability comes in 24h/7d/30d windows with a per-day series, and upgrade windows are
+// dated. Those belong to the Providers and Timeline views; mixing a trend in here would make
+// the rest of the tiles read as trends too.
 // ═════════════════════════════════════════════════════════════════════════
 
 let impactScope = 'all';

@@ -116,8 +116,9 @@
                 <h2 class="view-title">Operational overview</h2>
                 <p class="view-lead">Current state of <span id="ovChainCount">the</span> tracked networks: who is
                     affected by an open incident right now, where L2 value sits, and how trustworthy the underlying
-                    data is. Every figure is a point-in-time reading — this API keeps no historical series, so
-                    nothing here is a trend.</p>
+                    data is. Every figure on this page is a point-in-time reading, so nothing here is a trend —
+                    the series the API does keep (provider availability windows, upgrade windows) live on the
+                    Providers and Timeline tabs.</p>
             </div>
 
             <!-- Skeleton tiles reserve the row's exact height before app.js runs.
@@ -626,8 +627,9 @@
                 <button id="assistantClose" class="close-btn chat-close" type="button" aria-label="Close">&times;</button>
             </div>
             <p class="chat-lead">Answers are produced by calling this API's own endpoints; each reply lists the
-                tools it used so you can check the source. It cannot see anything the API does not expose — and
-                there is no historical data to ask about.</p>
+                tools it used so you can check the source. It cannot see anything the API does not expose: most
+                of the registry is a current snapshot, though provider availability is available over 24h/7d/30d
+                windows and upgrade windows have dates, so those can be asked about.</p>
 
             <div id="assistantLog" class="chat-log" role="log" aria-live="polite"></div>
 
