@@ -430,6 +430,13 @@
 
             <div class="stat-row u-mb-4" id="providerStats"></div>
 
+            <!-- Provider performance board. Headline availability is derived from each
+                 provider's OWN status-page incidents (self-reported — a silent page looks
+                 perfect); registry-endpoint reachability is a separate, muted signal and
+                 deliberately not mixed in. Stays hidden entirely when the API predates
+                 /providers/stats. -->
+            <div class="card pb-card u-mb-4" id="providerBoard" hidden></div>
+
             <div class="card">
                 <div class="card-head">
                     <h3 class="card-title">Events per day</h3>

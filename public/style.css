@@ -1286,3 +1286,96 @@ button, input, textarea, select { font: inherit; color: inherit; }
     .view { display: block !important; }
     .chart-table { display: table !important; }
 }
+
+/* ═══ Provider performance board ═════════════════════════════════════════
+   A comparison table rather than a card per provider — see the rationale over
+   renderProviderBoard() in app.js. Every colour here comes from a token so the board
+   works in both themes; the palette it was ported from was dark-only and would have been
+   illegible on the light surface. */
+.pb-card { padding: var(--sp-4); }
+.pb-caption { margin-bottom: var(--sp-4); }
+.pb-caption-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.pb-caption-note {
+    margin: var(--sp-2) 0 0; max-width: 78ch;
+    font-size: var(--fs-200); line-height: 1.55; color: var(--ink-3);
+}
+.pb-caption-note strong { color: var(--ink-2); }
+.pb-caption-note .pb-warn { color: var(--warn); }
+
+/* Open incidents are red; a maintenance window running to schedule is planned work and is
+   deliberately NOT red — the same rule the lifecycle palette and the severity floor use. */
+.pill-ongoing { background: color-mix(in srgb, var(--critical) 16%, transparent); color: var(--critical); }
+.pill-quiet { background: var(--surface-3); color: var(--ink-3); }
+.pill-maint { background: color-mix(in srgb, var(--cat-0) 22%, transparent); color: var(--ink-2); }
+.pill.sm { font-size: var(--fs-100); padding: 0 6px; }
+
+.pb-table { width: 100%; min-width: 880px; }
+.pb-table col.c-name { width: 21%; }
+.pb-table col.c-availability { width: 17%; }
+.pb-table col.c-lost { width: 12%; }
+.pb-table col.c-chains { width: 10%; }
+.pb-table col.c-incidents { width: 12%; }
+.pb-table col.c-openfor { width: 11%; }
+.pb-table col.c-mttr { width: 11%; }
+.pb-table col.c-trend { width: 12%; }
+
+.pb-table th { vertical-align: bottom; }
+.pb-sort-btn {
+    background: none; border: 0; padding: 0; cursor: pointer; font: inherit;
+    color: inherit; text-align: inherit;
+}
+.pb-sort-btn:hover { color: var(--accent-hover); }
+.pb-sorted { color: var(--ink-1); }
+.pb-row:hover { background: var(--surface-2); }
+/* A provider with something open right now is marked on the row itself, so it is visible
+   without reading the pills. */
+.pb-row.pb-ongoing { box-shadow: inset 3px 0 0 var(--critical); }
+.pb-name-main { font-weight: 600; color: var(--ink-1); margin-right: var(--sp-2); }
+.pb-flag {
+    margin-left: var(--sp-2); font-size: var(--fs-100); color: var(--ink-3);
+    border: 1px dashed var(--rule-strong); border-radius: var(--r-sm); padding: 0 5px; cursor: help;
+}
+
+.pb-avail-main { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.pb-pct { font-weight: 600; color: var(--ink-1); }
+.pb-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.pb-dot.good, .pb-bar-fill.good { background: var(--good); }
+.pb-dot.warn, .pb-bar-fill.warn { background: var(--warn); }
+.pb-dot.bad, .pb-bar-fill.bad { background: var(--critical); }
+.pb-bar { width: 46px; height: 4px; border-radius: 2px; background: var(--surface-3); overflow: hidden; flex: none; }
+.pb-bar-fill { display: block; height: 100%; min-width: 2px; border-radius: 2px; }
+.pb-sub { display: block; font-size: var(--fs-100); color: var(--ink-3); }
+/* A sample too small to trust is amber, not silent. */
+.pb-thin { color: var(--warn); cursor: help; }
+/* An incident open longer than a week is a different thing from one opened this morning. */
+.pb-stale { color: var(--critical); }
+.pb-dash { color: var(--ink-3); }
+.pb-none .pb-sub { color: var(--ink-3); }
+
+.pb-trend, .pb-trend-h { text-align: right; }
+.pb-spark { display: inline-block; vertical-align: middle; }
+.pb-spark-fill { fill: color-mix(in srgb, var(--accent) 22%, transparent); }
+.pb-spark-line { stroke: var(--accent); stroke-width: 1.5; }
+
+/* Non-comparable pages sit below this note instead of interleaved, so silence cannot win
+   a ranking built from what pages publish. */
+.pb-divider td {
+    padding-top: var(--sp-4); font-size: var(--fs-200); color: var(--ink-3);
+    border-bottom: none;
+}
+
+@media (max-width: 760px) {
+    /* This block sits after the shared .data-table--stack rules, so `.pb-table`'s desktop
+       min-width would otherwise win on source order at equal specificity and keep the table
+       880px wide inside a 390px viewport — every value pushed off-screen to the right,
+       leaving a card of labels with nothing beside them. */
+    .pb-table { min-width: 0; }
+    /* A stacked cell is a flex row (label ::before on the left, value on the right), so the
+       sub-line is a third flex item and would be squeezed onto the same line and clipped.
+       Give it a full-width wrapped line of its own, still right-aligned under its value. */
+    .pb-table td { flex-wrap: wrap; }
+    .pb-table .pb-sub { flex: 1 0 100%; text-align: right; margin-left: 0; }
+    .pb-avail-main { display: inline-flex; }
+    .pb-row.pb-ongoing { box-shadow: none; border-left: 3px solid var(--critical); }
+    .pb-caption-note { font-size: var(--fs-100); }
+}

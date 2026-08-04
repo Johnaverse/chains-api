@@ -309,6 +309,10 @@ document.addEventListener('DOMContentLoaded', () => {
     loadStatsLine();
     loadBulk();
     loadDiagnostics();
+    // One snapshot, fetched at boot rather than on first visit to the tab: it is a single
+    // small request, and having it already resolved means switching to Providers paints the
+    // board immediately instead of after a round-trip.
+    loadProviderStats();
     window.addEventListener('popstate', applyUrlState);
 });
 
@@ -2642,11 +2646,318 @@ function initProviderControls() { /* chips are generated in renderProviderFilter
 
 function renderProviders() {
     renderProviderStats();
+    renderProviderBoard();
     renderProviderFilter();
     renderProviderHistogram();
     renderProviderCalendar();
     renderProviderList();
 }
+
+// ─── Provider performance board (GET /providers/stats) ───────────────────
+// A comparison table, not ten cards. Cards force every provider to occupy equal space and
+// to show a value for every metric, so nine of ten render as a column of em-dashes; a table
+// lets one glance rank providers on whichever column the reader cares about, and lets a
+// missing value simply be missing.
+//
+// Two ideas the design has to carry, or the numbers mislead:
+//
+//   self-reported   Every figure comes from the provider's OWN status page. A provider that
+//                   posts nothing scores a silent 100%. Rows whose page publishes no
+//                   incident history are marked and sink below the comparable ones instead
+//                   of topping the ranking.
+//   disclosure bias Incident COUNTS are editorial policy, not reliability — one provider
+//                   posts 19 maintenance windows and 1 incident where another posts 19
+//                   incidents. The count column says so rather than implying a ranking.
+//
+// 404 → an older API without the endpoint → the board simply stays hidden.
+const providerBoard = { data: null, sort: 'availability', dir: 1 };
+
+async function loadProviderStats() {
+    let data;
+    try { data = await api('/providers/stats'); } catch { return; }
+    providerBoard.data = data;
+    if (activeView === 'providers') renderProviderBoard();
+}
+
+// `when` decides whether a column earns its width: a column no provider can populate is
+// 12% of the table spent on a stack of em-dashes. Time-to-resolve is the live example —
+// resolution transitions are almost never published, so it appears only once some page
+// actually exposes one.
+const PB_COLUMNS = [
+    { key: 'name', label: 'Provider', primary: true },
+    { key: 'availability', label: 'Availability', title: 'Chain-weighted: 1 − chain-hours lost ÷ (chains supported × window). Counts only incidents whose duration the page published.' },
+    { key: 'lost', label: 'Chain-hours lost', title: 'Chains affected × hours down, overlaps merged per chain. Available even when the availability denominator is not.' },
+    { key: 'chains', label: 'Chains', title: 'How many chains the provider’s own status page lists. This is the availability denominator.' },
+    { key: 'incidents', label: 'Posted', title: 'Incidents / maintenance windows published in the observed window. Disclosure policy differs sharply between providers — do not read this as a reliability ranking.' },
+    { key: 'openfor', label: 'Longest open', title: 'How long the provider’s oldest still-open incident has been running. With resolution times unpublished, this is the one duration the feeds do expose.', when: ps => ps.some(p => p.oldestOngoingAt) },
+    { key: 'mttr', label: 'Time to resolve', title: 'Median hours from the first update to the resolved update, over the incidents where the page actually showed both.', when: ps => ps.some(p => p.resolutionHours) },
+    { key: 'trend', label: 'Daily trend', title: 'Chain-hours lost per day, one bucket per day over 30 days. Buckets older than the observed history are empty rather than zero.' }
+];
+
+function renderProviderBoard() {
+    const host = byId('providerBoard');
+    if (!host) return;
+    const data = providerBoard.data;
+    const provs = data?.providers || [];
+    host.textContent = '';
+    if (!provs.length) { host.hidden = true; return; }
+    host.hidden = false;
+
+    // The observed window, not a fixed 30: the server reports how much history it actually
+    // has, and it is routinely half of what the field names suggest.
+    const days = Math.round(data.windowDays ?? 30);
+    const comparable = provs.filter(p => p.disclosure?.comparable !== false);
+    const partial = provs.filter(p => p.disclosure?.comparable === false);
+
+    host.appendChild(providerBoardCaption(data, provs, days));
+
+    const columns = PB_COLUMNS.filter(c => !c.when || c.when(provs));
+    const table = el('table', { class: 'data-table data-table--stack pb-table' });
+    table.appendChild(el('colgroup', {}, columns.map(c => el('col', { class: `c-${c.key}` }))));
+    table.appendChild(el('thead', {}, [el('tr', {}, columns.map(c => {
+        const active = providerBoard.sort === c.key;
+        return el('th', {
+            class: [c.primary ? 'pb-left' : '', active ? 'pb-sorted' : '', c.key === 'trend' ? 'pb-trend-h' : '']
+                .filter(Boolean).join(' ') || null,
+            title: c.title || null,
+            'aria-sort': active ? (providerBoard.dir > 0 ? 'descending' : 'ascending') : 'none'
+        }, [
+            el('button', {
+                class: 'pb-sort-btn',
+                text: c.label + (active ? (providerBoard.dir > 0 ? ' ↓' : ' ↑') : ''),
+                onclick: () => {
+                    if (providerBoard.sort === c.key) providerBoard.dir *= -1;
+                    else { providerBoard.sort = c.key; providerBoard.dir = 1; }
+                    renderProviderBoard();
+                }
+            })
+        ]);
+    }))]));
+
+    const body = el('tbody');
+    for (const p of sortProviders(comparable)) body.appendChild(providerRow(p, columns));
+    if (partial.length) {
+        // Below a divider rather than interleaved: a page that publishes nothing must not be
+        // able to top a ranking built from what pages publish.
+        const many = partial.length !== 1;
+        body.appendChild(el('tr', { class: 'pb-divider' }, [
+            el('td', { colspan: String(columns.length) }, [
+                el('span', {
+                    text: `Not comparable — ${many ? 'these pages do' : 'this page does'} not publish the chain list or any `
+                        + `incident history, so availability can’t be computed from ${many ? 'them' : 'it'}.`
+                })
+            ])
+        ]));
+        for (const p of sortProviders(partial)) body.appendChild(providerRow(p, columns));
+    }
+    table.appendChild(body);
+    host.appendChild(el('div', { class: 'table-wrap' }, [table]));
+}
+
+function providerBoardCaption(data, provs, days) {
+    const withCoverage = provs.filter(p => p.chainsSupported != null).length;
+    const ongoing = provs.reduce((n, p) => n + (p.ongoingNow || 0), 0);
+    const inMaint = provs.reduce((n, p) => n + (p.ongoingMaintenance || 0), 0);
+    // How much of the incident history had a duration at all. Most status pages publish an
+    // incident exactly once, at resolution, so its start — and therefore its cost — is
+    // unknowable. Those are excluded from availability rather than guessed, and a reader has
+    // to know that before ranking on it.
+    const measured = provs.reduce((n, p) => n + (p.availability?.measuredIncidents || 0), 0);
+    const unknown = provs.reduce((n, p) => n + (p.availability?.unknownDurationIncidents || 0), 0);
+    return el('div', { class: 'pb-caption' }, [
+        el('div', { class: 'pb-caption-head' }, [
+            el('h3', { class: 'card-title', text: 'Provider performance' }),
+            ongoing > 0
+                ? el('span', { class: 'pill pill-ongoing', text: `${ongoing} incident${ongoing === 1 ? '' : 's'} open now` })
+                : el('span', { class: 'pill pill-quiet', text: 'no open incidents' }),
+            inMaint > 0 ? el('span', { class: 'pill pill-maint', text: `${inMaint} maintenance running` }) : null
+        ]),
+        el('p', { class: 'pb-caption-note' }, [
+            el('strong', { text: 'Self-reported. ' }),
+            el('span', {
+                text: `Every figure comes from each provider’s own status page over the last ${days} days. `
+                    + `${withCoverage} of ${provs.length} pages list the chains they cover — that list is the availability `
+                    + 'denominator, so the other pages get no percentage rather than an invented one.'
+            })
+        ]),
+        // Conditional on there being something to caveat. An always-on disclaimer trains
+        // readers to skip it.
+        unknown > 0 ? el('p', { class: 'pb-caption-note' }, [
+            el('strong', { class: 'pb-warn', text: 'Read availability narrowly. ' }),
+            el('span', {
+                text: `Only ${measured} of ${measured + unknown} incidents published enough to time them; the rest appear `
+                    + 'once, at resolution, with no start. Those are left out of the percentage instead of being charged as '
+                    + 'downtime, so today availability mostly reflects what is burning right now. Incident counts below are '
+                    + 'complete — but they measure disclosure policy as much as reliability.'
+            })
+        ]) : null
+    ]);
+}
+
+function sortProviders(list) {
+    const val = p => {
+        switch (providerBoard.sort) {
+            case 'availability': return p.availability?.last30d?.percent ?? -1;
+            case 'lost': return p.availability?.last30d?.chainHoursLost ?? -1;
+            case 'chains': return p.chainsSupported ?? -1;
+            case 'incidents': return p.incidents30d ?? -1;
+            case 'mttr': return p.resolutionHours?.median ?? -1;
+            case 'openfor': return p.oldestOngoingAt ? Date.now() - Date.parse(p.oldestOngoingAt) : -1;
+            case 'trend': return p.availability?.last7d?.chainHoursLost ?? -1;
+            default: return null;
+        }
+    };
+    return [...list].sort((a, b) => {
+        if (providerBoard.sort === 'name') return (a.name || a.id).localeCompare(b.name || b.id) * providerBoard.dir;
+        // Availability sorts best-first by default, which means DESCENDING; every other
+        // column is "more is more", so one shared direction flag works. Missing values are
+        // -1 so they sink under a descending sort instead of leading it.
+        const d = (val(b) - val(a)) * providerBoard.dir;
+        return d || (a.name || a.id).localeCompare(b.name || b.id);
+    });
+}
+
+function providerRow(p, columns) {
+    const a = p.availability || {};
+    const pct = a.last30d?.percent;
+    const lost = a.last30d?.chainHoursLost;
+    const d = p.disclosure || {};
+    const has = key => columns.some(c => c.key === key);
+
+    // Availability cell: the headline, with 24h/7d underneath so a provider that is bad
+    // RIGHT NOW cannot hide behind a good month.
+    const availCell = pct == null
+        ? td('Availability', [
+            el('span', { class: 'pb-dash', text: '—' }),
+            // WHICH reason, not a bare dash: no denominator and no incidents are different
+            // states and the reader can act on the difference.
+            el('span', { class: 'pb-sub', text: p.chainsSupported == null ? 'no chain list published' : 'no incidents posted' })
+        ], { num: true, cls: 'pb-avail pb-none' })
+        : td('Availability', [
+            el('div', { class: 'pb-avail-main' }, [
+                el('span', { class: `pb-dot ${availClass(pct)}` }),
+                el('span', { class: 'pb-pct mono', text: `${pbPct(pct)}%` }),
+                el('span', { class: 'pb-bar' }, [
+                    // Deviation from 100 is the signal and it is tiny, so the bar scales the
+                    // LOSS across a 3% floor rather than the value — a 0–100 bar would render
+                    // every provider as a full bar.
+                    el('span', {
+                        class: `pb-bar-fill ${availClass(pct)}`,
+                        style: { width: `${Math.min(100, ((100 - pct) / 3) * 100).toFixed(1)}%` }
+                    })
+                ])
+            ]),
+            el('span', {
+                class: 'pb-sub',
+                // A 100% built from zero timed incidents means "nothing open", not "a clean
+                // month" — say which, or the column overstates.
+                text: a.measuredIncidents ? `24h ${pbPct(a.last24h?.percent)}% · 7d ${pbPct(a.last7d?.percent)}%` : 'nothing open · none timed'
+            })
+        ], { num: true, cls: 'pb-avail' });
+
+    return el('tr', { class: `pb-row${p.ongoingNow > 0 ? ' pb-ongoing' : ''}` }, [
+        td('Provider', [
+            el('span', { class: 'pb-name-main', text: p.name || p.id }),
+            p.ongoingNow > 0 ? el('span', { class: 'pill pill-ongoing sm', text: `${p.ongoingNow} ongoing` }) : null,
+            // Red is reserved for real incidents. A window running to schedule is planned
+            // work and gets a neutral chip, not an alarm.
+            p.ongoingMaintenance > 0
+                ? el('span', { class: 'pill pill-maint sm', title: 'Scheduled maintenance in progress — planned, not an outage.', text: `${p.ongoingMaintenance} in maintenance` })
+                : null,
+            !d.publishesChainCoverage
+                ? el('span', { class: 'pb-flag', title: 'This status page exposes no machine-readable chain list, so no availability denominator exists.', text: 'no coverage' })
+                : null
+        ], { primary: true, cls: 'pb-name' }),
+        availCell,
+        td('Chain-hours lost', [
+            el('span', { class: 'mono', text: lost == null ? '—' : pb1(lost) }),
+            lost ? el('span', { class: 'pb-sub', text: `${pb1(a.last24h?.chainHoursLost || 0)} in 24h` }) : null
+        ], { num: true, empty: lost == null }),
+        td('Chains', [
+            el('span', { class: 'mono', text: p.chainsSupported == null ? '—' : String(p.chainsSupported) }),
+            p.chainsAffected30d ? el('span', { class: 'pb-sub', text: `${p.chainsAffected30d} hit` }) : null
+        ], { num: true, empty: p.chainsSupported == null }),
+        td('Posted', [
+            el('span', { class: 'mono', text: `${p.incidents30d ?? 0} inc` }),
+            el('span', { class: 'pb-sub', text: p.maintenance30d ? `${p.maintenance30d} maint` : 'no maintenance posted' })
+        ], { num: true }),
+        ...(has('openfor') ? [td('Longest open', openForCell(p), { num: true, empty: !p.oldestOngoingAt })] : []),
+        ...(has('mttr') ? [td('Time to resolve', mttrCell(p), { num: true })] : []),
+        td('Daily trend', [
+            p.dailySeries?.length
+                ? sparkline(p.dailySeries.map(b => b.chainHoursLost), 96, 26)
+                : el('span', { class: 'pb-sub', text: '—' })
+        ], { num: true, cls: 'pb-trend', empty: !p.dailySeries?.length })
+    ]);
+}
+
+// The age of the oldest still-open incident. A provider sitting on a 12-day-old unresolved
+// outage and one that opened a ticket an hour ago post the same "1 ongoing"; only this
+// column tells them apart.
+function openForCell(p) {
+    if (!p.oldestOngoingAt) return [el('span', { class: 'pb-dash', text: '—' })];
+    const ms = Date.now() - Date.parse(p.oldestOngoingAt);
+    return [
+        el('span', { class: `mono${ms > 7 * 864e5 ? ' pb-stale' : ''}`, text: fmtDuration(ms) || '—' }),
+        el('span', { class: 'pb-sub', text: p.ongoingNow > 1 ? `oldest of ${p.ongoingNow}` : 'still open' })
+    ];
+}
+
+// MTTR is only as good as the share of incidents where the page showed an open→resolved
+// transition. Most publish a history feed carrying the resolved entry alone, so the sample
+// is often 1-of-16 — printing a bare "22.6h" there would be a confident lie. The sample size
+// travels with the number.
+function mttrCell(p) {
+    const r = p.resolutionHours;
+    if (!r?.median && r?.median !== 0) {
+        return [el('span', { class: 'pb-dash', text: '—' }), el('span', { class: 'pb-sub', text: 'not tracked' })];
+    }
+    const share = p.disclosure?.resolutionTracked ?? 0;
+    return [
+        el('span', { class: 'mono', text: `${pb1(r.median)}h` }),
+        el('span', {
+            class: `pb-sub${share < 0.3 ? ' pb-thin' : ''}`,
+            title: share < 0.3 ? 'Small sample — most of this page’s incidents never showed an opening update.' : null,
+            text: `${r.samples} of ${p.incidents30d ?? 0}`
+        })
+    ];
+}
+
+// Inline sparkline. Areas read as volume at this size where a polyline reads as noise, so
+// the shape is filled; an all-zero series draws a flat baseline rather than vanishing,
+// because "no downtime" is a result worth seeing.
+//
+// This is decoration and is marked aria-hidden: the numbers behind it are not reachable from
+// the shape, and the columns beside it carry the values that matter. It is deliberately not
+// a Viz chart — those all ship axes and a table twin, which is the right rule for a chart
+// someone reads values off and the wrong shape for a 96×26 glyph in a table cell.
+function sparkline(values, w, h) {
+    const peak = Math.max(...values, 0);
+    const n = values.length;
+    const step = w / Math.max(1, n - 1);
+    const y = v => (peak <= 0 ? h - 1.5 : h - 1.5 - (v / peak) * (h - 4));
+    const pts = values.map((v, i) => `${(i * step).toFixed(1)},${y(v).toFixed(1)}`);
+    return Viz.svgEl('svg', { viewBox: `0 0 ${w} ${h}`, width: String(w), height: String(h), class: 'pb-spark', 'aria-hidden': 'true' }, [
+        Viz.svgEl('path', { d: `M0,${h} L${pts.join(' L')} L${w},${h} Z`, class: 'pb-spark-fill' }),
+        Viz.svgEl('path', { d: `M${pts.join(' L')}`, class: 'pb-spark-line', fill: 'none', 'vector-effect': 'non-scaling-stroke' })
+    ]);
+}
+
+// Availability lives near 100, so the thresholds are tight — a 97% month means a
+// chain-equivalent was down for most of a day.
+//
+// THREE tones, not four. The version this came from had a fourth tier between good and warn
+// (99–99.9), but no four-tone green→amber→red ramp clears the validator's normal-vision
+// separation floor: every candidate put two tones ~10 ΔE apart in the yellow-green region,
+// which full-colour readers cannot reliably tell apart and a direct label does not excuse.
+// The 2-decimal percentage sits beside every dot and distinguishes 99.94 from 99.5 far
+// better than a colour no one can name, so the tier was dropped rather than faked.
+function availClass(pct) { return pct == null ? '' : pct >= 99.9 ? 'good' : pct >= 97 ? 'warn' : 'bad'; }
+// Deliberately NOT Viz.fmtPct: that one appends the sign and rounds to 1dp, and the second
+// decimal is the entire signal this close to 100 — 99.94 and 99.90 are a 17× difference in
+// downtime. Callers append the % themselves.
+function pbPct(v) { return v == null ? '—' : String(Math.round(v * 100) / 100); }
+function pb1(v) { return v == null ? '—' : String(Math.round(v * 10) / 10); }
 
 function renderProviderStats() {
     const wrap = byId('providerStats');
