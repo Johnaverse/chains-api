@@ -89,6 +89,8 @@
                 aria-controls="view-incidents">Incidents<span class="tab-badge hidden" id="tabBadgeIncidents"></span></button>
             <button class="tab" id="tab-providers" data-view="providers" role="tab" aria-selected="false"
                 aria-controls="view-providers">Providers</button>
+            <button class="tab" id="tab-timeline" data-view="timeline" role="tab" aria-selected="false"
+                aria-controls="view-timeline">Timeline</button>
             <button class="tab" id="tab-news" data-view="news" role="tab" aria-selected="false"
                 aria-controls="view-news">News</button>
             <button class="tab" id="tab-forum" data-view="forum" role="tab" aria-selected="false"
@@ -462,6 +464,59 @@
     </section>
 
     <!-- ═══ View: News (chains-news ecosystem relay) ═══════════════════ -->
+    <!-- ─── View: Timeline — upgrade windows linked to their fallout ───────── -->
+    <section id="view-timeline" class="view scroll-view" role="tabpanel" aria-labelledby="tab-timeline" tabindex="0">
+        <div class="view-inner">
+            <div class="view-head">
+                <h2 class="view-title">Upgrade timeline <span class="pill-meta" id="timelineMeta"></span></h2>
+                <p class="view-lead">Scheduled network upgrades and maintenance windows, cross-linked with the
+                    other feeds. The chart runs left to right through <em>now</em> — the hatched half is
+                    scheduled and has not happened yet. Rows carry the software each window requires, the
+                    incidents that followed on the same network (suspected, never asserted) and the forum
+                    discussion or news coverage around them. Something wrong? Flag it with the ⚑ on any row.</p>
+            </div>
+
+            <!-- Pending-window banner: the one fact a visitor most often wants ("is anything about
+                 to happen?"), lifted out of the list. -->
+            <div class="tlx-next" id="timelineNextNotice" hidden></div>
+
+            <!-- Stream tabs slice the same set the chart draws, so the counts and the picture
+                 can never disagree. -->
+            <div class="tlx-tabs" id="timelineTabs"></div>
+
+            <!-- The outer box exists so the hover tooltip can escape the chart's own overflow
+                 clipping, which the pins and edge blobs need. This nesting is load-bearing: the
+                 crosshair reads the WRAP's border box, and the tooltip is positioned against it
+                 while being a child of the outer — so horizontal padding on the wrap would drift
+                 both away from the data. -->
+            <div class="tlx-chart-outer">
+                <div class="tlx-chart-wrap" id="timelineChartWrap">
+                    <div class="tlx-pins" id="timelinePins"></div>
+                    <div class="tlx-chart" id="timelineChart"></div>
+                    <div class="tlx-heat" id="timelineHeat"></div>
+                    <div class="tlx-axis" id="timelineAxis"></div>
+                    <!-- What the axis cannot show. A silently short chart reads as
+                         "nothing else exists". -->
+                    <div class="tlx-omitted" id="timelineOmitted" hidden></div>
+                    <div class="tlx-crosshair" id="timelineCrosshair" hidden></div>
+                </div>
+                <div class="tlx-tooltip" id="timelineTooltip" role="status" aria-live="polite" hidden></div>
+            </div>
+
+            <!-- Both controls are built by JS and their listeners are attached at build time,
+                 so neither may be pre-rendered here or they would render and do nothing. -->
+            <div class="tlx-toolbar">
+                <div class="tlx-range" id="timelineRange"></div>
+                <span class="toolbar-count" id="timelineCount"></span>
+                <label class="tlx-sort">Sort by
+                    <select id="timelineSort" aria-label="Sort timeline windows"></select>
+                </label>
+            </div>
+
+            <div id="timelineRows" class="tlx-rows"><div class="feed-empty">Loading upgrade timeline…</div></div>
+        </div>
+    </section>
+
     <section id="view-news" class="view scroll-view" role="tabpanel" aria-labelledby="tab-news" tabindex="0">
         <div class="view-inner">
             <div class="view-head">

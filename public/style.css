@@ -1379,3 +1379,236 @@ button, input, textarea, select { font: inherit; color: inherit; }
     .pb-row.pb-ongoing { box-shadow: none; border-left: 3px solid var(--critical); }
     .pb-caption-note { font-size: var(--fs-100); }
 }
+
+/* ═══ Timeline view ══════════════════════════════════════════════════════
+   A metric tab strip, a density chart over a real time axis with pinned events, an urgency
+   ribbon, a range control, then a scannable list. The x-axis runs THROUGH now into the
+   future — this feed's point is that upgrades are pending — and everything right of the
+   now-line is hatched so "scheduled" can never be misread as "happened".
+
+   Ported from a dark-only palette: every hard-coded hex here has been replaced with a token
+   so the view works in both themes, and the urgency ramp reuses the reserved status colours
+   rather than introducing hues of its own. */
+.tlx-next {
+    display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap;
+    padding: 10px var(--sp-4); margin-bottom: var(--sp-4);
+    border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+    border-radius: var(--r-md);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+/* No `display` on the hidden state is a trap: `.tlx-next` sets display:flex, which beats the
+   UA `[hidden]` rule, so the banner stayed visible as an empty box whenever JS hid it. */
+.tlx-next[hidden] { display: none; }
+.tlx-next-dot {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    background: var(--accent-hover); box-shadow: 0 0 8px var(--accent-hover);
+    animation: live-pulse 2s ease-in-out infinite;
+}
+.tlx-next-label { font-size: var(--fs-100); font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+.tlx-next-count { font-size: var(--fs-400); font-weight: 700; color: var(--good); font-variant-numeric: tabular-nums; }
+.tlx-next-title { font-size: var(--fs-200); color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+.tlx-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: var(--sp-3); }
+.tlx-tab {
+    display: flex; align-items: baseline; gap: 7px; cursor: pointer;
+    background: var(--tint); border: 1px solid transparent; border-radius: var(--r-pill);
+    padding: 6px var(--sp-4); color: var(--ink-3);
+}
+.tlx-tab:hover { background: var(--tint-strong); color: var(--ink-1); }
+.tlx-tab.active {
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+    color: var(--ink-1);
+}
+.tlx-tab-label { font-size: var(--fs-200); font-weight: 600; }
+.tlx-tab-count { font-size: var(--fs-200); font-weight: 700; font-variant-numeric: tabular-nums; opacity: .85; }
+
+/* The outer box is the tooltip's positioning context: the inner wrap clips (pins and edge
+   blobs overhang by design) and a clipped tooltip is useless. */
+.tlx-chart-outer { position: relative; }
+.tlx-chart-wrap {
+    --tlx-accent: var(--accent-hover);
+    /* Zero horizontal padding is load-bearing: the hover reads THIS element's border box to
+       convert a pointer position into a time, while the SVG spans its content box. Any
+       left/right padding drifts the crosshair from the data by exactly that many pixels. */
+    position: relative; padding: 34px 0 0;
+    border: 1px solid var(--rule); border-radius: var(--r-md);
+    background: var(--surface-1); overflow: hidden;
+    cursor: crosshair; touch-action: pan-y;
+}
+/* 150px is TL_CHART_H in app.js, and the crosshair below derives from it (34 top padding +
+   150 plot + 16 ribbon = 166). Change one and all four must move together. */
+.tlx-chart { position: relative; height: 150px; }
+.tlx-svg { display: block; width: 100%; height: 150px; }
+.tlx-nowline { stroke: var(--good); stroke-width: 1.5px; stroke-dasharray: 4 3; opacity: .85; }
+
+/* Pins sit in the padding above the chart; each drops a stem to the axis position of its
+   window. Only the noteworthy ones are pinned (fallout first), spaced apart so the badges
+   stay legible. */
+.tlx-pins { position: absolute; top: 0; left: 0; right: 0; height: 34px; pointer-events: none; }
+.tlx-pin { position: absolute; top: 2px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; pointer-events: auto; }
+.tlx-pin.dim { opacity: .45; }
+.tlx-pin-badge {
+    font-size: var(--fs-100); font-weight: 800; padding: 2px 6px; border-radius: 5px;
+    white-space: nowrap; background: var(--accent); color: var(--surface-1);
+}
+.tlx-pin-badge.urg-urgent { background: var(--warn); color: #241a00; }
+.tlx-pin-badge.urg-mandatory, .tlx-pin-badge.urg-critical { background: var(--critical); color: #fff; }
+.tlx-pin-stem { width: 1px; height: 14px; background: var(--rule-strong); }
+
+/* Urgency ribbon — one blob per window. */
+.tlx-heat { position: relative; height: 16px; border-top: 1px solid var(--rule); background: var(--surface-2); }
+.tlx-blob { position: absolute; top: 5px; width: 6px; height: 6px; border-radius: 50%; transform: translateX(-50%); background: var(--accent); opacity: .8; }
+.tlx-blob.urg-urgent { background: var(--warn); }
+.tlx-blob.urg-mandatory, .tlx-blob.urg-critical { background: var(--critical); }
+.tlx-blob.has-fallout { box-shadow: 0 0 0 2px color-mix(in srgb, var(--critical) 34%, transparent); }
+
+.tlx-axis { position: relative; height: 24px; border-top: 1px solid var(--rule); }
+.tlx-tick { position: absolute; top: 5px; transform: translateX(-50%); font-size: var(--fs-100); color: var(--ink-3); white-space: nowrap; }
+.tlx-tick:first-child { transform: none; left: 6px !important; }
+.tlx-tick-end { transform: translateX(-100%); margin-left: -4px; }
+.tlx-tick-now { color: var(--good); font-weight: 700; }
+
+/* ─── Hover crosshair + readout ───
+   Spans the plot and the ribbon, stopping short of the axis so the tick labels stay legible
+   under it. The 166px is 150 (plot) + 16 (ribbon); the 34px top is the wrap's padding. */
+.tlx-crosshair {
+    position: absolute; left: 0; top: 34px; height: 166px; width: 1px;
+    background: var(--rule-strong); pointer-events: none; z-index: 2;
+}
+.tlx-crosshair::before { content: ''; position: absolute; inset: 0 -4px; background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.tlx-tooltip {
+    position: absolute; top: 40px; z-index: 30; width: 340px; max-width: calc(100vw - 48px);
+    padding: 9px 11px; border-radius: var(--r-md);
+    background: var(--surface-2); border: 1px solid var(--rule-strong);
+    box-shadow: var(--shadow-2);
+    /* Never intercept the pointer: the tooltip sits under the cursor and would otherwise
+       fight the pointermove it exists to answer. */
+    pointer-events: none;
+}
+.tlx-tip-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); padding-bottom: 6px; margin-bottom: 6px; border-bottom: 1px solid var(--rule); }
+.tlx-tip-time { font-size: var(--fs-200); font-weight: 700; color: var(--ink-1); }
+.tlx-tip-count { font-size: var(--fs-100); color: var(--ink-3); }
+.tlx-tip-row { display: grid; grid-template-columns: 8px 44px 1fr; gap: 2px 7px; align-items: baseline; padding: 4px 0; }
+.tlx-tip-row + .tlx-tip-row { border-top: 1px solid var(--rule); }
+.tlx-tip-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); align-self: center; }
+.tlx-tip-dot.urg-urgent { background: var(--warn); }
+.tlx-tip-dot.urg-mandatory, .tlx-tip-dot.urg-critical { background: var(--critical); }
+.tlx-tip-when { font-size: var(--fs-100); color: var(--ink-3); }
+.tlx-tip-when.pending { color: var(--good); font-weight: 650; }
+.tlx-tip-title { font-size: var(--fs-200); font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; color: var(--ink-1); }
+.tlx-tip-meta, .tlx-tip-sw, .tlx-tip-fallout { grid-column: 3; font-size: var(--fs-100); }
+.tlx-tip-meta { color: var(--ink-3); }
+.tlx-tip-sw { color: var(--ink-2); }
+.tlx-tip-fallout { color: var(--critical); }
+.tlx-tip-more { font-size: var(--fs-100); color: var(--ink-3); padding-top: 5px; }
+
+/* Evidence badges. Colour encodes how well the time is KNOWN, not severity: a reader must be
+   able to tell a stated window from a timestamp that merely records when someone posted. */
+.tlx-chip-ev { font-size: var(--fs-100); font-weight: 650; padding: 2px 7px; border-radius: 6px; white-space: nowrap; cursor: help; }
+.ev-exact { background: color-mix(in srgb, var(--good) 14%, transparent); color: var(--good); }
+.ev-approx { background: var(--tint); color: var(--ink-3); }
+.ev-unknown { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+.tlx-when-tba { flex-shrink: 0; width: 92px; font-size: var(--fs-200); font-weight: 650; color: var(--warn); cursor: help; }
+.tl-fallout-open { flex-shrink: 0; font-size: var(--fs-100); color: var(--critical); font-weight: 650; }
+.tlx-omitted {
+    padding: 5px var(--sp-3); font-size: var(--fs-100); color: var(--warn);
+    background: color-mix(in srgb, var(--warn) 8%, transparent); border-top: 1px solid var(--rule);
+}
+
+.tlx-toolbar { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; margin: var(--sp-4) 0 10px; }
+.tlx-range { display: flex; gap: 4px; background: var(--tint); border-radius: var(--r-pill); padding: 3px; }
+.tlx-range-btn {
+    background: none; border: none; color: var(--ink-3); font-size: var(--fs-200);
+    font-weight: 650; padding: 5px var(--sp-3); border-radius: var(--r-pill); cursor: pointer;
+}
+.tlx-range-btn:hover { color: var(--ink-1); }
+.tlx-range-btn.active { background: var(--tint-strong); color: var(--ink-1); }
+.tlx-sort { margin-left: auto; font-size: var(--fs-200); color: var(--ink-3); display: flex; align-items: center; gap: 6px; }
+.tlx-sort select {
+    background: var(--surface-2); border: 1px solid var(--rule); border-radius: var(--r-sm);
+    color: var(--ink-1); font-size: var(--fs-200); padding: 5px var(--sp-2); outline: none; cursor: pointer;
+}
+.tlx-sort select:focus-visible { border-color: var(--accent); outline: 2px solid var(--focus); outline-offset: 1px; }
+
+/* ─── Rows ─── */
+.tlx-rows { display: flex; flex-direction: column; }
+.tlx-daybreak { font-size: var(--fs-100); font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); padding: var(--sp-4) 0 7px; }
+.tlx-row { border: 1px solid var(--rule); border-radius: var(--r-md); background: var(--surface-1); margin-bottom: 6px; }
+.tlx-row:hover { background: var(--surface-2); }
+.tlx-row.pending {
+    border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+    background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+.tlx-row.has-fallout { box-shadow: inset 3px 0 0 var(--critical); }
+.tlx-row-head { position: relative; display: flex; align-items: center; gap: 11px; padding: 11px var(--sp-4); min-width: 0; }
+.tlx-row-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--accent); }
+.tlx-row-dot.urg-urgent { background: var(--warn); }
+.tlx-row-dot.urg-mandatory, .tlx-row-dot.urg-critical { background: var(--critical); }
+.tlx-row.pending .tlx-row-dot { box-shadow: 0 0 7px currentColor; animation: live-pulse 2s ease-in-out infinite; }
+.tlx-when { flex-shrink: 0; width: 92px; font-size: var(--fs-300); font-weight: 700; font-variant-numeric: tabular-nums; color: var(--good); }
+.tlx-when.past { color: var(--ink-3); font-weight: 600; }
+.tlx-row-main { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; flex: 1; }
+.tlx-row-title { font-size: var(--fs-300); font-weight: 600; color: var(--ink-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+a.tlx-row-title:hover { color: var(--accent-hover); }
+.tlx-row-sub { flex-shrink: 0; font-size: var(--fs-100); }
+.tlx-row-chips { display: flex; gap: 5px; flex-shrink: 0; }
+/* Software chips stay neutral rather than taking a hue of their own: every colour in this
+   view already means something about urgency or evidence. */
+.sw-chip { font-size: var(--fs-100); font-weight: 600; padding: 2px var(--sp-2); border-radius: 6px; background: var(--surface-3); color: var(--ink-2); }
+.tlx-chip-dim { font-size: var(--fs-100); font-weight: 600; padding: 2px var(--sp-2); border-radius: 6px; background: var(--tint); color: var(--ink-3); }
+.tlx-chip-fallout {
+    font-size: var(--fs-100); font-weight: 600; padding: 2px var(--sp-2); border-radius: 6px;
+    background: color-mix(in srgb, var(--critical) 16%, transparent); color: var(--critical);
+}
+.tlx-row-toggle {
+    flex-shrink: 0; background: none; border: 1px solid var(--rule); border-radius: 6px;
+    color: var(--ink-3); font-size: var(--fs-100); font-weight: 650; padding: 3px 9px; cursor: pointer;
+}
+.tlx-row-toggle:hover { color: var(--ink-1); border-color: var(--rule-strong); }
+.tlx-row-detail { padding: 0 var(--sp-4) 11px 46px; }
+.tlx-row .report-wrap { flex-shrink: 0; margin-top: 0; }
+
+.tl-fallout, .tl-context { display: flex; align-items: baseline; gap: 7px; margin-top: 4px; font-size: var(--fs-200); min-width: 0; }
+.tl-fallout a, .tl-context a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-fallout .muted, .tl-context .muted { flex-shrink: 0; font-size: var(--fs-100); }
+.tl-fallout-arrow { color: var(--critical); flex-shrink: 0; }
+.tl-context-kind { flex-shrink: 0; font-size: var(--fs-100); font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); }
+
+/* At the shared phone breakpoint the row collapses to two lines: time + title, then meta.
+   The chart keeps its full width — it is the part that benefits most from it. */
+@media (max-width: 760px) {
+    .tlx-row-head { flex-wrap: wrap; gap: var(--sp-2) 10px; }
+    .tlx-when { width: auto; }
+    /* Title FIRST on a phone, not last. Ported as order:3, which put the version chips, the
+       evidence badge and the urgency pill above the one thing that identifies the row. */
+    .tlx-row-main { flex-basis: 100%; order: -1; }
+    .tlx-row-sub { display: none; }
+    .tlx-row-chips { flex-wrap: wrap; }
+    .tlx-row-detail { padding-left: var(--sp-4); }
+    .tlx-sort { margin-left: 0; }
+    .tlx-tooltip { width: auto; left: var(--sp-3) !important; right: var(--sp-3); }
+}
+
+/* ═══ Report-wrong-info affordance (⚑ on timeline rows and incident cards) ═══ */
+.report-wrap { margin-top: 6px; }
+.report-btn { background: transparent; border: none; color: var(--ink-3); font-size: var(--fs-100); font-weight: 600; cursor: pointer; padding: 0; opacity: .6; }
+.report-btn:hover { opacity: 1; color: var(--warn); }
+.report-btn:disabled { cursor: default; opacity: .4; }
+.report-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 5px; }
+.report-form select, .report-form input {
+    background: var(--surface-2); border: 1px solid var(--rule); border-radius: 6px;
+    color: var(--ink-1); font-size: var(--fs-100); padding: 4px 7px; outline: none;
+}
+.report-form input { flex: 1; min-width: 140px; }
+.report-form select:focus-visible, .report-form input:focus-visible { border-color: var(--accent); outline: 2px solid var(--focus); outline-offset: 1px; }
+.report-send {
+    background: color-mix(in srgb, var(--accent) 22%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+    color: var(--accent); font-size: var(--fs-100); font-weight: 600;
+    padding: 4px 10px; border-radius: 6px; cursor: pointer;
+}
+.report-send:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 34%, transparent); }
+.report-send:disabled { opacity: .5; cursor: default; }
+.report-thanks { font-size: var(--fs-100); color: var(--good); }
+.report-note { font-size: var(--fs-100); color: var(--critical); }

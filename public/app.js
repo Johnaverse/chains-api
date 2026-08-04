@@ -577,7 +577,7 @@ function initAppbarHeight() {
 }
 
 // ─────────────────────────────── tabs / routing ──────────────────────────
-const VIEWS = ['overview', 'networks', 'graph', 'incidents', 'providers', 'news', 'forum'];
+const VIEWS = ['overview', 'networks', 'graph', 'incidents', 'providers', 'timeline', 'news', 'forum'];
 const DEFAULT_VIEW = 'overview';
 let activeView = DEFAULT_VIEW;
 let searchQuery = '';
@@ -613,6 +613,11 @@ function switchView(view, opts = {}) {
     if (view === 'overview') renderOverview();
     if (view === 'incidents') renderIncidents();
     if (view === 'providers') renderProviders();
+    // The else is load-bearing: the timeline arms a 60s countdown ticker, and its own guard
+    // silently returns when another view is active — so a leaked interval has no symptom at
+    // all beyond a full re-render firing behind whatever tab the reader is on.
+    if (view === 'timeline') ensureTimelineView();
+    else stopTimelineTicker();
 
     updateSearchPlaceholder();
     applySearch();
@@ -626,6 +631,7 @@ function updateSearchPlaceholder() {
         activeView === 'networks' ? 'Filter networks — id or name…'
             : activeView === 'incidents' ? 'Filter incidents — network or title…'
                 : activeView === 'providers' ? 'Filter provider incidents — provider, chain or title…'
+                    : activeView === 'timeline' ? 'Filter timeline — network, software or title…'
                     : activeView === 'news' ? 'Filter news — title, source or network…'
                 : activeView === 'forum' ? 'Filter posts — network, forum or title…'
                         : 'Search networks — id or name…';
@@ -635,6 +641,7 @@ function applySearch() {
     if (activeView === 'networks') { chainShown = null; renderChainsTable(); }
     else if (activeView === 'incidents') renderIncidentList();
     else if (activeView === 'providers') renderProviderList();
+    else if (activeView === 'timeline') renderTimeline();
     else if (activeView === 'news') renderNewsList();
     else if (activeView === 'forum') { renderForumTreemap(); renderForumList(); }
 }
@@ -4609,4 +4616,787 @@ function renderNewsList() {
         parts.push('Chain links appear only where an article named a chain the registry recognises; the feed tags market commentary rather than dropping it, so low-signal stories are filterable but never hidden from you silently.');
         note.textContent = parts.join(' ');
     }
+}
+
+// ═══ Timeline view (GET /upgrades) ══════════════════════════════════════════
+// Scheduled network upgrades and maintenance windows on one time axis, with the incidents
+// that followed an activation attached to it. Ported from the pre-rebuild dashboard; the
+// SVG helper, the DOM accessor and the link gating are this file's, and the per-network
+// avatar it used does not exist in this design, so the row names its network as a chain
+// chip instead.
+// ─────────────────────────────── Timeline (upgrades ↔ fallout ↔ coverage) ───────────────────────────────
+// An activity view over the API's /upgrades correlation layer, not a list of
+// cards: a density chart across a real time axis with NOW in it, so pending
+// windows and recent history read as one continuous picture, then a dense row
+// list underneath. The previous centre-spine layout fitted eleven windows in a
+// 2400px viewport and put every scheduled window in a column headed "Recent".
+//
+// The chart's x-domain deliberately extends into the FUTURE — this feed's whole
+// point is that ten upgrades are pending — and the future half is drawn hatched
+// so "scheduled" never reads as "happened".
+const timeline = {
+    upgrades: [], loaded: false, loading: false, error: null, ticker: null,
+    stream: 'all', rangeDays: 7, sort: 'time',
+    // Domain + bucketing of the chart as last drawn, read by the hover layer.
+    hover: null
+};
+
+// Range presets. Each spans backwards `days` and forwards far enough to hold the
+// pending windows, capped so one distant window can't flatten the recent detail.
+const TL_RANGES = [
+    ['1D', 1], ['7D', 7], ['30D', 30], ['All', 0]
+];
+
+// How well the feed knows when a window runs. A countdown, a position on the time axis and
+// a sort are only meaningful for the dated levels — 'announced' means the provider said an
+// upgrade is coming and never named the day, so it gets its own group rather than a fake time.
+const TL_EVIDENCE = {
+    window: { label: 'exact window', cls: 'ev-exact', title: 'The provider stated the window start (and usually its end).' },
+    scheduled: { label: 'scheduled', cls: 'ev-exact', title: 'A scheduled entry set the start time.' },
+    started: { label: 'observed start', cls: 'ev-approx', title: 'Seen in progress — the run had begun by this time.' },
+    completed: { label: 'completed by', cls: 'ev-approx', title: 'Only a completion post exists: an upper bound on the run, not its start.' },
+    announced: { label: 'date not announced', cls: 'ev-unknown', title: 'Announced with no date. The provider has not said when it runs.' }
+};
+function evidenceOf(u) { return TL_EVIDENCE[u.activationEvidence] ?? TL_EVIDENCE.announced; }
+function isDated(u) { return timelineActivationMs(u) != null; }
+
+const TL_STREAMS = [
+    ['all', 'All windows'],
+    ['upcoming', 'Upcoming'],
+    ['undated', 'Date TBA'],
+    ['active', 'In progress'],
+    ['fallout', 'With fallout'],
+    ['done', 'Completed']
+];
+
+
+function ensureTimelineView() {
+    initTimelineControls();
+    initTimelineHover();
+    if (timeline.loaded) { renderTimeline(); return; }
+    if (timeline.loading) return;
+    timeline.loading = true;
+    loadTimeline();
+}
+
+async function loadTimeline() {
+    try {
+        const d = await api('/upgrades?limit=200');
+        timeline.upgrades = d.upgrades || [];
+        timeline.loaded = true;
+        timeline.error = null;
+    } catch (err) {
+        // A 404 means an older chains-api deployment — the Pages dashboard
+        // can front-run the API rollout — so say that instead of a generic
+        // failure. Anything else is retried on the next visit to the tab.
+        timeline.error = /→ 404$/.test(err?.message || '') ? 'old-api' : 'down';
+    } finally {
+        timeline.loading = false;
+    }
+    renderTimeline();
+}
+
+function timelineActivationMs(u) {
+    const t = Date.parse(u.activationAt || '');
+    return Number.isNaN(t) ? null : t;
+}
+
+function timelineMatchesSearch(u, q) {
+    if ((u.title || '').toLowerCase().includes(q) || (u.provider || '').toLowerCase().includes(q)) return true;
+    if ((u.networkNames || []).some(n => n.toLowerCase().includes(q))) return true;
+    if ((u.software || []).some(s => `${s.client || ''} ${s.version || ''}`.toLowerCase().includes(q))) return true;
+    return (u.chainIds || []).some(id => String(id).includes(q) || state.byId.get(id)?.name?.toLowerCase().includes(q));
+}
+
+// Which stream tab an upgrade belongs to. Pending is decided by the clock, not
+// by status: providers leave a window labelled "scheduled" long after it ran.
+function timelineStreamOf(u, now) {
+    const ms = timelineActivationMs(u);
+    // Undated but not finished: announced, day unknown. Calling this 'done' would file a
+    // pending fork under history purely because nobody has named the date yet.
+    if (ms == null) return u.status === 'maintenance_completed' ? 'done' : 'undated';
+    if (ms > now) return 'upcoming';
+    if (u.status === 'maintenance_in_progress') return 'active';
+    return 'done';
+}
+
+function timelineInStream(u, stream, now) {
+    if (stream === 'all') return true;
+    if (stream === 'fallout') return (u.followedByIncidents || []).length > 0;
+    return timelineStreamOf(u, now) === stream;
+}
+
+// Undated windows cannot be placed on a time axis at all. They are excluded from the chart
+// and counted next to it, never silently dropped.
+function timelineUndated(items) { return items.filter((u) => !isDated(u)); }
+
+// The x-domain: `rangeDays` back from now, and forward to the last pending
+// window (bounded by the same span, so a window three weeks out never squashes
+// the last 24 hours into a pixel). 'All' fits every window in the payload.
+function timelineDomain(items, now) {
+    const times = items.filter(isDated).map(timelineActivationMs);
+    if (timeline.rangeDays === 0) {
+        const lo = times.length ? Math.min(...times, now) : now - 7 * 864e5;
+        const hi = times.length ? Math.max(...times, now) : now + 864e5;
+        const pad = Math.max((hi - lo) * 0.02, 36e5);
+        return [lo - pad, hi + pad];
+    }
+    const span = timeline.rangeDays * 864e5;
+    const lastPending = Math.max(now, ...times.filter(t => t > now));
+    return [now - span, Math.min(lastPending + span * 0.05, now + span)];
+}
+
+function renderTimeline() {
+    const rowsWrap = byId('timelineRows');
+    if (!rowsWrap) return;
+    const meta = byId('timelineMeta');
+
+    if (timeline.error) {
+        const msg = timeline.error === 'old-api'
+            ? 'Timeline requires a newer chains-api — the API this dashboard points at doesn’t serve /upgrades yet.'
+            : 'Upgrade timeline unavailable — the /upgrades feed didn’t answer. Revisit the tab to retry.';
+        rowsWrap.textContent = '';
+        rowsWrap.appendChild(el('div', { class: 'feed-empty', text: msg }));
+        timeline.hover = null;
+        hideTimelineHover();
+        byId('timelineChartWrap')?.setAttribute('hidden', '');
+        if (meta) meta.textContent = '';
+        return;
+    }
+    if (!timeline.loaded) {
+        rowsWrap.textContent = '';
+        rowsWrap.appendChild(el('div', { class: 'feed-empty', text: 'Loading upgrade timeline…' }));
+        return;
+    }
+    byId('timelineChartWrap')?.removeAttribute('hidden');
+
+    const now = Date.now();
+    const searched = searchQuery ? timeline.upgrades.filter(u => timelineMatchesSearch(u, searchQuery)) : timeline.upgrades;
+    const [lo, hi] = timelineDomain(searched, now);
+    // The chart shows everything the search matched inside the window; the tabs
+    // then slice that set, so tab counts always describe what the chart draws.
+    const inRange = searched.filter(u => { const t = timelineActivationMs(u); return t != null && t >= lo && t <= hi; });
+    // Undated windows have no position on a time axis, so they are never plotted — but they
+    // ARE listed and counted, because "announced, day unknown" is information a reader needs
+    // rather than a row to hide.
+    const undated = timelineUndated(searched);
+    const tabbable = [...inRange, ...undated];
+    const items = tabbable.filter(u => timelineInStream(u, timeline.stream, now));
+
+    renderTimelineTabs(tabbable, now);
+    renderTimelineChart(inRange, items, [lo, hi], now, undated.length);
+    renderTimelineRows(items, now);
+
+    if (meta) meta.textContent = `${timeline.upgrades.length} tracked`;
+    // Only a DATED window can be counted down to. An undated announcement must never
+    // produce a "next window in ..." headline.
+    const nextUp = searched.filter(isDated).map(timelineActivationMs).filter(t => t > now).sort((a, b) => a - b)[0];
+    const notice = byId('timelineNextNotice');
+    if (notice) {
+        notice.textContent = '';
+        if (nextUp != null) {
+            const u = searched.find(x => timelineActivationMs(x) === nextUp);
+            notice.appendChild(el('span', { class: 'tlx-next-dot' }));
+            notice.appendChild(el('span', { class: 'tlx-next-label', text: 'Next window' }));
+            notice.appendChild(el('span', { class: 'tlx-next-count mono tl-countdown', 'data-at': String(nextUp), text: countdownText(nextUp - now) }));
+            notice.appendChild(el('span', { class: 'tlx-next-title', text: `${timelineNetworkLabel(u)} · ${u.title}` }));
+            notice.hidden = false;
+        } else {
+            notice.hidden = true;
+        }
+    }
+
+    if (searched.some(u => (timelineActivationMs(u) ?? 0) > now)) startTimelineTicker(); else stopTimelineTicker();
+}
+
+function renderTimelineTabs(inRange, now) {
+    const bar = byId('timelineTabs');
+    if (!bar) return;
+    bar.textContent = '';
+    for (const [key, label] of TL_STREAMS) {
+        const n = inRange.filter(u => timelineInStream(u, key, now)).length;
+        bar.appendChild(el('button', {
+            class: `tlx-tab${timeline.stream === key ? ' active' : ''}`,
+            onclick: () => { timeline.stream = key; renderTimeline(); }
+        }, [
+            el('span', { class: 'tlx-tab-label', text: label }),
+            el('span', { class: 'tlx-tab-count', text: String(n) })
+        ]));
+    }
+}
+
+// ─── The chart ───
+// Area = number of windows activating per bucket, drawn as a stepped density
+// curve. Past and future are two separate paths so the future can be hatched.
+// Above it ride pins for the windows that matter most (fallout, then urgency),
+// each dropping a leader line onto its exact position on the axis.
+const TL_CHART_W = 1000;   // viewBox units; the SVG scales to its container
+const TL_CHART_H = 150;
+const TL_BUCKETS = 96;
+
+function renderTimelineChart(inRange, selected, [lo, hi], now, undatedCount = 0) {
+    const host = byId('timelineChart');
+    if (!host) return;
+    host.textContent = '';
+    // Say what the chart cannot show. A silently short axis reads as "nothing else exists".
+    const omitted = byId('timelineOmitted');
+    if (omitted) {
+        omitted.textContent = undatedCount
+            ? `${undatedCount} window${undatedCount === 1 ? '' : 's'} not plotted — no date announced`
+            : '';
+        omitted.hidden = !undatedCount;
+    }
+    const span = Math.max(hi - lo, 1);
+    const x = (t) => ((t - lo) / span) * TL_CHART_W;
+
+    const counts = new Array(TL_BUCKETS).fill(0);
+    for (const u of inRange) {
+        const t = timelineActivationMs(u);
+        if (t == null) continue;
+        counts[Math.min(TL_BUCKETS - 1, Math.max(0, Math.floor(((t - lo) / span) * TL_BUCKETS)))] += 1;
+    }
+    const peak = Math.max(1, ...counts);
+    const bw = TL_CHART_W / TL_BUCKETS;
+    const y = (n) => TL_CHART_H - (n / peak) * (TL_CHART_H - 14);
+
+    // Stepped outline across all buckets; the fill closes it to the baseline.
+    const pts = [];
+    counts.forEach((n, i) => { pts.push([i * bw, y(n)], [(i + 1) * bw, y(n)]); });
+    const line = pts.map(([px, py], i) => `${i ? 'L' : 'M'}${px.toFixed(1)},${py.toFixed(1)}`).join(' ');
+    const nowX = Math.max(0, Math.min(TL_CHART_W, x(now)));
+
+    const defs = Viz.svgEl('defs', {}, [
+        Viz.svgEl('linearGradient', { id: 'tlxFill', x1: '0', y1: '0', x2: '0', y2: '1' }, [
+            Viz.svgEl('stop', { offset: '0%', 'stop-color': 'var(--tlx-accent)', 'stop-opacity': '0.45' }),
+            Viz.svgEl('stop', { offset: '100%', 'stop-color': 'var(--tlx-accent)', 'stop-opacity': '0.02' })
+        ]),
+        Viz.svgEl('pattern', { id: 'tlxHatch', width: '6', height: '6', patternUnits: 'userSpaceOnUse', patternTransform: 'rotate(45)' }, [
+            Viz.svgEl('rect', { width: '6', height: '6', fill: 'var(--tlx-accent)', 'fill-opacity': '0.06' }),
+            Viz.svgEl('line', { x1: '0', y1: '0', x2: '0', y2: '6', stroke: 'var(--tlx-accent)', 'stroke-opacity': '0.35', 'stroke-width': '1.5' })
+        ]),
+        // Past and future share one outline; each clip reveals its own half.
+        Viz.svgEl('clipPath', { id: 'tlxPast' }, [Viz.svgEl('rect', { x: '0', y: '0', width: String(nowX), height: String(TL_CHART_H) })]),
+        Viz.svgEl('clipPath', { id: 'tlxFuture' }, [Viz.svgEl('rect', { x: String(nowX), y: '0', width: String(TL_CHART_W - nowX), height: String(TL_CHART_H) })])
+    ]);
+
+    const area = `${line} L${TL_CHART_W},${TL_CHART_H} L0,${TL_CHART_H} Z`;
+    const svg = Viz.svgEl('svg', {
+        viewBox: `0 0 ${TL_CHART_W} ${TL_CHART_H}`, preserveAspectRatio: 'none',
+        class: 'tlx-svg', role: 'img',
+        'aria-label': `Upgrade window density, ${new Date(lo).toLocaleDateString()} to ${new Date(hi).toLocaleDateString()}`
+    }, [
+        defs,
+        Viz.svgEl('path', { d: area, fill: 'url(#tlxFill)', 'clip-path': 'url(#tlxPast)' }),
+        Viz.svgEl('path', { d: area, fill: 'url(#tlxHatch)', 'clip-path': 'url(#tlxFuture)' }),
+        Viz.svgEl('path', { d: line, fill: 'none', stroke: 'var(--tlx-accent)', 'stroke-width': '1.5', 'vector-effect': 'non-scaling-stroke' }),
+        Viz.svgEl('line', { x1: String(nowX), y1: '0', x2: String(nowX), y2: String(TL_CHART_H), class: 'tlx-nowline', 'vector-effect': 'non-scaling-stroke' })
+    ]);
+    host.appendChild(svg);
+
+    renderTimelinePins(inRange, selected, x, now);
+    renderTimelineHeat(inRange, x);
+    renderTimelineAxis(lo, hi, nowX);
+
+    // Hand the hover layer the same domain and bucketing the chart just drew,
+    // so the tooltip always describes the exact bar under the cursor.
+    timeline.hover = { lo, hi, buckets: bucketize(inRange, lo, hi) };
+}
+
+// inRange split into the same TL_BUCKETS the area chart uses. The tooltip reads
+// from this rather than re-deriving, so a bar of height 3 always lists 3 rows.
+function bucketize(items, lo, hi) {
+    const span = Math.max(hi - lo, 1);
+    const buckets = Array.from({ length: TL_BUCKETS }, () => []);
+    for (const u of items) {
+        const t = timelineActivationMs(u);
+        if (t == null) continue;
+        buckets[Math.min(TL_BUCKETS - 1, Math.max(0, Math.floor(((t - lo) / span) * TL_BUCKETS)))].push(u);
+    }
+    for (const b of buckets) b.sort((a, c) => (timelineActivationMs(a) ?? 0) - (timelineActivationMs(c) ?? 0));
+    return buckets;
+}
+
+// Pins: the windows a reader should notice first — anything with fallout, then
+// the most urgent, then the soonest. Capped so they never collide into mush.
+function renderTimelinePins(inRange, selected, x, now) {
+    const host = byId('timelinePins');
+    if (!host) return;
+    host.textContent = '';
+    const weight = (u) => (u.followedByIncidents?.length ? 100 : 0)
+        + (/urgent|critical|mandatory/i.test(u.urgency || '') ? 40 : 0)
+        + ((timelineActivationMs(u) ?? 0) > now ? 20 : 0);
+    const picked = [...inRange].sort((a, b) => weight(b) - weight(a) || (timelineActivationMs(b) ?? 0) - (timelineActivationMs(a) ?? 0))
+        .filter(u => weight(u) > 0).slice(0, 8)
+        .sort((a, b) => (timelineActivationMs(a) ?? 0) - (timelineActivationMs(b) ?? 0));
+
+    const selectedSet = new Set(selected);
+    let lastPct = -99;
+    for (const u of picked) {
+        const t = timelineActivationMs(u);
+        if (t == null) continue;
+        const pct = (x(t) / TL_CHART_W) * 100;
+        if (pct - lastPct < 7) continue;   // keep badges legible
+        lastPct = pct;
+        const fallout = u.followedByIncidents?.length || 0;
+        const pin = el('div', {
+            class: `tlx-pin${selectedSet.has(u) ? '' : ' dim'}`,
+            style: { left: `${pct.toFixed(2)}%` },
+            title: `${u.title}\n${new Date(t).toLocaleString()}`
+        }, [
+            el('span', { class: `tlx-pin-badge ${urgencyClass(u.urgency)}`, text: fallout ? `↯${fallout}` : (timelineNetworkLabel(u) || '•').slice(0, 3) }),
+            el('span', { class: 'tlx-pin-stem' })
+        ]);
+        host.appendChild(pin);
+    }
+}
+
+// The thin strip under the chart: one blob per window, coloured by urgency —
+// AppControl's temperature ribbon, carrying severity instead of heat.
+function renderTimelineHeat(inRange, x) {
+    const host = byId('timelineHeat');
+    if (!host) return;
+    host.textContent = '';
+    for (const u of inRange) {
+        const t = timelineActivationMs(u);
+        if (t == null) continue;
+        host.appendChild(el('span', {
+            class: `tlx-blob ${urgencyClass(u.urgency)}${u.followedByIncidents?.length ? ' has-fallout' : ''}`,
+            style: { left: `${((x(t) / TL_CHART_W) * 100).toFixed(2)}%` },
+            title: u.title
+        }));
+    }
+}
+
+function renderTimelineAxis(lo, hi, nowX) {
+    const host = byId('timelineAxis');
+    if (!host) return;
+    host.textContent = '';
+    const span = hi - lo;
+    const withinDay = span <= 36 * 36e5;
+    const fmt = (t) => new Date(t).toLocaleString(undefined,
+        withinDay ? { hour: '2-digit', minute: '2-digit' } : { month: 'short', day: 'numeric' });
+    // "now" always wins: a date tick sitting on top of it rendered as "Junow".
+    const nowPct = (nowX / TL_CHART_W) * 100;
+    for (let i = 0; i <= 6; i += 1) {
+        const pct = (i / 6) * 100;
+        if (Math.abs(pct - nowPct) < 5) continue;
+        host.appendChild(el('span', {
+            // The last tick sits at 100% and its centring transform pushed half
+            // the label outside the clipped container ("Aug 3" read as "Au").
+            class: `tlx-tick${i === 6 ? ' tlx-tick-end' : ''}`,
+            style: { left: `${pct.toFixed(2)}%` }, text: fmt(lo + (span * i) / 6)
+        }));
+    }
+    host.appendChild(el('span', { class: 'tlx-tick tlx-tick-now', style: { left: `${nowPct.toFixed(2)}%` }, text: 'now' }));
+}
+
+// ─── Hover crosshair (Grafana-style) ───
+// Pointing anywhere across the chart reads out that moment: a vertical
+// crosshair, the timestamp under the cursor, and the windows in the bar being
+// pointed at. Without it the density curve says "something happened here" and
+// gives no way to ask what.
+const TL_TOOLTIP_ROWS = 6;
+
+function initTimelineHover() {
+    const wrap = byId('timelineChartWrap');
+    if (!wrap || wrap.dataset.hoverBound) return;
+    wrap.dataset.hoverBound = '1';
+    // Pointer events rather than mouse events, so a stylus or touch drag reads
+    // the chart too. Touch also fires pointerdown -> move, which is the natural
+    // "scrub" gesture on a phone.
+    wrap.addEventListener('pointermove', onTimelineHover);
+    wrap.addEventListener('pointerdown', onTimelineHover);
+    wrap.addEventListener('pointerleave', hideTimelineHover);
+}
+
+function onTimelineHover(e) {
+    const wrap = byId('timelineChartWrap');
+    const cross = byId('timelineCrosshair');
+    const tip = byId('timelineTooltip');
+    if (!wrap || !cross || !tip || !timeline.hover) return;
+
+    const rect = wrap.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const frac = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    const { lo, hi, buckets } = timeline.hover;
+    const at = lo + frac * (hi - lo);
+    const idx = Math.min(TL_BUCKETS - 1, Math.floor(frac * TL_BUCKETS));
+
+    cross.style.left = `${(frac * 100).toFixed(3)}%`;
+    cross.hidden = false;
+
+    renderTimelineTooltip(tip, buckets[idx] ?? [], at, hi - lo);
+    // Follow the cursor, flipping before the tooltip would leave the panel.
+    const width = tip.offsetWidth || 280;
+    const raw = frac * rect.width + 14;
+    tip.style.left = `${Math.max(6, Math.min(raw, rect.width - width - 6)).toFixed(0)}px`;
+    tip.hidden = false;
+}
+
+function hideTimelineHover() {
+    const cross = byId('timelineCrosshair');
+    const tip = byId('timelineTooltip');
+    if (cross) cross.hidden = true;
+    if (tip) tip.hidden = true;
+}
+
+function renderTimelineTooltip(tip, items, at, spanMs) {
+    tip.textContent = '';
+    // Resolution follows the zoom: a 1-day view wants minutes, a month wants
+    // the date. Same rule as the axis, so the two never disagree.
+    const stamp = new Date(at).toLocaleString(undefined, spanMs <= 36 * 36e5
+        ? { weekday: 'short', hour: '2-digit', minute: '2-digit' }
+        : { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+    tip.appendChild(el('div', { class: 'tlx-tip-head' }, [
+        el('span', { class: 'tlx-tip-time mono', text: stamp }),
+        el('span', { class: 'tlx-tip-count', text: items.length ? `${items.length} window${items.length === 1 ? '' : 's'}` : 'nothing scheduled' })
+    ]));
+
+    const now = Date.now();
+    for (const u of items.slice(0, TL_TOOLTIP_ROWS)) {
+        const ms = timelineActivationMs(u);
+        const pending = ms != null && ms > now;
+        tip.appendChild(el('div', { class: 'tlx-tip-row' }, [
+            el('span', { class: `tlx-tip-dot ${urgencyClass(u.urgency)}` }),
+            el('span', {
+                class: `tlx-tip-when mono${pending ? ' pending' : ''}`,
+                text: ms != null ? new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : '—'
+            }),
+            el('span', { class: 'tlx-tip-title', text: u.title }),
+            el('span', { class: 'tlx-tip-meta', text: [timelineNetworkLabel(u), u.provider].filter(Boolean).join(' · ') }),
+            (u.software || []).length
+                ? el('span', { class: 'tlx-tip-sw mono', text: (u.software || []).map(s => [s.client, s.version].filter(Boolean).join(' ')).join(', ') })
+                : null,
+            u.followedByIncidents?.length
+                ? el('span', { class: 'tlx-tip-fallout', text: `↯ ${u.followedByIncidents.length} incident${u.followedByIncidents.length === 1 ? '' : 's'} followed` })
+                : null
+        ]));
+    }
+    if (items.length > TL_TOOLTIP_ROWS) {
+        tip.appendChild(el('div', { class: 'tlx-tip-more', text: `+${items.length - TL_TOOLTIP_ROWS} more in this interval` }));
+    }
+}
+
+// ─── Rows ───
+const TL_SORTS = [
+    ['time', 'Time'],
+    ['urgency', 'Urgency'],
+    ['fallout', 'Fallout'],
+    ['provider', 'Provider']
+];
+
+const TL_URGENCY_RANK = { mandatory: 3, critical: 3, urgent: 2, standard: 1 };
+
+function renderTimelineRows(items, now) {
+    const wrap = byId('timelineRows');
+    if (!wrap) return;
+    wrap.textContent = '';
+    const count = byId('timelineCount');
+    // Says what it is SCOPED to: the header pill counts everything tracked, this counts what
+    // survived the range and the search, and two bare "N windows" a few pixels apart read as a
+    // contradiction rather than as two different questions.
+    if (count) count.textContent = `${items.length} in range${searchQuery ? ` · “${searchQuery}”` : ''}`;
+
+    if (!items.length) {
+        wrap.appendChild(el('div', { class: 'feed-empty', text: searchQuery ? 'Nothing matches.' : 'No windows in this range.' }));
+        return;
+    }
+
+    const sorted = [...items].sort((a, b) => {
+        if (timeline.sort === 'urgency') {
+            const d = (TL_URGENCY_RANK[(b.urgency || '').toLowerCase()] || 0) - (TL_URGENCY_RANK[(a.urgency || '').toLowerCase()] || 0);
+            if (d) return d;
+        } else if (timeline.sort === 'fallout') {
+            const d = (b.followedByIncidents?.length || 0) - (a.followedByIncidents?.length || 0);
+            if (d) return d;
+        } else if (timeline.sort === 'provider') {
+            const d = (a.provider || '').localeCompare(b.provider || '');
+            if (d) return d;
+        }
+        // Default and tiebreak: pending soonest-first, then history newest-first.
+        const ta = timelineActivationMs(a) ?? 0;
+        const tb = timelineActivationMs(b) ?? 0;
+        const aP = ta > now, bP = tb > now;
+        if (aP !== bP) return aP ? -1 : 1;
+        return aP ? ta - tb : tb - ta;
+    });
+
+    let lastBucket = null;
+    for (const u of sorted) {
+        // Day separators only make sense while the list is in time order.
+        if (timeline.sort === 'time') {
+            // Pending windows sort ahead of history, so "Today" occurs twice —
+            // once for what is still to come and once for what already ran.
+            // Qualify the pending one or the two runs read as a rendering bug.
+            const actMs = timelineActivationMs(u);
+            const day = timelineDayBucket(actMs, now);
+            const bucket = actMs != null && actMs > now ? `${day} · scheduled` : day;
+            if (bucket !== lastBucket) {
+                lastBucket = bucket;
+                wrap.appendChild(el('div', { class: 'tlx-daybreak', text: bucket }));
+            }
+        }
+        wrap.appendChild(timelineRow(u, now));
+    }
+}
+
+function timelineDayBucket(ms, now) {
+    if (ms == null) return 'Date not announced';
+    const d = new Date(ms);
+    const today = new Date(now);
+    const days = Math.round((Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())) / 864e5);
+    if (days === 0) return 'Today';
+    if (days === 1) return 'Tomorrow';
+    if (days === -1) return 'Yesterday';
+    return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function timelineNetworkLabel(u) {
+    const names = u.networkNames?.length ? u.networkNames
+        : (u.chainIds || []).map(id => state.byId.get(id)?.name).filter(Boolean);
+    return names[0] || u.provider || 'Unknown';
+}
+
+// "in 2d 4h" / "in 35m" — the live part of a pending row.
+function countdownText(ms) {
+    if (!Number.isFinite(ms) || ms <= 0) return 'now';
+    const m = Math.ceil(ms / 60000);
+    if (m < 60) return `in ${m}m`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `in ${h}h ${m % 60}m`;
+    return `in ${Math.floor(h / 24)}d ${h % 24}h`;
+}
+
+// One shared minute tick updates every visible countdown in place; a window
+// crossing into the past re-renders so it re-buckets. Guarded so re-renders
+// never stack a second interval; cleared on view switch.
+function startTimelineTicker() {
+    if (timeline.ticker) return;
+    timeline.ticker = setInterval(() => {
+        if (activeView !== 'timeline') return;
+        let expired = false;
+        document.querySelectorAll('#view-timeline .tl-countdown').forEach(n => {
+            const left = Number(n.dataset.at) - Date.now();
+            if (left <= 0) expired = true;
+            n.textContent = countdownText(left);
+        });
+        if (expired) renderTimeline();
+    }, 60000);
+}
+function stopTimelineTicker() { if (timeline.ticker) { clearInterval(timeline.ticker); timeline.ticker = null; } }
+
+// Sanitized urgency class token (same guard as the severity pill) — the raw
+// value still shows as the pill's text. Shared by rows, pins and blobs.
+function urgencyClass(urgency) {
+    return `urg-${String(urgency || 'standard').toLowerCase().replace(/[^a-z]/g, '')}`;
+}
+function urgencyPill(urgency) {
+    return el('span', { class: `pill ${urgencyClass(urgency)}`, text: urgency || 'standard' });
+}
+
+// Fallout: incidents that started on the same network within the follow
+// window after activation — the "what did this upgrade cause?" rows.
+function timelineFalloutRows(u) {
+    // durationEvidence distinguishes "we watched it resolve" from "the page mentioned it once
+    // and never said when it ended" — a reader comparing incidents needs that, not a number
+    // that silently means different things.
+    const durationOf = (inc) => {
+        if (inc.durationEvidence === 'observed' && inc.resolvedAt && inc.startedAt) {
+            const ms = Date.parse(inc.resolvedAt) - Date.parse(inc.startedAt);
+            return ms > 0 ? `lasted ${fmtDuration(ms)}` : 'resolved';
+        }
+        if (inc.durationEvidence === 'ongoing') return 'still open';
+        return 'duration not published';
+    };
+    return (u.followedByIncidents || []).slice(0, 4).map(inc =>
+        el('div', { class: 'tl-fallout' }, [
+            el('span', { class: 'tl-fallout-arrow', text: '↳' }),
+            inc.url ? el('a', { href: safeUrl(inc.url), target: '_blank', rel: 'noopener', text: inc.title }) : el('span', { text: inc.title }),
+            el('span', { class: 'muted', text: `+${inc.hoursAfterActivation}h after activation (suspected)` }),
+            el('span', {
+                class: inc.durationEvidence === 'ongoing' ? 'tl-fallout-open' : 'muted',
+                text: durationOf(inc)
+            })
+        ]));
+}
+
+// Context: governance discussion (forum) and editorial coverage (news) around
+// the window. Deduped by URL — the same ACD call is often carried by both
+// feeds, and two identical links under one window reads as a bug.
+function timelineContextRows(u) {
+    const row = (label, item) => el('div', { class: 'tl-context' }, [
+        el('span', { class: 'tl-context-kind', text: label }),
+        el('a', { href: safeUrl(item.url), target: '_blank', rel: 'noopener', text: item.title }),
+        item.publishedAt ? el('span', { class: 'muted', text: relTime(item.publishedAt) }) : null
+    ]);
+    const seen = new Set();
+    const fresh = (list) => (list || []).filter(i => {
+        const k = (i.url || i.title || '').toLowerCase();
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+    });
+    return [
+        ...fresh(u.discussion).slice(0, 2).map(d => row('discussion', d)),
+        ...fresh(u.coverage).slice(0, 2).map(c => row('coverage', c))
+    ];
+}
+
+// One row. Time leads (this is a timeline), then network + title, then the
+// evidence chips. Detail — fallout, discussion, coverage — is collapsed behind
+// a disclosure so a hundred windows stay scannable; rows with fallout open by
+// default because that is the finding, not a footnote.
+function timelineRow(u, now) {
+    const actMs = timelineActivationMs(u);
+    const pending = actMs != null && actMs > now;
+    const label = timelineNetworkLabel(u);
+    const chainId = (u.chainIds || [])[0] ?? null;
+    const fallout = u.followedByIncidents?.length || 0;
+
+    // A countdown is a claim about a known instant. With no date announced there is nothing
+    // to count down to, so the slot says so instead of rendering a dash that looks like a
+    // missing value.
+    const ev = evidenceOf(u);
+    const when = actMs == null
+        ? el('span', { class: 'tlx-when tlx-when-tba', title: ev.title, text: 'date TBA' })
+        : pending
+            ? el('span', { class: 'tlx-when mono tl-countdown', 'data-at': String(actMs), text: countdownText(actMs - now) })
+            : el('span', {
+                class: 'tlx-when past',
+                text: new Date(actMs).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+            });
+
+    const chips = [];
+    for (const s of (u.software || []).slice(0, 3)) {
+        chips.push(el('span', { class: 'sw-chip mono', text: [s.client, s.version].filter(Boolean).join(' ') }));
+    }
+    if (u.windowMinutes) chips.push(el('span', { class: 'tlx-chip-dim mono', text: fmtDuration(u.windowMinutes * 60000) }));
+    // How well the time is known, on every row — the reader should never have to guess
+    // whether "02:36 PM" is a stated window or the moment someone posted a notice.
+    chips.push(el('span', { class: `tlx-chip-ev ${ev.cls}`, title: ev.title, text: ev.label }));
+    if (fallout) chips.push(el('span', { class: 'tlx-chip-fallout', text: `↯ ${fallout} incident${fallout === 1 ? '' : 's'} after` }));
+
+    const detail = [...timelineFalloutRows(u), ...timelineContextRows(u)];
+
+    const head = el('div', { class: 'tlx-row-head' }, [
+        el('span', { class: `tlx-row-dot ${urgencyClass(u.urgency)}` }),
+        when,
+        el('span', { class: 'tlx-row-main' }, [
+            u.url ? el('a', { class: 'tlx-row-title', href: safeUrl(u.url), target: '_blank', rel: 'noopener', text: u.title })
+                : el('span', { class: 'tlx-row-title', text: u.title }),
+            // The network resolves to a registry chain often enough to be worth a link, and a
+            // chip here behaves like the affected-chain chips on incident cards. When it does
+            // not resolve it stays plain text rather than becoming a dead control.
+            el('span', { class: 'tlx-row-sub muted' }, [
+                chainId != null && state.byId.has(chainId)
+                    ? el('button', { class: 'chain-chip', type: 'button', text: label, onclick: e => { e.preventDefault(); e.stopPropagation(); openChainDetail(chainId); } })
+                    : el('span', { text: label }),
+                u.provider ? el('span', { text: ` · ${u.provider}` }) : null
+            ])
+        ]),
+        el('span', { class: 'tlx-row-chips' }, chips),
+        urgencyPill(u.urgency),
+        feedbackAffordance({ kind: 'upgrade', refId: u.incidentId || u.title })
+    ]);
+
+    if (!detail.length) return el('div', { class: `tlx-row${pending ? ' pending' : ''}` }, [head]);
+
+    const body = el('div', { class: 'tlx-row-detail' }, detail);
+    const toggle = el('button', {
+        class: 'tlx-row-toggle',
+        'aria-expanded': fallout ? 'true' : 'false',
+        text: fallout ? 'Hide links' : `${detail.length} linked`,
+        onclick: (e) => {
+            const open = body.hidden;
+            body.hidden = !open;
+            e.currentTarget.setAttribute('aria-expanded', String(open));
+            e.currentTarget.textContent = open ? 'Hide links' : `${detail.length} linked`;
+        }
+    });
+    body.hidden = !fallout;
+    head.insertBefore(toggle, head.lastChild);
+    return el('div', { class: `tlx-row${pending ? ' pending' : ''}${fallout ? ' has-fallout' : ''}` }, [head, body]);
+}
+
+// Range + sort controls. Built once; re-render only repaints their active state.
+function initTimelineControls() {
+    const rangeBar = byId('timelineRange');
+    if (rangeBar && !rangeBar.childElementCount) {
+        for (const [label, days] of TL_RANGES) {
+            rangeBar.appendChild(el('button', {
+                class: `tlx-range-btn${timeline.rangeDays === days ? ' active' : ''}`,
+                'data-days': String(days), text: label,
+                onclick: () => {
+                    timeline.rangeDays = days;
+                    rangeBar.querySelectorAll('.tlx-range-btn').forEach(b => b.classList.toggle('active', Number(b.dataset.days) === days));
+                    renderTimeline();
+                }
+            }));
+        }
+    }
+    const sortSel = byId('timelineSort');
+    if (sortSel && !sortSel.childElementCount) {
+        for (const [key, label] of TL_SORTS) sortSel.appendChild(el('option', { value: key, text: label }));
+        sortSel.value = timeline.sort;
+        sortSel.addEventListener('change', () => { timeline.sort = sortSel.value; renderTimeline(); });
+    }
+}
+
+// ─── Wrong-info reporting ────────────────────────────────────────────────
+// A feed can be confidently wrong — the wrong chain, a stale version, a misread time
+// — and only a human reader can tell which. Every timeline and incident card
+// gets a small flag that unfolds an inline report form posting to /feedback.
+const FEEDBACK_REASONS = [
+    ['wrong_chain', 'Wrong chain/network'],
+    ['wrong_version', 'Wrong version'],
+    ['wrong_time', 'Wrong time'],
+    ['not_related', 'Not related'],
+    ['misclassified', 'Misclassified'],
+    ['outdated', 'Outdated'],
+    ['other', 'Other']
+];
+
+function feedbackAffordance({ kind, refId }) {
+    const wrap = el('div', { class: 'report-wrap' });
+    // Incident cards are anchors: swallow clicks anywhere in the affordance
+    // so opening the form / picking a reason never navigates the card's link
+    // (preventDefault stops the anchor; the controls' own listeners and
+    // mousedown-driven behaviour — select opening, input focus — still work).
+    wrap.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); });
+
+    const btn = el('button', { class: 'report-btn', title: 'Report wrong info', 'aria-label': 'Report wrong info', text: '⚑ report' });
+    const select = el('select', { class: 'report-reason' },
+        FEEDBACK_REASONS.map(([value, label]) => el('option', { value, text: label })));
+    const comment = el('input', { class: 'report-comment', type: 'text', maxlength: '500', placeholder: 'What’s wrong? (optional)' });
+    const send = el('button', { class: 'report-send', text: 'Send' });
+    const note = el('span', { class: 'report-note hidden' });
+    const form = el('div', { class: 'report-form hidden' }, [select, comment, send, note]);
+
+    btn.addEventListener('click', () => form.classList.toggle('hidden'));
+    send.addEventListener('click', async () => {
+        send.disabled = true;
+        note.classList.add('hidden');
+        const body = { kind, reason: select.value, page: activeView };
+        if (refId) body.refId = String(refId).slice(0, 200);
+        const text = comment.value.trim();
+        if (text) body.comment = text.slice(0, 500);
+        let res = null;
+        try { res = await apiPost('/feedback', body, { timeoutMs: 15000 }); } catch { /* network error → note below */ }
+        if (res?.ok) {
+            form.textContent = '';
+            form.appendChild(el('span', { class: 'report-thanks', text: 'Thanks — recorded.' }));
+            btn.disabled = true;
+            return;
+        }
+        note.textContent = res?.status === 429 ? 'Too many reports — try again in a minute.'
+            : res ? (res.data?.error || 'Couldn’t send — try again.')
+            : 'Couldn’t send — network error.';
+        note.classList.remove('hidden');
+        send.disabled = false;
+    });
+
+    wrap.appendChild(btn);
+    wrap.appendChild(form);
+    return wrap;
 }
