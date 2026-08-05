@@ -36,8 +36,24 @@ const CDP_PORT = Number(process.env.CDP_PORT || 9336);
 const CHROME = process.env.CHROME || '/usr/bin/chromium-browser';
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Must mirror src/http/app.js. If that policy is relaxed or tightened, this string moves too
-// — the point of the test is that the two agree.
+// package.json allows Node >=20, but the global WHATWG WebSocket this uses to speak CDP only
+// became available unflagged in Node 22. Say so plainly instead of failing later with a bare
+// ReferenceError that reads like the page is broken. (Adding `ws` would put a dependency in a
+// repo whose verification scripts deliberately have none.)
+if (typeof WebSocket === 'undefined') {
+  console.error(`This script drives chromium over CDP using Node's global WebSocket, which is
+unavailable on ${process.version} (needs Node >= 22). The rest of the project runs on Node >= 20.`);
+  process.exit(2);
+}
+
+// The feed origins and every other directive mirror src/http/app.js; if that policy moves,
+// this string moves with it.
+//
+// ONE deliberate difference: `connect-src` also allows the API's own origin. Served from
+// 127.0.0.1 the dashboard resolves API_BASE to the remote API, so without it nothing loads
+// and there is no page to inspect. That widening would also hide a real regression — a build
+// that wrongly treats /ui as cross-origin and talks to production — so the check that
+// catches it is made explicitly below ("/ui is same-origin") rather than left to CSP.
 const CSP = [
   "default-src 'self'",
   "script-src 'self'",
@@ -56,7 +72,11 @@ const MIME = {
 };
 
 const server = http.createServer((req, res) => {
-  const rel = decodeURIComponent(req.url.split('?')[0]);
+  // Also mount everything under /ui/, mirroring how the API serves this dashboard. The
+  // same-origin check below needs a page whose pathname really starts with /ui.
+  let rel = decodeURIComponent(req.url.split('?')[0]);
+  if (rel === '/ui' || rel === '/ui/') rel = '/index.html';
+  else if (rel.startsWith('/ui/')) rel = rel.slice(3);
   const file = path.join(ROOT, rel === '/' ? '/index.html' : rel);
   if (!file.startsWith(ROOT) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
     res.writeHead(404).end();
@@ -175,6 +195,24 @@ try {
   })()`);
   note(inlineInMarkup === 0, 'no inline style attributes in index.html',
     `${inlineInMarkup} found`);
+
+  // 2b. A page served under /ui MUST resolve its API base to same-origin. This is the bug
+  //     this branch fixed: the check was port- and hostname-based only, so the API's own
+  //     dashboard on any other port fetched PRODUCTION data while looking like that
+  //     deployment's. CSP cannot catch it here (see the note on connect-src above), so load
+  //     the page at a real /ui path and read the value the browser actually computed.
+  //     Deliberately not eval of an extracted expression: this policy forbids that, as the
+  //     first attempt discovered.
+  await evaluate(`location.href = '/ui/index.html'`);
+  await wait(4000);
+  const uiApiBase = await evaluate('typeof API_BASE === "string" ? API_BASE : "(missing)"');
+  const uiPath = await evaluate('location.pathname');
+  note(uiPath.startsWith('/ui') && uiApiBase === '',
+    'a page served at /ui resolves the API to same-origin',
+    `pathname=${uiPath} API_BASE=${JSON.stringify(uiApiBase)}`);
+  // Back to the root mount for the view sweep, where the API is reachable.
+  await evaluate(`location.href = '/index.html'`);
+  await wait(4000);
 
   // 3. Every view renders, and nothing on it pushes the document wider than the viewport.
   const views = await evaluate('VIEWS.slice()');
