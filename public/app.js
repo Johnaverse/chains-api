@@ -2522,7 +2522,7 @@ function incidentCard(it) {
                 'confidence ', bar, `${Math.round(conf * 100)}%`
             ]));
         }
-        if (enr.model) head.appendChild(el('span', { text: `· ${enr.model}` }));
+
 
         const block = el('div', { class: 'ai-block' }, [
             head,
@@ -2782,23 +2782,28 @@ function providerBoardCaption(data, provs, days) {
                 : el('span', { class: 'pill pill-quiet', text: 'no open incidents' }),
             inMaint > 0 ? el('span', { class: 'pill pill-maint', text: `${inMaint} maintenance running` }) : null
         ]),
+        // Both caveats stay — they are what stops the table being misread — but as scannable
+        // lines rather than paragraphs, with the reasoning on hover like every other hint
+        // here. Ninety words of permanent disclaimer is a disclaimer nobody reads.
         el('p', { class: 'pb-caption-note' }, [
-            el('strong', { text: 'Self-reported. ' }),
+            el('strong', { text: 'Self-reported' }),
             el('span', {
-                text: `Every figure comes from each provider’s own status page over the last ${days} days. `
-                    + `${withCoverage} of ${provs.length} pages list the chains they cover — that list is the availability `
-                    + 'denominator, so the other pages get no percentage rather than an invented one.'
+                title: `Every figure comes from each provider’s own status page over the last ${days} days, so a`
+                    + ' provider that posts nothing scores a silent 100%. The chain list is the availability'
+                    + ' denominator — pages that publish none get no percentage rather than an invented one, and'
+                    + ' sit below the divider.',
+                text: ` · last ${days} days · ${withCoverage} of ${provs.length} pages list their chains`
             })
         ]),
-        // Conditional on there being something to caveat. An always-on disclaimer trains
-        // readers to skip it.
+        // Conditional: an always-on disclaimer trains readers to skip it.
         unknown > 0 ? el('p', { class: 'pb-caption-note' }, [
-            el('strong', { class: 'pb-warn', text: 'Read availability narrowly. ' }),
+            el('strong', { class: 'pb-warn', text: 'Read availability narrowly' }),
             el('span', {
-                text: `Only ${measured} of ${measured + unknown} incidents published enough to time them; the rest appear `
-                    + 'once, at resolution, with no start. Those are left out of the percentage instead of being charged as '
-                    + 'downtime, so today availability mostly reflects what is burning right now. Incident counts below are '
-                    + 'complete — but they measure disclosure policy as much as reliability.'
+                title: `Only ${measured} of ${measured + unknown} incidents published enough to time them; the rest`
+                    + ' appear once, at resolution, with no start. Those are left out of the percentage rather than'
+                    + ' charged as downtime, so availability mostly reflects what is burning right now. Incident'
+                    + ' counts are complete, but they measure disclosure policy as much as reliability.',
+                text: ` · ${measured} of ${measured + unknown} incidents could be timed`
             })
         ]) : null
     ]);
@@ -4569,7 +4574,7 @@ function newsCard(s) {
                 'confidence ', bar, `${Math.round(conf * 100)}%`
             ]));
         }
-        if (enr.model) head.appendChild(el('span', { text: `· ${enr.model}` }));
+
         const block = el('div', { class: 'ai-block' }, [head]);
         if (enr.summary && enr.summary !== s.summary) {
             block.appendChild(el('div', { class: 'ai-summary', text: plainText(enr.summary) }));
