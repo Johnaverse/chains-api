@@ -75,6 +75,11 @@
         if (a >= 1e9) return `$${(n / 1e9).toFixed(2)}B`;
         if (a >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
         if (a >= 1e3) return `$${(n / 1e3).toFixed(1)}K`;
+        // Below a dollar, rounding to whole dollars prints "$0" for a real, non-zero value —
+        // and elsewhere this dashboard treats zero as a measurement and absence as unknown,
+        // so a rounded "$0" quietly asserts something false. Two significant figures keep a
+        // thin market legible ($0.15 volume stays $0.15) without widening the common case.
+        if (a > 0 && a < 1) return `$${Number(n.toPrecision(2))}`;
         return `$${n.toFixed(0)}`;
     }
     function fmtNum(n) {

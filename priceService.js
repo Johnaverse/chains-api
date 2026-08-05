@@ -8,26 +8,33 @@ import {
 
 // chainId → CoinGecko asset id for the chain's NATIVE currency.
 //
-// Verified against the registry's nativeCurrency.symbol and against CoinGecko's
-// last_updated_at on 2026-08-05. Three assets were serving quotes that had not moved in
-// months; they are kept (the asset mapping is still correct — the market is what died) and
-// the staleness flag stops them being presented as live:
+// Verified on 2026-08-05 against the registry's nativeCurrency.symbol AND against
+// CoinGecko's /coins/{id}, because an id that merely RETURNS DATA is not evidence it is the
+// right asset — that was the actual defect here. Three distinct problems turned up, and they
+// need three different responses:
 //
-//   oec-token   OKT    274 days stale, market cap reported as -1
-//   matic-network      was mapped to chain 137, but that chain's native currency is now POL
-//                      after the MATIC migration — a WRONG asset, not merely a stale one,
-//                      so it is replaced rather than flagged
-//   canto       CANTO    7 days stale
-//   fantom      FTM      quoted daily but market cap 0 and 24h volume ~$32: FTM's market
-//                      moved to Sonic's S. Deliberately NOT remapped to sonic-3 — chain
-//                      250's native currency really is FTM, and substituting another
-//                      asset's numbers would misreport it. Near-zero is the honest answer.
+//   WRONG ASSET → replace.
+//     matic-network was mapped to chain 137, whose native currency is POL after the
+//     migration. It kept serving a quote frozen in Feb 2026, so it read as live and was
+//     wrong. Now polygon-ecosystem-token (verified symbol POL, "POL (ex-MATIC)").
+//
+//   DELISTED → remove the mapping.
+//     oec-token (chain 66, OKT) is gone from CoinGecko's catalogue: /coins/oec-token
+//     answers "coin not found" and a search for OKT returns nothing, yet /simple/price
+//     still serves a husk frozen at $4.96 since Nov 2025. Flagging that as stale would
+//     park a permanently unrecoverable number on the chain forever, so chain 66 now has no
+//     price at all — which is the truth: we have no source for it.
+//
+//   QUIET MARKET → keep and let the staleness flag speak.
+//     canto (CANTO) and fantom (FTM) both still resolve on /coins/{id}; their markets are
+//     thin or gone, not their listings. fantom is deliberately NOT remapped to sonic-3
+//     despite market cap 0 and ~$32 volume — chain 250's native currency really is FTM, and
+//     substituting Sonic's S would misreport a different asset.
 const CHAIN_ID_TO_COINGECKO_ID = {
   1: 'ethereum',
   10: 'ethereum',
   25: 'crypto-com-chain',
   56: 'binancecoin',
-  66: 'oec-token',
   100: 'xdai',
   137: 'polygon-ecosystem-token',
   146: 'sonic-3',
@@ -85,14 +92,18 @@ function getCachedByCoinId(coinId) {
 function toPublic(entry) {
   if (!entry || !entry.quote) return null;
   const q = entry.quote;
-  // `stale` is a claim about the UPSTREAM number, not about our cache. A stale quote is
-  // still returned — the last known value and its age are useful — but no consumer may
-  // present it as current. Callers that render it must check this flag.
+  // `stale` is a claim about the UPSTREAM number, not about our cache.
   const stale = q.asOf != null && Date.now() - q.asOf > PRICE_STALE_AFTER_MS;
   return {
     usd: q.usd,
-    vol24h: q.vol24h,
-    marketCap: q.marketCap,
+    // The price survives staleness because a last known price plus its age is still
+    // informative. Volume and market cap do not: both describe a window that has since
+    // closed, so a months-old figure is not a weaker version of the answer, it is a
+    // different question. Nulled HERE rather than left to each consumer — the first cut of
+    // this had the dashboard hiding them while the API and the MCP tools served them, which
+    // is two answers to one question.
+    vol24h: stale ? null : q.vol24h,
+    marketCap: stale ? null : q.marketCap,
     asOf: q.asOf != null ? new Date(q.asOf).toISOString() : null,
     stale,
     updatedAt: entry.updatedAt

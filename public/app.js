@@ -3604,10 +3604,10 @@ async function loadChainDetail(chainId, box) {
                 + ` Read ${relTime(p.updatedAt)}. Rollups are mapped to their settlement token.${staleNote}`,
             text: `$${p.usd.toLocaleString()}${p.stale ? ` · stale (${asOfText})` : ''}`
         })));
-        // 24h volume is the ASSET's trading activity, not the chain's throughput. Suppressed
-        // entirely when stale: a months-old volume figure invites exactly the wrong reading,
-        // and unlike a price it has no residual value.
-        if (typeof p.vol24h === 'number' && !p.stale) {
+        // 24h volume is the ASSET's trading activity, not the chain's throughput. A stale
+        // quote arrives with this already nulled by the service, so absence here means
+        // "no current figure" and needs no second staleness check.
+        if (typeof p.vol24h === 'number') {
             box.appendChild(detailRow(`${sym} 24h volume`, el('span', {
                 title: `Trading volume of ${sym} across exchanges over the last 24 hours, from CoinGecko`
                     + `${p.asOf ? ` (last moved ${asOfText})` : ''}. This is market activity for the asset —`
@@ -3616,7 +3616,7 @@ async function loadChainDetail(chainId, box) {
                 text: Viz.fmtUsd(p.vol24h)
             })));
         }
-        if (typeof p.marketCap === 'number' && !p.stale) {
+        if (typeof p.marketCap === 'number') {
             box.appendChild(detailRow(`${sym} market cap`, el('span', {
                 title: `Circulating market capitalisation of ${sym}, from CoinGecko. A property of the asset,`
                     + ' not of this chain.',

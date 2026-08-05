@@ -266,10 +266,59 @@ describe('priceService', () => {
       });
       const q = await getPriceForChain(1);
       expect(q.stale).toBe(true);
-      // The value is still returned — the last known number and its age are useful. What
-      // must not happen is a consumer showing it as current.
+      // The PRICE survives: a last known price plus its age is still informative.
       expect(q.usd).toBe(4.96);
       expect(q.asOf).toBe(new Date(secs(longAgo) * 1000).toISOString());
+      // Volume and market cap do NOT: they describe a window that has since closed, so a
+      // months-old figure is a different question rather than a weaker answer. Nulled by the
+      // service so every consumer gets one answer — an earlier cut left the dashboard hiding
+      // them while the API served them.
+      expect(q.vol24h).toBeNull();
+      expect(q.marketCap).toBeNull();
+    });
+
+    it('holds the line exactly at the staleness threshold', async () => {
+      // Time is frozen because the boundary is otherwise unreachable: last_updated_at has
+      // second granularity while the threshold is in milliseconds, so a wall-clock test can
+      // never make the age EXACTLY the threshold — and a version of this test that only
+      // checked "a second inside" and "a minute outside" passed happily when > was mutated
+      // to >=, which is the one distinction it claimed to pin.
+      vi.useFakeTimers();
+      try {
+        const now = 1785946000000; // whole second, so the arithmetic below is exact
+        vi.setSystemTime(now);
+        const exactly = (now - 86400000) / 1000;
+
+        vi.mocked(fetchUtil.proxyFetch).mockResolvedValue({
+          ok: true,
+          json: async () => ({ ethereum: { usd: 10, usd_24h_vol: 555, last_updated_at: exactly } })
+        });
+        // Age === threshold. `stale` is a strict >, so this is still current.
+        const atBoundary = await getPriceForChain(1);
+        expect(atBoundary.stale).toBe(false);
+        expect(atBoundary.vol24h).toBe(555);
+
+        clearPriceCache();
+        vi.mocked(fetchUtil.proxyFetch).mockResolvedValue({
+          ok: true,
+          json: async () => ({ ethereum: { usd: 10, usd_24h_vol: 555, last_updated_at: exactly - 1 } })
+        });
+        // One second past it, and the volume goes.
+        const pastBoundary = await getPriceForChain(1);
+        expect(pastBoundary.stale).toBe(true);
+        expect(pastBoundary.vol24h).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('has no mapping for a chain whose asset CoinGecko delisted', async () => {
+      // Chain 66 (OKXChain, OKT): /coins/oec-token answers "coin not found" and a search for
+      // OKT returns nothing, yet /simple/price still serves a husk frozen at $4.96 since
+      // Nov 2025. Flagging that stale would park an unrecoverable number on the chain
+      // forever, so the honest answer is that we have no source.
+      expect(getCoinGeckoId(66)).toBeNull();
+      expect(await getPriceForChain(66)).toBeNull();
     });
 
     it('treats a non-positive market cap as unknown rather than as zero', async () => {
