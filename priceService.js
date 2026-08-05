@@ -3,7 +3,8 @@ import {
   PRICE_CACHE_TTL_MS,
   PRICE_NEGATIVE_CACHE_TTL_MS,
   PRICE_FETCH_TIMEOUT_MS,
-  PRICE_STALE_AFTER_MS,
+  PRICE_QUOTE_MAX_AGE_MS,
+  PRICE_REFRESH_INTERVAL_MS,
 } from './config.js';
 
 // chainId → CoinGecko asset id for the chain's NATIVE currency.
@@ -93,7 +94,7 @@ function toPublic(entry) {
   if (!entry || !entry.quote) return null;
   const q = entry.quote;
   // `stale` is a claim about the UPSTREAM number, not about our cache.
-  const stale = q.asOf != null && Date.now() - q.asOf > PRICE_STALE_AFTER_MS;
+  const stale = q.asOf != null && Date.now() - q.asOf > PRICE_QUOTE_MAX_AGE_MS;
   return {
     usd: q.usd,
     // The price survives staleness because a last known price plus its age is still
@@ -271,6 +272,41 @@ export async function prefetchAllPrices() {
   const coinIds = [...new Set(Object.values(CHAIN_ID_TO_COINGECKO_ID))];
   const fetched = await fetchCoinIds(coinIds);
   recordResults(coinIds, fetched);
+}
+
+let refreshTimer = null;
+
+/**
+ * Re-warm every mapped asset on a timer.
+ *
+ * Without this, prices refresh only when a request happens to land on an expired entry, so
+ * one unlucky caller an hour waits on a CoinGecko round trip while everyone else is served
+ * from cache. Every other periodic job here (RPC health, L2BEAT, source self-heal) already
+ * runs this way; prices were the one warmed once at boot and then left to expire.
+ *
+ * One batched request per tick regardless of how many assets are mapped, because
+ * prefetchAllPrices sends every id in a single call.
+ */
+export function startPriceRefresh() {
+  if (refreshTimer) return;
+  if (!PRICE_REFRESH_INTERVAL_MS || PRICE_REFRESH_INTERVAL_MS <= 0) return;
+  refreshTimer = setInterval(() => {
+    // Unreachable today — prefetchAllPrices swallows its own fetch errors — but a tick that
+    // rejected would take the process down with an unhandled rejection, so the guard stays
+    // rather than depending on another function's internals.
+    prefetchAllPrices().catch(err =>
+      console.warn(`Price refresh tick failed: ${err.message}`)
+    );
+  }, PRICE_REFRESH_INTERVAL_MS);
+  // Never keep the process alive just for this.
+  if (typeof refreshTimer.unref === 'function') refreshTimer.unref();
+}
+
+export function stopPriceRefresh() {
+  if (refreshTimer) {
+    clearInterval(refreshTimer);
+    refreshTimer = null;
+  }
 }
 
 export function clearPriceCache() {

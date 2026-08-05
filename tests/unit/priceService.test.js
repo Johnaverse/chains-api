@@ -4,7 +4,8 @@ vi.mock('../../config.js', () => ({
   PRICE_CACHE_TTL_MS: 3600000,
   PRICE_NEGATIVE_CACHE_TTL_MS: 300000,
   PRICE_FETCH_TIMEOUT_MS: 3000,
-  PRICE_STALE_AFTER_MS: 86400000,
+  PRICE_QUOTE_MAX_AGE_MS: 86400000,
+  PRICE_REFRESH_INTERVAL_MS: 3600000,
   PROXY_URL: '',
   PROXY_ENABLED: false,
 }));
@@ -19,6 +20,8 @@ import {
   getPricesForChains,
   getCoinGeckoId,
   clearPriceCache,
+  startPriceRefresh,
+  stopPriceRefresh,
 } from '../../priceService.js';
 
 describe('priceService', () => {
@@ -308,6 +311,70 @@ describe('priceService', () => {
         expect(pastBoundary.stale).toBe(true);
         expect(pastBoundary.vol24h).toBeNull();
       } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('re-warms every mapped asset on a timer, in one batched call per tick', async () => {
+      // The point of the timer: without it, entries expire and the next caller to touch an
+      // expired one waits on the round trip. Nothing else in this file exercises a tick.
+      vi.useFakeTimers();
+      try {
+        vi.mocked(fetchUtil.proxyFetch).mockResolvedValue({
+          ok: true, json: async () => ({ ethereum: { usd: 1 } })
+        });
+        startPriceRefresh();
+        expect(fetchUtil.proxyFetch).not.toHaveBeenCalled(); // start alone must not fetch
+
+        await vi.advanceTimersByTimeAsync(3600000);
+        expect(fetchUtil.proxyFetch).toHaveBeenCalledTimes(1); // one batch, not one per asset
+
+        await vi.advanceTimersByTimeAsync(3600000);
+        expect(fetchUtil.proxyFetch).toHaveBeenCalledTimes(2);
+      } finally {
+        stopPriceRefresh();
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not stack timers when started twice, and stops cleanly', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.mocked(fetchUtil.proxyFetch).mockResolvedValue({
+          ok: true, json: async () => ({ ethereum: { usd: 1 } })
+        });
+        startPriceRefresh();
+        startPriceRefresh(); // a second call must be a no-op, not a second interval
+        await vi.advanceTimersByTimeAsync(3600000);
+        expect(fetchUtil.proxyFetch).toHaveBeenCalledTimes(1);
+
+        stopPriceRefresh();
+        await vi.advanceTimersByTimeAsync(3600000 * 3);
+        expect(fetchUtil.proxyFetch).toHaveBeenCalledTimes(1); // nothing after stop
+      } finally {
+        stopPriceRefresh();
+        vi.useRealTimers();
+      }
+    });
+
+    it('keeps the schedule when the upstream fetch fails', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.mocked(fetchUtil.proxyFetch).mockRejectedValue(new Error('network'));
+        startPriceRefresh();
+        await vi.advanceTimersByTimeAsync(3600000);
+        vi.mocked(fetchUtil.proxyFetch).mockResolvedValue({
+          ok: true, json: async () => ({ ethereum: { usd: 1 } })
+        });
+        // A failed upstream call must not stop the schedule — that would silently freeze
+        // prices until a restart. Note this exercises a FAILED FETCH, not a thrown tick:
+        // prefetchAllPrices swallows fetch errors internally, so the .catch in the interval
+        // is unreachable belt-and-braces today (confirmed by mutation: deleting it fails
+        // nothing). It stays because that is an internal detail of another function.
+        await vi.advanceTimersByTimeAsync(3600000);
+        expect(fetchUtil.proxyFetch).toHaveBeenCalledTimes(2);
+      } finally {
+        stopPriceRefresh();
         vi.useRealTimers();
       }
     });

@@ -96,7 +96,11 @@ vi.mock('../../priceService.js', () => ({
   }),
   getCoinGeckoId: vi.fn(() => null),
   clearPriceCache: vi.fn(),
-  prefetchAllPrices: vi.fn(async () => {})
+  prefetchAllPrices: vi.fn(async () => {}),
+  // The server starts the hourly re-warm alongside the other refreshers; stubbed so the
+  // integration suite never schedules a real interval.
+  startPriceRefresh: vi.fn(),
+  stopPriceRefresh: vi.fn()
 }));
 
 vi.mock('../../clientsView.js', () => ({

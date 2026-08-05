@@ -50,7 +50,7 @@ import { refresherRoute } from './routes/refresher.js';
 import { summaryRoute } from './routes/summary.js';
 import { rootRoute } from './routes/root.js';
 import { assistantRoutes } from './routes/assistant.js';
-import { prefetchAllPrices } from '../../priceService.js';
+import { prefetchAllPrices, startPriceRefresh } from '../../priceService.js';
 import { logger } from '../util/logger.js';
 
 function resolveCorsOrigin(value) {
@@ -294,12 +294,15 @@ export async function buildApp(options = {}) {
     startRpcHealthCheck();
     startL2BeatRefresh();
     startSourceRefresher();
-    // Warm the price cache in the background so the first /chains request
-    // doesn't pay a CoinGecko round-trip. Failures are silent — a cold
-    // cache falls back to per-request fetching with the same timeout.
+    // Warm the price cache now so the first /chains request doesn't pay a CoinGecko
+    // round-trip, then keep it warm on a timer. Without the timer, entries expire after
+    // PRICE_CACHE_TTL_MS and the next caller to touch an expired one waits on the fetch.
+    // Failures are silent either way — a cold cache falls back to per-request fetching with
+    // the same timeout.
     prefetchAllPrices().catch(err => {
       logger.warn({ err: err.message }, 'Initial price prefetch failed');
     });
+    startPriceRefresh();
   }
 
   await fastify.register(adminRoutes);

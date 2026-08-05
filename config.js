@@ -122,12 +122,27 @@ export const PROXY_ENABLED = PROXY_URL !== '';
 export const PRICE_CACHE_TTL_MS = parseIntEnv('PRICE_CACHE_TTL_MS', 3600000);
 export const PRICE_NEGATIVE_CACHE_TTL_MS = parseIntEnv('PRICE_NEGATIVE_CACHE_TTL_MS', 300000);
 export const PRICE_FETCH_TIMEOUT_MS = parseIntEnv('PRICE_FETCH_TIMEOUT_MS', 3000);
-// How old CoinGecko's own `last_updated_at` may be before a quote stops counting as current.
-// This is NOT a cache TTL: CoinGecko keeps serving quotes for assets whose market has moved
-// on (observed 183 days for matic-network and 274 for oec-token), so without this a long-dead
-// number is indistinguishable from a live one. 24h is generous — a real market updates within
-// minutes — and deliberately so, since the point is to catch the dead, not the merely quiet.
-export const PRICE_STALE_AFTER_MS = parseIntEnv('PRICE_STALE_AFTER_MS', 86400000);
+// How old COINGECKO'S OWN `last_updated_at` may be before a quote stops counting as current.
+//
+// Named for the quote rather than for staleness because three different durations meet here
+// and only one of them is about us:
+//   • the "24h" in 24h volume is CoinGecko's measurement WINDOW, which rolls continuously
+//     upstream and is not a refresh interval at all;
+//   • PRICE_CACHE_TTL_MS is how often WE re-read the number;
+//   • this is how stale the UPSTREAM number may be before we refuse to call it current.
+// The last two both defaulting to a day's magnitude was needlessly confusing.
+//
+// CoinGecko keeps serving quotes for assets whose market has moved on (observed 183 days for
+// matic-network, 274 for the since-delisted oec-token), so without this a long-dead number is
+// indistinguishable from a live one. A day is deliberately generous — a real market moves
+// within minutes — because the job is to catch the dead, not the merely quiet.
+export const PRICE_QUOTE_MAX_AGE_MS = parseIntEnv('PRICE_QUOTE_MAX_AGE_MS', 86400000);
+
+// How often to re-warm every mapped asset in the background. Without this, prices refresh
+// only when a request happens to find an expired entry, which makes one unlucky caller per
+// hour wait on a CoinGecko round trip. One batched request per tick — 24 calls a day against
+// a free tier that allows tens per minute. 0 disables it and restores purely lazy refresh.
+export const PRICE_REFRESH_INTERVAL_MS = parseIntEnv('PRICE_REFRESH_INTERVAL_MS', 3600000);
 
 // Live incidents feed (chains-status-news). Used by the get_live_incidents
 // tool so the assistant/MCP can answer "is X down" questions server-side.
