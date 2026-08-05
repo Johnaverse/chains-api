@@ -4,6 +4,7 @@ vi.mock('../../config.js', () => ({
   PRICE_CACHE_TTL_MS: 3600000,
   PRICE_NEGATIVE_CACHE_TTL_MS: 300000,
   PRICE_FETCH_TIMEOUT_MS: 3000,
+  PRICE_STALE_AFTER_MS: 86400000,
   PROXY_URL: '',
   PROXY_ENABLED: false,
 }));
@@ -39,8 +40,11 @@ describe('priceService', () => {
       expect(getCoinGeckoId(8453)).toBe('ethereum');
     });
 
-    it('should return matic-network for Polygon (137)', () => {
-      expect(getCoinGeckoId(137)).toBe('matic-network');
+    // POL, not MATIC: chain 137's native currency migrated, and CoinGecko still serves a
+    // matic-network quote that stopped moving in Feb 2026 — so the old id was not merely
+    // outdated, it was a live-looking wrong answer.
+    it('should return polygon-ecosystem-token for Polygon (137)', () => {
+      expect(getCoinGeckoId(137)).toBe('polygon-ecosystem-token');
     });
   });
 
@@ -144,7 +148,7 @@ describe('priceService', () => {
         ok: true,
         json: async () => ({
           ethereum: { usd: 2000.5 },
-          'matic-network': { usd: 0.8 },
+          'polygon-ecosystem-token': { usd: 0.8 },
         }),
       });
       const result = await getPricesForChains([1, 137, 10]); // 10 shares ETH with 1
@@ -152,7 +156,7 @@ describe('priceService', () => {
       // Verify the URL contains both ids (not three)
       const url = vi.mocked(fetchUtil.proxyFetch).mock.calls[0][0];
       expect(url).toContain('ethereum');
-      expect(url).toContain('matic-network');
+      expect(url).toContain('polygon-ecosystem-token');
       expect(result.get(1)).toMatchObject({ usd: 2000.5 });
       expect(result.get(137)).toMatchObject({ usd: 0.8 });
       expect(result.get(10)).toMatchObject({ usd: 2000.5 }); // sibling reuse
@@ -210,12 +214,109 @@ describe('priceService', () => {
         ok: true,
         json: async () => ({
           ethereum: { usd: 2000.5 },
-          // matic-network is missing
+          // polygon-ecosystem-token is missing
         }),
       });
       const result = await getPricesForChains([1, 137]);
       expect(result.get(1)).toMatchObject({ usd: 2000.5 });
       expect(result.get(137)).toBeNull();
+    });
+  });
+
+  describe('volume, market cap and upstream freshness', () => {
+    const HOUR = 3600000;
+    const secs = (ms) => Math.floor(ms / 1000);
+
+    it('asks CoinGecko for volume, market cap and its own timestamp', async () => {
+      vi.mocked(fetchUtil.proxyFetch).mockResolvedValue({
+        ok: true, json: async () => ({ ethereum: { usd: 2000.5 } })
+      });
+      await getPriceForChain(1);
+      const url = vi.mocked(fetchUtil.proxyFetch).mock.calls[0][0];
+      expect(url).toContain('include_24hr_vol=true');
+      expect(url).toContain('include_market_cap=true');
+      // Without this the response cannot be distinguished from a months-old one.
+      expect(url).toContain('include_last_updated_at=true');
+    });
+
+    it('surfaces volume and market cap, and converts the timestamp to an ISO instant', async () => {
+      const at = Date.now() - HOUR;
+      vi.mocked(fetchUtil.proxyFetch).mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          ethereum: {
+            usd: 2000.5, usd_24h_vol: 7241466518.33,
+            usd_market_cap: 226115143171.46, last_updated_at: secs(at)
+          }
+        })
+      });
+      const q = await getPriceForChain(1);
+      expect(q.vol24h).toBeCloseTo(7241466518.33, 2);
+      expect(q.marketCap).toBeCloseTo(226115143171.46, 2);
+      expect(q.asOf).toBe(new Date(secs(at) * 1000).toISOString());
+      expect(q.stale).toBe(false);
+    });
+
+    it('flags a quote whose upstream timestamp is older than the threshold', async () => {
+      // Observed live: oec-token had not moved in 274 days while still being served.
+      const longAgo = Date.now() - 274 * 24 * HOUR;
+      vi.mocked(fetchUtil.proxyFetch).mockResolvedValue({
+        ok: true,
+        json: async () => ({ ethereum: { usd: 4.96, usd_24h_vol: 3700, last_updated_at: secs(longAgo) } })
+      });
+      const q = await getPriceForChain(1);
+      expect(q.stale).toBe(true);
+      // The value is still returned — the last known number and its age are useful. What
+      // must not happen is a consumer showing it as current.
+      expect(q.usd).toBe(4.96);
+      expect(q.asOf).toBe(new Date(secs(longAgo) * 1000).toISOString());
+    });
+
+    it('treats a non-positive market cap as unknown rather than as zero', async () => {
+      // Both observed live: -1 from oec-token, 0 from fantom. Neither is a market cap.
+      vi.mocked(fetchUtil.proxyFetch).mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          ethereum: { usd: 4.96, usd_market_cap: -1 },
+          'polygon-ecosystem-token': { usd: 0.03, usd_market_cap: 0, usd_24h_vol: 31.66 }
+        })
+      });
+      const m = await getPricesForChains([1, 137]);
+      expect(m.get(1).marketCap).toBeNull();
+      expect(m.get(137).marketCap).toBeNull();
+      // Volume of 31.66 is a real reported figure for a dead market — kept, not nulled.
+      expect(m.get(137).vol24h).toBeCloseTo(31.66, 2);
+    });
+
+    it('reports missing volume as null, never as zero', async () => {
+      vi.mocked(fetchUtil.proxyFetch).mockResolvedValue({
+        ok: true, json: async () => ({ ethereum: { usd: 2000.5 } })
+      });
+      const q = await getPriceForChain(1);
+      expect(q.vol24h).toBeNull();
+      expect(q.marketCap).toBeNull();
+      expect(q.asOf).toBeNull();
+      // No upstream timestamp means we cannot judge staleness, so we do not claim it is stale.
+      expect(q.stale).toBe(false);
+    });
+
+    it('shares the full quote with sibling chains on the same asset', async () => {
+      vi.mocked(fetchUtil.proxyFetch).mockResolvedValue({
+        ok: true,
+        json: async () => ({ ethereum: { usd: 2000.5, usd_24h_vol: 123456, last_updated_at: secs(Date.now()) } })
+      });
+      const m = await getPricesForChains([1, 10, 8453, 42161]);
+      // Base and Arbitrum legitimately report ETH's volume — the number describes the ASSET,
+      // not the chain, which is why consumers must name the asset when they show it.
+      for (const id of [1, 10, 8453, 42161]) expect(m.get(id).vol24h).toBe(123456);
+      expect(vi.mocked(fetchUtil.proxyFetch)).toHaveBeenCalledTimes(1);
+    });
+
+    it('still negative-caches an id upstream does not know', async () => {
+      vi.mocked(fetchUtil.proxyFetch).mockResolvedValue({ ok: true, json: async () => ({}) });
+      expect(await getPriceForChain(1)).toBeNull();
+      await getPriceForChain(1);
+      expect(vi.mocked(fetchUtil.proxyFetch)).toHaveBeenCalledTimes(1);
     });
   });
 });
