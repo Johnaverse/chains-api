@@ -23,10 +23,15 @@ import {
 } from '../../config.js';
 
 // Browser feed origins the /ui dashboard fetches from — kept in lock-step
-// with STATUS_NEWS_BASE / FORUM_NEWS_BASE in public/app.js. http + ws each.
+// with STATUS_NEWS_BASE / FORUM_NEWS_BASE / NEWS_BASE in public/app.js.
+// http + ws each.
 const DASHBOARD_FEED_ORIGINS = [
   'https://chains-status-news.johnaverse.cc', 'wss://chains-status-news.johnaverse.cc',
-  'https://chains-forum-news.johnaverse.cc', 'wss://chains-forum-news.johnaverse.cc'
+  'https://chains-forum-news.johnaverse.cc', 'wss://chains-forum-news.johnaverse.cc',
+  // chains-news (ecosystem news relay). Listed ahead of its public rollout so
+  // the dashboard's News tab works the moment DNS resolves; until then the
+  // fetch simply fails and the view shows its unavailable state.
+  'https://chains-news.johnaverse.cc', 'wss://chains-news.johnaverse.cc'
 ];
 import { chainsRoutes } from './routes/chains.js';
 import { relationsRoutes } from './routes/relations.js';

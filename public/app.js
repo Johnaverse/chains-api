@@ -1,103 +1,206 @@
 // ─────────────────────────────────────────────────────────────────────────
-// Chains dashboard — Networks (default landing: KPIs + chains + L2 scaling),
-// Relationships (lazy-loaded 3D graph), Incidents and Providers (live
-// operator/RPC-provider status, last 30 days), Timeline (upgrade windows
-// cross-linked with their fallout and coverage), Forum (post treemap).
-// Data: chains-api /summary (slim bulk, ETag + localStorage SWR; falls back
-// to /export then the checked-in snapshot), per-chain detail endpoints on
-// drawer open, and chains-status-news (WebSocket /ws).
+// Chains — blockchain network analytics dashboard.
+//
+// Views: Overview (cross-cutting joins), Networks (registry table),
+// Relationships (lazy 3D graph), Incidents, Providers, Forum.
+//
+// Data sources:
+//   • chains-api /summary — slim bulk registry (ETag + localStorage SWR,
+//     falls back to /export then the checked-in snapshot)
+//   • chains-api /stats, /health, /validate — headline counts, source
+//     freshness, cross-source data conflicts
+//   • chains-status-news — incidents over REST backfill + WebSocket
+//   • chains-forum-news — governance/forum posts over REST + WebSocket
+//
+// A NOTE ON HONESTY, because it constrains the whole render layer:
+// this backend persists NO time series. Every store is replace-in-place —
+// there is no TVS history, no price history, no uptime window, and
+// RpcEndpointResult.latencyMs is permanently null. So this dashboard shows
+// current state and cross-sectional structure only. There are no sparklines,
+// no deltas and no trend lines anywhere, and the event histograms are
+// explicitly labelled as counts of retained feed events rather than as
+// metric trends.
 // ─────────────────────────────────────────────────────────────────────────
 
 const SAME_ORIGIN_API =
     location.port === '3000' || location.hostname === 'chains-api.johnaverse.cc'
-    // The API serves this dashboard itself at /ui/ (any port) — those calls
-    // must stay same-origin, or a local server's UI would show prod's data.
+    // The API serves this dashboard itself at /ui/ (any port) — those calls must stay
+    // same-origin, or a local or staging server's own UI silently shows production data
+    // while looking like it shows that deployment's.
     || location.pathname.startsWith('/ui');
 const API_BASE = SAME_ORIGIN_API ? '' : 'https://chains-api.johnaverse.cc';
 const STATUS_NEWS_BASE = 'https://chains-status-news.johnaverse.cc';
 const FORUM_NEWS_BASE = 'https://chains-forum-news.johnaverse.cc';
+// chains-news: the third feed (ecosystem news). Kept in lock-step with
+// DASHBOARD_FEED_ORIGINS in src/http/app.js, which allow-lists it for the /ui
+// mirror's CSP.
+const NEWS_BASE = 'https://chains-news.johnaverse.cc';
 
-const COLORS = {
-    Mainnet: '#10b981', L2: '#8b5cf6', Testnet: '#f59e0b', Beacon: '#ec4899', Default: '#6b7280'
-};
 const ALL_SOURCES = ['chains', 'chainlist', 'theGraph', 'slip44', 'l2beat'];
+const SOURCE_LABELS = {
+    chains: 'Chain ID Network', chainlist: 'Chainlist', theGraph: 'The Graph',
+    slip44: 'SLIP-0044', l2beat: 'L2BEAT'
+};
+
+// ── One network taxonomy, used everywhere ──
+// The old UI mixed environment (mainnet/testnet) with orthogonal tags (L2,
+// Beacon, ZK) in a single column, so the column could not be scanned and the
+// node colours disagreed with the table. These four groups are mutually
+// exclusive and drive the type colour, the table column, the filter chips and
+// the graph legend from one definition.
+//
+// Only THREE categorical hues plus neutral gray: four hues cannot clear
+// all-pairs colour-vision separation, and the 3D graph puts any two node
+// colours side by side. See the palette note in style.css.
+const NET_CLASSES = {
+    mainnet: { key: 'mainnet', label: 'Mainnet L1', dot: 'dot-mainnet', cssVar: '--cat-1' },
+    l2: { key: 'l2', label: 'L2 / rollup', dot: 'dot-l2', cssVar: '--cat-2' },
+    testnet: { key: 'testnet', label: 'Testnet', dot: 'dot-testnet', cssVar: '--cat-3' },
+    other: { key: 'other', label: 'Other', dot: 'dot-other', cssVar: '--cat-0' }
+};
+// Three real groups. `other` stays defined as the fallback colour for a node
+// whose class can't be resolved, but nothing is classified into it — which also
+// means the type scale uses exactly the three validated categorical hues.
+const NET_CLASS_ORDER = ['mainnet', 'l2', 'testnet'];
+
+// Environment wins over the L2 tag: an L2 testnet is a testnet. That keeps the
+// groups disjoint and makes "Testnet" mean the same thing in every surface.
+//
+// Beacon is deliberately NOT a type here. It is an orthogonal capability tag —
+// Ethereum Mainnet (chain 1) carries it, and ranking it first typed the single
+// most important L1 in the registry as "Other". It shows up as a class tag on
+// the name instead, alongside ZK/Validium/Optimium.
+function netClass(c) {
+    const tags = c.tags || [];
+    if (tags.includes('Testnet')) return NET_CLASSES.testnet;
+    if (tags.includes('L2')) return NET_CLASSES.l2;
+    return NET_CLASSES.mainnet;
+}
+// Class tags shown as a sub-line on the network name (not in the Type column).
+function classTags(c) {
+    return (c.tags || []).filter(t => t !== 'Testnet');
+}
 
 const state = {
     chains: [], byId: new Map(), rel: new Map(),
     l2beat: new Map(), l2beatProjects: [], l2beatMeta: null,
     statusPagesByChain: new Map(),
-    lastUpdated: null
+    lastUpdated: null,
+    stats: null, health: null, validate: null,
+    // chainId → array of OPEN incidents affecting it (operator + provider fan-out)
+    openByChain: new Map()
 };
 
-// graph state
-let graphData = { nodes: [], links: [] };
-let filteredData = { nodes: [], links: [] };
-let currentFilter = 'all';
-let enabledSources = new Set(ALL_SOURCES);
-let myGraph = null;
-let graphBuilt = false;
-let graphDirty = true;      // data changed since the graph was last (re)built
-let graphLibPromise = null; // in-flight lazy load of 3d-force-graph.min.js
-
-// ─── DOM helper ───
+// ─── DOM helpers ─────────────────────────────────────────────────────────
+// Both spellings are accepted — an object ({ width: '40%' }) and a declaration string
+// ('width: 40%') — because the two halves of this file were written to different
+// conventions and a mismatch here fails silently rather than loudly. Everything routes
+// through setProperty, which also means custom properties (--x: y) work.
+function applyStyle(node, v) {
+    const decls = typeof v === 'string'
+        ? v.split(';').map(d => d.split(':')).filter(p => p.length >= 2)
+            .map(([prop, ...rest]) => [prop.trim(), rest.join(':').trim()])
+        : Object.entries(v).map(([prop, val]) => [prop.replace(/[A-Z]/g, m => `-${m.toLowerCase()}`), String(val)]);
+    for (const [prop, val] of decls) node.style.setProperty(prop, val);
+}
 function el(tag, props = {}, children = []) {
     const node = document.createElement(tag);
     for (const [k, v] of Object.entries(props)) {
+        if (v === null || v === undefined) continue;
         if (k === 'class') node.className = v;
         else if (k === 'text') node.textContent = v;
-        // Styles MUST go through the CSSOM: the page ships `style-src 'self'`
-        // with no 'unsafe-inline', so a style ATTRIBUTE is dropped by the
-        // browser without an error — positioned elements silently pile up at
-        // the origin. Pass an object, never a string.
-        else if (k === 'style' && v && typeof v === 'object') Object.assign(node.style, v);
+        // Styles go through the CSSOM, never through a style ATTRIBUTE. The API serves this
+        // dashboard at /ui under `style-src 'self'` with no 'unsafe-inline', so a style
+        // attribute is dropped there by the browser with NO console error — while the same
+        // page on GitHub Pages (which sends no CSP) looks fine. Anything positioned or
+        // coloured from JS therefore has to be assigned, or it silently collapses on /ui only.
+        else if (k === 'style') applyStyle(node, v);
         else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2), v);
-        else if (v !== null && v !== undefined) node.setAttribute(k, v);
+        else node.setAttribute(k, v);
     }
     for (const c of [].concat(children)) {
         if (c == null) continue;
-        node.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+        // A string child is ALWAYS text, never markup — createTextNode cannot execute anything.
+        if (typeof c === 'string') { node.appendChild(document.createTextNode(c)); continue; }
+        // Anything else must be a real Node. An explicit contract rather than a cast: it makes the
+        // helper fail safe on a stray value (a number, an object) instead of throwing deep in
+        // appendChild, and it states outright that no string can reach this line.
+        if (c instanceof Node) node.appendChild(c);
     }
     return node;
 }
-
-function classify(c) {
-    if (c.tags?.includes('Beacon')) return 'Beacon';
-    if (c.tags?.includes('L2')) return 'L2';
-    if (c.tags?.includes('Testnet')) return 'Testnet';
-    return 'Mainnet';
-}
+function byId(id) { return document.getElementById(id); }
+function clear(node) { if (node) node.textContent = ''; }
+// One place decides "is this a phone-sized viewport", matched to the CSS
+// breakpoint so JS and CSS never disagree about the layout in force.
+function isNarrow() { return window.matchMedia('(max-width: 760px)').matches; }
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
-function fmtUsd(n) {
-    if (n == null || !Number.isFinite(n)) return '—';
-    if (n >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;
-    if (n >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
-    if (n >= 1e3) return `$${(n / 1e3).toFixed(1)}K`;
-    return `$${n.toFixed(0)}`;
-}
+
+// ─── formatting ──────────────────────────────────────────────────────────
+const fmtUsd = n => Viz.fmtUsd(n);
+const fmtNum = n => Viz.fmtNum(n);
+
 function fmtDuration(ms) {
-    if (!ms || ms < 0) return null;
-    // Seconds below a minute. Rounding everything to minutes rendered a 35-second
-    // outage as "1m" and a 3-second step gap as "0m" — and uptime-monitor
-    // incidents are routinely tens of seconds long (Abstract's Portal recovered in
-    // 35s on Jul 20 and 3m on Jul 29).
+    if (!Number.isFinite(ms) || ms < 0) return null;
+    // Seconds below a minute. Rounding everything to minutes rendered a 35-second outage as
+    // "1m" and a 3-second step gap as "0m", and uptime-monitor incidents are routinely tens
+    // of seconds long. The previous fallback here read "under a minute", which is honest
+    // about the magnitude but composes into "+under a minute" in a lifecycle gap and
+    // "seen over under a minute" in a duration pill, and cannot tell 3s from 55s.
     if (ms < 60000) return `${Math.max(1, Math.round(ms / 1000))}s`;
     const m = Math.round(ms / 60000);
     if (m < 60) return `${m}m`;
     const h = Math.floor(m / 60);
     if (h < 24) return `${h}h ${m % 60}m`;
-    return `${Math.floor(h / 24)}d ${h % 24}h`;
+    const d = Math.floor(h / 24);
+    return `${d}d ${h % 24}h`;
 }
-function safeHost(url) { try { const u = new URL(url); return (u.protocol === 'http:' || u.protocol === 'https:') ? u.host : null; } catch { return null; } }
-// Provider status pages emit HTML bodies, and when the LLM enrichment falls back
-// to the raw body the dashboard rendered the markup as literal text —
-// "<p><strong>THIS IS A SCHEDULED EVENT Aug <var data-var='date'>5</var>…".
-// Tags out, entities decoded, whitespace collapsed.
+function fmtAge(seconds) {
+    if (!Number.isFinite(seconds)) return '—';
+    if (seconds < 90) return `${Math.round(seconds)}s ago`;
+    const m = seconds / 60;
+    if (m < 90) return `${Math.round(m)}m ago`;
+    const h = m / 60;
+    if (h < 36) return `${Math.round(h)}h ago`;
+    return `${Math.round(h / 24)}d ago`;
+}
+function relTime(iso) {
+    const t = Date.parse(iso || '');
+    if (Number.isNaN(t)) return '';
+    return fmtAge(Math.max(0, (Date.now() - t) / 1000));
+}
+function fmtDateTime(ms) {
+    return ms != null && !Number.isNaN(ms)
+        ? new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
+        : null;
+}
+// Only an http(s) URL may become an href. Feed and registry data is third-party, so a
+// `javascript:` URL here would be a clickable XSS — CodeQL flagged exactly this class. Returns
+// null on anything else, and el() drops a null attribute, so the title still renders as text
+// while ceasing to be a link. safeHost() below already applied this rule to the display label;
+// this applies it to the destination.
+function safeUrl(url) {
+    try {
+        const u = new URL(url);
+        return (u.protocol === 'http:' || u.protocol === 'https:') ? u.href : null;
+    } catch { return null; }
+}
+
+function safeHost(url) {
+    try {
+        const u = new URL(url);
+        return (u.protocol === 'http:' || u.protocol === 'https:') ? u.host : null;
+    } catch { return null; }
+}
+
+// Provider status pages emit HTML bodies, and when the LLM enrichment falls back to the raw
+// body the summary rendered the markup as literal text — "<p><strong>THIS IS A SCHEDULED
+// EVENT Aug <var data-var='date'>5</var>…". Tags out, entities decoded, whitespace collapsed.
 //
-// Deliberately NOT DOMParser: an inert parsed document read via textContent is
-// safe, but handing untrusted markup to a parser at all is the wrong shape and
-// CodeQL is right to flag it. Plain string work has no such question, and the
-// only entities these feeds emit are the handful mapped below. Every caller
-// assigns the result with textContent.
+// Deliberately NOT DOMParser: an inert parsed document read via textContent is safe, but
+// handing untrusted markup to a parser at all is the wrong shape and CodeQL is right to flag
+// it. Plain string work raises no such question, and the only entities these feeds emit are
+// the handful mapped below. Every caller assigns the result with textContent.
 const NAMED_ENTITIES = {
     amp: '&', lt: '<', gt: '>', quot: '"', apos: '\'', nbsp: ' ',
     mdash: '—', ndash: '–', hellip: '…', rsquo: '’', lsquo: '‘', ldquo: '“', rdquo: '”'
@@ -127,30 +230,46 @@ function decodeEntity(ref) {
     if (code >= 0xd800 && code <= 0xdfff) return null;
     return String.fromCodePoint(code);
 }
-function iconColorFor(chainId) { const c = state.byId.get(chainId); return c ? COLORS[classify(c)] : COLORS.Default; }
-function networkIcon(label, color, cls = 'net-icon') {
-    const n = el('span', { class: cls, text: (label || '?').charAt(0).toUpperCase() });
-    n.style.background = `linear-gradient(135deg, ${color}, ${color}44)`;
-    return n;
+function dayKey(ms) {
+    return ms != null && !Number.isNaN(ms) ? new Date(ms).toISOString().slice(0, 10) : null;
 }
 
+// A colored dot + text label. Type identity is never carried by text colour —
+// a light categorical hue is illegible as text on either surface.
+function typeTag(cls) {
+    return el('span', { class: 'tag' }, [
+        el('span', { class: `tag-dot ${cls.dot}` }), cls.label
+    ]);
+}
+
+
+// A table cell that also works in the stacked mobile card layout: `data-label`
+// becomes the field name shown beside the value, and cells with no value are
+// dropped there rather than rendering "TVS —" on every card.
+function td(label, children, { num = false, primary = false, empty = false, cls = '' } = {}) {
+    const classes = [num ? 'num' : '', primary ? 'cell-primary' : '', empty ? 'is-empty' : '', cls]
+        .filter(Boolean).join(' ');
+    return el('td', {
+        class: classes || null,
+        'data-label': primary ? null : label
+    }, children);
+}
+
+// ─── fetch helpers ───────────────────────────────────────────────────────
 async function api(path, { timeoutMs = 25000 } = {}) {
-    // fetch() has no built-in timeout — a stalled response (e.g. the multi-MB
-    // /export over a flaky connection) would otherwise hang forever and the
-    // page would never fall back or surface an error. Abort so callers can.
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
-        const res = await fetch(`${API_BASE}${path}`, { headers: { accept: 'application/json' }, signal: ctrl.signal });
+        const res = await fetch(`${API_BASE}${path}`, {
+            headers: { accept: 'application/json' }, signal: ctrl.signal
+        });
         if (!res.ok) throw new Error(`${path} → ${res.status}`);
         return await res.json();
-    } finally {
-        clearTimeout(timer);
-    }
+    } finally { clearTimeout(timer); }
 }
 
-// POST helper for the assistant. Unlike api(), non-2xx responses still carry a
-// useful JSON body ({error}) — return status + body so callers can branch.
+// POST helper for the assistant. Non-2xx responses still carry a useful JSON
+// body ({error}), so return status + body and let callers branch.
 async function apiPost(path, body, { timeoutMs = 70000 } = {}) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -164,47 +283,162 @@ async function apiPost(path, body, { timeoutMs = 70000 } = {}) {
         let data = null;
         try { data = await res.json(); } catch { /* non-JSON error body */ }
         return { status: res.status, ok: res.ok, data };
-    } finally {
-        clearTimeout(timer);
-    }
+    } finally { clearTimeout(timer); }
 }
 
 // ─────────────────────────────── bootstrap ───────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+    initTheme();
     initTabs();
     initSearch();
     initGraphControls();
     initDrawer();
     initAssistant();
     initIncidentControls();
-    initChainsTableHeader();
-    initAppbarHeight();     // keep --appbar-h in sync with the real bar height
-    document.getElementById('loadRetryBtn')?.addEventListener('click', () => loadBulk());
-    applyUrlState();        // restore view + ?q= immediately (before data loads)
-    // Start the live incidents feed immediately — it must NOT wait on the
-    // bulk load or it appears stuck.
+    initProviderControls();
+    initOverviewControls();
+    initNewsControls();
+    initChainsTable();
+    initAppbarHeight();
+    initResizeHandling();
+    byId('loadRetryBtn')?.addEventListener('click', () => loadBulk());
+    applyUrlState();
+
+    // The live feed must not wait on the bulk load or the tab looks stuck.
     connectStatusFeed();
     loadStatsLine();
-    loadProviderStats();
     loadBulk();
+    loadDiagnostics();
+    // One snapshot, fetched at boot rather than on first visit to the tab: it is a single
+    // small request, and having it already resolved means switching to Providers paints the
+    // board immediately instead of after a round-trip.
+    loadProviderStats();
     window.addEventListener('popstate', applyUrlState);
 });
 
-let stats = null;
-async function loadStatsLine() {
-    try {
-        stats = await api('/stats');
-        document.getElementById('statsLine').textContent =
-            `${stats.totalChains} chains · ${stats.totalMainnets} mainnets · ${stats.totalL2s} L2s · ${stats.totalTestnets} testnets`;
-        renderSummaryCards();
-    } catch { /* noop */ }
+// ─── theme ───────────────────────────────────────────────────────────────
+// Charts read their colours from CSS custom properties at render time, so a
+// theme flip only needs a re-render — no palette duplication in JS.
+function initTheme() {
+    byId('themeToggle')?.addEventListener('click', () => {
+        const current = document.documentElement.getAttribute('data-theme')
+            || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+        const next = current === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', next);
+        try { localStorage.setItem('chains:theme', next); } catch { /* best effort */ }
+        rerenderCharts();
+        if (myGraph) myGraph.backgroundColor(Viz.cssVar('--page'));
+    });
 }
 
-// ─── bulk load: /summary with ETag + localStorage stale-while-revalidate ───
-// A cached copy renders instantly on repeat visits; the network trip then
-// revalidates (304 = free) or refreshes in the background.
-const SUMMARY_LS_KEY = 'chains:summary:v1';
-const SUMMARY_TTL_MS = 24 * 60 * 60 * 1000; // ignore copies older than a day
+function initResizeHandling() {
+    const onResize = debounce(() => rerenderCharts(), 180);
+    window.addEventListener('resize', onResize);
+
+    // Backgrounding the browser tab should also stop the WebGL loop — browsers
+    // throttle rAF for hidden tabs but do not guarantee it stops.
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) pauseGraph();
+        else if (activeView === 'graph') resumeGraph();
+    });
+}
+
+// Re-render every chart on the active view. Charts are laid out against their
+// container width and read theme colours at render time, so resize and theme
+// changes both just need this.
+function rerenderCharts() {
+    if (activeView === 'overview') renderOverview({ force: true });
+    else if (activeView === 'incidents') renderIncidents();
+    else if (activeView === 'providers') renderProviders();
+    else if (activeView === 'news') renderNewsSources();
+    // The forum list caps posts per group by breakpoint, so it re-renders too.
+    else if (activeView === 'forum') { renderForumTreemap(); renderForumList(); }
+}
+
+// ─── headline counts ─────────────────────────────────────────────────────
+async function loadStatsLine() {
+    try {
+        state.stats = await api('/stats');
+        renderAppbarMeta();
+        if (activeView === 'overview') renderOverview();
+    } catch { /* the bulk load still populates counts */ }
+}
+
+// /health and the validation report power the two credibility panels on
+// Overview. They are the most trustworthy thing this API exposes and the old
+// dashboard never called either one.
+//
+// The counts come from /metrics rather than /validate: the panel renders 17
+// numbers, and /validate ships 184 KB to deliver them (92 KB of `allErrors` +
+// 92 KB of `errorsByRule` we never read). /metrics exposes the same figures as
+// gauges in 3.4 KB — a ~54x smaller parse, which matters on a phone. /validate
+// stays as the fallback if the gauges are missing.
+async function loadDiagnostics() {
+    const [health, metrics] = await Promise.allSettled([api('/health'), apiText('/metrics')]);
+    if (health.status === 'fulfilled') state.health = health.value;
+
+    let validation = metrics.status === 'fulfilled' ? parseValidationMetrics(metrics.value) : null;
+    if (!validation) {
+        try { validation = await api('/validate'); } catch { /* panel shows nothing */ }
+    }
+    if (validation) state.validate = validation;
+
+    renderAppbarMeta();
+    if (activeView === 'overview') { renderDataQuality(); renderFreshness(); renderOverviewStats(); }
+}
+
+async function apiText(path, { timeoutMs = 15000 } = {}) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+        const res = await fetch(`${API_BASE}${path}`, { headers: { accept: 'text/plain' }, signal: ctrl.signal });
+        if (!res.ok) throw new Error(`${path} → ${res.status}`);
+        return await res.text();
+    } finally { clearTimeout(timer); }
+}
+
+// Pull `chains_api_validation_errors{rule="ruleN"} <count>` out of the
+// Prometheus exposition and rebuild the shape renderDataQuality already reads.
+// Returns null when the gauges are absent (they only appear once the server has
+// run validation), so the caller can fall back to /validate.
+function parseValidationMetrics(text) {
+    if (typeof text !== 'string') return null;
+    const summary = {};
+    let total = 0;
+    const re = /^chains_api_validation_errors\{rule="(rule\d+)"\}\s+(\d+(?:\.\d+)?)$/gm;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+        const n = Number(m[2]);
+        if (!Number.isFinite(n)) continue;
+        summary[m[1]] = n;
+        total += n;
+    }
+    if (!Object.keys(summary).length) return null;
+    return { totalErrors: total, summary, source: 'metrics' };
+}
+
+function renderAppbarMeta() {
+    const s = state.stats;
+    const chainsEl = byId('metaChains');
+    const asOfEl = byId('metaAsOf');
+    if (chainsEl) {
+        const n = s?.totalChains ?? state.chains.length;
+        chainsEl.textContent = n ? `${fmtNum(n)} networks` : '—';
+    }
+    if (asOfEl) {
+        const parts = [];
+        if (state.lastUpdated) parts.push(`registry ${relTime(state.lastUpdated)}`);
+        if (state.l2beatMeta?.fetchedAt) parts.push(`L2BEAT ${relTime(state.l2beatMeta.fetchedAt)}`);
+        asOfEl.textContent = parts.length ? parts.join(' · ') : 'loading…';
+        asOfEl.title = state.lastUpdated
+            ? `Registry built ${fmtDateTime(Date.parse(state.lastUpdated))}`
+            : '';
+    }
+}
+
+// ─── bulk load: /summary with ETag + localStorage SWR ────────────────────
+const SUMMARY_LS_KEY = 'chains:summary:v2';
+const SUMMARY_TTL_MS = 24 * 60 * 60 * 1000;
 
 function readCachedSummary() {
     try {
@@ -216,8 +450,11 @@ function readCachedSummary() {
     } catch { return null; }
 }
 function writeCachedSummary(payload, etag) {
-    try { localStorage.setItem(SUMMARY_LS_KEY, JSON.stringify({ savedAt: Date.now(), etag: etag || null, payload })); }
-    catch { /* quota/private mode — cache is best-effort */ }
+    try {
+        localStorage.setItem(SUMMARY_LS_KEY, JSON.stringify({
+            savedAt: Date.now(), etag: etag || null, payload
+        }));
+    } catch { /* quota / private mode — cache is best-effort */ }
 }
 
 async function loadBulk() {
@@ -225,173 +462,204 @@ async function loadBulk() {
     const cached = readCachedSummary();
     if (cached) applyBulk(cached.payload);
 
-    // 1) /summary (slim, ETag-aware) — 2 attempts for transient tunnel blips.
     for (let attempt = 0; attempt < 2; attempt++) {
         try {
             const headers = { accept: 'application/json' };
             if (cached?.etag) headers['if-none-match'] = cached.etag;
             const res = await fetch(`${API_BASE}/summary`, { headers, signal: AbortSignal.timeout(25000) });
-            if (res.status === 304) { writeCachedSummary(cached.payload, cached.etag); return; } // cache is current
-            if (!res.ok) throw new Error(`${res.status}`);
+            if (res.status === 304) { writeCachedSummary(cached.payload, cached.etag); return; }
+            if (!res.ok) throw new Error(String(res.status));
             const payload = await res.json();
             writeCachedSummary(payload, res.headers.get('etag'));
             applyBulk(payload);
             return;
         } catch { if (attempt === 0) await new Promise(r => setTimeout(r, 1200)); }
     }
-    // 2) legacy /export (older API deployments), 3) checked-in slim snapshot.
-    try { applyBulk(await api('/export')); return; } catch { /* next */ }
+    try { applyBulk(await api('/export')); return; } catch { /* next fallback */ }
     try { applyBulk(await (await fetch('summary.json')).json()); return; } catch { /* fall through */ }
     if (!state.chains.length) showLoadError();
 }
 
-// Accepts both shapes: /summary ({chains, l2beat}) and /export ({data:{indexed:{all}}}).
+// Accepts both /summary ({chains, l2beat}) and /export ({data:{indexed:{all}}}).
 let statusPagesLoaded = false;
 function applyBulk(payload) {
     const data = payload.data ?? payload;
     state.chains = data.chains ?? data.indexed?.all ?? [];
     state.lastUpdated = data.lastUpdated ?? null;
     state.byId = new Map(state.chains.map(c => [c.chainId, c]));
-    state.l2beatMeta = data.l2beat ? { source: data.l2beat.source, count: (data.l2beat.projects || []).length } : null;
+    state.l2beatMeta = data.l2beat
+        ? {
+            source: data.l2beat.source,
+            fetchedAt: data.l2beat.fetchedAt ?? null,
+            count: (data.l2beat.projects || []).length
+        }
+        : null;
     state.l2beatProjects = data.l2beat?.projects ?? [];
     state.l2beat = new Map();
     for (const p of state.l2beatProjects) if (p.chainId != null) state.l2beat.set(p.chainId, p);
     state.rel = new Map();
 
     buildRelations();
+    buildOpenIncidentIndex();
     graphDirty = true;
     if (activeView === 'graph') ensureGraphView();
-    renderSummaryCards();   // total TVS needs the L2BEAT projects just loaded
-    renderScalingChart();
-    renderChainsView();
-    if (!document.getElementById('statsLine').textContent.includes('chains')) {
-        document.getElementById('statsLine').textContent = `${state.chains.length} chains loaded`;
-    }
-    if (!statusPagesLoaded) { statusPagesLoaded = true; loadStatusPages(); } // drawer status-page links
-    applyUrlState();        // deep-link ?chain=
+
+    renderAppbarMeta();
+    renderChainFilters();
+    // Building 100 table rows costs ~30 ms on a throttled phone. Only do it if
+    // the reader is actually on Networks; otherwise mark it stale and let
+    // switchView() build it on arrival.
+    if (activeView === 'networks') renderChainsTable();
+    else chainsTableStale = true;
+    if (activeView === 'overview') renderOverview();
+
+    if (!statusPagesLoaded) { statusPagesLoaded = true; loadStatusPages(); }
+    applyUrlState();
 }
 
 function showLoadError() {
-    const b = document.getElementById('loadErrorBanner');
-    if (b) b.classList.remove('hidden');
-    const o = document.getElementById('loadingOverlay');
+    byId('loadErrorBanner')?.classList.remove('hidden');
+    const o = byId('loadingOverlay');
     if (o) {
-        o.querySelector('.spinner').style.display = 'none';
-        o.querySelector('p').textContent = 'Failed to load data.';
-        o.querySelector('.loading-sub').textContent = 'Check your connection or that the API is reachable.';
+        o.querySelector('.spinner')?.classList.add('hidden');
+        const p = o.querySelector('p');
+        if (p) p.textContent = 'Could not load network data.';
+        const sub = o.querySelector('.loading-sub');
+        if (sub) sub.textContent = 'Check your connection, or that the API is reachable.';
     }
 }
-function hideLoadError() { document.getElementById('loadErrorBanner')?.classList.add('hidden'); }
+function hideLoadError() { byId('loadErrorBanner')?.classList.add('hidden'); }
 
-// ─── relations ───
+// ─── relations ───────────────────────────────────────────────────────────
 function relEntry(id) {
-    if (!state.rel.has(id)) state.rel.set(id, { l1Parent: null, mainnet: null, l2Children: [], testnetChildren: [] });
+    if (!state.rel.has(id)) {
+        state.rel.set(id, { l1Parent: null, mainnet: null, l2Children: [], testnetChildren: [] });
+    }
     return state.rel.get(id);
 }
+// /summary carries both directions of every edge (l2Of/parentOf and
+// testnetOf/mainnetOf), so fold them into one entry per chain.
 function buildRelations() {
     for (const c of state.chains) {
         for (const r of c.relations ?? []) {
             if (r.chainId == null) continue;
-            if (r.kind === 'l2Of') { relEntry(c.chainId).l1Parent = r.chainId; relEntry(r.chainId).l2Children.push(c.chainId); }
-            else if (r.kind === 'parentOf') { relEntry(r.chainId).l1Parent = c.chainId; relEntry(c.chainId).l2Children.push(r.chainId); }
-            else if (r.kind === 'testnetOf') { relEntry(c.chainId).mainnet = r.chainId; relEntry(r.chainId).testnetChildren.push(c.chainId); }
-            else if (r.kind === 'mainnetOf') { relEntry(r.chainId).mainnet = c.chainId; relEntry(c.chainId).testnetChildren.push(r.chainId); }
+            if (r.kind === 'l2Of') {
+                relEntry(c.chainId).l1Parent = r.chainId;
+                relEntry(r.chainId).l2Children.push(c.chainId);
+            } else if (r.kind === 'parentOf') {
+                relEntry(r.chainId).l1Parent = c.chainId;
+                relEntry(c.chainId).l2Children.push(r.chainId);
+            } else if (r.kind === 'testnetOf') {
+                relEntry(c.chainId).mainnet = r.chainId;
+                relEntry(r.chainId).testnetChildren.push(c.chainId);
+            } else if (r.kind === 'mainnetOf') {
+                relEntry(r.chainId).mainnet = c.chainId;
+                relEntry(c.chainId).testnetChildren.push(r.chainId);
+            }
         }
     }
-    for (const e of state.rel.values()) { e.l2Children = [...new Set(e.l2Children)]; e.testnetChildren = [...new Set(e.testnetChildren)]; }
+    for (const e of state.rel.values()) {
+        e.l2Children = [...new Set(e.l2Children)];
+        e.testnetChildren = [...new Set(e.testnetChildren)];
+    }
 }
 
-// ─── keep --appbar-h equal to the real (wrapping) app-bar height ───
-// The bar is position:fixed; content uses padding-top:var(--appbar-h). A fixed
-// guess overlaps on mobile when the bar wraps to extra rows (long stats line,
-// scrolled tabs). Measuring it guarantees content always clears the bar.
+// ─── app-bar height sync ─────────────────────────────────────────────────
+// The bar is fixed and content pads by var(--appbar-h). Measuring it keeps
+// content clear of the bar when it wraps to extra rows on narrow screens.
 function initAppbarHeight() {
-    const bar = document.getElementById('appbar');
+    const bar = byId('appbar');
     if (!bar) return;
     const sync = () => document.documentElement.style.setProperty('--appbar-h', `${bar.offsetHeight}px`);
     sync();
     window.addEventListener('resize', sync);
     if ('ResizeObserver' in window) new ResizeObserver(sync).observe(bar);
-    // Treemap tiles are absolutely positioned in px — re-fit on width change.
-    let rt;
-    window.addEventListener('resize', () => {
-        if (activeView !== 'forum' || !forum.loaded) return;
-        clearTimeout(rt); rt = setTimeout(renderForumTreemap, 150);
-    });
 }
 
-// ─────────────────────────────── tabs ───────────────────────────────
-function initTabs() {
-    const tabs = [...document.querySelectorAll('#tabs .tab')];
-    tabs.forEach(btn => btn.addEventListener('click', () => switchView(btn.dataset.view)));
-    // Arrow keys cycle the tab group (ARIA tabs pattern).
-    document.getElementById('tabs')?.addEventListener('keydown', e => {
-        if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-        e.preventDefault();
-        const i = tabs.findIndex(t => t.dataset.view === activeView);
-        const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length];
-        next.focus(); switchView(next.dataset.view);
-    });
-}
-// View / search / selected-chain are all reflected in the URL so each tab is a
-// separate, shareable, reloadable page (e.g. ?view=incidents&q=base).
-// Networks is the default landing view: info-dense and cheap to render —
-// the 3D graph (1.2 MB lib + physics warmup) only loads when visited.
-const VIEWS = ['networks', 'graph', 'incidents', 'providers', 'timeline', 'forum'];
-const DEFAULT_VIEW = 'networks';
+// ─────────────────────────────── tabs / routing ──────────────────────────
+const VIEWS = ['overview', 'networks', 'graph', 'incidents', 'providers', 'timeline', 'news', 'forum'];
+const DEFAULT_VIEW = 'overview';
 let activeView = DEFAULT_VIEW;
 let searchQuery = '';
 let openChainId = null;
 
+function initTabs() {
+    const tabs = [...document.querySelectorAll('#tabs .tab')];
+    tabs.forEach(btn => btn.addEventListener('click', () => switchView(btn.dataset.view)));
+    byId('tabs')?.addEventListener('keydown', e => {
+        if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+        e.preventDefault();
+        const i = tabs.findIndex(t => t.dataset.view === activeView);
+        const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length];
+        next.focus();
+        switchView(next.dataset.view);
+    });
+}
+
 function switchView(view, opts = {}) {
     if (!VIEWS.includes(view)) view = DEFAULT_VIEW;
     activeView = view;
-    document.querySelectorAll('#tabs .tab').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+    document.querySelectorAll('#tabs .tab').forEach(b =>
+        b.setAttribute('aria-selected', String(b.dataset.view === view)));
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-    document.getElementById(`view-${view}`).classList.add('active');
+    byId(`view-${view}`)?.classList.add('active');
     document.body.classList.toggle('graph-active', view === 'graph');
+
+    if (view === 'networks' && chainsTableStale) { chainsTableStale = false; renderChainsTable(); }
     if (view === 'graph') ensureGraphView();
-    if (view === 'timeline') ensureTimelineView(); else stopTimelineTicker();
+    else pauseGraph();   // stop the WebGL loop the moment the graph is hidden
     if (view === 'forum') ensureForumView();
+    if (view === 'news') ensureNewsView();
+    if (view === 'overview') renderOverview();
+    if (view === 'incidents') renderIncidents();
+    if (view === 'providers') renderProviders();
+    // The else is load-bearing: the timeline arms a 60s countdown ticker, and its own guard
+    // silently returns when another view is active — so a leaked interval has no symptom at
+    // all beyond a full re-render firing behind whatever tab the reader is on.
+    if (view === 'timeline') ensureTimelineView();
+    else stopTimelineTicker();
+
     updateSearchPlaceholder();
     applySearch();
     if (!opts.fromUrl) updateUrl({ push: true });
 }
 
 function updateSearchPlaceholder() {
-    const input = document.getElementById('searchInput');
-    if (input) input.placeholder = activeView === 'networks' ? 'Filter networks — id or name…'
-        : activeView === 'incidents' ? 'Filter incidents — network or title…'
-        : activeView === 'providers' ? 'Filter provider incidents — provider, chain or title…'
-        : activeView === 'timeline' ? 'Filter timeline — network, software or title…'
-        : activeView === 'forum' ? 'Filter forum posts — network, forum or title…'
-        : 'Find a network — id or name…';
+    const input = byId('searchInput');
+    if (!input) return;
+    input.placeholder =
+        activeView === 'networks' ? 'Filter networks — id or name…'
+            : activeView === 'incidents' ? 'Filter incidents — network or title…'
+                : activeView === 'providers' ? 'Filter provider incidents — provider, chain or title…'
+                    : activeView === 'timeline' ? 'Filter timeline — network, software or title…'
+                    : activeView === 'news' ? 'Filter news — title, source or network…'
+                : activeView === 'forum' ? 'Filter posts — network, forum or title…'
+                        : 'Search networks — id or name…';
 }
 
-// Apply the current ?q= search to whichever page is active.
 function applySearch() {
-    if (activeView === 'networks') { chainShown = CHAIN_PAGE; renderChainsView(); }
+    if (activeView === 'networks') { chainShown = null; renderChainsTable(); }
     else if (activeView === 'incidents') renderIncidentList();
     else if (activeView === 'providers') renderProviderList();
     else if (activeView === 'timeline') renderTimeline();
+    else if (activeView === 'news') renderNewsList();
     else if (activeView === 'forum') { renderForumTreemap(); renderForumList(); }
 }
 
 function updateUrl({ push = false } = {}) {
     const u = new URL(location.href);
     const set = (k, v) => { if (v == null || v === '') u.searchParams.delete(k); else u.searchParams.set(k, v); };
-    set('view', activeView === DEFAULT_VIEW ? null : activeView); // default view keeps the URL clean
+    set('view', activeView === DEFAULT_VIEW ? null : activeView);
     set('q', searchQuery || null);
     set('chain', openChainId);
     history[push ? 'pushState' : 'replaceState'](null, '', u);
 }
 
-// Restore view + query + open-chain from the URL (on load and on back/forward).
 function applyUrlState() {
     const params = new URLSearchParams(location.search);
     const q = params.get('q') || '';
     searchQuery = q.trim().toLowerCase();
-    const input = document.getElementById('searchInput');
+    const input = byId('searchInput');
     if (input && input.value !== q) input.value = q;
     switchView(params.get('view') || DEFAULT_VIEW, { fromUrl: true });
 
@@ -400,10 +668,7 @@ function applyUrlState() {
     else closeDrawer({ fromUrl: true });
 }
 
-// ─────────────────────────────── search (global) ───────────────────────────────
-// One predicate for every chain search surface (dropdown, networks table):
-// id, name, shortName, and the registry aliases /summary ships for renamed
-// chains — typing "optimism" must find OP Mainnet (10), "xdai" → Gnosis.
+// ─────────────────────────────── global search ───────────────────────────
 function chainMatchesQuery(c, q) {
     return String(c.chainId).includes(q)
         || c.name?.toLowerCase().includes(q)
@@ -412,73 +677,1296 @@ function chainMatchesQuery(c, q) {
 }
 
 function initSearch() {
-    const input = document.getElementById('searchInput');
-    const dd = document.getElementById('searchDropdown');
+    const input = byId('searchInput');
+    const dd = byId('searchDropdown');
+    if (!input || !dd) return;
     let activeIdx = -1;
 
-    // A jump-to-network autocomplete on every view (select → open detail). On
-    // Networks/Incidents the same query also filters the page.
     const renderDropdown = debounce(q => {
         if (!q) { dd.classList.add('hidden'); return; }
         const matches = state.chains.filter(c => chainMatchesQuery(c, q)).sort((a, b) => {
-            // Dead chains sink below living ones, then a name OR alias
-            // starting with the query outranks mid-string hits — "optimism"
-            // puts OP Mainnet (alias match) on top, Optimism Kovan last.
+            // Dead chains sink; then a name or alias starting with the query
+            // outranks a mid-string hit ("optimism" → OP Mainnet first).
             const ad = a.status === 'deprecated', bd = b.status === 'deprecated';
             if (ad !== bd) return ad ? 1 : -1;
-            const hit = c => (c.name || '').toLowerCase().startsWith(q) || (c.aliases || []).some(t => t.startsWith(q));
+            const hit = c => (c.name || '').toLowerCase().startsWith(q)
+                || (c.aliases || []).some(t => t.startsWith(q));
             const as = hit(a), bs = hit(b);
             if (as !== bs) return as ? -1 : 1;
             return (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase());
         }).slice(0, 40);
-        dd.textContent = ''; activeIdx = -1;
-        if (!matches.length) dd.appendChild(el('div', { class: 'dropdown-empty', text: 'No networks found.' }));
+
+        clear(dd);
+        activeIdx = -1;
+        if (!matches.length) {
+            dd.appendChild(el('div', { class: 'dropdown-empty', text: 'No networks found.' }));
+        }
         for (const c of matches) {
-            dd.appendChild(el('div', { class: 'dropdown-item', 'data-id': c.chainId, onclick: () => pick(c.chainId) }, [
-                networkIcon(c.name, COLORS[classify(c)], 'dropdown-icon'),
+            const cls = netClass(c);
+            const open = state.openByChain.get(c.chainId);
+            dd.appendChild(el('div', {
+                class: 'dropdown-item', role: 'option', 'data-id': c.chainId,
+                onclick: () => pick(c.chainId)
+            }, [
+                el('span', { class: `tag-dot ${cls.dot}` }),
                 el('div', { class: 'dropdown-info' }, [
-                    el('span', { class: 'dropdown-name', text: c.name || `Chain ${c.chainId}` }),
-                    el('div', { class: 'dropdown-meta', text: `ID: ${c.chainId} · ${(c.tags || []).join(', ') || classify(c)}${c.status === 'deprecated' ? ' · deprecated' : ''}` })
+                    el('div', { class: 'dropdown-name', text: c.name || `Chain ${c.chainId}` }),
+                    el('div', {
+                        class: 'dropdown-meta',
+                        text: [`ID ${c.chainId}`, cls.label,
+                            c.status === 'deprecated' ? 'deprecated' : null,
+                            open?.length ? 'open incident' : null].filter(Boolean).join(' · ')
+                    })
                 ])
             ]));
         }
         dd.classList.remove('hidden');
     }, 140);
 
-    // Filtering the page re-renders the whole table/list — debounce it so
-    // fast typing doesn't rebuild 2.5k rows per keystroke.
     const debouncedApplySearch = debounce(applySearch, 150);
     function onInput(raw) {
         searchQuery = raw.trim().toLowerCase();
-        updateUrl();           // ?q= reflects the search (shareable / reloadable)
+        updateUrl();
         debouncedApplySearch();
         renderDropdown(searchQuery);
     }
-    function pick(id) { dd.classList.add('hidden'); openChainDetail(id); if (activeView === 'graph') focusNodeById(id); }
+    function pick(id) {
+        dd.classList.add('hidden');
+        openChainDetail(id);
+        if (activeView === 'graph') focusNodeById(id);
+    }
     globalThis.pickChain = pick;
 
     input.addEventListener('input', e => onInput(e.target.value));
     input.addEventListener('keydown', e => {
         const items = dd.querySelectorAll('.dropdown-item');
-        if (e.key === 'ArrowDown' && items.length) { e.preventDefault(); activeIdx = Math.min(activeIdx + 1, items.length - 1); mark(items); }
-        else if (e.key === 'ArrowUp' && items.length) { e.preventDefault(); activeIdx = Math.max(activeIdx - 1, 0); mark(items); }
-        else if (e.key === 'Enter') { e.preventDefault(); const t = items[activeIdx] || items[0]; if (t) pick(Number(t.dataset.id)); }
-        else if (e.key === 'Escape') { dd.classList.add('hidden'); input.blur(); }
+        if (e.key === 'ArrowDown' && items.length) {
+            e.preventDefault(); activeIdx = Math.min(activeIdx + 1, items.length - 1); mark(items);
+        } else if (e.key === 'ArrowUp' && items.length) {
+            e.preventDefault(); activeIdx = Math.max(activeIdx - 1, 0); mark(items);
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            const t = items[activeIdx] || items[0];
+            if (t) pick(Number(t.dataset.id));
+        } else if (e.key === 'Escape') { dd.classList.add('hidden'); input.blur(); }
     });
-    function mark(items) { items.forEach((it, i) => it.classList.toggle('active', i === activeIdx)); items[activeIdx]?.scrollIntoView({ block: 'nearest' }); }
-    document.addEventListener('click', e => { if (!e.target.closest('.search-box')) dd.classList.add('hidden'); });
+    function mark(items) {
+        items.forEach((it, i) => it.classList.toggle('active', i === activeIdx));
+        items[activeIdx]?.scrollIntoView({ block: 'nearest' });
+    }
+    document.addEventListener('click', e => {
+        if (!e.target.closest('.search-box')) dd.classList.add('hidden');
+    });
     document.addEventListener('keydown', e => {
-        // "/" focuses global search — unless the user is typing somewhere else
-        // (e.g. the assistant textarea).
         const tag = document.activeElement?.tagName;
         if (e.key === '/' && tag !== 'INPUT' && tag !== 'TEXTAREA') { e.preventDefault(); input.focus(); }
     });
 }
 
-// ─────────────────────────────── graph ───────────────────────────────
-// The 1.2 MB 3d-force-graph library is NOT in index.html — it's injected on
-// the first visit to the Relationships tab so the default Networks landing
-// stays light.
+// ─── status pages (drawer links) ─────────────────────────────────────────
+async function loadStatusPages() {
+    try {
+        const d = await api('/status-pages');
+        for (const sp of d.statusPages || []) {
+            for (const id of sp.chainIds || []) {
+                state.statusPagesByChain.set(id, { id: sp.id, name: sp.name, url: sp.url });
+            }
+        }
+    } catch { /* the drawer simply omits the status-page link */ }
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// Incidents (chains-status-news: REST backfill + WebSocket)
+// ═════════════════════════════════════════════════════════════════════════
+
+// The feed emits a normalized lifecycle `status` on every event. Map the wire
+// vocabulary to display labels; never re-derive it from the summary HTML.
+const STATUS_LABEL = {
+    investigating: 'Investigating', identified: 'Identified', monitoring: 'Monitoring',
+    resolved: 'Resolved', maintenance_scheduled: 'Scheduled',
+    maintenance_in_progress: 'In progress', maintenance_completed: 'Completed',
+    operational: 'Operational', degraded: 'Degraded',
+    partial_outage: 'Partial outage', major_outage: 'Major outage'
+};
+
+// The CSS token for a status label ('In progress' → 'inprogress'). One list maps a
+// status to a colour (see `.st-*` in style.css) and everything that needs one reads it
+// from there — the lifecycle dots originally shipped a second copy of the palette keyed
+// on the feed's RAW enum ('major_outage') while the labels are display strings ('Major
+// outage'), so every maintenance step rendered grey.
+function statusToken(status) {
+    return status ? String(status).toLowerCase().replace(/\s+/g, '') : null;
+}
+
+// Cap the per-incident transition list. An Atlassian incident can carry dozens of
+// updates; the card shows a lifecycle, not a changelog.
+const MAX_TRANSITIONS = 24;
+
+// Merge one event into an incident's ordered transition list, newest last and deduped so
+// a re-broadcast cannot double the strip. Both the REST backfill and the WS replay call
+// this, so the same event genuinely arrives twice; an event with no id falls back to its
+// timestamp+title rather than skipping dedup entirely.
+//
+// Mutates the list in place AND returns it — incidentModel uses the return value while
+// addIncidents relies on the mutation, so it must keep doing both.
+function addTransition(list, ev, ms) {
+    if (ms == null) return list;
+    const id = ev.id ?? `${ms}|${ev.title || ''}`;
+    if (list.some(t => t.id === id)) return list;
+    // Status comes from the feed's normalized enum only. Older cached events that predate
+    // the field get a null status, which paints an uncoloured dot — the honest rendering
+    // of "the feed did not classify this state". Nothing is inferred from the wording.
+    list.push({ id, ms, title: ev.title || '', status: STATUS_LABEL[ev.status] || null });
+    list.sort((a, b) => a.ms - b.ms);
+    if (list.length > MAX_TRANSITIONS) list.splice(0, list.length - MAX_TRANSITIONS);
+    return list;
+}
+const SCHEDULED_STATUSES = new Set([
+    'maintenance_scheduled', 'maintenance_in_progress', 'maintenance_completed'
+]);
+
+// LLM severity → the reserved status scale. Only these three values are ever
+// emitted by the feed; anything else falls through to "none" and the card says
+// the event is unclassified rather than inventing a level.
+const SEVERITY_RANK = { critical: 3, major: 2, minor: 1 };
+const SEVERITY_META = {
+    critical: { key: 'critical', label: 'Critical', cssVar: '--critical' },
+    major: { key: 'major', label: 'Major', cssVar: '--serious' },
+    minor: { key: 'minor', label: 'Minor', cssVar: '--warn' },
+    none: { key: 'none', label: 'Not classified', cssVar: '--cat-0' }
+};
+
+const incidents = {
+    items: [], byKey: new Map(), ws: null, retries: 0,
+    groupBy: 'flat', dayFilter: null, category: 'all', severity: 'all', shown: null,
+    backfilled: false, backfillInFlight: false,
+    // Two-phase enrichment: most events carry `enrichment` inline on the REST
+    // backfill, but live WS `status.enrichment` frames arrive separately and
+    // are keyed by raw eventId. eventToKey resolves an eventId to its incident;
+    // enrichPending stashes frames that beat their item.
+    eventToKey: new Map(), enrichByKey: new Map(), enrichPending: new Map(), enrichTimer: null
+};
+const providers = { filter: 'all', dayFilter: null, shown: null };
+// Rendering every retained event made Providers ~48 phone-screens tall and
+// Incidents ~28. Page them; the counts above still state the true total.
+const FEED_PAGE = 25;
+function feedPageSize() { return isNarrow() ? 10 : FEED_PAGE; }
+
+function feedMoreButton(total, shown, onMore) {
+    return el('div', { class: 'table-foot' }, [
+        el('button', {
+            class: 'btn', type: 'button',
+            text: `Show more — ${fmtNum(total - shown)} remaining`,
+            onclick: onMore
+        })
+    ]);
+}
+
+// eventToKey/enrichPending grow per raw event id, so cap them for long-lived
+// tabs. Maps keep insertion order — evict oldest.
+const MAX_EVENT_KEYS = 5000;
+const MAX_ENRICH_PENDING = 500;
+function capMap(map, max) { while (map.size > max) map.delete(map.keys().next().value); }
+
+// The feed publishes a stable per-INCIDENT id alongside the per-event one; use it. The
+// fallback below keys on source+title, which merges every incident a provider ever gave
+// the same name: on 500 live events that collapsed 274 real incidents into 172 cards, 80
+// of which fused more than one distinct incident. The lifecycle strip is what exposed it —
+// four "Resolved" steps three days apart are not one incident's history. Kept only for
+// older cached events that predate the field.
+function incidentKey(ev) {
+    if (ev.incidentId) return ev.incidentId;
+    const sp = ev.statusPage?.id || (ev.chains?.[0]?.chainId ?? 'unknown');
+    return `${sp}|${(ev.title || '').toLowerCase().trim()}`;
+}
+function eventTimeMs(ev) {
+    const t = Date.parse(ev.publishedAt || ev.updatedAt || '');
+    return Number.isNaN(t) ? null : t;
+}
+function classifyKind(ev) {
+    if (SCHEDULED_STATUSES.has(ev.status)) return 'scheduled';
+    return 'incident';
+}
+
+// A status page is one of three kinds: a chain operator, a coin, or a
+// commercial RPC provider. Providers get their own tab because one provider
+// incident fans out across many chains.
+function pageKind(ev) {
+    const k = ev.statusPage?.kind;
+    return k === 'rpc-provider' ? 'provider' : k === 'coin' ? 'coin' : 'chain';
+}
+
+function incidentModel(ev) {
+    const whenMs = eventTimeMs(ev);
+    const kindOfPage = pageKind(ev);
+    const chainIds = (ev.chains || []).map(c => c.chainId).filter(id => id != null);
+    const primaryChain = ev.chains?.[0];
+    const ongoingSince = Date.parse(ev.ongoingSince || '');
+
+    return {
+        key: incidentKey(ev),
+        title: ev.title || '(untitled)',
+        url: ev.url,
+        whenMs,
+        firstSeen: whenMs,
+        lastSeen: whenMs,
+        status: STATUS_LABEL[ev.status] || null,
+        rawStatus: ev.status || null,
+        // What happened, in order — one entry per state the feed published. This is what
+        // turns "went down" + "recovered" from two unrelated cards into one readable
+        // lifecycle.
+        transitions: addTransition([], ev, whenMs),
+        // The title of the OPENING event, kept separately: the newest event wins for
+        // current state, but a card headlined "Portal recovered" describes the end of the
+        // story rather than the incident. Atlassian incidents keep one title throughout,
+        // so this is a no-op for them.
+        openedTitle: ev.title || '(untitled)',
+        ongoing: typeof ev.ongoing === 'boolean' ? ev.ongoing : null,
+        // Authoritative start of an open incident. This is what makes an honest
+        // duration possible; the previous implementation scraped timestamps out
+        // of the summary HTML with a regex and showed the result as fact.
+        ongoingSinceMs: Number.isNaN(ongoingSince) ? null : ongoingSince,
+        kind: classifyKind(ev),
+        pageKind: kindOfPage,
+        urgency: ev.urgency || null,
+        impact: ev.impact || null,
+        // Client/version named by the operator, when they name one.
+        software: Array.isArray(ev.software)
+            ? ev.software.filter(Boolean).map(s => [s.client, s.version].filter(Boolean).join(' ')).filter(Boolean)
+            : [],
+        netName: primaryChain?.name || ev.statusPage?.name || ev.statusPage?.id || 'Unknown',
+        chainId: primaryChain?.chainId ?? null,
+        chainIds,
+        spId: ev.statusPage?.id || (primaryChain?.chainId != null ? String(primaryChain.chainId) : 'unknown'),
+        spName: ev.statusPage?.name || ev.statusPage?.id || 'Unknown source',
+        isProvider: kindOfPage === 'provider',
+        affectedComponents: Array.isArray(ev.affectedComponents) ? ev.affectedComponents : [],
+        // Names the enrichment mentions but that could not be resolved to a
+        // registry chain ID — shown as plain text, never as a link.
+        affectedNames: []
+    };
+}
+
+function addIncidents(events) {
+    let changed = false;
+    for (const ev of events) {
+        const m = incidentModel(ev);
+        if (ev.id) {
+            incidents.eventToKey.set(ev.id, m.key);
+            capMap(incidents.eventToKey, MAX_EVENT_KEYS);
+            const early = incidents.enrichPending.get(ev.id);
+            if (early) { incidents.enrichPending.delete(ev.id); applyEnrichment(m.key, early); }
+        }
+        // The REST backfill ships enrichment INLINE on most events. The old
+        // dashboard only read WS enrichment frames, so several hundred existing
+        // AI classifications were discarded on every page load.
+        if (ev.enrichment) applyEnrichment(m.key, ev.enrichment);
+
+        const existing = incidents.byKey.get(m.key);
+        if (!existing) { incidents.byKey.set(m.key, m); changed = true; continue; }
+
+        if (m.whenMs != null) {
+            const opening = existing.firstSeen == null || m.whenMs < existing.firstSeen;
+            existing.firstSeen = Math.min(existing.firstSeen ?? m.whenMs, m.whenMs);
+            existing.lastSeen = Math.max(existing.lastSeen ?? m.whenMs, m.whenMs);
+            addTransition(existing.transitions ??= [], ev, m.whenMs);
+            // An earlier event can arrive after a later one — the recovery is often parsed
+            // first, and a restart replays history out of order — so the headline follows
+            // the earliest event, not arrival order.
+            if (opening) existing.openedTitle = m.openedTitle;
+            if (existing.whenMs == null || m.whenMs >= existing.whenMs) {
+                // Newest event wins for current state.
+                Object.assign(existing, {
+                    whenMs: m.whenMs, status: m.status, rawStatus: m.rawStatus,
+                    ongoing: m.ongoing, ongoingSinceMs: m.ongoingSinceMs,
+                    url: m.url, kind: m.kind, urgency: m.urgency, impact: m.impact
+                });
+                if (m.chainIds.length) { existing.chainIds = m.chainIds; existing.chainId = m.chainId; }
+                if (m.affectedComponents.length) existing.affectedComponents = m.affectedComponents;
+                if (m.software.length) existing.software = m.software;
+            }
+        }
+        changed = true;
+    }
+    if (!changed) return;
+    incidents.items = [...incidents.byKey.values()].sort((a, b) => (b.whenMs || 0) - (a.whenMs || 0));
+    scheduleIncidentRepaint();
+}
+
+// The WebSocket replays ~100 events on connect, one frame at a time. Repainting
+// per frame ran buildOpenIncidentIndex + the stats/impact renders 100+ times on
+// load (measured), all of it thrown away by the next frame. Coalesce into one
+// repaint per animation frame batch.
+let incidentRepaintTimer = null;
+function scheduleIncidentRepaint() {
+    if (incidentRepaintTimer) return;
+    incidentRepaintTimer = setTimeout(() => {
+        incidentRepaintTimer = null;
+        buildOpenIncidentIndex();
+        repaintIncidentSurfaces();
+    }, 120);
+}
+
+function addEnrichment(enr) {
+    const key = incidents.eventToKey.get(enr.eventId);
+    if (!key) {
+        incidents.enrichPending.set(enr.eventId, enr);
+        capMap(incidents.enrichPending, MAX_ENRICH_PENDING);
+        return;
+    }
+    if (applyEnrichment(key, enr)) scheduleEnrichmentRerender();
+}
+
+// Newest enrichment wins per incident (a later update can re-classify it). An
+// older frame loses; equal/absent timestamps let the later arrival win so a
+// re-classification is never dropped.
+function applyEnrichment(key, enr) {
+    const prev = incidents.enrichByKey.get(key);
+    if (prev && (Date.parse(prev.createdAt) || 0) > (Date.parse(enr.createdAt) || 0)) return false;
+    incidents.enrichByKey.set(key, enr);
+    return true;
+}
+function scheduleEnrichmentRerender() {
+    if (incidents.enrichTimer) return;
+    incidents.enrichTimer = setTimeout(() => {
+        incidents.enrichTimer = null;
+        scheduleIncidentRepaint();
+    }, 300);
+}
+
+function repaintIncidentSurfaces() {
+    // The badge is always live — it is visible from every view.
+    try { renderTabBadge(); } catch { /* non-critical */ }
+    // Only repaint the view the user is actually looking at. Calendars,
+    // histograms and lists are rebuilt from scratch, so painting two hidden
+    // views on every WebSocket frame was pure waste; switchView() re-renders
+    // a view when it becomes active.
+    if (activeView === 'incidents') {
+        try { renderIncidents(); } catch (err) { console.error('incident render failed', err); }
+    }
+    if (activeView === 'providers') {
+        try { renderProviders(); } catch (err) { console.error('provider render failed', err); }
+    }
+    // Only the incident-dependent parts of Overview. Re-rendering the TVS
+    // charts on every feed message would repaint charts whose data did not
+    // change, which reads as a flash on refetch.
+    if (activeView === 'overview') {
+        try { renderOverviewStats(); renderImpact(); } catch (err) { console.error('overview render failed', err); }
+    }
+    if (activeView === 'networks') {
+        try { renderChainsTable(); } catch (err) { console.error('table render failed', err); }
+    }
+    // Node colours depend on which chains have an open incident.
+    if (graphEmphasizeIncidents && myGraph) applyGraphFilter();
+}
+
+// The ONE door from a feed-supplied severity to anything rendered. Every label and
+// every `sev-*` class comes out of SEVERITY_META, so an unexpected value degrades to
+// "Not classified" instead of printing itself — and no feed string ever reaches the DOM
+// or a class attribute. Both call paths (incident cards, news cards) go through here.
+function severityMeta(raw) {
+    const key = raw ? String(raw).toLowerCase() : null;
+    return SEVERITY_META[key] || SEVERITY_META.none;
+}
+function severityOf(it) {
+    return severityMeta(incidents.enrichByKey.get(it.key)?.severity);
+}
+function enrichmentOf(it) { return incidents.enrichByKey.get(it.key) || null; }
+
+// An incident is open when the feed says so. Fall back to the status label only
+// for older cached events that predate the `ongoing` flag.
+function isOpen(it) {
+    if (it.ongoing != null) return it.ongoing;
+    return Boolean(it.status && !['resolved', 'completed', 'closed'].includes(it.status.toLowerCase()));
+}
+
+// Duration, stated for what it actually is:
+//   • open incident with a start time → "open 3h 20m" (authoritative)
+//   • otherwise → the span over which we OBSERVED updates, labelled as such
+// Never a duration parsed out of prose.
+function durationInfo(it) {
+    if (isOpen(it) && it.ongoingSinceMs) {
+        const d = fmtDuration(Date.now() - it.ongoingSinceMs);
+        if (d) return { text: `open ${d}`, title: `Open since ${fmtDateTime(it.ongoingSinceMs)}` };
+    }
+    if (it.firstSeen != null && it.lastSeen != null && it.lastSeen > it.firstSeen) {
+        const d = fmtDuration(it.lastSeen - it.firstSeen);
+        if (d) return { text: `seen over ${d}`, title: 'Span between the first and last update this dashboard observed' };
+    }
+    return null;
+}
+
+// ── the cross-cutting join ──
+// chainId → open incidents affecting it, from BOTH chain operator pages and
+// RPC provider fan-out. This is what lets the Networks table, the Overview
+// impact panel and the graph agree about who is currently affected.
+function buildOpenIncidentIndex() {
+    const map = new Map();
+    for (const it of incidents.items) {
+        if (!isOpen(it)) continue;
+        for (const id of it.chainIds) {
+            if (!map.has(id)) map.set(id, []);
+            map.get(id).push(it);
+        }
+    }
+    // Worst severity first so a table cell can show the most serious one.
+    for (const arr of map.values()) {
+        arr.sort((a, b) => (SEVERITY_RANK[severityOf(b).key] || 0) - (SEVERITY_RANK[severityOf(a).key] || 0));
+    }
+    state.openByChain = map;
+}
+
+function openIncidents() { return incidents.items.filter(isOpen); }
+
+function renderTabBadge() {
+    const badge = byId('tabBadgeIncidents');
+    if (!badge) return;
+    const n = incidents.items.filter(it => isOpen(it) && !it.isProvider).length;
+    badge.textContent = n ? String(n) : '';
+    badge.classList.toggle('hidden', !n);
+    badge.title = n ? `${n} open chain incident${n === 1 ? '' : 's'}` : '';
+}
+
+// ─── feed transport ──────────────────────────────────────────────────────
+function connectStatusFeed() {
+    // The WS replay is capped server-side (~100 events), so full history always
+    // comes from the REST backfill; the socket only streams live updates.
+    statusFeedBackfill();
+    setFeedLive(false);
+    const wsUrl = `${STATUS_NEWS_BASE.replace(/^http/, 'ws')}/ws?replay=100`;
+    let ws;
+    try { ws = new WebSocket(wsUrl); } catch { return; }
+    incidents.ws = ws;
+    ws.onopen = () => { incidents.retries = 0; setFeedLive(true); statusFeedBackfill(); };
+    ws.onmessage = ev => {
+        let m;
+        try { m = JSON.parse(ev.data); } catch { return; }
+        if (m.type === 'status.item' && m.item) addIncidents([m.item]);
+        else if (m.type === 'status.enrichment' && m.eventId) addEnrichment(m);
+    };
+    ws.onerror = () => { try { ws.close(); } catch { /* noop */ } };
+    ws.onclose = () => {
+        incidents.ws = null;
+        setFeedLive(false);
+        if (incidents.retries < 6) {
+            const delay = Math.min(1000 * 2 ** incidents.retries, 20000);
+            incidents.retries++;
+            setTimeout(connectStatusFeed, delay);
+        }
+    };
+}
+function setFeedLive(live) { setLiveDot(['incidentsMeta', 'providersMeta', 'impactMeta'], live); }
+
+function setLiveDot(ids, live) {
+    for (const id of [].concat(ids)) {
+        const e = byId(id);
+        if (!e) continue;
+        e.className = 'pill-meta live-pill';
+        clear(e);
+        e.appendChild(el('span', {
+            class: `live-dot ${live ? 'on' : 'off'}`,
+            title: live ? 'Live — receiving real-time updates' : 'Disconnected from the live feed'
+        }));
+        e.appendChild(document.createTextNode(live ? 'live' : 'offline'));
+    }
+}
+
+async function statusFeedBackfill() {
+    if (incidents.backfilled || incidents.backfillInFlight) return;
+    incidents.backfillInFlight = true;
+    try {
+        const res = await fetch(`${STATUS_NEWS_BASE}/events?limit=500`, {
+            headers: { accept: 'application/json' }
+        });
+        if (!res.ok) throw new Error(String(res.status));
+        const d = await res.json();
+        addIncidents(d.events || d.items || []);
+        incidents.backfilled = true;
+    } catch {
+        if (!incidents.items.length) {
+            for (const id of ['incidentsList', 'providersList']) {
+                const l = byId(id);
+                if (l) {
+                    clear(l);
+                    l.appendChild(el('div', {
+                        class: 'feed-empty',
+                        text: 'Live status feed unavailable (chains-status-news).'
+                    }));
+                }
+            }
+        }
+    } finally {
+        incidents.backfillInFlight = false;
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// Overview — the cross-cutting view. Everything on THIS page is a current reading and nothing
+// here implies a trend. That is a choice about the page, not a fact about the API: provider
+// availability comes in 24h/7d/30d windows with a per-day series, and upgrade windows are
+// dated. Those belong to the Providers and Timeline views; mixing a trend in here would make
+// the rest of the tiles read as trends too.
+// ═════════════════════════════════════════════════════════════════════════
+
+let impactScope = 'all';
+
+function initOverviewControls() {
+    document.querySelectorAll('#impactScope .chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+            impactScope = chip.dataset.scope;
+            document.querySelectorAll('#impactScope .chip').forEach(c =>
+                c.setAttribute('aria-pressed', String(c === chip)));
+            renderImpact();
+        });
+    });
+}
+
+function renderOverview({ force = false } = {}) {
+    renderOverviewStats();
+    renderImpact();
+    renderTvsCharts({ force });
+    renderConcentration({ force });
+    renderDataQuality();
+    renderFreshness();
+    const cc = byId('ovChainCount');
+    if (cc) cc.textContent = state.chains.length ? fmtNum(state.chains.length) : 'the';
+}
+
+function statTile({ label, value, sub, tone, meter, hero, hint }) {
+    const tile = el('div', { class: `stat-tile${tone ? ` tone-${tone}` : ''}${hero ? ' is-hero' : ''}` });
+    const lab = el('div', { class: 'stat-label' }, [label]);
+    if (hint) {
+        lab.appendChild(el('span', { class: 'info-dot', text: 'i', title: hint, 'aria-label': hint, role: 'img' }));
+    }
+    tile.appendChild(lab);
+    tile.appendChild(el('div', { class: 'stat-value', text: value }));
+    if (sub) tile.appendChild(el('div', { class: 'stat-sub', text: sub }));
+    if (meter != null && Number.isFinite(meter)) {
+        const track = el('div', { class: 'meter' }, [el('div', { class: 'meter-fill' })]);
+        track.firstChild.style.width = `${Math.max(0, Math.min(100, meter))}%`;
+        tile.appendChild(track);
+    }
+    return tile;
+}
+
+function renderOverviewStats() {
+    const wrap = byId('overviewStats');
+    if (!wrap) return;
+    const s = state.stats || {};
+    const open = openIncidents();
+    const openChainSide = open.filter(it => !it.isProvider).length;
+    const openProviderSide = open.filter(it => it.isProvider).length;
+    const affected = state.openByChain.size;
+    const rpcPct = s.rpc && s.rpc.healthPercent != null ? Number(s.rpc.healthPercent) : null;
+    const tvs = totalTvs();
+
+    // RPC health thresholds describe endpoint reachability from the monitor's
+    // vantage point, which is genuinely low for public endpoint lists.
+    const rpcTone = rpcPct == null ? '' : rpcPct >= 80 ? 'good' : rpcPct >= 50 ? 'warn' : 'critical';
+
+    const tiles = [
+        // Exactly one hero figure per view: for an operational overview the
+        // headline is how much is broken right now.
+        statTile({
+            label: 'Open incidents', value: fmtNum(open.length), hero: true,
+            sub: `${fmtNum(openChainSide)} chain · ${fmtNum(openProviderSide)} provider`,
+            tone: open.length === 0 ? 'good' : open.length > 20 ? 'critical' : 'warn',
+            hint: 'Incidents the feed still reports as unresolved, across chain operator, coin and RPC-provider status pages.'
+        }),
+        statTile({
+            label: 'Networks affected now', value: fmtNum(affected),
+            sub: affected ? `of ${fmtNum(state.chains.length)} tracked` : 'no chain currently named',
+            tone: affected === 0 ? 'good' : affected > 25 ? 'critical' : 'warn',
+            hint: 'Distinct chain IDs named by at least one open incident, including RPC-provider fan-out.'
+        }),
+        statTile({
+            label: 'Networks', value: fmtNum(s.totalChains ?? (state.chains.length || null)),
+            sub: s.activeChains != null
+                ? `${fmtNum(s.activeChains)} active · ${fmtNum(s.deprecatedChains)} deprecated`
+                : '',
+            hint: 'Chains in the merged registry across all five upstream sources.'
+        }),
+        statTile({
+            label: 'RPC endpoint health', value: rpcPct != null ? `${rpcPct}%` : '—',
+            sub: s.rpc ? `${fmtNum(s.rpc.working)} of ${fmtNum(s.rpc.tested)} reachable` : '',
+            tone: rpcTone, meter: rpcPct,
+            hint: 'Share of probed public RPC endpoints that answered. Public endpoint lists contain many dead URLs, so a low figure is normal and is a data-quality signal, not an outage.'
+        }),
+        statTile({
+            label: 'L2 value secured', value: tvs ? fmtUsd(tvs) : '—',
+            sub: state.l2beatProjects.length
+                ? `${fmtNum(state.l2beatProjects.length)} L2BEAT projects`
+                : '',
+            hint: 'Total value secured across all L2BEAT-classified projects, as of the last L2BEAT fetch. Point-in-time only — no history is stored.'
+        }),
+        statTile({
+            label: 'Data conflicts', value: state.validate ? fmtNum(state.validate.totalErrors) : '—',
+            sub: state.validate ? 'across 17 validation rules' : '',
+            tone: !state.validate ? '' : state.validate.totalErrors > 500 ? 'warn' : '',
+            hint: 'Disagreements between the five upstream sources found by the API validation rules. These are metadata conflicts, not service failures.'
+        })
+    ];
+    clear(wrap);
+    for (const t of tiles) wrap.appendChild(t);
+    // The HTML skeleton has been replaced by real values.
+    wrap.removeAttribute('aria-busy');
+}
+
+function totalTvs() {
+    return state.l2beatProjects.reduce((s, p) => s + (p.tvs || 0), 0);
+}
+
+// ── Live incident impact ────────────────────────────────────────────────
+// One row per (network, open incident) pair. Provider incidents fan out, so a
+// single provider outage legitimately produces several rows.
+
+function buildImpactRows() {
+    const rows = [];
+    for (const it of openIncidents()) {
+        if (impactScope === 'chain' && it.isProvider) continue;
+        if (impactScope === 'provider' && !it.isProvider) continue;
+        if (it.chainIds.length) {
+            for (const id of it.chainIds) rows.push({ chainId: id, incident: it });
+        } else {
+            // Provider-wide with no chain named — still worth showing, but never
+            // attributed to a chain we cannot identify.
+            rows.push({ chainId: null, incident: it });
+        }
+    }
+    rows.sort((a, b) => {
+        const d = (SEVERITY_RANK[severityOf(b.incident).key] || 0) - (SEVERITY_RANK[severityOf(a.incident).key] || 0);
+        if (d) return d;
+        return (b.incident.whenMs || 0) - (a.incident.whenMs || 0);
+    });
+    return rows;
+}
+
+function renderImpact() {
+    const host = byId('impactBody');
+    if (!host) return;
+    const rows = buildImpactRows();
+    clear(host);
+
+    if (!rows.length) {
+        host.appendChild(el('div', {
+            class: 'feed-empty',
+            text: incidents.items.length
+                ? 'Nothing open in this scope — every incident the feed retains is resolved or completed.'
+                : 'Waiting for the live status feed…'
+        }));
+        return;
+    }
+
+    // The panel is a bounded scroll region, so every row can be rendered: there
+    // is no layout cost to more rows and no expander to hunt for.
+    const shown = rows;
+    const table = el('table', { class: 'data-table data-table--stack' }, [
+        el('caption', { class: 'sr-only', text: 'Networks affected by open incidents' }),
+        el('thead', {}, [el('tr', {}, [
+            el('th', { scope: 'col', text: 'Network' }),
+            el('th', { scope: 'col', text: 'Type' }),
+            el('th', { scope: 'col', text: 'Incident' }),
+            el('th', { scope: 'col', text: 'Severity' }),
+            el('th', { scope: 'col', text: 'State' }),
+            el('th', { scope: 'col', text: 'Duration' })
+        ])])
+    ]);
+    const tbody = el('tbody');
+
+    for (const r of shown) {
+        const c = r.chainId != null ? state.byId.get(r.chainId) : null;
+        const it = r.incident;
+        const sev = severityOf(it);
+        const dur = durationInfo(it);
+        const cls = c ? netClass(c) : null;
+
+        const nameCell = td('Network', [], { primary: true });
+        if (c) {
+            nameCell.appendChild(el('div', { class: 'cell-stack' }, [
+                el('span', { class: 'cell-name', text: c.name || `Chain ${r.chainId}` }),
+                el('span', { class: 'cell-sub', text: `ID ${r.chainId}` })
+            ]));
+        } else {
+            nameCell.appendChild(el('div', { class: 'cell-stack' }, [
+                el('span', { class: 'cell-name muted', text: 'No chain named' }),
+                el('span', { class: 'cell-sub', text: it.affectedComponents.slice(0, 2).join(', ') || 'provider-wide' })
+            ]));
+        }
+
+        const sevMark = el('span', { class: 'sev-mark' });
+        const tr = el('tr', c ? { class: 'is-clickable', onclick: () => openChainDetail(r.chainId) } : {}, [
+            nameCell,
+            td('Type', [cls ? typeTag(cls) : el('span', { class: 'dim', text: '—' })], { empty: !cls }),
+            // The title has to be on the row: several distinct incidents can hit
+            // the same chain at the same severity, and without it those rows are
+            // indistinguishable duplicates.
+            td('Incident', [el('div', { class: 'cell-stack' }, [
+                it.url
+                    ? el('a', {
+                        href: safeUrl(it.url), target: '_blank', rel: 'noopener',
+                        text: it.openedTitle || it.title, title: it.openedTitle || it.title,
+                        // The row opens the chain drawer; the link opens the
+                        // upstream report. Don't fire both.
+                        onclick: e => e.stopPropagation()
+                    })
+                    : el('span', { text: it.openedTitle || it.title, title: it.openedTitle || it.title }),
+                el('span', {
+                    class: 'cell-sub',
+                    text: `${it.isProvider ? it.spName : it.netName} · ${it.isProvider ? 'RPC provider' : it.pageKind === 'coin' ? 'coin status page' : 'chain operator'}`
+                })
+            ])], { cls: 'cell-incident' }),
+            td('Severity', [el('span', { class: `sev sev-${sev.key}` }, [sevMark, sev.label])]),
+            td('State', [el('span', { class: 'pill', text: it.status || 'Unknown' })]),
+            td('Duration', [dur
+                ? el('span', { class: 'incident-dur', title: dur.title, text: dur.text })
+                : el('span', { class: 'dim', text: '—' })], { empty: !dur })
+        ]);
+        tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    host.appendChild(el('div', { class: 'table-wrap' }, [table]));
+
+    const summary = el('p', { class: 'note' });
+    const providerRows = rows.filter(r => r.incident.isProvider).length;
+    summary.textContent =
+        `${fmtNum(rows.length)} network-incident pair${rows.length === 1 ? '' : 's'} from ` +
+        `${fmtNum(new Set(rows.map(r => r.incident.key)).size)} open incident${rows.length === 1 ? '' : 's'}` +
+        `${providerRows ? ` · ${fmtNum(providerRows)} via RPC-provider fan-out` : ''}.` +
+        ' Severity is an AI classification from the feed; unclassified events are shown as such.';
+    host.appendChild(summary);
+
+}
+
+// ── TVS distribution charts ─────────────────────────────────────────────
+// These are the genuinely new analytics: /summary already ships category,
+// stage, stack and daLayer per project and the old dashboard surfaced none of
+// it. Each is one series, so one hue and no legend — bar length is the
+// encoding and colouring bars by their own value would waste the hue channel.
+
+// Stage is an ordinal ladder, so keep it in ladder order rather than sorting by
+// value; the reader is comparing rungs, not ranking them.
+const STAGE_ORDER = ['Stage 0', 'Stage 1', 'Stage 2', 'Not applicable'];
+
+function aggregateTvs(field, { order = null, topN = null } = {}) {
+    const agg = new Map();
+    for (const p of state.l2beatProjects) {
+        const key = p[field] || 'Unspecified';
+        const cur = agg.get(key) || { value: 0, count: 0 };
+        cur.value += p.tvs || 0;
+        cur.count += 1;
+        agg.set(key, cur);
+    }
+    let entries = [...agg.entries()].map(([label, v]) => ({
+        label, value: v.value,
+        sub: { label: 'Projects', value: fmtNum(v.count) }
+    }));
+    if (order) {
+        entries.sort((a, b) => {
+            const ai = order.indexOf(a.label), bi = order.indexOf(b.label);
+            return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+        });
+    } else {
+        entries.sort((a, b) => b.value - a.value);
+    }
+    if (topN) entries = entries.slice(0, topN);
+    return entries;
+}
+
+function mountChart(containerId, actionsId, render) {
+    const container = byId(containerId);
+    if (!container) return;
+    const result = render(container);
+    const actions = byId(actionsId);
+    if (actions && result?.table) {
+        clear(actions);
+        container.appendChild(result.table);
+        Viz.attachTableToggle(container, result.table, actions);
+    }
+}
+
+// Build a chart only once it is near the viewport. Four bar charts plus the
+// composition bar cost ~77 ms in one task on a throttled phone, and on a narrow
+// screen they all start below the fold — so that work was blocking the main
+// thread for something the reader could not see yet. Anything already at or
+// near the top renders synchronously, so the fold is never empty.
+const chartObservers = new WeakMap();
+function renderWhenVisible(container, fn) {
+    if (!container) return;
+    if (!('IntersectionObserver' in window)) { fn(); return; }
+    const rect = container.getBoundingClientRect();
+    if (rect.top < window.innerHeight * 1.25) { fn(); return; }
+
+    const existing = chartObservers.get(container);
+    if (existing) existing.disconnect();
+    const io = new IntersectionObserver(entries => {
+        if (!entries.some(e => e.isIntersecting)) return;
+        io.disconnect();
+        chartObservers.delete(container);
+        fn();
+    }, { rootMargin: '240px 0px' });
+    chartObservers.set(container, io);
+    io.observe(container);
+}
+
+// Signature of the data these charts are derived from. Cheap to compute and
+// exact enough: L2BEAT replaces its payload wholesale on each refresh.
+function tvsDataSignature() {
+    return `${state.l2beatMeta?.fetchedAt ?? ''}|${state.l2beatMeta?.source ?? ''}|${state.l2beatProjects.length}`;
+}
+let tvsRenderedSignature = null;
+let tvsRenderedWidth = 0;
+
+function renderTvsCharts({ force = false } = {}) {
+    if (!state.l2beatProjects.length) return;
+    // Re-render on a real data change or a width change (the charts are laid out
+    // against container width), never just because something else repainted.
+    const sig = tvsDataSignature();
+    const width = byId('chartTvsStage')?.clientWidth || 0;
+    if (!force && sig === tvsRenderedSignature && width === tvsRenderedWidth) return;
+    tvsRenderedSignature = sig;
+    tvsRenderedWidth = width;
+
+    const usd = { valueFmt: fmtUsd, axisFmt: Viz.fmtAxisUsd, unit: 'Value secured (USD)' };
+
+    renderWhenVisible(byId('chartTvsStage'), () => mountChart('chartTvsStage', 'tvsStageActions', c =>
+        Viz.barChart(c, { ...usd, data: aggregateTvs('stage', { order: STAGE_ORDER }), tableCaption: 'Value secured by rollup stage' })));
+
+    renderWhenVisible(byId('chartTvsDa'), () => mountChart('chartTvsDa', 'tvsDaActions', c =>
+        Viz.barChart(c, { ...usd, data: aggregateTvs('daLayer'), tableCaption: 'Value secured by data-availability layer' })));
+
+    renderWhenVisible(byId('chartTvsStack'), () => mountChart('chartTvsStack', 'tvsStackActions', c =>
+        Viz.barChart(c, { ...usd, data: aggregateTvs('stack'), tableCaption: 'Value secured by stack' })));
+
+    // Top projects. Only the ~25 projects the registry could match to a chain
+    // ID are clickable; the rest have no chain to open.
+    const top = state.l2beatProjects
+        .filter(p => (p.tvs || 0) > 0)
+        .sort((a, b) => b.tvs - a.tvs)
+        .slice(0, 12)
+        .map(p => ({
+            label: p.displayName || p.slug,
+            value: p.tvs,
+            id: p.chainId ?? null,
+            sub: { label: 'Stage', value: p.stage || 'n/a' }
+        }));
+    renderWhenVisible(byId('chartTvsTop'), () => mountChart('chartTvsTop', 'tvsTopActions', c =>
+        Viz.barChart(c, {
+            ...usd, data: top, tableCaption: 'Largest networks by value secured',
+            onSelect: id => { if (id != null) openChainDetail(id); }
+        })));
+}
+
+let concRenderedSignature = null;
+let concRenderedWidth = 0;
+function renderConcentration({ force = false } = {}) {
+    const host = byId('chartConcentration');
+    if (!host || !state.l2beatProjects.length) return;
+    const sig = tvsDataSignature();
+    if (!force && sig === concRenderedSignature && host.clientWidth === concRenderedWidth) return;
+    concRenderedSignature = sig;
+    concRenderedWidth = host.clientWidth;
+    const sorted = state.l2beatProjects
+        .filter(p => (p.tvs || 0) > 0)
+        .sort((a, b) => b.tvs - a.tvs);
+    if (!sorted.length) return;
+
+    // Three named segments plus a neutral remainder: three is the validated all-pairs colour cap,
+    // so a fourth named segment would have to reuse a hue already on screen.
+    const TOP_N = 3;
+    const parts = sorted.slice(0, TOP_N).map(p => ({ label: p.displayName || p.slug, value: p.tvs }));
+    const restVal = sorted.slice(TOP_N).reduce((sum, p) => sum + p.tvs, 0);
+    if (restVal > 0) parts.push({ label: `Other (${sorted.length - TOP_N})`, value: restVal });
+
+    renderWhenVisible(host, () => paintConcentration(host, sorted, parts));
+}
+
+function paintConcentration(host, sorted, parts) {
+    const res = Viz.compositionBar(host, {
+        parts, valueFmt: fmtUsd, maxSlots: 3,
+        tableCaption: 'Share of total value secured'
+    });
+    const actions = byId('concentrationActions');
+    if (actions && res?.table) {
+        clear(actions);
+        host.appendChild(res.table);
+        Viz.attachTableToggle(host, res.table, actions);
+    }
+    const total = totalTvs();
+    const topN = 3;
+    const topShare = sorted.slice(0, topN).reduce((sum, p) => sum + p.tvs, 0);
+    host.appendChild(el('p', {
+        class: 'note',
+        text: `The ${topN} largest projects hold ${Viz.fmtPct((topShare / total) * 100)} of ${fmtUsd(total)} total value secured across ${fmtNum(sorted.length)} projects reporting a non-zero figure.`
+    }));
+}
+
+// ── Data quality ────────────────────────────────────────────────────────
+const RULE_LABELS = {
+    rule1: 'Conflicting relations between sources',
+    rule2: 'SLIP-44 coin type on a testnet',
+    rule3: 'Name says testnet but the tag disagrees',
+    rule4: 'Sepolia / Hoodi naming problems',
+    rule5: 'Lifecycle status conflicts',
+    rule6: 'Goerli chains not marked deprecated',
+    rule7: 'L2BEAT project missing a classification',
+    rule8: 'L2BEAT host chain with no relation',
+    rule9: 'L2BEAT category disagrees with the name',
+    rule10: 'L2BEAT project not in the registry',
+    rule11: 'Stage 0 rollup holding high value',
+    rule12: 'RPC endpoints disagree on block height',
+    rule13: 'Sources disagree on the network name',
+    rule14: 'Native currency mismatch',
+    rule15: 'SLIP-44 symbol vs native symbol mismatch',
+    rule16: 'RPC URL present in only one source',
+    rule17: 'Active chain under a deprecated parent'
+};
+
+function renderDataQuality() {
+    const host = byId('dataQualityBody');
+    if (!host) return;
+    const v = state.validate;
+    if (!v) return;
+
+    const meta = byId('validateMeta');
+    if (meta) meta.textContent = `${fmtNum(v.totalErrors)} findings`;
+
+    const rules = Object.entries(v.summary || {})
+        .map(([k, n]) => ({ key: k, label: RULE_LABELS[k] || k, count: n }))
+        .filter(r => r.count > 0)
+        .sort((a, b) => b.count - a.count);
+
+    clear(host);
+    if (!rules.length) {
+        host.appendChild(el('div', { class: 'feed-empty', text: 'No cross-source conflicts found.' }));
+        return;
+    }
+    const max = Math.max(...rules.map(r => r.count));
+    const list = el('div', { class: 'kv-list' });
+    for (const r of rules) {
+        const bar = el('div', { class: 'kv-bar' }, [el('div', { class: 'kv-bar-fill' })]);
+        bar.firstChild.style.width = `${(r.count / max) * 100}%`;
+        list.appendChild(el('div', { class: 'kv-row' }, [
+            el('span', { class: 'kv-key', text: r.label }),
+            bar,
+            el('span', { class: 'kv-val', text: fmtNum(r.count) })
+        ]));
+    }
+    host.appendChild(list);
+    const clean = 17 - rules.length;
+    host.appendChild(el('p', {
+        class: 'note',
+        text: `${clean} of 17 rules found nothing. These are disagreements between upstream sources — most are metadata noise, but block-height drift and status conflicts are worth reading.`
+    }));
+}
+
+// ── Source freshness ────────────────────────────────────────────────────
+function renderFreshness() {
+    const host = byId('freshnessBody');
+    if (!host) return;
+    const hd = state.health;
+    if (!hd) return;
+
+    const meta = byId('healthMeta');
+    if (meta) {
+        meta.textContent = hd.status === 'ok' ? 'healthy' : hd.status;
+        meta.title = hd.version ? `API version ${hd.version}` : '';
+    }
+
+    clear(host);
+    const list = el('div', { class: 'kv-list' });
+    for (const [key, s] of Object.entries(hd.sources || {})) {
+        const label = SOURCE_LABELS[key] || key;
+        const ok = s.loaded;
+        const extra = s.source ? ` · ${s.source}` : '';
+        list.appendChild(el('div', { class: 'kv-row' }, [
+            el('span', { class: `dot ${ok ? 'dot-ok' : 'dot-bad'}` }),
+            el('span', { class: 'kv-key', text: label }),
+            el('span', {
+                class: 'kv-val',
+                text: `${ok ? fmtAge(s.ageSeconds) : 'not loaded'}${extra}`
+            })
+        ]));
+    }
+    host.appendChild(list);
+
+    const r = hd.refreshers || {};
+    const notes = [];
+    if (r.rpc) notes.push(`RPC sweep ${r.rpc.isRunning ? 'running' : 'idle'}, last ${relTime(r.rpc.lastRunAt)}`);
+    if (r.l2beat) {
+        notes.push(`L2BEAT refresh every ${Math.round((r.l2beat.intervalMs || 0) / 60000)}m, last ${relTime(r.l2beat.lastRefreshAt)} from ${r.l2beat.lastRefreshSource || 'unknown'}`);
+    }
+    // The four registry sources share one timestamp server-side, so say so
+    // rather than implying four independent freshness readings.
+    notes.push('The four registry sources report a single shared build time; only L2BEAT refreshes independently.');
+    host.appendChild(el('p', { class: 'note', text: notes.join(' · ') }));
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// Networks table
+// ═════════════════════════════════════════════════════════════════════════
+let chainSort = { key: 'chainId', dir: 1 };
+let chainTypeFilter = 'all';
+let chainStatusFilter = 'all';
+let chainIncidentOnly = false;
+let chainTvsOnly = false;
+// A stacked card is far taller than a table row, so a phone gets a smaller
+// first page. pageSize() is read at render time, not cached, so rotating the
+// device picks up the new size on the next paint.
+const CHAIN_PAGE = 100;
+const CHAIN_PAGE_NARROW = 25;
+function chainPageSize() { return isNarrow() ? CHAIN_PAGE_NARROW : CHAIN_PAGE; }
+// null means "whatever this breakpoint's default is" — so rotating to a phone
+// really does shrink the list, while an explicit "show more" is remembered.
+let chainShown = null;
+// Set when bulk data lands while Networks is not the active view.
+let chainsTableStale = false;
+
+function initChainsTable() {
+    document.querySelectorAll('#chainsTable thead th[data-sort]').forEach(th => {
+        const activate = () => {
+            const k = th.dataset.sort;
+            chainSort.dir = chainSort.key === k ? -chainSort.dir : 1;
+            chainSort.key = k;
+            // aria-sort must reflect the real state — screen readers announce it
+            // and the caret is driven from the same attribute.
+            document.querySelectorAll('#chainsTable thead th[data-sort]').forEach(o =>
+                o.setAttribute('aria-sort', 'none'));
+            th.setAttribute('aria-sort', chainSort.dir === 1 ? 'ascending' : 'descending');
+            renderChainsTable();
+        };
+        th.setAttribute('tabindex', '0');
+        th.addEventListener('click', activate);
+        th.addEventListener('keydown', e => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); }
+        });
+    });
+
+    byId('chipIncidentOnly')?.addEventListener('click', e => {
+        chainIncidentOnly = !chainIncidentOnly;
+        e.currentTarget.setAttribute('aria-pressed', String(chainIncidentOnly));
+        chainShown = null;
+        renderChainsTable();
+    });
+    byId('chipTvsOnly')?.addEventListener('click', e => {
+        chainTvsOnly = !chainTvsOnly;
+        e.currentTarget.setAttribute('aria-pressed', String(chainTvsOnly));
+        chainShown = null;
+        renderChainsTable();
+    });
+}
+
+// Filter chips carry real counts, so the reader knows how many rows a filter
+// will produce before clicking it.
+function renderChainFilters() {
+    const typeWrap = byId('chainTypeChips');
+    if (typeWrap) {
+        const counts = new Map(NET_CLASS_ORDER.map(k => [k, 0]));
+        for (const c of state.chains) {
+            const k = netClass(c).key;
+            counts.set(k, (counts.get(k) || 0) + 1);
+        }
+        clear(typeWrap);
+        const mk = (key, label, count, dotClass) => {
+            const chip = el('button', {
+                class: 'chip', type: 'button',
+                'aria-pressed': String(chainTypeFilter === key),
+                onclick: () => {
+                    chainTypeFilter = key;
+                    chainShown = null;
+                    renderChainFilters();
+                    renderChainsTable();
+                }
+            }, [
+                dotClass ? el('span', { class: `chip-dot ${dotClass}` }) : null,
+                label,
+                count != null ? el('span', { class: 'chip-count', text: fmtNum(count) }) : null
+            ]);
+            typeWrap.appendChild(chip);
+        };
+        mk('all', 'All', state.chains.length, null);
+        for (const k of NET_CLASS_ORDER) {
+            const cls = NET_CLASSES[k];
+            if (!counts.get(k)) continue;
+            mk(k, cls.label, counts.get(k), cls.dot);
+        }
+    }
+
+    const statusWrap = byId('chainStatusChips');
+    if (statusWrap) {
+        const byStatus = state.stats?.byStatus || {};
+        clear(statusWrap);
+        const mk = (key, label, count) => statusWrap.appendChild(el('button', {
+            class: 'chip', type: 'button',
+            'aria-pressed': String(chainStatusFilter === key),
+            onclick: () => {
+                chainStatusFilter = key;
+                chainShown = null;
+                renderChainFilters();
+                renderChainsTable();
+            }
+        }, [label, count != null ? el('span', { class: 'chip-count', text: fmtNum(count) }) : null]));
+        mk('all', 'Any', null);
+        mk('active', 'Active', byStatus.active);
+        mk('deprecated', 'Deprecated', byStatus.deprecated);
+        mk('incubating', 'Incubating', byStatus.incubating);
+    }
+
+    const ic = byId('chipIncidentCount');
+    if (ic) ic.textContent = state.openByChain.size ? fmtNum(state.openByChain.size) : '';
+}
+
+// /summary omits `status` when the chain is active, so absence means active —
+// never render "unknown" for it.
+function statusOf(c) { return c.status || 'active'; }
+
+function chainRow(c) {
+    const l2b = state.l2beat.get(c.chainId);
+    const open = state.openByChain.get(c.chainId) || [];
+    const worst = open.length ? severityOf(open[0]) : null;
+    return {
+        chainId: c.chainId,
+        name: c.name || `Chain ${c.chainId}`,
+        cls: netClass(c),
+        type: netClass(c).label,
+        tags: classTags(c),
+        stage: l2b?.stage || '',
+        tvs: l2b?.tvs ?? null,
+        rpcs: c.rpcCount ?? 0,
+        status: statusOf(c),
+        openCount: open.length,
+        // Sort key for the incident column: severity rank, then count.
+        incident: open.length ? (SEVERITY_RANK[worst.key] || 0) * 1000 + open.length : 0,
+        worst, open
+    };
+}
+
+function renderChainsTable() {
+    const body = byId('chainsTableBody');
+    if (!body) return;
+    const q = searchQuery;
+
+    let rows = state.chains.filter(c => {
+        if (chainTypeFilter !== 'all' && netClass(c).key !== chainTypeFilter) return false;
+        if (chainStatusFilter !== 'all' && statusOf(c) !== chainStatusFilter) return false;
+        if (chainIncidentOnly && !state.openByChain.has(c.chainId)) return false;
+        if (chainTvsOnly && !(state.l2beat.get(c.chainId)?.tvs > 0)) return false;
+        if (q && !chainMatchesQuery(c, q)) return false;
+        return true;
+    }).map(chainRow);
+
+    const { key, dir } = chainSort;
+    rows.sort((a, b) => {
+        let av = a[key], bv = b[key];
+        if (key === 'tvs') { av = av ?? -1; bv = bv ?? -1; }
+        if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir;
+        return String(av).localeCompare(String(bv)) * dir;
+    });
+
+    const countEl = byId('chainsCount');
+    if (countEl) {
+        const total = state.chains.length;
+        countEl.textContent = rows.length === total
+            ? `${fmtNum(total)} networks`
+            : `${fmtNum(rows.length)} of ${fmtNum(total)} networks`;
+    }
+
+    const limit = chainShown ?? chainPageSize();
+
+    clear(body);
+    if (!rows.length) {
+        body.appendChild(el('tr', {}, [
+            el('td', { colspan: '8', class: 'cell-primary' }, [el('div', {
+                class: 'table-empty',
+                text: state.chains.length
+                    ? 'No networks match these filters.'
+                    : 'Loading networks…'
+            })])
+        ]));
+        byId('chainsTableMore')?.classList.add('hidden');
+        return;
+    }
+
+    for (const r of rows.slice(0, limit)) {
+        // On mobile this becomes the card's heading, so fold the ID in — the
+        // separate ID column is dropped from the stacked layout.
+        const nameCell = td('Network', [el('div', { class: 'cell-stack' }, [
+            el('span', { class: 'cell-name', text: r.name }),
+            el('span', { class: 'cell-sub', text: [`ID ${r.chainId}`, ...r.tags].join(' · ') })
+        ])], { primary: true });
+
+        let incidentCell;
+        if (r.openCount) {
+            incidentCell = el('span', { class: `sev sev-${r.worst.key}`, title: r.open.map(i => i.title).slice(0, 4).join('\n') }, [
+                el('span', { class: 'sev-mark' }),
+                r.openCount > 1 ? `${r.worst.label} +${r.openCount - 1}` : r.worst.label
+            ]);
+        } else {
+            incidentCell = el('span', { class: 'dim', text: '—' });
+        }
+
+        body.appendChild(el('tr', {
+            class: 'is-clickable', 'data-id': r.chainId,
+            onclick: () => openChainDetail(r.chainId)
+        }, [
+            // The ID column is redundant once the card heading carries it, so it
+            // is the one cell hidden outright on small screens.
+            td('ID', [String(r.chainId)], { num: true, cls: 'mono col-id' }),
+            nameCell,
+            td('Type', [typeTag(r.cls)]),
+            td('Stage', [r.stage
+                ? el('span', { class: 'pill pill-stage', text: r.stage })
+                : el('span', { class: 'dim', text: '—' })], { empty: !r.stage }),
+            td('Value secured', [r.tvs != null ? fmtUsd(r.tvs) : '—'], { num: true, empty: r.tvs == null }),
+            td('RPCs', [r.rpcs ? fmtNum(r.rpcs) : '—'], { num: true, empty: !r.rpcs }),
+            td('Status', [el('span', { class: `pill pill-${r.status}`, text: r.status })]),
+            td('Incident', [incidentCell], { empty: !r.openCount })
+        ]));
+    }
+
+    const more = byId('chainsTableMore');
+    if (more) {
+        clear(more);
+        if (rows.length > limit) {
+            more.classList.remove('hidden');
+            more.appendChild(el('button', {
+                class: 'btn', type: 'button',
+                text: `Show more — ${fmtNum(rows.length - limit)} remaining`,
+                onclick: () => { chainShown = limit + chainPageSize() * 3; renderChainsTable(); }
+            }));
+        } else {
+            more.classList.add('hidden');
+        }
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// Relationships — 3D force graph
+//
+// The old graph encoded almost nothing: node size was a constant per type and
+// only two of the four relation kinds were drawn. Now size carries a real
+// measure (value secured or RPC count), all four relation kinds are drawn with
+// distinct colours, and an emphasis mode dims networks with no open incident.
+//
+// There is no per-node ring: the bundled 3d-force-graph build reads
+// window.THREE but never assigns it, so custom node geometry is not available.
+// Emphasis-by-dimming is used instead, which the legend states accurately.
+// ═════════════════════════════════════════════════════════════════════════
+let graphData = { nodes: [], links: [] };
+let filteredData = { nodes: [], links: [] };
+let graphTypeFilter = 'all';
+let graphSizeMode = 'tvs';
+let graphEmphasizeIncidents = false;
+let enabledSources = new Set(ALL_SOURCES);
+let myGraph = null;
+let graphBuilt = false;
+let graphDirty = true;
+let graphLibPromise = null;
+
+const LINK_KINDS = {
+    l2Of: { label: 'L2 → its L1', cssVar: '--cat-2' },
+    testnetOf: { label: 'Testnet → its mainnet', cssVar: '--cat-3' }
+};
+
 function ensureGraphLib() {
     if (globalThis.ForceGraph3D) return Promise.resolve();
     if (!graphLibPromise) {
@@ -492,69 +1980,158 @@ function ensureGraphLib() {
     }
     return graphLibPromise;
 }
+
+// The 3D graph is the only WebGL surface in the dashboard, and its render loop
+// does NOT stop when the section is hidden — measured at ~134k draw calls/sec
+// while sitting on another tab, which is a straight battery drain on a phone.
+// Pause it on the way out and resume on the way in.
+function pauseGraph() {
+    if (myGraph?.pauseAnimation) { try { myGraph.pauseAnimation(); } catch { /* older build */ } }
+}
+function resumeGraph() {
+    if (myGraph?.resumeAnimation) { try { myGraph.resumeAnimation(); } catch { /* older build */ } }
+}
+
 async function ensureGraphView() {
+    resumeGraph();
     if (myGraph) setTimeout(() => myGraph.width(window.innerWidth).height(window.innerHeight), 0);
-    if (!state.chains.length) return; // data still loading; applyBulk() re-enters
+    if (!state.chains.length) return;   // still loading; applyBulk re-enters
     try { await ensureGraphLib(); } catch { showLoadError(); return; }
-    if (activeView !== 'graph') return; // user tabbed away while the lib loaded
+    if (activeView !== 'graph') return; // tabbed away while the lib loaded
     if (graphDirty) { buildGraph(); applyGraphFilter(); graphDirty = false; }
+    renderGraphLegend();
 }
 
 function initGraphControls() {
-    document.querySelectorAll('.filter-btn').forEach(btn => btn.addEventListener('click', e => {
-        document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-        e.currentTarget.classList.add('active');
-        currentFilter = e.currentTarget.dataset.filter; applyGraphFilter();
-    }));
-    const toggle = document.getElementById('sourcesToggle');
-    const ddrop = document.getElementById('sourcesDropdown');
-    toggle?.addEventListener('click', () => ddrop.classList.toggle('hidden'));
-    document.addEventListener('click', e => { if (!e.target.closest('#sourcesPanel')) ddrop?.classList.add('hidden'); });
-    ddrop?.querySelectorAll('input[data-source]').forEach(cb => cb.addEventListener('change', () => {
-        cb.checked ? enabledSources.add(cb.dataset.source) : enabledSources.delete(cb.dataset.source);
-        buildGraph(); applyGraphFilter();
-    }));
+    // Type filter chips are generated from the same taxonomy as everything else.
+    const filterWrap = byId('graphFilterChips');
+    if (filterWrap) {
+        const mk = (key, label, dotClass) => filterWrap.appendChild(el('button', {
+            class: 'chip', type: 'button', 'data-filter': key,
+            'aria-pressed': String(graphTypeFilter === key),
+            onclick: () => {
+                graphTypeFilter = key;
+                filterWrap.querySelectorAll('.chip').forEach(c =>
+                    c.setAttribute('aria-pressed', String(c.dataset.filter === key)));
+                applyGraphFilter();
+            }
+        }, [dotClass ? el('span', { class: `chip-dot ${dotClass}` }) : null, label]));
+        mk('all', 'All', null);
+        for (const k of NET_CLASS_ORDER) mk(k, NET_CLASSES[k].label, NET_CLASSES[k].dot);
+    }
+
+    document.querySelectorAll('#graphSizeChips .chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+            graphSizeMode = chip.dataset.size;
+            document.querySelectorAll('#graphSizeChips .chip').forEach(c =>
+                c.setAttribute('aria-pressed', String(c === chip)));
+            buildGraph();
+            applyGraphFilter();
+            renderGraphLegend();
+        });
+    });
+
+    byId('graphIncidentEmphasis')?.addEventListener('click', e => {
+        graphEmphasizeIncidents = !graphEmphasizeIncidents;
+        e.currentTarget.setAttribute('aria-pressed', String(graphEmphasizeIncidents));
+        applyGraphFilter();
+        renderGraphLegend();
+    });
+
+    byId('graphReset')?.addEventListener('click', () => {
+        if (myGraph) myGraph.cameraPosition({ x: 0, y: 0, z: 900 }, { x: 0, y: 0, z: 0 }, 800);
+    });
+
+    const srcWrap = byId('graphSources');
+    if (srcWrap) {
+        for (const s of ALL_SOURCES) {
+            const cb = el('input', { type: 'checkbox', checked: 'checked', 'data-source': s });
+            cb.addEventListener('change', () => {
+                if (cb.checked) enabledSources.add(s); else enabledSources.delete(s);
+                buildGraph();
+                applyGraphFilter();
+            });
+            srcWrap.appendChild(el('label', { class: 'check-row' }, [cb, SOURCE_LABELS[s] || s]));
+        }
+    }
 }
+
 function visibleChains() {
     if (enabledSources.size === ALL_SOURCES.length) return state.chains;
     return state.chains.filter(c => c.sources?.some(s => enabledSources.has(s)));
 }
+
+// Node size: area should scale with the measure, and force-graph's `val` maps
+// to volume, so take a root to keep large values from swamping the scene.
+function nodeVal(c) {
+    if (graphSizeMode === 'flat') return 2;
+    if (graphSizeMode === 'rpc') {
+        const n = c.rpcCount || 0;
+        return 1 + 5 * Math.sqrt(n / 40);
+    }
+    const tvs = state.l2beat.get(c.chainId)?.tvs || 0;
+    if (!tvs) return 1;
+    const maxTvs = graphMaxTvs();
+    return 2 + 12 * Math.sqrt(tvs / maxTvs);
+}
+let _maxTvsCache = null;
+function graphMaxTvs() {
+    if (_maxTvsCache == null) {
+        _maxTvsCache = Math.max(1, ...state.l2beatProjects.map(p => p.tvs || 0));
+    }
+    return _maxTvsCache;
+}
+
 function buildGraph() {
-    // Lib not in yet (lazy load in flight, or a source toggle raced it):
-    // mark dirty and let ensureGraphView() rebuild once it lands.
     if (!globalThis.ForceGraph3D) { graphDirty = true; return; }
+    _maxTvsCache = null;
     const chains = visibleChains();
     const ids = new Set(chains.map(c => c.chainId));
-    const nodes = []; const nodeMap = new Map();
+    const nodes = [];
     for (const c of chains) {
-        const type = classify(c);
+        const cls = netClass(c);
         let name = c.name || `Chain ${c.chainId}`;
-        if (type === 'Testnet' && !name.toLowerCase().includes('testnet')) name += ' Testnet';
-        const val = type === 'Mainnet' ? (c.chainId === 1 ? 8 : 3) : type === 'L2' ? 1.8 : type === 'Beacon' ? 1.5 : 1;
-        const node = { id: c.chainId, name, val, color: COLORS[type], type };
-        nodes.push(node); nodeMap.set(c.chainId, node);
+        const l2b = state.l2beat.get(c.chainId);
+        nodes.push({
+            id: c.chainId, name, classKey: cls.key,
+            val: nodeVal(c),
+            tvs: l2b?.tvs ?? null,
+            rpcCount: c.rpcCount || 0
+        });
     }
+    // All four relation kinds fold into two drawn edges per chain (the reverse
+    // edges parentOf/mainnetOf point at the same pairs).
     const links = [];
     for (const c of chains) {
-        const e = state.rel.get(c.chainId); if (!e) continue;
+        const e = state.rel.get(c.chainId);
+        if (!e) continue;
         if (e.l1Parent != null && ids.has(e.l1Parent)) links.push({ source: c.chainId, target: e.l1Parent, kind: 'l2Of' });
         if (e.mainnet != null && ids.has(e.mainnet)) links.push({ source: c.chainId, target: e.mainnet, kind: 'testnetOf' });
     }
     graphData = { nodes, links };
     filteredData = { nodes: [...nodes], links: [...links] };
-    if (!graphBuilt) { renderGraph(); graphBuilt = true; document.getElementById('loadingOverlay')?.classList.add('hidden'); }
+    if (!graphBuilt) {
+        renderGraph();
+        graphBuilt = true;
+        byId('loadingOverlay')?.classList.add('hidden');
+    }
 }
-function linksFor(idSet, exclude) {
+
+function linksFor(idSet) {
     return graphData.links.filter(l => {
         const s = l.source.id ?? l.source, t = l.target.id ?? l.target;
-        return idSet.has(s) && idSet.has(t) && (!exclude || l.kind !== exclude);
+        return idSet.has(s) && idSet.has(t);
     });
 }
+
 function applyGraphFilter() {
-    if (currentFilter === 'all') filteredData = { nodes: [...graphData.nodes], links: [...graphData.links] };
-    else {
+    if (graphTypeFilter === 'all') {
+        filteredData = { nodes: [...graphData.nodes], links: [...graphData.links] };
+    } else {
+        // Pull in each match's parent so the selection keeps its context.
         const set = new Set();
-        for (const n of graphData.nodes) if (n.type === currentFilter) {
+        for (const n of graphData.nodes) {
+            if (n.classKey !== graphTypeFilter) continue;
             set.add(n.id);
             const e = state.rel.get(n.id);
             if (e?.l1Parent != null) set.add(e.l1Parent);
@@ -563,594 +2140,289 @@ function applyGraphFilter() {
         filteredData = { nodes: graphData.nodes.filter(n => set.has(n.id)), links: linksFor(set) };
     }
     if (myGraph) myGraph.graphData(filteredData);
+    const nc = byId('graphNodeCount');
+    const lc = byId('graphLinkCount');
+    if (nc) nc.textContent = fmtNum(filteredData.nodes.length);
+    if (lc) lc.textContent = fmtNum(filteredData.links.length);
 }
+
+function nodeColorFor(n) {
+    const base = Viz.cssVar(NET_CLASSES[n.classKey]?.cssVar || '--cat-0');
+    if (!graphEmphasizeIncidents) return base;
+    // Emphasis form: the affected networks keep their identity colour, the rest
+    // recede toward the background.
+    return state.openByChain.has(n.id) ? base : Viz.mix(base, Viz.cssVar('--page'), 0.82);
+}
+
 function renderGraph() {
-    myGraph = ForceGraph3D()(document.getElementById('3d-graph'))
+    myGraph = ForceGraph3D()(byId('graph-canvas'))
         .graphData(filteredData)
-        .nodeLabel('name').nodeColor('color').nodeVal('val').nodeResolution(12).nodeOpacity(0.9)
-        .linkColor(l => l.kind === 'l2Of' ? 'rgba(139,92,246,0.4)' : l.kind === 'testnetOf' ? 'rgba(245,158,11,0.4)' : 'rgba(255,255,255,0.1)')
-        .linkWidth(0.8)
-        .linkDirectionalParticles(l => (l.kind === 'l2Of' || l.kind === 'testnetOf') ? 2 : 0)
-        .linkDirectionalParticleSpeed(0.004).linkDirectionalParticleWidth(1.5)
-        .linkDirectionalParticleColor(l => l.kind === 'l2Of' ? 'rgba(139,92,246,0.7)' : 'rgba(245,158,11,0.7)')
-        .backgroundColor('#060608').warmupTicks(80).cooldownTicks(60)
+        .nodeLabel(n => {
+            const bits = [n.name, `ID ${n.id}`, NET_CLASSES[n.classKey]?.label];
+            if (n.tvs) bits.push(`Value secured ${fmtUsd(n.tvs)}`);
+            if (n.rpcCount) bits.push(`${n.rpcCount} RPC endpoints`);
+            const open = state.openByChain.get(n.id);
+            if (open?.length) bits.push(`${open.length} open incident${open.length === 1 ? '' : 's'}`);
+            return bits.filter(Boolean).join(' · ');
+        })
+        .nodeColor(nodeColorFor)
+        .nodeVal('val')
+        .nodeResolution(10)
+        .nodeOpacity(0.92)
+        .linkColor(l => {
+            const c = Viz.cssVar(LINK_KINDS[l.kind]?.cssVar || '--rule-strong');
+            return Viz.mix(c, Viz.cssVar('--page'), 0.45);
+        })
+        .linkWidth(0.7)
+        .linkDirectionalParticles(2)
+        .linkDirectionalParticleSpeed(0.004)
+        .linkDirectionalParticleWidth(1.2)
+        .linkDirectionalParticleColor(l => Viz.cssVar(LINK_KINDS[l.kind]?.cssVar || '--rule-strong'))
+        .backgroundColor(Viz.cssVar('--page'))
+        .warmupTicks(80)
+        .cooldownTicks(60)
         .onNodeClick(n => { focusNode(n); openChainDetail(n.id); });
-    window.addEventListener('resize', () => myGraph && myGraph.width(window.innerWidth).height(window.innerHeight));
+    window.addEventListener('resize', () => {
+        if (myGraph) myGraph.width(window.innerWidth).height(window.innerHeight);
+    });
 }
+
+function renderGraphLegend() {
+    const colorWrap = byId('graphLegendColor');
+    if (colorWrap) {
+        clear(colorWrap);
+        for (const k of NET_CLASS_ORDER) {
+            const cls = NET_CLASSES[k];
+            const sw = el('span', { class: 'legend-swatch' });
+            sw.style.background = Viz.cssVar(cls.cssVar);
+            sw.style.borderRadius = '50%';
+            colorWrap.appendChild(el('span', { class: 'legend-item' }, [sw, cls.label]));
+        }
+    }
+    const sizeWrap = byId('graphLegendSize');
+    if (sizeWrap) {
+        clear(sizeWrap);
+        const label = graphSizeMode === 'tvs' ? 'Value secured'
+            : graphSizeMode === 'rpc' ? 'RPC endpoint count' : 'Uniform (no measure)';
+        const ramp = el('span', { class: 'legend-size' });
+        for (const d of [4, 7, 11]) {
+            const i = el('i');
+            i.style.width = `${d}px`;
+            i.style.height = `${d}px`;
+            ramp.appendChild(i);
+        }
+        sizeWrap.appendChild(el('span', { class: 'legend-item' }, [ramp, label]));
+        if (graphSizeMode === 'tvs') {
+            sizeWrap.appendChild(el('span', {
+                class: 'legend-item legend-count',
+                text: 'Unclassified chains take the minimum size'
+            }));
+        }
+    }
+    const linkWrap = byId('graphLegendLinks');
+    if (linkWrap) {
+        clear(linkWrap);
+        for (const [, def] of Object.entries(LINK_KINDS)) {
+            const line = el('span', { class: 'legend-line' });
+            line.style.background = Viz.cssVar(def.cssVar);
+            linkWrap.appendChild(el('span', { class: 'legend-item' }, [line, def.label]));
+        }
+    }
+    const emph = byId('graphLegendEmphasis');
+    if (emph) {
+        clear(emph);
+        emph.appendChild(el('div', { class: 'legend-title', text: 'Highlight' }));
+        emph.appendChild(el('div', { class: 'chart-legend' }, [
+            el('span', {
+                class: 'legend-item',
+                text: graphEmphasizeIncidents
+                    ? `${fmtNum(state.openByChain.size)} networks with an open incident keep full colour; the rest are dimmed`
+                    : 'Off — enable to dim networks with no open incident'
+            })
+        ]));
+    }
+}
+
 function focusNode(node) {
     if (!myGraph || node.x == null) return;
     const r = 1 + 150 / Math.hypot(node.x, node.y, node.z);
     myGraph.cameraPosition({ x: node.x * r, y: node.y * r, z: node.z * r }, node, 1200);
 }
-function focusNodeById(id) { const n = filteredData.nodes.find(x => x.id === id) || graphData.nodes.find(x => x.id === id); if (n) focusNode(n); }
-
-// ─────────────────────────────── summary metric strip ───────────────────────────────
-function totalTvs() { return state.l2beatProjects.reduce((s, p) => s + (p.tvs || 0), 0); }
-function renderSummaryCards() {
-    const wrap = document.getElementById('summaryCards'); if (!wrap) return;
-    const s = stats || {};
-    const num = v => (v != null ? Number(v).toLocaleString() : '—');
-    const tvs = totalTvs();
-    const rpcPct = s.rpc ? Number(s.rpc.healthPercent) : null;
-    const cards = [
-        { label: 'Networks', value: num(s.totalChains ?? (state.chains.length || null)) },
-        { label: 'Mainnets', value: num(s.totalMainnets) },
-        { label: 'L2s', value: num(s.totalL2s) },
-        { label: 'Testnets', value: num(s.totalTestnets) },
-        {
-            label: 'RPC health', value: rpcPct != null ? `${rpcPct}%` : '—',
-            sub: s.rpc ? `${num(s.rpc.working)} / ${num(s.rpc.tested)} endpoints` : '',
-            tone: rpcPct == null ? '' : rpcPct >= 90 ? 'good' : rpcPct >= 70 ? 'warn' : 'bad',
-            bar: rpcPct
-        },
-        { label: 'Total TVS', value: tvs ? fmtUsd(tvs) : '—', sub: state.l2beatProjects.length ? `${state.l2beatProjects.length} L2BEAT projects` : '' }
-    ];
-    wrap.textContent = '';
-    for (const c of cards) {
-        const card = el('div', { class: `stat-card ${c.tone || ''}` }, [
-            el('div', { class: 'stat-value', text: c.value }),
-            el('div', { class: 'stat-label', text: c.label }),
-            c.sub ? el('div', { class: 'stat-sub', text: c.sub }) : null
-        ]);
-        if (c.bar != null) {
-            const track = el('div', { class: 'stat-bar' }, [el('div', { class: 'stat-bar-fill' })]);
-            track.firstChild.style.width = `${Math.max(0, Math.min(100, c.bar))}%`;
-            card.appendChild(track);
-        }
-        wrap.appendChild(card);
-    }
+function focusNodeById(id) {
+    const n = filteredData.nodes.find(x => x.id === id) || graphData.nodes.find(x => x.id === id);
+    if (n) focusNode(n);
 }
 
-// ─────────────────────────────── Chains table ───────────────────────────────
-let chainSort = { key: 'chainId', dir: 1 };
-let chainTagFilter = 'all';
-const CHAIN_PAGE = 200;
-let chainShown = CHAIN_PAGE;
+// ═════════════════════════════════════════════════════════════════════════
+// Incidents view
+// ═════════════════════════════════════════════════════════════════════════
+function chainIncidents() { return incidents.items.filter(it => !it.isProvider); }
 
-function initChainsTableHeader() {
-    document.querySelectorAll('#chainsTable thead th[data-sort]').forEach(th => th.addEventListener('click', () => {
-        const k = th.dataset.sort; chainSort.dir = chainSort.key === k ? -chainSort.dir : 1; chainSort.key = k; renderChainsView();
-    }));
-    document.querySelectorAll('#chainTagChips .chip').forEach(chip => chip.addEventListener('click', () => {
-        document.querySelectorAll('#chainTagChips .chip').forEach(c => c.classList.remove('active'));
-        chip.classList.add('active'); chainTagFilter = chip.dataset.tag; chainShown = CHAIN_PAGE; renderChainsView();
-    }));
-}
-// Type = the environment (Mainnet/Testnet). L2 / Beacon / ZK / Validium /
-// Optimium are orthogonal tags — a chain can be a mainnet-L2 or a testnet-L2.
-function networkType(c) { return c.tags?.includes('Testnet') ? 'Testnet' : 'Mainnet'; }
-function extraTags(c) { return (c.tags || []).filter(t => t !== 'Testnet'); }
-
-function chainRowData(c) {
-    // /summary precomputes rpcCount; the /export fallback still ships raw URLs.
-    const rpcCount = c.rpcCount ?? (c.rpc || []).filter(u => { const url = typeof u === 'string' ? u : u?.url; return url && url.startsWith('http') && !url.includes('${'); }).length;
-    const l2b = state.l2beat.get(c.chainId);
-    return {
-        chainId: c.chainId, name: c.name || `Chain ${c.chainId}`,
-        type: networkType(c), tags: extraTags(c), stage: l2b?.stage || '',
-        rpcs: rpcCount, tvs: l2b?.tvs ?? null, status: c.status || ''
-    };
-}
-function renderChainsView() {
-    const body = document.getElementById('chainsTableBody'); if (!body) return;
-    const q = searchQuery;
-    let rows = state.chains.filter(c => {
-        if (chainTagFilter !== 'all') {
-            if (chainTagFilter === 'Mainnet') { if (networkType(c) !== 'Mainnet') return false; }      // env: not a testnet (incl. mainnet-L2s)
-            else if (chainTagFilter === 'Testnet') { if (!c.tags?.includes('Testnet')) return false; }  // env: testnet (incl. testnet-L2s)
-            else if (!c.tags?.includes(chainTagFilter)) return false;                                   // tag membership: L2 / Beacon / ZK …
-        }
-        if (q && !chainMatchesQuery(c, q)) return false;
-        return true;
-    }).map(chainRowData);
-
-    const { key, dir } = chainSort;
-    rows.sort((a, b) => {
-        let av = a[key], bv = b[key];
-        if (key === 'tvs') { av = av ?? -1; bv = bv ?? -1; }
-        if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir;
-        return String(av).localeCompare(String(bv)) * dir;
-    });
-
-    document.getElementById('chainsCount').textContent = `${rows.length.toLocaleString()} shown`;
-    body.textContent = '';
-    for (const r of rows.slice(0, chainShown)) {
-        body.appendChild(el('tr', { 'data-id': r.chainId, onclick: () => openChainDetail(r.chainId) }, [
-            el('td', { class: 'num mono', text: String(r.chainId) }),
-            el('td', {}, [el('span', { class: 'cell-name', text: r.name })]),
-            el('td', {}, [
-                el('span', { class: `tag tag-${r.type.toLowerCase()}`, text: r.type }),
-                ...r.tags.map(t => el('span', { class: `tag tag-${t.toLowerCase()}`, text: t }))
-            ]),
-            el('td', {}, [r.stage ? el('span', { class: 'pill pill-stage', text: r.stage }) : el('span', { class: 'muted', text: '—' })]),
-            el('td', { class: 'num', text: r.tvs != null ? fmtUsd(r.tvs) : '—' }),
-            el('td', { class: 'num', text: r.rpcs ? String(r.rpcs) : '—' }),
-            el('td', {}, [statusBadge(r.status)])
-        ]));
-    }
-    const more = document.getElementById('chainsTableMore'); more.textContent = '';
-    if (rows.length > chainShown) more.appendChild(el('button', { class: 'load-more', text: `Show more (${(rows.length - chainShown).toLocaleString()} remaining)`, onclick: () => { chainShown += CHAIN_PAGE * 2; renderChainsView(); } }));
-}
-function statusBadge(status) {
-    if (!status) return el('span', { class: 'muted', text: '—' });
-    return el('span', { class: `pill pill-${status.toLowerCase()}`, text: status });
-}
-
-// ─────────────────────────────── Top-L2s TVS chart ───────────────────────────────
-function renderScalingChart() {
-    const wrap = document.getElementById('scalingChart'); if (!wrap) return;
-    const top = state.l2beatProjects.filter(p => p.tvs > 0).sort((a, b) => b.tvs - a.tvs).slice(0, 15);
-    if (state.l2beatMeta) document.getElementById('scalingMeta').textContent = `${state.l2beatMeta.count} projects · ${state.l2beatMeta.source}`;
-    wrap.textContent = '';
-    if (!top.length) { wrap.appendChild(el('div', { class: 'feed-empty', text: 'No scaling data.' })); return; }
-    const max = top[0].tvs;
-    for (const p of top) {
-        const pct = Math.max(2, (p.tvs / max) * 100);
-        const row = el('div', { class: 'bar-row', onclick: p.chainId != null ? () => openChainDetail(p.chainId) : null }, [
-            el('div', { class: 'bar-label', text: p.displayName || p.slug }),
-            el('div', { class: 'bar-track' }, [el('div', { class: 'bar-fill' })]),
-            el('div', { class: 'bar-value mono', text: fmtUsd(p.tvs) })
-        ]);
-        const fill = row.querySelector('.bar-fill');
-        fill.style.width = `${pct}%`;
-        fill.style.background = `linear-gradient(90deg, var(--color-l2), #06b6d4)`;
-        wrap.appendChild(row);
-    }
-}
-
-// ─────────────────────────────── status pages (drawer links only) ───────────────────────────────
-async function loadStatusPages() {
-    try {
-        const d = await api('/status-pages');
-        for (const sp of d.statusPages || []) for (const id of sp.chainIds || []) state.statusPagesByChain.set(id, { id: sp.id, name: sp.name, url: sp.url });
-    } catch { /* drawer just won't show a status link */ }
-}
-
-// ─────────────────────────────── Incidents (live WS) ───────────────────────────────
-const STATUS_WORDS = ['Resolved', 'Completed', 'Monitoring', 'Verifying', 'Update', 'Identified', 'Investigating', 'Scheduled', 'In progress'];
-// Statuses that close an incident/maintenance — used to know it's done.
-const CLOSED_STATUSES = new Set(['resolved', 'completed', 'closed']);
-// chains-status-news now emits a normalized `status` (and `ongoing`) on every
-// event — exact for Atlassian/webhook sources, text-derived server-side for
-// feed-only providers. Prefer it; the summary-scraping below is only a fallback
-// for older cached events that predate the field. Maps the wire vocabulary
-// (src/incidentState.js STATUS) to the display label the cards already use.
-const SERVER_STATUS_LABEL = {
-    investigating: 'Investigating', identified: 'Identified', monitoring: 'Monitoring', resolved: 'Resolved',
-    maintenance_scheduled: 'Scheduled', maintenance_in_progress: 'In progress', maintenance_completed: 'Completed',
-    operational: 'Operational', degraded: 'Degraded', partial_outage: 'Partial outage', major_outage: 'Major outage'
-};
-const SCHEDULED_STATUSES = new Set(['maintenance_scheduled', 'maintenance_in_progress', 'maintenance_completed']);
-
-// The CSS token for a status label ('In progress' -> 'inprogress'). Shared by the
-// status pill and the timeline dot so the two cannot key on different strings —
-// the dot palette was originally written against the feed's raw enum
-// ('major_outage') while parseIncidentStatus returns a LABEL ('Major outage'),
-// which left every maintenance step grey.
-function statusToken(status) {
-    return status ? String(status).toLowerCase().replace(/\s+/g, '') : null;
-}
-const incidents = {
-    items: [], byKey: new Map(), ws: null, retries: 0, groupBy: 'flat', dayFilter: null, category: 'all',
-    // LLM enrichment (chains-status-news two-phase delivery): raw items arrive as
-    // status.item, a status.enrichment (keyed by the raw eventId) follows later.
-    // eventToKey resolves an eventId to its incident; enrichByKey holds the newest
-    // enrichment per incident; enrichPending stashes any that arrive before the item.
-    eventToKey: new Map(), enrichByKey: new Map(), enrichPending: new Map(), enrichTimer: null
-};
-const providers = { filter: 'all', dayFilter: null };
-// eventToKey/enrichPending grow per raw event id (unlike byKey, which is bounded
-// by distinct incidents), so cap them for long-lived tabs. Well above the feed's
-// live window (store ~500, WS replay 100); enrichPending only holds frames whose
-// item hasn't landed, so it stays small. Maps keep insertion order — evict oldest.
-const MAX_EVENT_KEYS = 5000;
-const MAX_ENRICH_PENDING = 500;
-function capMap(map, max) { while (map.size > max) map.delete(map.keys().next().value); }
-
-function parseIncidentStatus(ev) {
-    const label = SERVER_STATUS_LABEL[ev.status];
-    if (label) return label;
-    const s = ev.summary || '';
-    const m = s.match(new RegExp(`<strong>\\s*(${STATUS_WORDS.join('|')})\\s*</strong>`, 'i'));
-    if (m) return m[1];
-    const m2 = s.match(/Status:\s*([a-z ]+?)(?:\s*\||$)/i);
-    if (m2) return m2[1].trim();
-    return null;
-}
-// Incident vs scheduled maintenance. The server's structured status decides it
-// when present; otherwise fall back to text — incident lifecycle words win (so
-// an "Investigating…" event isn't miscategorised), then maintenance/upgrade
-// signals mark it scheduled.
-function classifyKind(ev) {
-    if (SCHEDULED_STATUSES.has(ev.status)) return 'scheduled';
-    if (SERVER_STATUS_LABEL[ev.status]) return 'incident';
-    const blob = `${ev.title || ''} ${ev.summary || ''}`;
-    if (/\b(Investigating|Identified|Monitoring)\b/i.test(blob)) return 'incident';
-    if (/\b(Scheduled|Maintenance|Verifying|Completed|In progress)\b/i.test(blob) || /maintenance|upgrade|planned/i.test(ev.title || '')) return 'scheduled';
-    return 'incident';
-}
-function parseIncidentTimes(ev) {
-    const s = ev.summary || '';
-    const year = (ev.publishedAt ? new Date(ev.publishedAt) : new Date()).getUTCFullYear();
-    const stamps = [...s.matchAll(/<small>([\s\S]*?)<\/small>/gi)]
-        .map(x => {
-            // Pull the visible tokens (month word, day, HH:MM) directly from the
-            // <small> content — e.g. "Jun <var…>26</var>, <var…>20:03</var> UTC".
-            // We only need to parse a date, so extract tokens instead of
-            // stripping tags (tag-stripping is brittle and only used here for
-            // a non-HTML purpose).
-            const inner = x[1];
-            const month = (inner.match(/[A-Za-z]{3,}/) || [])[0];
-            const nums = inner.match(/\d{1,2}:\d{2}|\d{1,2}/g) || [];
-            const day = nums.find(n => !n.includes(':'));
-            const time = nums.find(n => n.includes(':'));
-            if (!month || !day || !time) return null;
-            const d = new Date(`${month} ${day} ${year} ${time}:00 UTC`);
-            return Number.isNaN(d.getTime()) ? null : d.getTime();
-        }).filter(v => v != null);
-    if (stamps.length >= 2) return { start: Math.min(...stamps), end: Math.max(...stamps) };
-    // ISO fallback (e.g. "Resolved: 2026-06-26 18:49:13")
-    const iso = [...s.matchAll(/(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2})/g)].map(x => Date.parse(x[1].replace(' ', 'T') + 'Z')).filter(Boolean);
-    if (iso.length >= 2) return { start: Math.min(...iso), end: Math.max(...iso) };
-    return null;
-}
-// One incident = one block. The feed emits a separate event per state change and
-// stamps them all with a shared `incidentId` for exactly this purpose — so that
-// is the key.
-//
-// It used to key on status page + title, which breaks on the two feed styles that
-// matter. Uptime-monitor pages retitle every state ("Portal went down" then
-// "Portal recovered"), so one incident split into two cards. And a recurring
-// title collapsed UNRELATED outages into one block: Abstract's Portal went down
-// on Jul 20, Jul 21 and Jul 29, which showed as two cards, hid the third
-// occurrence, and reported a "9d 11h" duration that was really the gap between
-// the first and last separate outage.
-//
-// The statusPage|title form stays as the fallback for events cached before
-// incidentId existed; every one of 456 live events now carries it.
-function incidentKey(ev) {
-    if (ev.incidentId) return ev.incidentId;
-    const sp = ev.statusPage?.id || (ev.chains?.[0]?.chainId ?? 'unknown');
-    return `${sp}|${(ev.title || '').toLowerCase().trim()}`;
-}
-
-// Cap the per-incident transition list. An Atlassian incident can carry dozens of
-// updates; the card shows a lifecycle, not a changelog.
-const MAX_TRANSITIONS = 24;
-
-// Merge one event into an incident's ordered transition list, newest last and
-// deduped so a re-broadcast cannot double the timeline. addIncidents runs for
-// both the REST fetch and the WS replay, so the same event genuinely arrives
-// twice; an event with no id falls back to its timestamp+title rather than
-// skipping dedup entirely.
-function addTransition(list, ev, ms) {
-    if (ms == null) return list;
-    const id = ev.id ?? `${ms}|${ev.title || ''}`;
-    if (list.some(t => t.id === id)) return list;
-    list.push({ id, ms, title: ev.title || '', status: parseIncidentStatus(ev) });
-    list.sort((a, b) => a.ms - b.ms);
-    if (list.length > MAX_TRANSITIONS) list.splice(0, list.length - MAX_TRANSITIONS);
-    return list;
-}
-function eventTimeMs(ev) {
-    const t = Date.parse(ev.publishedAt || ev.updatedAt || '');
-    return Number.isNaN(t) ? null : t;
-}
-function incidentModel(ev) {
-    const chain = ev.chains?.[0];
-    const whenMs = eventTimeMs(ev);
-    const isProvider = ev.statusPage?.kind === 'rpc-provider';
-    return {
-        key: incidentKey(ev),
-        title: ev.title || '(untitled)',
-        url: ev.url,
-        whenMs,
-        firstSeen: whenMs,
-        lastSeen: whenMs,
-        // What happened, in order. One entry per state change the feed published,
-        // which is what turns "went down" + "recovered" into a readable lifecycle
-        // instead of two unrelated cards.
-        transitions: addTransition([], ev, whenMs),
-        // The title of the OPENING event, kept separately: the newest event wins for
-        // current status, but a card headlined "Portal recovered" describes the end of
-        // the story rather than the incident. Atlassian incidents keep one title
-        // throughout, so this is a no-op for them.
-        openedTitle: ev.title || '(untitled)',
-        status: parseIncidentStatus(ev),
-        // Authoritative active/resolved flag from the feed; null on older cached
-        // events, where the card falls back to matching the status label.
-        ongoing: typeof ev.ongoing === 'boolean' ? ev.ongoing : null,
-        kind: classifyKind(ev),
-        durationMs: (() => { const t = parseIncidentTimes(ev); return t ? t.end - t.start : null; })(),
-        netName: chain?.name || ev.statusPage?.name || ev.statusPage?.id || 'Unknown',
-        chainId: chain?.chainId ?? null,
-        spId: ev.statusPage?.id || (chain?.chainId != null ? String(chain.chainId) : 'unknown'),
-        // RPC provider incidents (Infura, QuickNode, dRPC, Pinax) get their own
-        // tab; one provider status page can affect many chains per incident.
-        isProvider,
-        provider: isProvider ? (ev.statusPage?.id || 'unknown') : null,
-        providerName: isProvider ? (ev.statusPage?.name || ev.statusPage?.id || 'Provider') : null,
-        affectedChains: isProvider ? (ev.chains || []).map(c => c.chainId).filter(id => id != null) : [],
-        affectedComponents: Array.isArray(ev.affectedComponents) ? ev.affectedComponents : []
-    };
-}
-function dayKey(ms) { return ms != null && !Number.isNaN(ms) ? new Date(ms).toISOString().slice(0, 10) : null; }
-
-function addIncidents(events) {
-    let changed = false;
-    for (const ev of events) {
-        const m = incidentModel(ev);
-        // Remember which incident this raw event belongs to so a later
-        // status.enrichment (keyed by eventId) attaches to the right card; drain
-        // any enrichment that raced ahead of its item.
-        if (ev.id) {
-            incidents.eventToKey.set(ev.id, m.key);
-            capMap(incidents.eventToKey, MAX_EVENT_KEYS);
-            const early = incidents.enrichPending.get(ev.id);
-            if (early) { incidents.enrichPending.delete(ev.id); applyEnrichment(m.key, early); }
-        }
-        const existing = incidents.byKey.get(m.key);
-        if (!existing) { incidents.byKey.set(m.key, m); changed = true; continue; }
-        // merge into the single block for this incident
-        if (m.whenMs != null) {
-            const opening = existing.firstSeen == null || m.whenMs < existing.firstSeen;
-            existing.firstSeen = Math.min(existing.firstSeen ?? m.whenMs, m.whenMs);
-            existing.lastSeen = Math.max(existing.lastSeen ?? m.whenMs, m.whenMs);
-            addTransition(existing.transitions ??= [], ev, m.whenMs);
-            // An earlier event can arrive after a later one — the recovery is often
-            // parsed first, and a restart replays history out of order — so the
-            // headline follows the earliest event, not arrival order.
-            if (opening) existing.openedTitle = m.openedTitle;
-            if (existing.whenMs == null || m.whenMs >= existing.whenMs) { // newest event wins for current status
-                existing.whenMs = m.whenMs; existing.status = m.status; existing.ongoing = m.ongoing; existing.url = m.url; existing.kind = m.kind;
-                if (m.affectedChains.length) existing.affectedChains = m.affectedChains;
-                if (m.affectedComponents.length) existing.affectedComponents = m.affectedComponents;
-            }
-        }
-        changed = true;
-    }
-    if (!changed) return;
-    for (const m of incidents.byKey.values()) {
-        // Prefer the observed open span (first→last update); fall back to the
-        // duration parsed from a single summary. The span is only trustworthy now
-        // that incidents are keyed by incidentId — keyed by title it measured the
-        // gap between unrelated recurrences and reported a 3-minute outage as 9d 11h.
-        if (m.firstSeen != null && m.lastSeen != null && m.lastSeen > m.firstSeen) {
-            m.durationMs = m.lastSeen - m.firstSeen;
-            m.durationEvidence = 'observed';
-        } else if (m.durationMs != null) {
-            // Read out of the entry's own prose rather than from two observed
-            // timestamps — weaker, and labelled so the card can say so.
-            m.durationEvidence = 'stated';
-        }
-    }
-    incidents.items = [...incidents.byKey.values()].sort((a, b) => (b.whenMs || 0) - (a.whenMs || 0));
-    try { renderIncidents(); } catch (err) { console.error('incident render failed', err); }
-    try { renderProviders(); } catch (err) { console.error('provider render failed', err); }
-}
-
-// A status.enrichment frame: the LLM classification/summary for one event,
-// delivered after its status.item. Attach it to the event's incident (or stash
-// it if the item hasn't landed yet) and repaint.
-function addEnrichment(enr) {
-    const key = incidents.eventToKey.get(enr.eventId);
-    if (!key) {
-        // Item hasn't landed yet — stash until addIncidents drains it. Capped so
-        // a frame whose item never arrives (aged past replay) can't leak forever.
-        incidents.enrichPending.set(enr.eventId, enr);
-        capMap(incidents.enrichPending, MAX_ENRICH_PENDING);
-        return;
-    }
-    if (applyEnrichment(key, enr)) scheduleEnrichmentRerender();
-}
-// Newest enrichment wins per incident (a later update can re-classify it). A
-// strictly-older frame loses; equal or absent timestamps let the later arrival
-// win, so a re-classification is never dropped when createdAt is missing/tied.
-function applyEnrichment(key, enr) {
-    const prev = incidents.enrichByKey.get(key);
-    if (prev && (Date.parse(prev.createdAt) || 0) > (Date.parse(enr.createdAt) || 0)) return false;
-    incidents.enrichByKey.set(key, enr);
-    return true;
-}
-// Enrichments burst (WS replay re-sends them); coalesce the repaint.
-function scheduleEnrichmentRerender() {
-    if (incidents.enrichTimer) return;
-    incidents.enrichTimer = setTimeout(() => {
-        incidents.enrichTimer = null;
-        try { renderIncidents(); } catch (err) { console.error('incident render failed', err); }
-        try { renderProviders(); } catch (err) { console.error('provider render failed', err); }
-    }, 300);
-}
-
-// The Incidents tab covers chain operator status pages; RPC provider status
-// pages live in their own Providers tab. Items after the active category filter.
 function visibleIncidents() {
-    const chainIncidents = incidents.items.filter(it => !it.isProvider);
-    if (incidents.category === 'all') return chainIncidents;
-    return chainIncidents.filter(it => it.kind === incidents.category);
+    let items = chainIncidents();
+    if (incidents.category !== 'all') items = items.filter(it => it.kind === incidents.category);
+    if (incidents.severity !== 'all') items = items.filter(it => severityOf(it).key === incidents.severity);
+    return items;
 }
 
 function initIncidentControls() {
-    document.getElementById('grpFlat')?.addEventListener('click', () => setGroupBy('flat'));
-    document.getElementById('grpNetwork')?.addEventListener('click', () => setGroupBy('network'));
+    byId('grpFlat')?.addEventListener('click', () => setGroupBy('flat'));
+    byId('grpNetwork')?.addEventListener('click', () => setGroupBy('network'));
     document.querySelectorAll('#incidentCategory .chip').forEach(chip =>
         chip.addEventListener('click', () => setCategory(chip.dataset.cat)));
 }
 function setGroupBy(mode) {
     incidents.groupBy = mode;
-    document.getElementById('grpFlat')?.classList.toggle('active', mode === 'flat');
-    document.getElementById('grpNetwork')?.classList.toggle('active', mode === 'network');
+    byId('grpFlat')?.setAttribute('aria-pressed', String(mode === 'flat'));
+    byId('grpNetwork')?.setAttribute('aria-pressed', String(mode === 'network'));
     renderIncidentList();
 }
 function setCategory(cat) {
     incidents.category = cat;
-    document.querySelectorAll('#incidentCategory .chip').forEach(c => c.classList.toggle('active', c.dataset.cat === cat));
+    incidents.shown = null;
+    document.querySelectorAll('#incidentCategory .chip').forEach(c =>
+        c.setAttribute('aria-pressed', String(c.dataset.cat === cat)));
+    renderIncidents();
+}
+function setSeverity(sev) {
+    incidents.severity = sev;
+    incidents.shown = null;
     renderIncidents();
 }
 
-function renderIncidents() {
-    renderCalendar();
-    renderIncidentList();
-}
-
-// Three real month grids — previous, current, next (next month surfaces
-// upcoming scheduled maintenance). Monday-first, UTC day keys (matches
-// dayKey()), days with events are heat-shaded and click-toggle a day filter.
-function renderMonthCalendars(containerId, items, selectedDay, onSelect) {
-    const wrap = document.getElementById(containerId); if (!wrap) return;
+// Severity chips are built from what the feed actually classified, with counts,
+// including an explicit bucket for unclassified events.
+function renderSeverityChips() {
+    const wrap = byId('incidentSeverity');
+    if (!wrap) return;
+    const base = chainIncidents().filter(it =>
+        incidents.category === 'all' || it.kind === incidents.category);
     const counts = new Map();
-    for (const it of items) { const k = dayKey(it.whenMs); if (k) counts.set(k, (counts.get(k) || 0) + 1); }
-    const max = Math.max(1, ...counts.values());
-    const todayKey = dayKey(Date.now());
-    const now = new Date();
-    wrap.textContent = '';
-    for (let off = -1; off <= 1; off++) {
-        const first = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + off, 1));
-        const daysInMonth = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() + 1, 0)).getUTCDate();
-        const grid = el('div', { class: 'cal-grid' },
-            ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map(d => el('div', { class: 'cal-dow', text: d })));
-        for (let i = (first.getUTCDay() + 6) % 7; i > 0; i--) grid.appendChild(el('div', { class: 'cal-cell blank' }));
-        for (let d = 1; d <= daysInMonth; d++) {
-            const k = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), d)).toISOString().slice(0, 10);
-            const n = counts.get(k) || 0;
-            const cell = el('div', {
-                class: `cal-cell${n ? ' has' : ''}${selectedDay === k ? ' sel' : ''}${k === todayKey ? ' today' : ''}`,
-                title: `${k}: ${n} incident${n === 1 ? '' : 's'}`
-            }, [
-                el('span', { class: 'cal-day', text: String(d) }),
-                n ? el('span', { class: 'cal-count', text: String(n) }) : null
-            ]);
-            if (n) { cell.style.background = `rgba(139,92,246,${0.15 + 0.6 * (n / max)})`; cell.addEventListener('click', () => onSelect(k)); }
-            grid.appendChild(cell);
+    for (const it of base) {
+        const k = severityOf(it).key;
+        counts.set(k, (counts.get(k) || 0) + 1);
+    }
+    clear(wrap);
+    const mk = (key, label, count, cssVar) => wrap.appendChild(el('button', {
+        class: 'chip', type: 'button',
+        'aria-pressed': String(incidents.severity === key),
+        onclick: () => setSeverity(key)
+    }, [
+        cssVar ? (() => {
+            const d = el('span', { class: 'chip-dot' });
+            d.style.background = Viz.cssVar(cssVar);
+            return d;
+        })() : null,
+        label,
+        count != null ? el('span', { class: 'chip-count', text: fmtNum(count) }) : null
+    ]));
+    mk('all', 'Any', base.length, null);
+    for (const key of ['critical', 'major', 'minor', 'none']) {
+        if (!counts.get(key)) continue;
+        mk(key, SEVERITY_META[key].label, counts.get(key), SEVERITY_META[key].cssVar);
+    }
+}
+
+function renderIncidents() {
+    renderIncidentStats();
+    renderSeverityChips();
+    renderIncidentHistogram();
+    renderIncidentCalendar();
+    renderIncidentList();
+    renderTabBadge();
+}
+
+function renderIncidentStats() {
+    const wrap = byId('incidentStats');
+    if (!wrap) return;
+    const all = chainIncidents();
+    const open = all.filter(isOpen);
+    const scheduled = all.filter(it => it.kind === 'scheduled');
+    const enriched = all.filter(it => enrichmentOf(it)).length;
+    clear(wrap);
+    wrap.appendChild(statTile({
+        label: 'Open now', value: fmtNum(open.length), hero: true,
+        sub: `of ${fmtNum(all.length)} retained events`,
+        tone: open.length === 0 ? 'good' : 'warn'
+    }));
+    wrap.appendChild(statTile({
+        label: 'Scheduled maintenance', value: fmtNum(scheduled.length),
+        sub: 'includes upcoming windows'
+    }));
+    wrap.appendChild(statTile({
+        label: 'Networks named', value: fmtNum(new Set(all.flatMap(it => it.chainIds)).size),
+        sub: 'resolved to a registry chain ID'
+    }));
+    wrap.appendChild(statTile({
+        label: 'AI classified', value: all.length ? Viz.fmtPct((enriched / all.length) * 100, 0) : '—',
+        sub: `${fmtNum(enriched)} of ${fmtNum(all.length)} events`,
+        hint: 'Share of events with an LLM classification from the feed. Unclassified events are never given a guessed severity.'
+    }));
+}
+
+// Day buckets across the retained window. Labelled as observed event counts,
+// not as a metric trend — the feed keeps a rolling window, not history.
+function dayBuckets(items) {
+    const counts = new Map();
+    for (const it of items) {
+        const k = dayKey(it.whenMs);
+        if (k) counts.set(k, (counts.get(k) || 0) + 1);
+    }
+    if (!counts.size) return { days: [], counts };
+    const keys = [...counts.keys()].sort();
+    const start = new Date(`${keys[0]}T00:00:00Z`);
+    const end = new Date(`${keys[keys.length - 1]}T00:00:00Z`);
+    const days = [];
+    for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+        const k = d.toISOString().slice(0, 10);
+        days.push({ key: k, count: counts.get(k) || 0 });
+    }
+    return { days, counts };
+}
+
+function renderIncidentHistogram() {
+    const host = byId('incidentHistogram');
+    if (!host) return;
+    const { days } = dayBuckets(visibleIncidents());
+    const res = Viz.dayHistogram(host, {
+        days, selected: incidents.dayFilter, valueLabel: 'events',
+        tableCaption: 'Retained events per day',
+        onSelect: k => {
+            incidents.dayFilter = incidents.dayFilter === k ? null : k;
+            renderIncidents();
         }
-        wrap.appendChild(el('div', { class: 'cal-month' }, [
-            el('div', { class: 'cal-month-title', text: first.toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' }) }),
-            grid
-        ]));
+    });
+    const actions = byId('incidentHistActions');
+    if (actions && res?.table) {
+        clear(actions);
+        host.appendChild(res.table);
+        Viz.attachTableToggle(host, res.table, actions);
     }
 }
 
-function renderCalendar() {
-    renderMonthCalendars('incidentCalendar', visibleIncidents(), incidents.dayFilter,
-        k => { incidents.dayFilter = incidents.dayFilter === k ? null : k; renderIncidents(); });
-}
-
-// One card builder for both chain incidents and provider incidents — they
-// differ only in icon/label source and the affected-chains chip row.
-function incidentCard(it) {
-    const isProvider = !!it.isProvider;
-    const label = isProvider ? it.providerName : it.netName;
-    const enr = incidents.enrichByKey.get(it.key) || null;
-    const enrAction = enr?.context?.actionRequired && String(enr.context.actionRequired).toLowerCase() !== 'none'
-        ? enr.context.actionRequired : null;
-    const open = it.ongoing != null
-        ? it.ongoing
-        : Boolean(it.status && !CLOSED_STATUSES.has(it.status.toLowerCase()));
-    // When it STARTED, not when it last changed. The headline is the opening event, so
-    // pairing it with the recovery's timestamp read as a contradiction: "Portal went
-    // down · 7:58:10 PM" was the moment it came back. The timeline below carries the
-    // later steps. Identical to whenMs for a single-state incident.
-    const startedMs = it.firstSeen ?? it.whenMs;
-    const when = startedMs != null ? new Date(startedMs).toLocaleString() : null;
-    const meta = [label, when, open ? 'ongoing' : null].filter(Boolean);
-    const dur = fmtDuration(it.durationMs);
-    const side = [];
-    // The LLM severity is the strongest at-a-glance signal — lead the rail with it.
-    // Sanitize the value into the class token (a garbage string would otherwise
-    // inject stray classes); the raw value is still shown as the pill's text.
-    const sevClass = enr?.severity ? String(enr.severity).toLowerCase().replace(/[^a-z]/g, '') : null;
-    if (sevClass) side.push(el('span', { class: `pill sev-${sevClass}`, text: enr.severity }));
-    if (it.status) side.push(el('span', { class: `pill st-${statusToken(it.status)}`, text: it.status }));
-    // A duration measured between two published states is a fact; one read out of an
-    // entry's prose is a claim. Mark the weaker one rather than showing both as the
-    // same number — this pill used to read "9d 11h" for a three-minute outage.
-    if (dur) {
-        const stated = it.durationEvidence === 'stated';
-        side.push(el('span', {
-            class: `incident-dur${stated ? ' incident-dur-stated' : ''}`,
-            text: stated ? `~${dur}` : dur,
-            title: stated ? 'Duration stated in the incident text' : 'Measured between the first and last published update'
-        }));
-    }
-
-    // Provider incidents map to the chains they hit: clickable chips (open the
-    // drawer), else raw component names, else a "provider-wide" note.
-    let affected = null;
-    if (isProvider) {
-        if (it.affectedChains?.length) {
-            affected = el('div', { class: 'affected-chains' }, it.affectedChains.slice(0, 12).map(id => {
-                const c = state.byId.get(id);
-                return el('span', { class: 'chain-chip', onclick: e => { e.preventDefault(); e.stopPropagation(); openChainDetail(id); }, text: c?.name || `Chain ${id}` });
-            }));
-        } else if (it.affectedComponents?.length) {
-            affected = el('div', { class: 'incident-meta muted', text: it.affectedComponents.slice(0, 5).join(', ') });
-        } else {
-            affected = el('div', { class: 'incident-meta muted', text: 'No specific chain — provider-wide' });
+function renderIncidentCalendar() {
+    const host = byId('incidentCalendar');
+    if (!host) return;
+    const { counts } = dayBuckets(visibleIncidents());
+    const res = Viz.calendarHeatmap(host, {
+        counts, selected: incidents.dayFilter, noun: 'event',
+        onSelect: k => {
+            incidents.dayFilter = incidents.dayFilter === k ? null : k;
+            renderIncidents();
         }
-    }
-
-    return el('a', { class: `incident-card${open ? ' open' : ''}`, href: it.url || '#', target: '_blank', rel: 'noopener' }, [
-        isProvider ? networkIcon(label, COLORS.Default, 'net-icon provider-icon') : networkIcon(label, iconColorFor(it.chainId)),
-        el('div', { class: 'incident-body' }, [
-            el('div', { class: 'incident-title' }, [
-                !isProvider && it.kind === 'scheduled' ? el('span', { class: 'kind-tag', text: 'Scheduled' }) : null,
-                el('span', { text: it.openedTitle || it.title })
-            ]),
-            el('div', { class: 'incident-meta', text: meta.join(' · ') }),
-            incidentTimeline(it),
-            // LLM enrichment (chains-status-news): plain-language summary + any
-            // required action. The "AI" tag carries class/confidence/model on hover.
-            enr?.summary ? el('div', { class: 'incident-ai' }, [
-                el('span', {
-                    class: 'ai-tag', text: 'AI',
-                    title: [enr.class, enr.confidence != null ? `${Math.round(enr.confidence * 100)}%` : null, enr.model]
-                        .filter(Boolean).join(' · ')
-                }),
-                el('span', { class: 'ai-summary', text: plainText(enr.summary) })
-            ]) : null,
-            enrAction ? el('div', { class: 'incident-action', text: `Action: ${enrAction}` }) : null,
-            affected,
-            // Wrong-info loop: kind reflects whose page the incident came
-            // from; the merge key (status page + title) identifies the item.
-            feedbackAffordance({ kind: isProvider ? 'provider' : 'incident', refId: it.key })
-        ]),
-        el('div', { class: 'incident-side' }, side)
-    ]);
+    });
+    const legend = byId('incidentScaleLegend');
+    if (legend) Viz.scaleLegend(legend, { max: res?.max, noun: 'events' });
 }
 
-// The incident's lifecycle, one row per state the feed published: what changed,
-// when, and how long the step took. This is the whole point of keying on
-// incidentId — "Portal went down" at 19:55 and "Portal recovered" at 19:58 are one
-// three-minute incident, and used to render as two unrelated cards.
-//
-// Returns null for a single-state incident: a one-row "timeline" is just the
-// timestamp already shown in the meta line.
+// The lifecycle of one incident: a row per state the feed published, down → recovered.
+// Suppressed below two steps, where there is no lifecycle to show — just a single state.
 function incidentTimeline(it) {
     const steps = it.transitions;
     if (!Array.isArray(steps) || steps.length < 2) return null;
-    // Atlassian incidents keep ONE title across every update, so stripping the
-    // shared subject would leave the same single word on every row ("errors",
-    // "errors", ...). When the titles never change, the STATUS is what changed.
+    // Atlassian incidents keep ONE title across every update, so stripping the shared
+    // subject would leave the same single word on every row ("errors", "errors", …).
+    // When the titles never change, the STATUS is what changed.
     const first = (steps[0].title || '').trim().toLowerCase();
     const uniformTitle = steps.every(step => (step.title || '').trim().toLowerCase() === first);
     const startedDay = new Date(steps[0].ms).toDateString();
@@ -1160,8 +2432,8 @@ function incidentTimeline(it) {
         // "resolved" is visible rather than buried in two absolute timestamps.
         const gap = prev ? fmtDuration(step.ms - prev.ms) : null;
         const when = new Date(step.ms);
-        // A multi-day incident would otherwise show two bare clock times three days
-        // apart and read as an hour.
+        // A multi-day incident would otherwise show two bare clock times three days apart
+        // and read as an hour.
         const sameDay = when.toDateString() === startedDay;
         const stamp = sameDay
             ? when.toLocaleTimeString()
@@ -1180,9 +2452,9 @@ function incidentTimeline(it) {
     return el('ul', { class: 'incident-timeline' }, rows);
 }
 
-// The steps of one incident usually repeat its subject ("Portal went down",
-// "Portal recovered"); the card headline already carries it, so show only what
-// changed. Falls back to the full title when there is no shared prefix to strip.
+// The steps of one incident usually repeat its subject ("Portal went down", "Portal
+// recovered"); the card headline already carries it, so show only what changed. Falls
+// back to the full title when there is no shared prefix to strip.
 function stripLifecycleSubject(title, openedTitle) {
     const text = (title || '').trim();
     if (!text || !openedTitle) return text || '—';
@@ -1195,127 +2467,254 @@ function stripLifecycleSubject(title, openedTitle) {
     return shared > 0 ? own.slice(shared).join(' ') : text;
 }
 
+// One card builder for chain, coin and provider incidents.
+function incidentCard(it) {
+    const enr = enrichmentOf(it);
+    const sev = severityOf(it);
+    const open = isOpen(it);
+    const dur = durationInfo(it);
+    // When it STARTED, not when it last changed. Pairing the opening headline below with the
+    // newest event's timestamp produced "Portal went down · 7:58:10 PM" where 7:58 was the
+    // moment it came back; the lifecycle strip is what carries the later steps.
+    const when = fmtDateTime(it.firstSeen ?? it.whenMs);
+    // The opening event's title. The newest event wins for current state, but a card
+    // headlined "Portal recovered" describes the end of the story rather than the incident.
+    const headline = it.openedTitle || it.title;
+
+    const cls = ['incident-card'];
+    if (open) cls.push('is-open');
+    else if (it.kind === 'scheduled') cls.push('is-scheduled');
+
+    // Meta line: source, timestamp, and any client/version the operator named.
+    const meta = [
+        it.isProvider ? it.spName : it.netName,
+        when,
+        it.urgency === 'urgent' ? 'urgent' : null,
+        it.software.length ? it.software.slice(0, 2).join(', ') : null
+    ].filter(Boolean);
+
+    const main = el('div', { class: 'incident-main' }, [
+        el('div', { class: 'incident-title' }, [
+            it.kind === 'scheduled' ? el('span', { class: 'kind-tag', text: 'Scheduled' }) : null,
+            el('span', { class: 'incident-title-text' }, [
+                it.url
+                    ? el('a', { href: safeUrl(it.url), target: '_blank', rel: 'noopener', text: headline })
+                    : el('span', { text: headline })
+            ])
+        ]),
+        el('div', { class: 'incident-meta', text: meta.join(' · ') }),
+        // Published states before anything the model inferred: what the operator actually
+        // said outranks a classification of it.
+        incidentTimeline(it)
+    ]);
+
+    // ── AI enrichment, fully attributed ──
+    if (enr?.summary) {
+        const conf = Number.isFinite(enr.confidence) ? enr.confidence : null;
+        const head = el('div', { class: 'ai-head' }, [
+            el('span', { class: 'ai-tag', text: 'AI' }),
+            enr.class ? el('span', { class: 'ai-class', text: String(enr.class).replace(/_/g, ' ') }) : null
+        ]);
+        if (conf != null) {
+            const bar = el('span', { class: 'ai-conf-bar' }, [el('span', { class: 'ai-conf-fill' })]);
+            bar.firstChild.style.width = `${Math.round(conf * 100)}%`;
+            head.appendChild(el('span', { class: 'ai-conf', title: 'Model-reported confidence in this classification' }, [
+                'confidence ', bar, `${Math.round(conf * 100)}%`
+            ]));
+        }
+        if (enr.model) head.appendChild(el('span', { text: `· ${enr.model}` }));
+
+        const block = el('div', { class: 'ai-block' }, [
+            head,
+            el('div', { class: 'ai-summary', text: plainText(enr.summary) })
+        ]);
+        const action = enr.context?.actionRequired;
+        if (action && String(action).toLowerCase() !== 'none') {
+            block.appendChild(el('div', { class: 'ai-action' }, [
+                el('span', { class: 'ai-action-label', text: 'Action:' }),
+                el('span', { text: String(action) })
+            ]));
+        }
+        main.appendChild(block);
+    } else {
+        main.appendChild(el('div', {
+            class: 'ai-unclassified',
+            text: 'Not classified by the AI pipeline — severity unknown.'
+        }));
+    }
+
+    // Affected chains: clickable only when resolved to a registry chain ID.
+    if (it.chainIds.length) {
+        const chips = el('div', { class: 'affected-chains' });
+        for (const id of it.chainIds.slice(0, 14)) {
+            const c = state.byId.get(id);
+            chips.appendChild(el('button', {
+                class: 'chain-chip', type: 'button',
+                text: c?.name || `Chain ${id}`,
+                onclick: e => { e.preventDefault(); e.stopPropagation(); openChainDetail(id); }
+            }));
+        }
+        if (it.chainIds.length > 14) {
+            chips.appendChild(el('span', { class: 'legend-count', text: `+${it.chainIds.length - 14} more` }));
+        }
+        main.appendChild(chips);
+    } else if (it.isProvider) {
+        main.appendChild(el('div', {
+            class: 'incident-meta dim',
+            text: it.affectedComponents.length
+                ? `Components: ${it.affectedComponents.slice(0, 5).join(', ')}`
+                : 'No specific chain named — provider-wide'
+        }));
+    }
+
+    const side = el('div', { class: 'incident-side' }, [
+        el('span', { class: `sev sev-${sev.key}` }, [el('span', { class: 'sev-mark' }), sev.label]),
+        it.status ? el('span', { class: 'pill', text: it.status }) : null,
+        dur ? el('span', { class: 'incident-dur', title: dur.title, text: dur.text }) : null
+    ]);
+
+    return el('div', { class: cls.join(' ') }, [main, side]);
+}
+
 function renderIncidentList() {
-    const list = document.getElementById('incidentsList'); if (!list) return;
+    const list = byId('incidentsList');
+    if (!list) return;
     let items = visibleIncidents();
     if (incidents.dayFilter) items = items.filter(it => dayKey(it.whenMs) === incidents.dayFilter);
-    if (searchQuery) items = items.filter(it => it.netName?.toLowerCase().includes(searchQuery) || it.title?.toLowerCase().includes(searchQuery) || String(it.chainId).includes(searchQuery));
-    const noun = incidents.category === 'scheduled' ? 'maintenance' : 'incident';
-    document.getElementById('incidentsCount').textContent =
-        `${items.length} ${noun}${items.length === 1 ? '' : 's'}${incidents.dayFilter ? ` on ${incidents.dayFilter}` : ''}${searchQuery ? ` · “${searchQuery}”` : ''}`;
-    list.textContent = '';
-    if (!items.length) { list.appendChild(el('div', { class: 'feed-empty', text: 'Nothing in this range.' })); return; }
+    if (searchQuery) {
+        items = items.filter(it =>
+            it.netName?.toLowerCase().includes(searchQuery)
+            || it.title?.toLowerCase().includes(searchQuery)
+            || it.openedTitle?.toLowerCase().includes(searchQuery)
+            || String(it.chainId).includes(searchQuery));
+    }
+
+    const countEl = byId('incidentsCount');
+    if (countEl) {
+        const bits = [`${fmtNum(items.length)} event${items.length === 1 ? '' : 's'}`];
+        if (incidents.dayFilter) bits.push(`on ${incidents.dayFilter}`);
+        if (incidents.severity !== 'all') bits.push(SEVERITY_META[incidents.severity].label.toLowerCase());
+        if (searchQuery) bits.push(`matching “${searchQuery}”`);
+        countEl.textContent = bits.join(' · ');
+    }
+
+    clear(list);
+    if (!items.length) {
+        list.appendChild(el('div', {
+            class: 'feed-empty',
+            text: incidents.items.length ? 'No events match these filters.' : 'Waiting for the live status feed…'
+        }));
+        return;
+    }
 
     if (incidents.groupBy === 'network') {
         const groups = new Map();
-        for (const it of items) { if (!groups.has(it.spId)) groups.set(it.spId, []); groups.get(it.spId).push(it); }
-        const ordered = [...groups.entries()].sort((a, b) => b[1].length - a[1].length);
-        for (const [, arr] of ordered) {
+        for (const it of items) {
+            if (!groups.has(it.spId)) groups.set(it.spId, []);
+            groups.get(it.spId).push(it);
+        }
+        for (const [, arr] of [...groups.entries()].sort((a, b) => b[1].length - a[1].length)) {
             const head = arr[0];
-            list.appendChild(el('div', { class: 'incident-group-head' }, [
-                networkIcon(head.netName, iconColorFor(head.chainId), 'net-icon sm'),
-                el('span', { class: 'cell-name', text: head.netName }),
-                el('span', { class: 'muted', text: `${arr.length} event${arr.length === 1 ? '' : 's'}` })
+            const openCount = arr.filter(isOpen).length;
+            list.appendChild(el('div', { class: 'group-head' }, [
+                el('span', { class: 'group-name', text: head.netName }),
+                el('span', { class: 'legend-count', text: `${arr.length} event${arr.length === 1 ? '' : 's'}` }),
+                openCount ? el('span', { class: 'sev sev-critical' }, [
+                    el('span', { class: 'sev-mark' }), `${openCount} open`
+                ]) : null
             ]));
             for (const it of arr) list.appendChild(incidentCard(it));
         }
     } else {
-        for (const it of items) list.appendChild(incidentCard(it));
+        const limit = incidents.shown ?? feedPageSize();
+        for (const it of items.slice(0, limit)) list.appendChild(incidentCard(it));
+        if (items.length > limit) {
+            list.appendChild(feedMoreButton(items.length, limit, () => {
+                incidents.shown = limit + feedPageSize() * 2;
+                renderIncidentList();
+            }));
+        }
     }
 }
 
-// ─────────────────────────────── RPC providers (live WS) ───────────────────────────────
-// Same feed as Incidents; provider items (statusPage.kind === 'rpc-provider')
-// are split out here and grouped by provider, each showing the chains it hit.
+// ═════════════════════════════════════════════════════════════════════════
+// Providers view
+// ═════════════════════════════════════════════════════════════════════════
 function providerIncidents() { return incidents.items.filter(it => it.isProvider); }
 function visibleProviderIncidents() {
     const all = providerIncidents();
-    return providers.filter === 'all' ? all : all.filter(it => it.provider === providers.filter);
+    return providers.filter === 'all' ? all : all.filter(it => it.spId === providers.filter);
 }
 function providerMatchesSearch(it, q) {
-    if (it.providerName?.toLowerCase().includes(q) || it.title?.toLowerCase().includes(q)) return true;
+    if (it.spName?.toLowerCase().includes(q) || it.title?.toLowerCase().includes(q)
+        || it.openedTitle?.toLowerCase().includes(q)) return true;
     if ((it.affectedComponents || []).some(c => c.toLowerCase().includes(q))) return true;
-    return (it.affectedChains || []).some(id => String(id).includes(q) || state.byId.get(id)?.name?.toLowerCase().includes(q));
+    return it.chainIds.some(id => String(id).includes(q) || state.byId.get(id)?.name?.toLowerCase().includes(q));
 }
 
-function setProviderFilter(prov) {
-    providers.filter = prov;
-    renderProviders();
-}
+function initProviderControls() { /* chips are generated in renderProviderFilter */ }
 
 function renderProviders() {
-    renderProviderCalendar();
+    renderProviderStats();
+    renderProviderBoard();
     renderProviderFilter();
+    renderProviderHistogram();
+    renderProviderCalendar();
     renderProviderList();
 }
 
-function renderProviderCalendar() {
-    renderMonthCalendars('providerCalendar', visibleProviderIncidents(), providers.dayFilter,
-        k => { providers.dayFilter = providers.dayFilter === k ? null : k; renderProviders(); });
-}
-
-function renderProviderFilter() {
-    const bar = document.getElementById('providerFilter'); if (!bar) return;
-    const all = providerIncidents();
-    const counts = new Map(), names = new Map();
-    for (const it of all) { counts.set(it.provider, (counts.get(it.provider) || 0) + 1); if (!names.has(it.provider)) names.set(it.provider, it.providerName); }
-    bar.textContent = '';
-    const chip = (prov, label) => el('button', { class: `chip${providers.filter === prov ? ' active' : ''}`, 'data-prov': prov, onclick: () => setProviderFilter(prov), text: label });
-    bar.appendChild(chip('all', `All (${all.length})`));
-    for (const [id, name] of [...names].sort((a, b) => (a[1] || '').localeCompare(b[1] || '')))
-        bar.appendChild(chip(id, `${name} (${counts.get(id) || 0})`));
-}
-// ─── Provider performance board (GET /providers/stats) ───
-// A comparison table, not ten isolated cards. Cards forced every provider to
-// occupy equal space and to show a value for every metric, so nine of ten
-// rendered as a column of em-dashes; a table lets one glance rank providers on
-// whichever column the reader cares about and lets a missing value simply be
-// missing.
+// ─── Provider performance board (GET /providers/stats) ───────────────────
+// A comparison table, not ten cards. Cards force every provider to occupy equal space and
+// to show a value for every metric, so nine of ten render as a column of em-dashes; a table
+// lets one glance rank providers on whichever column the reader cares about, and lets a
+// missing value simply be missing.
 //
 // Two ideas the design has to carry, or the numbers mislead:
 //
-//   self-reported   Every figure comes from the provider's OWN status page. A
-//                   provider that posts nothing scores a silent 100%. Rows
-//                   whose page doesn't publish incidents are marked and sink
-//                   below the comparable ones instead of topping the ranking.
-//   disclosure bias Incident COUNTS are editorial policy, not reliability —
-//                   Blockdaemon posts 19 maintenance windows and 1 incident
-//                   while Alchemy posts 19 incidents. The count column says so.
+//   self-reported   Every figure comes from the provider's OWN status page. A provider that
+//                   posts nothing scores a silent 100%. Rows whose page publishes no
+//                   incident history are marked and sink below the comparable ones instead
+//                   of topping the ranking.
+//   disclosure bias Incident COUNTS are editorial policy, not reliability — one provider
+//                   posts 19 maintenance windows and 1 incident where another posts 19
+//                   incidents. The count column says so rather than implying a ranking.
 //
-// 404 → older API without the endpoint → the board simply stays hidden.
+// 404 → an older API without the endpoint → the board simply stays hidden.
 const providerBoard = { data: null, sort: 'availability', dir: 1 };
 
 async function loadProviderStats() {
     let data;
     try { data = await api('/providers/stats'); } catch { return; }
     providerBoard.data = data;
-    renderProviderBoard();
+    if (activeView === 'providers') renderProviderBoard();
 }
 
-// `when` decides whether a column earns its width: a column no provider can
-// populate is 12% of the table spent on a stack of em-dashes. Time-to-resolve
-// is the live example — resolution transitions are almost never published, so
-// it only appears once some page actually exposes one.
+// `when` decides whether a column earns its width: a column no provider can populate is
+// 12% of the table spent on a stack of em-dashes. Time-to-resolve is the live example —
+// resolution transitions are almost never published, so it appears only once some page
+// actually exposes one.
 const PB_COLUMNS = [
-    { key: 'name', label: 'Provider', align: 'left' },
+    { key: 'name', label: 'Provider', primary: true },
     { key: 'availability', label: 'Availability', title: 'Chain-weighted: 1 − chain-hours lost ÷ (chains supported × window). Counts only incidents whose duration the page published.' },
     { key: 'lost', label: 'Chain-hours lost', title: 'Chains affected × hours down, overlaps merged per chain. Available even when the availability denominator is not.' },
     { key: 'chains', label: 'Chains', title: 'How many chains the provider’s own status page lists. This is the availability denominator.' },
     { key: 'incidents', label: 'Posted', title: 'Incidents / maintenance windows published in the observed window. Disclosure policy differs sharply between providers — do not read this as a reliability ranking.' },
-    { key: 'openfor', label: 'Longest open', title: 'How long the provider’s oldest still-open incident has been running. With resolution times unpublished, this is the one duration the feeds do expose.', when: (ps) => ps.some((p) => p.oldestOngoingAt) },
-    { key: 'mttr', label: 'Time to resolve', title: 'Median hours from the first update to the resolved update, over the incidents where the page actually showed both.', when: (ps) => ps.some((p) => p.resolutionHours) },
-    { key: 'trend', label: '30-day trend', title: 'Chain-hours lost per day.' }
+    { key: 'openfor', label: 'Longest open', title: 'How long the provider’s oldest still-open incident has been running. With resolution times unpublished, this is the one duration the feeds do expose.', when: ps => ps.some(p => p.oldestOngoingAt) },
+    { key: 'mttr', label: 'Time to resolve', title: 'Median hours from the first update to the resolved update, over the incidents where the page actually showed both.', when: ps => ps.some(p => p.resolutionHours) },
+    { key: 'trend', label: 'Daily trend', title: 'Chain-hours lost per day, one bucket per day over 30 days. Buckets older than the observed history are empty rather than zero.' }
 ];
 
 function renderProviderBoard() {
-    const host = document.getElementById('providerScorecards');
-    const data = providerBoard.data;
+    const host = byId('providerBoard');
     if (!host) return;
+    const data = providerBoard.data;
     const provs = data?.providers || [];
     host.textContent = '';
     if (!provs.length) { host.hidden = true; return; }
     host.hidden = false;
 
+    // The observed window, not a fixed 30: the server reports how much history it actually
+    // has, and it is routinely half of what the field names suggest.
     const days = Math.round(data.windowDays ?? 30);
     const comparable = provs.filter(p => p.disclosure?.comparable !== false);
     const partial = provs.filter(p => p.disclosure?.comparable === false);
@@ -1323,12 +2722,13 @@ function renderProviderBoard() {
     host.appendChild(providerBoardCaption(data, provs, days));
 
     const columns = PB_COLUMNS.filter(c => !c.when || c.when(provs));
-    const table = el('table', { class: 'pb-table' });
+    const table = el('table', { class: 'data-table data-table--stack pb-table' });
     table.appendChild(el('colgroup', {}, columns.map(c => el('col', { class: `c-${c.key}` }))));
-    const thead = el('thead', {}, [el('tr', {}, columns.map(c => {
+    table.appendChild(el('thead', {}, [el('tr', {}, columns.map(c => {
         const active = providerBoard.sort === c.key;
         return el('th', {
-            class: `${c.align === 'left' ? 'pb-left' : ''}${active ? ' pb-sorted' : ''}${c.key === 'trend' ? ' pb-trend-h' : ''}`,
+            class: [c.primary ? 'pb-left' : '', active ? 'pb-sorted' : '', c.key === 'trend' ? 'pb-trend-h' : '']
+                .filter(Boolean).join(' ') || null,
             title: c.title || null,
             'aria-sort': active ? (providerBoard.dir > 0 ? 'descending' : 'ascending') : 'none'
         }, [
@@ -1342,61 +2742,70 @@ function renderProviderBoard() {
                 }
             })
         ]);
-    }))]);
-    table.appendChild(thead);
+    }))]));
 
     const body = el('tbody');
     for (const p of sortProviders(comparable)) body.appendChild(providerRow(p, columns));
     if (partial.length) {
+        // Below a divider rather than interleaved: a page that publishes nothing must not be
+        // able to top a ranking built from what pages publish.
+        const many = partial.length !== 1;
         body.appendChild(el('tr', { class: 'pb-divider' }, [
-            el('td', { colspan: String(columns.length) },
-                [el('span', { text: `Not comparable — ${partial.length === 1 ? 'this page does' : 'these pages do'} not publish the chain list or any incident history, so availability can’t be computed from ${partial.length === 1 ? 'it' : 'them'}.` })])
+            el('td', { colspan: String(columns.length) }, [
+                el('span', {
+                    text: `Not comparable — ${many ? 'these pages do' : 'this page does'} not publish the chain list or any `
+                        + `incident history, so availability can’t be computed from ${many ? 'them' : 'it'}.`
+                })
+            ])
         ]));
         for (const p of sortProviders(partial)) body.appendChild(providerRow(p, columns));
     }
     table.appendChild(body);
-    host.appendChild(el('div', { class: 'pb-scroll' }, [table]));
+    host.appendChild(el('div', { class: 'table-wrap' }, [table]));
 }
 
 function providerBoardCaption(data, provs, days) {
     const withCoverage = provs.filter(p => p.chainsSupported != null).length;
     const ongoing = provs.reduce((n, p) => n + (p.ongoingNow || 0), 0);
     const inMaint = provs.reduce((n, p) => n + (p.ongoingMaintenance || 0), 0);
-    // How much of the incident history had a duration at all. Most status pages
-    // publish an incident exactly once, at resolution, so its start — and
-    // therefore its cost — is unknowable. Those are excluded from availability
-    // rather than guessed, and a reader has to know that before ranking on it.
+    // How much of the incident history had a duration at all. Most status pages publish an
+    // incident exactly once, at resolution, so its start — and therefore its cost — is
+    // unknowable. Those are excluded from availability rather than guessed, and a reader has
+    // to know that before ranking on it.
     const measured = provs.reduce((n, p) => n + (p.availability?.measuredIncidents || 0), 0);
     const unknown = provs.reduce((n, p) => n + (p.availability?.unknownDurationIncidents || 0), 0);
     return el('div', { class: 'pb-caption' }, [
         el('div', { class: 'pb-caption-head' }, [
-            el('h3', { class: 'pb-caption-title', text: 'Provider performance' }),
+            el('h3', { class: 'card-title', text: 'Provider performance' }),
             ongoing > 0
                 ? el('span', { class: 'pill pill-ongoing', text: `${ongoing} incident${ongoing === 1 ? '' : 's'} open now` })
                 : el('span', { class: 'pill pill-quiet', text: 'no open incidents' }),
             inMaint > 0 ? el('span', { class: 'pill pill-maint', text: `${inMaint} maintenance running` }) : null
         ]),
-        el('p', { class: 'pb-caption-note muted' }, [
+        el('p', { class: 'pb-caption-note' }, [
             el('strong', { text: 'Self-reported. ' }),
             el('span', {
                 text: `Every figure comes from each provider’s own status page over the last ${days} days. `
-                    + `${withCoverage} of ${provs.length} pages list the chains they cover — that list is the availability denominator, `
-                    + 'so the other pages get no percentage rather than an invented one.'
+                    + `${withCoverage} of ${provs.length} pages list the chains they cover — that list is the availability `
+                    + 'denominator, so the other pages get no percentage rather than an invented one.'
             })
         ]),
-        unknown > 0 ? el('p', { class: 'pb-caption-note muted' }, [
+        // Conditional on there being something to caveat. An always-on disclaimer trains
+        // readers to skip it.
+        unknown > 0 ? el('p', { class: 'pb-caption-note' }, [
             el('strong', { class: 'pb-warn', text: 'Read availability narrowly. ' }),
             el('span', {
-                text: `Only ${measured} of ${measured + unknown} incidents published enough to time them; the rest appear once, at resolution, `
-                    + 'with no start. Those are left out of the percentage instead of being charged as downtime, so today availability mostly '
-                    + 'reflects what is burning right now. Incident counts below are complete — but they measure disclosure policy as much as reliability.'
+                text: `Only ${measured} of ${measured + unknown} incidents published enough to time them; the rest appear `
+                    + 'once, at resolution, with no start. Those are left out of the percentage instead of being charged as '
+                    + 'downtime, so today availability mostly reflects what is burning right now. Incident counts below are '
+                    + 'complete — but they measure disclosure policy as much as reliability.'
             })
         ]) : null
     ]);
 }
 
 function sortProviders(list) {
-    const val = (p) => {
+    const val = p => {
         switch (providerBoard.sort) {
             case 'availability': return p.availability?.last30d?.percent ?? -1;
             case 'lost': return p.availability?.last30d?.chainHoursLost ?? -1;
@@ -1410,8 +2819,9 @@ function sortProviders(list) {
     };
     return [...list].sort((a, b) => {
         if (providerBoard.sort === 'name') return (a.name || a.id).localeCompare(b.name || b.id) * providerBoard.dir;
-        // Availability sorts best-first by default, which means DESCENDING; every
-        // other column is "more is more", so one shared direction flag works.
+        // Availability sorts best-first by default, which means DESCENDING; every other
+        // column is "more is more", so one shared direction flag works. Missing values are
+        // -1 so they sink under a descending sort instead of leading it.
         const d = (val(b) - val(a)) * providerBoard.dir;
         return d || (a.name || a.id).localeCompare(b.name || b.id);
     });
@@ -1422,249 +2832,346 @@ function providerRow(p, columns) {
     const pct = a.last30d?.percent;
     const lost = a.last30d?.chainHoursLost;
     const d = p.disclosure || {};
+    const has = key => columns.some(c => c.key === key);
 
-    // Availability cell: the 30d headline, with 24h/7d underneath so a provider
-    // that is bad RIGHT NOW can't hide behind a good month.
+    // Availability cell: the headline, with 24h/7d underneath so a provider that is bad
+    // RIGHT NOW cannot hide behind a good month.
     const availCell = pct == null
-        ? el('td', { class: 'pb-avail pb-none' }, [
+        ? td('Availability', [
             el('span', { class: 'pb-dash', text: '—' }),
-            el('span', { class: 'pb-sub muted', text: p.chainsSupported == null ? 'no chain list published' : 'no incidents posted' })
-        ])
-        : el('td', { class: 'pb-avail' }, [
+            // WHICH reason, not a bare dash: no denominator and no incidents are different
+            // states and the reader can act on the difference.
+            el('span', { class: 'pb-sub', text: p.chainsSupported == null ? 'no chain list published' : 'no incidents posted' })
+        ], { num: true, cls: 'pb-avail pb-none' })
+        : td('Availability', [
             el('div', { class: 'pb-avail-main' }, [
                 el('span', { class: `pb-dot ${availClass(pct)}` }),
-                el('span', { class: 'pb-pct mono', text: `${fmtPct(pct)}%` }),
+                el('span', { class: 'pb-pct mono', text: `${pbPct(pct)}%` }),
                 el('span', { class: 'pb-bar' }, [
-                    // Deviation from 100 is the signal and it is tiny, so the bar
-                    // scales the LOSS across a 3% floor rather than the value —
-                    // a 0-100 bar would render every provider as a full bar.
-                    el('span', { class: `pb-bar-fill ${availClass(pct)}`, style: { width: `${Math.min(100, ((100 - pct) / 3) * 100).toFixed(1)}%` } })
+                    // Deviation from 100 is the signal and it is tiny, so the bar scales the
+                    // LOSS across a 3% floor rather than the value — a 0–100 bar would render
+                    // every provider as a full bar.
+                    el('span', {
+                        class: `pb-bar-fill ${availClass(pct)}`,
+                        style: { width: `${Math.min(100, ((100 - pct) / 3) * 100).toFixed(1)}%` }
+                    })
                 ])
             ]),
             el('span', {
-                class: 'pb-sub muted',
-                // A 100% built from zero timed incidents means "nothing open",
-                // not "a clean month" — say which, or the column overstates.
-                text: a.measuredIncidents ? `24h ${fmtPct(a.last24h?.percent)}% · 7d ${fmtPct(a.last7d?.percent)}%` : 'nothing open · none timed'
+                class: 'pb-sub',
+                // A 100% built from zero timed incidents means "nothing open", not "a clean
+                // month" — say which, or the column overstates.
+                text: a.measuredIncidents ? `24h ${pbPct(a.last24h?.percent)}% · 7d ${pbPct(a.last7d?.percent)}%` : 'nothing open · none timed'
             })
-        ]);
-
-    const trend = p.dailySeries?.length
-        ? sparkline(p.dailySeries.map(b => b.chainHoursLost), 96, 26)
-        : el('span', { class: 'muted', text: '—' });
+        ], { num: true, cls: 'pb-avail' });
 
     return el('tr', { class: `pb-row${p.ongoingNow > 0 ? ' pb-ongoing' : ''}` }, [
-        el('td', { class: 'pb-left pb-name' }, [
+        td('Provider', [
             el('span', { class: 'pb-name-main', text: p.name || p.id }),
-            // Red is reserved for real incidents. A window running to schedule
-            // is planned work and gets a neutral chip, not an alarm.
             p.ongoingNow > 0 ? el('span', { class: 'pill pill-ongoing sm', text: `${p.ongoingNow} ongoing` }) : null,
-            p.ongoingMaintenance > 0 ? el('span', { class: 'pill pill-maint sm', title: 'Scheduled maintenance in progress — planned, not an outage.', text: `${p.ongoingMaintenance} in maintenance` }) : null,
-            !d.publishesChainCoverage ? el('span', { class: 'pb-flag', title: 'This status page exposes no machine-readable chain list, so no availability denominator exists.', text: 'no coverage' }) : null
-        ]),
+            // Red is reserved for real incidents. A window running to schedule is planned
+            // work and gets a neutral chip, not an alarm.
+            p.ongoingMaintenance > 0
+                ? el('span', { class: 'pill pill-maint sm', title: 'Scheduled maintenance in progress — planned, not an outage.', text: `${p.ongoingMaintenance} in maintenance` })
+                : null,
+            !d.publishesChainCoverage
+                ? el('span', { class: 'pb-flag', title: 'This status page exposes no machine-readable chain list, so no availability denominator exists.', text: 'no coverage' })
+                : null
+        ], { primary: true, cls: 'pb-name' }),
         availCell,
-        el('td', { class: 'pb-num' }, [
-            el('span', { class: 'mono', text: lost == null ? '—' : fmt1(lost) }),
-            el('span', { class: 'pb-sub muted', text: lost ? `${fmt1(a.last24h?.chainHoursLost || 0)} in 24h` : '' })
-        ]),
-        el('td', { class: 'pb-num' }, [
+        td('Chain-hours lost', [
+            el('span', { class: 'mono', text: lost == null ? '—' : pb1(lost) }),
+            lost ? el('span', { class: 'pb-sub', text: `${pb1(a.last24h?.chainHoursLost || 0)} in 24h` }) : null
+        ], { num: true, empty: lost == null }),
+        td('Chains', [
             el('span', { class: 'mono', text: p.chainsSupported == null ? '—' : String(p.chainsSupported) }),
-            el('span', { class: 'pb-sub muted', text: p.chainsAffected30d ? `${p.chainsAffected30d} hit` : '' })
-        ]),
-        el('td', { class: 'pb-num' }, [
-            el('span', { class: 'mono', text: `${p.incidents30d} inc` }),
-            el('span', { class: 'pb-sub muted', text: p.maintenance30d ? `${p.maintenance30d} maint` : 'no maintenance posted' })
-        ]),
-        ...(columns.some(c => c.key === 'openfor') ? [el('td', { class: 'pb-num' }, openForCell(p))] : []),
-        ...(columns.some(c => c.key === 'mttr') ? [el('td', { class: 'pb-num' }, mttrCell(p))] : []),
-        el('td', { class: 'pb-trend' }, [trend])
+            p.chainsAffected30d ? el('span', { class: 'pb-sub', text: `${p.chainsAffected30d} hit` }) : null
+        ], { num: true, empty: p.chainsSupported == null }),
+        td('Posted', [
+            el('span', { class: 'mono', text: `${p.incidents30d ?? 0} inc` }),
+            el('span', { class: 'pb-sub', text: p.maintenance30d ? `${p.maintenance30d} maint` : 'no maintenance posted' })
+        ], { num: true }),
+        ...(has('openfor') ? [td('Longest open', openForCell(p), { num: true, empty: !p.oldestOngoingAt })] : []),
+        ...(has('mttr') ? [td('Time to resolve', mttrCell(p), { num: true })] : []),
+        td('Daily trend', [
+            p.dailySeries?.length
+                ? sparkline(p.dailySeries.map(b => b.chainHoursLost), 96, 26)
+                : el('span', { class: 'pb-sub', text: '—' })
+        ], { num: true, cls: 'pb-trend', empty: !p.dailySeries?.length })
     ]);
 }
 
-// The age of the oldest still-open incident. A provider sitting on a 12-day-old
-// unresolved outage and one that opened a ticket an hour ago post the same "1
-// ongoing"; only this column tells them apart.
+// The age of the oldest still-open incident. A provider sitting on a 12-day-old unresolved
+// outage and one that opened a ticket an hour ago post the same "1 ongoing"; only this
+// column tells them apart.
 function openForCell(p) {
     if (!p.oldestOngoingAt) return [el('span', { class: 'pb-dash', text: '—' })];
     const ms = Date.now() - Date.parse(p.oldestOngoingAt);
     return [
-        el('span', { class: `mono ${ms > 7 * 864e5 ? 'pb-stale' : ''}`, text: fmtDuration(ms) || '—' }),
-        el('span', { class: 'pb-sub muted', text: p.ongoingNow > 1 ? `oldest of ${p.ongoingNow}` : 'still open' })
+        el('span', { class: `mono${ms > 7 * 864e5 ? ' pb-stale' : ''}`, text: fmtDuration(ms) || '—' }),
+        el('span', { class: 'pb-sub', text: p.ongoingNow > 1 ? `oldest of ${p.ongoingNow}` : 'still open' })
     ];
 }
 
-// MTTR is only as good as the share of incidents where the page showed an
-// open→resolved transition. Most publish a history feed carrying the resolved
-// entry alone, so the sample is often 1-of-16 — printing a bare "22.6h" there
-// would be a confident lie. The sample size travels with the number.
+// MTTR is only as good as the share of incidents where the page showed an open→resolved
+// transition. Most publish a history feed carrying the resolved entry alone, so the sample
+// is often 1-of-16 — printing a bare "22.6h" there would be a confident lie. The sample size
+// travels with the number.
 function mttrCell(p) {
     const r = p.resolutionHours;
-    if (!r?.median && r?.median !== 0) return [el('span', { class: 'pb-dash', text: '—' }), el('span', { class: 'pb-sub muted', text: 'not tracked' })];
+    if (!r?.median && r?.median !== 0) {
+        return [el('span', { class: 'pb-dash', text: '—' }), el('span', { class: 'pb-sub', text: 'not tracked' })];
+    }
     const share = p.disclosure?.resolutionTracked ?? 0;
     return [
-        el('span', { class: 'mono', text: `${fmt1(r.median)}h` }),
+        el('span', { class: 'mono', text: `${pb1(r.median)}h` }),
         el('span', {
-            class: `pb-sub ${share < 0.3 ? 'pb-thin' : 'muted'}`,
+            class: `pb-sub${share < 0.3 ? ' pb-thin' : ''}`,
             title: share < 0.3 ? 'Small sample — most of this page’s incidents never showed an opening update.' : null,
-            text: `${r.samples} of ${p.incidents30d}`
+            text: `${r.samples} of ${p.incidents30d ?? 0}`
         })
     ];
 }
 
-// Inline sparkline. Areas read as volume at this size where a polyline reads as
-// noise, so the shape is filled; an all-zero series draws a flat baseline
-// instead of vanishing, because "no downtime" is a result worth seeing.
+// Inline sparkline. Areas read as volume at this size where a polyline reads as noise, so
+// the shape is filled; an all-zero series draws a flat baseline rather than vanishing,
+// because "no downtime" is a result worth seeing.
+//
+// This is decoration and is marked aria-hidden: the numbers behind it are not reachable from
+// the shape, and the columns beside it carry the values that matter. It is deliberately not
+// a Viz chart — those all ship axes and a table twin, which is the right rule for a chart
+// someone reads values off and the wrong shape for a 96×26 glyph in a table cell.
 function sparkline(values, w, h) {
     const peak = Math.max(...values, 0);
     const n = values.length;
     const step = w / Math.max(1, n - 1);
-    const y = (v) => peak <= 0 ? h - 1.5 : h - 1.5 - (v / peak) * (h - 4);
+    const y = v => (peak <= 0 ? h - 1.5 : h - 1.5 - (v / peak) * (h - 4));
     const pts = values.map((v, i) => `${(i * step).toFixed(1)},${y(v).toFixed(1)}`);
-    return svgEl('svg', { viewBox: `0 0 ${w} ${h}`, width: String(w), height: String(h), class: 'pb-spark', 'aria-hidden': 'true' }, [
-        svgEl('path', { d: `M0,${h} L${pts.join(' L')} L${w},${h} Z`, class: 'pb-spark-fill' }),
-        svgEl('path', { d: `M${pts.join(' L')}`, class: 'pb-spark-line', fill: 'none', 'vector-effect': 'non-scaling-stroke' })
+    return Viz.svgEl('svg', { viewBox: `0 0 ${w} ${h}`, width: String(w), height: String(h), class: 'pb-spark', 'aria-hidden': 'true' }, [
+        Viz.svgEl('path', { d: `M0,${h} L${pts.join(' L')} L${w},${h} Z`, class: 'pb-spark-fill' }),
+        Viz.svgEl('path', { d: `M${pts.join(' L')}`, class: 'pb-spark-line', fill: 'none', 'vector-effect': 'non-scaling-stroke' })
     ]);
 }
 
-// Availability lives near 100, so thresholds are tight — a 97% month means a
+// Availability lives near 100, so the thresholds are tight — a 97% month means a
 // chain-equivalent was down for most of a day.
-function availClass(pct) { return pct == null ? '' : pct >= 99.9 ? 'good' : pct >= 99 ? 'ok' : pct >= 97 ? 'warn' : 'bad'; }
-function fmtPct(v) { return v == null ? '—' : String(Math.round(v * 100) / 100); }
-function fmt1(v) { return v == null ? '—' : String(Math.round(v * 10) / 10); }
+//
+// THREE tones, not four. The version this came from had a fourth tier between good and warn
+// (99–99.9), but no four-tone green→amber→red ramp clears the validator's normal-vision
+// separation floor: every candidate put two tones ~10 ΔE apart in the yellow-green region,
+// which full-colour readers cannot reliably tell apart and a direct label does not excuse.
+// The 2-decimal percentage sits beside every dot and distinguishes 99.94 from 99.5 far
+// better than a colour no one can name, so the tier was dropped rather than faked.
+function availClass(pct) { return pct == null ? '' : pct >= 99.9 ? 'good' : pct >= 97 ? 'warn' : 'bad'; }
+// Deliberately NOT Viz.fmtPct: that one appends the sign and rounds to 1dp, and the second
+// decimal is the entire signal this close to 100 — 99.94 and 99.90 are a 17× difference in
+// downtime. Callers append the % themselves.
+function pbPct(v) { return v == null ? '—' : String(Math.round(v * 100) / 100); }
+function pb1(v) { return v == null ? '—' : String(Math.round(v * 10) / 10); }
+
+function renderProviderStats() {
+    const wrap = byId('providerStats');
+    if (!wrap) return;
+    const all = providerIncidents();
+    const open = all.filter(isOpen);
+    const affected = new Set(open.flatMap(it => it.chainIds));
+    clear(wrap);
+    wrap.appendChild(statTile({
+        label: 'Open provider incidents', value: fmtNum(open.length), hero: true,
+        sub: `of ${fmtNum(all.length)} retained events`,
+        tone: open.length === 0 ? 'good' : 'warn'
+    }));
+    wrap.appendChild(statTile({
+        label: 'Providers tracked', value: fmtNum(new Set(all.map(it => it.spId)).size),
+        sub: 'with at least one retained event'
+    }));
+    wrap.appendChild(statTile({
+        label: 'Networks affected now', value: fmtNum(affected.size),
+        sub: 'named by an open provider incident',
+        tone: affected.size ? 'warn' : 'good'
+    }));
+    wrap.appendChild(statTile({
+        label: 'Events naming a chain', value: all.length
+            ? Viz.fmtPct((all.filter(it => it.chainIds.length).length / all.length) * 100, 0) : '—',
+        sub: 'the rest are provider-wide',
+        hint: 'Providers often report an incident without naming a specific chain, so fan-out coverage is partial by nature.'
+    }));
+}
+
+function renderProviderFilter() {
+    const bar = byId('providerFilter');
+    if (!bar) return;
+    const all = providerIncidents();
+    const counts = new Map(), names = new Map(), openCounts = new Map();
+    for (const it of all) {
+        counts.set(it.spId, (counts.get(it.spId) || 0) + 1);
+        if (!names.has(it.spId)) names.set(it.spId, it.spName);
+        if (isOpen(it)) openCounts.set(it.spId, (openCounts.get(it.spId) || 0) + 1);
+    }
+    clear(bar);
+    const mk = (id, label, count, openN) => bar.appendChild(el('button', {
+        class: 'chip', type: 'button', 'data-prov': id,
+        'aria-pressed': String(providers.filter === id),
+        onclick: () => { providers.filter = id; providers.shown = null; renderProviders(); }
+    }, [
+        label,
+        count != null ? el('span', { class: 'chip-count', text: fmtNum(count) }) : null,
+        openN ? el('span', { class: 'chip-dot', style: 'background: var(--critical)' }) : null
+    ]));
+    mk('all', 'All', all.length, all.filter(isOpen).length);
+    for (const [id, name] of [...names].sort((a, b) => (a[1] || '').localeCompare(b[1] || ''))) {
+        mk(id, name, counts.get(id) || 0, openCounts.get(id) || 0);
+    }
+}
+
+function renderProviderHistogram() {
+    const host = byId('providerHistogram');
+    if (!host) return;
+    const { days } = dayBuckets(visibleProviderIncidents());
+    const res = Viz.dayHistogram(host, {
+        days, selected: providers.dayFilter, valueLabel: 'events',
+        tableCaption: 'Retained provider events per day',
+        onSelect: k => {
+            providers.dayFilter = providers.dayFilter === k ? null : k;
+            renderProviders();
+        }
+    });
+    const actions = byId('providerHistActions');
+    if (actions && res?.table) {
+        clear(actions);
+        host.appendChild(res.table);
+        Viz.attachTableToggle(host, res.table, actions);
+    }
+}
+
+function renderProviderCalendar() {
+    const host = byId('providerCalendar');
+    if (!host) return;
+    const { counts } = dayBuckets(visibleProviderIncidents());
+    const res = Viz.calendarHeatmap(host, {
+        counts, selected: providers.dayFilter, noun: 'event',
+        onSelect: k => {
+            providers.dayFilter = providers.dayFilter === k ? null : k;
+            renderProviders();
+        }
+    });
+    const legend = byId('providerScaleLegend');
+    if (legend) Viz.scaleLegend(legend, { max: res?.max, noun: 'events' });
+}
 
 function renderProviderList() {
-    const list = document.getElementById('providersList'); if (!list) return;
+    const list = byId('providersList');
+    if (!list) return;
     let items = visibleProviderIncidents();
     if (providers.dayFilter) items = items.filter(it => dayKey(it.whenMs) === providers.dayFilter);
     if (searchQuery) items = items.filter(it => providerMatchesSearch(it, searchQuery));
-    const countEl = document.getElementById('providersCount');
-    if (countEl) countEl.textContent = `${items.length} incident${items.length === 1 ? '' : 's'}${providers.dayFilter ? ` on ${providers.dayFilter}` : ''}${searchQuery ? ` · “${searchQuery}”` : ''}`;
-    list.textContent = '';
+
+    const countEl = byId('providersCount');
+    if (countEl) {
+        const bits = [`${fmtNum(items.length)} event${items.length === 1 ? '' : 's'}`];
+        if (providers.dayFilter) bits.push(`on ${providers.dayFilter}`);
+        if (searchQuery) bits.push(`matching “${searchQuery}”`);
+        countEl.textContent = bits.join(' · ');
+    }
+
+    clear(list);
     if (!items.length) {
-        list.appendChild(el('div', { class: 'feed-empty', text: providerIncidents().length ? 'Nothing matches.' : 'No RPC provider incidents in range.' }));
+        list.appendChild(el('div', {
+            class: 'feed-empty',
+            text: providerIncidents().length ? 'No events match these filters.' : 'Waiting for the live status feed…'
+        }));
         return;
     }
-    for (const it of items) list.appendChild(incidentCard(it));
-}
-
-function connectStatusFeed() {
-    // The WS replay is capped server-side (~100 events, a few days), so the
-    // full history always comes from the REST backfill; the WS only streams
-    // live updates on top. addIncidents() merges the two by incident key.
-    statusFeedBackfill();
-    setFeedLive(false); // red until the socket opens
-    const wsUrl = `${STATUS_NEWS_BASE.replace(/^http/, 'ws')}/ws?replay=100`;
-    let ws;
-    try { ws = new WebSocket(wsUrl); } catch { return; }
-    incidents.ws = ws;
-    ws.onopen = () => { incidents.retries = 0; setFeedLive(true); statusFeedBackfill(); };
-    ws.onmessage = ev => {
-        let m; try { m = JSON.parse(ev.data); } catch { return; }
-        if (m.type === 'status.item' && m.item) addIncidents([m.item]);
-        else if (m.type === 'status.enrichment' && m.eventId) addEnrichment(m);
-    };
-    ws.onerror = () => { try { ws.close(); } catch { /* noop */ } };
-    ws.onclose = () => {
-        incidents.ws = null;
-        setFeedLive(false); // dropped — not receiving live updates until reconnect
-        if (incidents.retries < 6) { const delay = Math.min(1000 * 2 ** incidents.retries, 20000); incidents.retries++; setTimeout(connectStatusFeed, delay); }
-    };
-}
-function setFeedLive(live) { setLiveDot(['incidentsMeta', 'providersMeta'], live); }
-
-// Render a green (connected, receiving live updates) / red (disconnected) dot
-// next to the "live" label in a feed's status pill.
-function setLiveDot(ids, live) {
-    for (const id of [].concat(ids)) {
-        const e = document.getElementById(id);
-        if (!e) continue;
-        e.className = 'src-pill live-pill';
-        e.textContent = '';
-        e.appendChild(el('span', { class: `live-dot ${live ? 'on' : 'off'}`, title: live ? 'Live — receiving real-time updates' : 'Disconnected from the live feed' }));
-        e.appendChild(document.createTextNode('live'));
-    }
-}
-async function statusFeedBackfill() {
-    if (incidents.backfilled || incidents.backfillInFlight) return;
-    incidents.backfillInFlight = true;
-    try {
-        // limit=500 > store size — returns everything the feed has retained.
-        const res = await fetch(`${STATUS_NEWS_BASE}/events?limit=500`, { headers: { accept: 'application/json' } });
-        if (!res.ok) throw new Error(res.status);
-        const d = await res.json();
-        addIncidents(d.events || d.items || []);
-        incidents.backfilled = true;
-    } catch {
-        if (!incidents.items.length) { const l = document.getElementById('incidentsList'); if (l) { l.textContent = ''; l.appendChild(el('div', { class: 'feed-empty', text: 'Live status feed unavailable (chains-status-news).' })); } }
-    } finally {
-        incidents.backfillInFlight = false;
+    const limit = providers.shown ?? feedPageSize();
+    for (const it of items.slice(0, limit)) list.appendChild(incidentCard(it));
+    if (items.length > limit) {
+        list.appendChild(feedMoreButton(items.length, limit, () => {
+            providers.shown = limit + feedPageSize() * 2;
+            renderProviderList();
+        }));
     }
 }
 
-// ─────────────────────────────── Forum activity (treemap by forum) ───────────────────────────────
-// Posts are grouped by forum (one forum can front several chains) and drawn as
-// a squarified treemap: tile area ∝ post volume, colour ∝ weekly momentum.
-// threads: canonical thread key → newest normalized post. Seeded from REST,
-// then kept live by the WS. byForum is the grouped view derived from it.
-const forum = { threads: new Map(), byForum: new Map(), loaded: false, loading: false, filter: null, ws: null, retries: 0, rerenderTimer: null };
-const FORUM_TREEMAP_HEIGHT = 520;
+// ═════════════════════════════════════════════════════════════════════════
+// Forum activity
+//
+// Tile area = post volume in the retained window. Tile colour = a DIVERGING
+// ramp on weekly momentum (warm = more posts this week than last, cool = fewer,
+// neutral gray in the middle). The previous red/green pairing was the worst
+// possible choice for colour-vision deficiency.
+//
+// Momentum honesty: a forum with no prior-week posts has no ratio to report, so
+// it renders neutral and says "no prior week to compare" rather than being
+// painted maximally hot, which is what the old (recent-prior)/prior formula did
+// for every brand-new forum.
+// ═════════════════════════════════════════════════════════════════════════
+const forum = {
+    threads: new Map(), byForum: new Map(), loaded: false, loading: false,
+    filter: null, ws: null, retries: 0, rerenderTimer: null,
+    // null = this breakpoint's default number of forum groups to list.
+    groupsShown: null
+};
+const FORUM_TREEMAP_HEIGHT = 440;
 
-// Canonical thread id for a forum post URL — the feed can emit one thread from
-// two registry entries whose URLs differ only by #fragment / ?page.
-function forumThreadKey(u) { try { const x = new URL(u); return x.origin + x.pathname; } catch { return u; } }
+function forumThreadKey(u) {
+    try { const x = new URL(u); return x.origin + x.pathname; } catch { return u; }
+}
 
 function ensureForumView() {
-    if (forum.loaded) { renderForumTreemap(); return; } // re-fit to current width
+    if (forum.loaded) { renderForumTreemap(); return; }
     if (forum.loading) return;
     forum.loading = true;
     setForumLive(false);
     loadForumFeed();
 }
-
 function setForumLive(live) { setLiveDot('forumMeta', live); }
 
 async function loadForumFeed() {
     try {
         const res = await fetch(`${FORUM_NEWS_BASE}/news?limit=500`, { headers: { accept: 'application/json' } });
-        if (!res.ok) throw new Error(res.status);
+        if (!res.ok) throw new Error(String(res.status));
         for (const p of (await res.json()).news || []) upsertForumPost(p);
         regroupForum();
         forum.loaded = true;
     } catch {
-        const list = document.getElementById('forumList');
-        if (list) { list.textContent = ''; list.appendChild(el('div', { class: 'feed-empty', text: 'Forum feed unavailable (chains-forum-news).' })); }
+        const list = byId('forumList');
+        if (list) {
+            clear(list);
+            list.appendChild(el('div', { class: 'feed-empty', text: 'Forum feed unavailable (chains-forum-news).' }));
+        }
         return;
     } finally {
         forum.loading = false;
     }
     renderForumTreemap();
     renderForumList();
-    connectForumFeed(); // stream live updates on top of the REST seed
+    connectForumFeed();
 }
 
-// Live forum feed: same pattern as the status feed — REST seed above, then a
-// WS streams new posts. The dot goes green only while the socket is open.
 function connectForumFeed() {
-    setForumLive(false); // red until the socket opens
+    setForumLive(false);
     const wsUrl = `${FORUM_NEWS_BASE.replace(/^http/, 'ws')}/ws?replay=1`;
     let ws;
     try { ws = new WebSocket(wsUrl); } catch { return; }
     forum.ws = ws;
     ws.onopen = () => { forum.retries = 0; setForumLive(true); };
     ws.onmessage = ev => {
-        let m; try { m = JSON.parse(ev.data); } catch { return; }
+        let m;
+        try { m = JSON.parse(ev.data); } catch { return; }
         if (m.type === 'news.item' && m.item && upsertForumPost(m.item)) scheduleForumRerender();
     };
     ws.onerror = () => { try { ws.close(); } catch { /* noop */ } };
     ws.onclose = () => {
         forum.ws = null;
         setForumLive(false);
-        if (forum.retries < 6) { const delay = Math.min(1000 * 2 ** forum.retries, 20000); forum.retries++; setTimeout(connectForumFeed, delay); }
+        if (forum.retries < 6) {
+            const delay = Math.min(1000 * 2 ** forum.retries, 20000);
+            forum.retries++;
+            setTimeout(connectForumFeed, delay);
+        }
     };
 }
 
-// Merge one raw feed post into the thread store; returns true if it changed
-// anything (new thread or a newer revision of an existing one).
 function upsertForumPost(p) {
     const whenMs = Date.parse(p.publishedAt || p.updatedAt || '');
     const item = {
@@ -1687,7 +3194,6 @@ function regroupForum() {
     forum.byForum = groupByForum(posts);
 }
 
-// WS replay can burst; coalesce re-renders so a batch of pushes repaints once.
 function scheduleForumRerender() {
     if (forum.rerenderTimer) return;
     forum.rerenderTimer = setTimeout(() => {
@@ -1702,126 +3208,38 @@ function groupByForum(posts) {
     const WEEK = 7 * 86400 * 1000;
     const map = new Map();
     for (const p of posts) {
-        if (!map.has(p.forumId)) map.set(p.forumId, { id: p.forumId, name: p.forumName, chainMap: new Map(), posts: [], recent: 0, prior: 0 });
+        if (!map.has(p.forumId)) {
+            map.set(p.forumId, {
+                id: p.forumId, name: p.forumName, chainMap: new Map(),
+                posts: [], recent: 0, prior: 0
+            });
+        }
         const g = map.get(p.forumId);
         g.posts.push(p);
-        // Union affected chains across all of the forum's posts (not just the
-        // first) — otherwise chips miss chains only referenced by older posts.
         for (const c of p.chains) if (!g.chainMap.has(c.chainId)) g.chainMap.set(c.chainId, c);
-        // Momentum window: posts this week vs the week before. `age >= 0`
-        // guards clock-skewed / future feed timestamps from faking "recent".
         if (p.whenMs != null) {
             const age = now - p.whenMs;
             if (age >= 0 && age < WEEK) g.recent++;
             else if (age >= WEEK && age < 2 * WEEK) g.prior++;
         }
     }
-    // momentum ∈ [-1, 1]: heating up (recent > prior) → +, cooling → −.
     for (const g of map.values()) {
         g.chains = [...g.chainMap.values()];
-        g.momentum = g.prior > 0 ? clampMomentum((g.recent - g.prior) / g.prior)
-            : g.recent > 0 ? 1 : 0;
-    }
-    // Busiest forums first.
-    return new Map([...map.entries()].sort((a, b) => b[1].posts.length - a[1].posts.length));
-}
-
-function clampMomentum(m) { return Math.max(-1, Math.min(1, m)); }
-
-// Tile fill: red (cooling) → neutral → green (heating), intensity by magnitude.
-function momentumColor(m) {
-    if (m > 0.05) { const t = Math.min(1, m); return `rgba(34,197,94,${0.22 + 0.55 * t})`; }
-    if (m < -0.05) { const t = Math.min(1, -m); return `rgba(239,68,68,${0.22 + 0.55 * t})`; }
-    return 'rgba(130,130,150,0.28)';
-}
-
-// Squarified treemap (Bruls, Huizing & van Wijk) — lays out tiles so each
-// stays close to square, area ∝ value. Pure geometry, no external lib.
-function squarifyTreemap(children, x, y, w, h) {
-    const out = [];
-    const nodes = children.filter(c => c.value > 0).sort((a, b) => b.value - a.value);
-    const total = nodes.reduce((s, c) => s + c.value, 0);
-    if (total <= 0 || w <= 0 || h <= 0) return out;
-    const items = nodes.map(c => ({ ref: c, area: (c.value / total) * (w * h) }));
-
-    const worst = (row, side) => {
-        const sum = row.reduce((s, r) => s + r.area, 0);
-        let mx = -Infinity, mn = Infinity;
-        for (const r of row) { if (r.area > mx) mx = r.area; if (r.area < mn) mn = r.area; }
-        const s2 = sum * sum, l2 = side * side;
-        return Math.max((l2 * mx) / s2, s2 / (l2 * mn));
-    };
-
-    const rect = { x, y, w, h };
-    let i = 0;
-    while (i < items.length) {
-        const side = Math.min(rect.w, rect.h);
-        const row = [items[i]];
-        let j = i + 1;
-        while (j < items.length && worst(row, side) >= worst(row.concat(items[j]), side)) {
-            row.push(items[j]); j++;
-        }
-        const rowArea = row.reduce((s, r) => s + r.area, 0);
-        if (rect.w <= rect.h) {
-            const rh = rowArea / rect.w;
-            let cx = rect.x;
-            for (const r of row) { const rw = r.area / rh; out.push({ ref: r.ref, x: cx, y: rect.y, w: rw, h: rh }); cx += rw; }
-            rect.y += rh; rect.h -= rh;
+        if (g.prior > 0) {
+            // Keep the true ratio for the label and a clamped copy for the
+            // colour ramp — reporting the clamped value would understate a
+            // forum that went from 2 posts to 20 as merely "+100%".
+            g.momentumRaw = (g.recent - g.prior) / g.prior;
+            g.momentum = Math.max(-1, Math.min(1, g.momentumRaw));
+            g.comparable = true;
         } else {
-            const rw = rowArea / rect.h;
-            let cy = rect.y;
-            for (const r of row) { const rh = r.area / rw; out.push({ ref: r.ref, x: rect.x, y: cy, w: rw, h: rh }); cy += rh; }
-            rect.x += rw; rect.w -= rw;
+            // No baseline — say so instead of reporting +100%.
+            g.momentumRaw = null;
+            g.momentum = 0;
+            g.comparable = false;
         }
-        i = j;
     }
-    return out;
-}
-
-function renderForumTreemap() {
-    const wrap = document.getElementById('forumTreemap'); if (!wrap) return;
-    wrap.textContent = '';
-    if (!forum.byForum.size) return;
-    const width = wrap.clientWidth || 900;
-    const height = FORUM_TREEMAP_HEIGHT;
-    // Size tiles by the posts that match the active search (drop forums with no
-    // match). searchQuery is global — a term left in the box or restored from
-    // ?q= filters the list below, so an unfiltered treemap would show full tiles
-    // whose clicks land on "0 posts". Filtering here keeps tiles and list in
-    // lockstep: every visible tile has clickable posts.
-    const nodes = [...forum.byForum.values()]
-        .map(g => ({ g, value: searchQuery ? g.posts.filter(p => forumMatchesSearch(p, searchQuery)).length : g.posts.length }))
-        .filter(n => n.value > 0);
-    const tiles = squarifyTreemap(nodes, 0, 0, width, height);
-    const gap = 2;
-    for (const t of tiles) {
-        const g = t.ref.g;
-        const n = t.ref.value; // posts matching the current search (or total when unsearched)
-        const active = forum.filter === g.id;
-        // With a search active, every rendered tile is a match — spotlight them
-        // so filtering by a chain visibly focuses that chain's forum in the map.
-        const focused = Boolean(searchQuery);
-        const tile = el('button', {
-            class: `tm-tile${active ? ' active' : ''}${focused ? ' focus' : ''}`,
-            title: `${g.name} — ${n} posts · ${g.recent} this week${g.momentum > 0.05 ? ' (heating up)' : g.momentum < -0.05 ? ' (cooling)' : ''}`,
-            onclick: () => { forum.filter = active ? null : g.id; renderForumTreemap(); renderForumList(); }
-        });
-        tile.style.left = `${t.x + gap / 2}px`;
-        tile.style.top = `${t.y + gap / 2}px`;
-        tile.style.width = `${Math.max(0, t.w - gap)}px`;
-        tile.style.height = `${Math.max(0, t.h - gap)}px`;
-        tile.style.background = momentumColor(g.momentum);
-        // Label with the chain name (fall back to the forum name for forums
-        // that map to no chain), centred; scale with tile size.
-        if (t.w > 40 && t.h > 22) {
-            const fs = Math.max(10, Math.min(20, Math.round(t.w / 9)));
-            // Object form, not a string: a style attribute is blocked by the
-            // page's style-src CSP, so this size never took effect.
-            tile.appendChild(el('span', { class: 'tm-name', style: { fontSize: `${fs}px` }, text: g.chains[0]?.name || g.name }));
-        }
-        wrap.appendChild(tile);
-    }
-    wrap.style.height = `${height}px`;
+    return new Map([...map.entries()].sort((a, b) => b[1].posts.length - a[1].posts.length));
 }
 
 function forumMatchesSearch(p, q) {
@@ -1829,43 +3247,1386 @@ function forumMatchesSearch(p, q) {
     return p.chains.some(c => String(c.chainId).includes(q) || (c.name || '').toLowerCase().includes(q));
 }
 
+function momentumText(g) {
+    if (!g || !g.comparable || g.momentumRaw == null) return 'no prior week to compare';
+    if (Math.abs(g.momentumRaw) <= 0.05) return 'flat week on week';
+    const pct = Math.round(g.momentumRaw * 100);
+    return `${pct > 0 ? '+' : ''}${pct}% vs last week (${g.recent} this week, ${g.prior} last)`;
+}
+
+function renderForumTreemap() {
+    const host = byId('forumTreemap');
+    if (!host) return;
+    if (!forum.byForum.size) {
+        host.style.height = 'auto';
+        clear(host);
+        host.appendChild(el('div', { class: 'chart-empty', text: forum.loaded ? 'No forum activity retained.' : 'Loading forum activity…' }));
+        return;
+    }
+
+    // Size by the posts matching the active search, so every visible tile has
+    // clickable posts and the list below stays in lockstep.
+    const nodes = [...forum.byForum.values()]
+        .map(g => ({
+            id: g.id,
+            label: g.chains[0]?.name || g.name,
+            value: searchQuery ? g.posts.filter(p => forumMatchesSearch(p, searchQuery)).length : g.posts.length,
+            // null (not 0) when there is no baseline, so the tile renders
+            // neutral AND the label can distinguish "flat" from "unknown".
+            signal: g.comparable ? g.momentum : null,
+            signalLabel: momentumText(g),
+            note: `${g.recent} this week · ${g.prior} the week before`,
+            g
+        }))
+        .filter(n => n.value > 0);
+
+    const focusIds = searchQuery ? new Set(nodes.map(n => n.id)) : null;
+    // 27 tiles in a 324px-wide box produces unlabelled slivers. On a phone show
+    // the busiest forums only, taller, and say so — the full list stays in the
+    // table twin and in the grouped posts below.
+    const narrow = isNarrow();
+    const ranked = nodes.slice().sort((a, b) => b.value - a.value);
+    const shownNodes = narrow ? ranked.slice(0, 10) : nodes;
+    const hiddenCount = nodes.length - shownNodes.length;
+    const res = Viz.treemap(host, {
+        nodes: shownNodes,
+        height: narrow ? 380 : FORUM_TREEMAP_HEIGHT,
+        selectedId: forum.filter, focusIds,
+        valueFmt: n => `${fmtNum(n)} post${n === 1 ? '' : 's'}`,
+        // A forum with no prior-week posts has no ratio to report — say that
+        // rather than printing "flat", which would imply a real comparison.
+        signalFmt: s => {
+            if (!Number.isFinite(s)) return 'no prior week to compare';
+            if (Math.abs(s) <= 0.05) return 'flat week on week';
+            const p = Math.round(s * 100);
+            return `${p > 0 ? '+' : ''}${p}% vs last week`;
+        },
+        tableCaption: 'Forum post volume and weekly momentum',
+        onSelect: id => {
+            forum.filter = forum.filter === id ? null : id;
+            forum.groupsShown = null;
+            renderForumTreemap();
+            renderForumList();
+        }
+    });
+
+    // Diverging scale legend, built from the diverging tokens.
+    const legend = byId('forumScaleLegend');
+    if (legend) {
+        clear(legend);
+        const cool = Viz.cssVar('--div-cool'), warm = Viz.cssVar('--div-warm'), mid = Viz.cssVar('--div-mid');
+        const ramp = el('div', { class: 'scale-ramp' });
+        for (const c of [Viz.mix(mid, cool, 1), Viz.mix(mid, cool, 0.6), Viz.mix(mid, cool, 0.3),
+            mid, Viz.mix(mid, warm, 0.3), Viz.mix(mid, warm, 0.6), Viz.mix(mid, warm, 1)]) {
+            const s = el('span', { class: 'scale-step' });
+            s.style.background = c;
+            ramp.appendChild(s);
+        }
+        legend.appendChild(el('span', { text: 'fewer posts than last week' }));
+        legend.appendChild(ramp);
+        legend.appendChild(el('span', { text: 'more posts than last week' }));
+    }
+
+    const note = byId('forumNote');
+    if (note) {
+        const noBase = [...forum.byForum.values()].filter(g => !g.comparable).length;
+        note.textContent = `${fmtNum(forum.byForum.size)} forums across ${fmtNum(forum.threads.size)} retained threads. `
+            + (hiddenCount > 0 ? `Showing the ${fmtNum(shownNodes.length)} busiest here; ${fmtNum(hiddenCount)} smaller forums are in the table and the list below. ` : '')
+            + (noBase ? `${fmtNum(noBase)} forums had no posts in the prior week, so they have no momentum baseline and render neutral. ` : '')
+            + 'Momentum compares this week\'s post count with last week\'s within the feed\'s retained window — it is not a long-run trend.';
+    }
+
+    const actions = byId('forumActions');
+    if (actions && res?.table) {
+        clear(actions);
+        // The treemap's table twin lives in the card, not inside the treemap
+        // div, so it survives the container clear — drop the previous one or
+        // every re-render (search, resize, live post) stacks another copy.
+        host.parentNode.querySelectorAll(':scope > .chart-table').forEach(t => t.remove());
+        host.parentNode.appendChild(res.table);
+        Viz.attachTableToggle(host, res.table, actions);
+    }
+}
+
 function renderForumList() {
-    const list = document.getElementById('forumList'); if (!list) return;
+    const list = byId('forumList');
+    if (!list) return;
     if (!forum.loaded) return;
-    // Order forums by their most recent post (last event) so a forum that just
-    // had activity rises above a higher-volume but quiet one. posts are already
-    // newest-first within a group (regroupForum sorts by whenMs), so [0] is its
-    // latest; filter first so the key reflects the posts actually shown.
     const groups = [...forum.byForum.values()]
         .filter(g => !forum.filter || g.id === forum.filter)
         .map(g => ({ g, posts: g.posts.filter(p => !searchQuery || forumMatchesSearch(p, searchQuery)) }))
         .filter(x => x.posts.length)
         .sort((a, b) => (b.posts[0]?.whenMs || 0) - (a.posts[0]?.whenMs || 0));
-    const count = document.getElementById('forumCount');
+
+    // Every forum group with its posts made this the tallest view on a phone.
+    // Page the GROUPS as well as the posts within each one.
+    const groupLimit = forum.groupsShown ?? (isNarrow() ? 5 : 10);
+    const visibleGroups = groups.slice(0, groupLimit);
 
     let shown = 0;
-    list.textContent = '';
-    for (const { g, posts } of groups) {
+    clear(list);
+    for (const { g, posts } of visibleGroups) {
         shown += posts.length;
-        const chainChips = g.chains.slice(0, 6).map(c =>
-            el('span', { class: 'chain-chip', onclick: () => openChainDetail(c.chainId), text: c.name || `Chain ${c.chainId}` }));
-        list.appendChild(el('div', { class: 'forum-group-head' }, [
-            el('span', { class: 'cell-name', text: g.name }),
-            el('span', { class: 'muted', text: `${posts.length} post${posts.length === 1 ? '' : 's'}` }),
-            el('div', { class: 'affected-chains', style: 'margin:0' }, chainChips)
+        const chips = el('div', { class: 'affected-chains' }, g.chains.slice(0, 6).map(c =>
+            el('button', {
+                class: 'chain-chip', type: 'button',
+                text: c.name || `Chain ${c.chainId}`,
+                onclick: () => openChainDetail(c.chainId)
+            })));
+        list.appendChild(el('div', { class: 'group-head' }, [
+            el('span', { class: 'group-name', text: g.name }),
+            el('span', { class: 'legend-count', text: `${posts.length} post${posts.length === 1 ? '' : 's'}` }),
+            el('span', { class: 'legend-count', text: momentumText(g) }),
+            chips
         ]));
-        for (const p of posts.slice(0, 20)) {
-            list.appendChild(el('a', { class: 'incident-card', href: p.url, target: '_blank', rel: 'noopener' }, [
-                el('div', { class: 'incident-body' }, [
-                    el('div', { class: 'incident-title' }, [el('span', { text: p.title })]),
-                    el('div', { class: 'incident-meta', text: [p.forumName, p.whenMs ? relTime(new Date(p.whenMs).toISOString()) : null].filter(Boolean).join(' · ') })
+        for (const p of posts.slice(0, isNarrow() ? 5 : 20)) {
+            list.appendChild(el('div', { class: 'incident-card' }, [
+                el('div', { class: 'incident-main' }, [
+                    el('div', { class: 'incident-title' }, [
+                        el('span', { class: 'incident-title-text' }, [
+                            el('a', { href: safeUrl(p.url), target: '_blank', rel: 'noopener', text: p.title })
+                        ])
+                    ]),
+                    el('div', {
+                        class: 'incident-meta',
+                        text: [p.forumName, p.whenMs ? relTime(new Date(p.whenMs).toISOString()) : null]
+                            .filter(Boolean).join(' · ')
+                    })
                 ])
             ]));
         }
     }
-    if (count) count.textContent = `${shown} post${shown === 1 ? '' : 's'}${forum.filter ? ` · ${forum.byForum.get(forum.filter)?.name || ''}` : ''}${searchQuery ? ` · “${searchQuery}”` : ''}`;
-    if (!shown) list.appendChild(el('div', { class: 'feed-empty', text: 'Nothing matches.' }));
+    if (groups.length > visibleGroups.length) {
+        list.appendChild(el('div', { class: 'table-foot' }, [
+            el('button', {
+                class: 'btn', type: 'button',
+                text: `Show more forums — ${fmtNum(groups.length - visibleGroups.length)} remaining`,
+                onclick: () => { forum.groupsShown = groupLimit + 10; renderForumList(); }
+            })
+        ]));
+    }
+
+    const count = byId('forumCount');
+    if (count) {
+        count.textContent = `${fmtNum(shown)} post${shown === 1 ? '' : 's'}`
+            + (forum.filter ? ` · ${forum.byForum.get(forum.filter)?.name || ''}` : '')
+            + (searchQuery ? ` · matching “${searchQuery}”` : '');
+    }
+    if (!shown) list.appendChild(el('div', { class: 'feed-empty', text: 'No posts match these filters.' }));
 }
+
+// ═════════════════════════════════════════════════════════════════════════
+// Chain detail drawer
+// ═════════════════════════════════════════════════════════════════════════
+function initDrawer() {
+    byId('closeDrawer')?.addEventListener('click', () => closeDrawer());
+    byId('drawerScrim')?.addEventListener('click', () => closeDrawer());
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape' && !byId('detailDrawer')?.classList.contains('hidden')) closeDrawer();
+    });
+}
+function closeDrawer(opts = {}) {
+    byId('detailDrawer')?.classList.add('hidden');
+    stopBlockHead();
+    openChainId = null;
+    if (!opts.fromUrl) updateUrl();
+}
+function chainLink(id) {
+    const c = state.byId.get(id);
+    return el('button', {
+        class: 'chip-link', type: 'button',
+        text: c?.name || `Chain ${id}`,
+        onclick: () => openChainDetail(id)
+    });
+}
+function detailRow(label, valueNode) {
+    return el('div', { class: 'd-row' }, [
+        el('span', { class: 'd-label', text: label }),
+        el('div', { class: 'd-value' }, [].concat(valueNode))
+    ]);
+}
+function drawerSection(title) {
+    return el('div', { class: 'd-section' }, [el('div', { class: 'd-section-title', text: title })]);
+}
+
+function openChainDetail(chainId, opts = {}) {
+    const c = state.byId.get(chainId);
+    if (!c) return;
+    openChainId = chainId;
+    if (!opts.fromUrl) updateUrl();
+
+    const body = byId('drawerBody');
+    const cls = netClass(c);
+    const e = state.rel.get(chainId) || {};
+    const l2b = state.l2beat.get(chainId);
+    const sp = state.statusPagesByChain.get(chainId);
+    const open = state.openByChain.get(chainId) || [];
+    clear(body);
+
+    // ── header ──
+    const badges = el('div', { class: 'd-badges' }, [
+        el('span', { class: 'badge', text: `ID ${c.chainId}` }),
+        typeTag(cls),
+        el('span', { class: `pill pill-${statusOf(c)}`, text: statusOf(c) }),
+        ...classTags(c).map(t => el('span', { class: 'tag', text: t }))
+    ]);
+    body.appendChild(el('div', { class: 'd-header' }, [
+        el('div', {}, [
+            el('h2', { id: 'drawerTitle', text: c.name || `Chain ${c.chainId}` }),
+            badges
+        ])
+    ]));
+
+    // ── open incidents first: it is the most urgent thing to know ──
+    if (open.length) {
+        const sec = drawerSection(`Open incidents (${open.length})`);
+        for (const it of open.slice(0, 5)) {
+            const sev = severityOf(it);
+            const dur = durationInfo(it);
+            sec.appendChild(el('div', { class: 'incident-card is-open' }, [
+                el('div', { class: 'incident-main' }, [
+                    el('div', { class: 'incident-title' }, [
+                        el('span', { class: 'incident-title-text' }, [
+                            it.url ? el('a', { href: safeUrl(it.url), target: '_blank', rel: 'noopener', text: it.openedTitle || it.title })
+                                : el('span', { text: it.openedTitle || it.title })
+                        ])
+                    ]),
+                    el('div', {
+                        class: 'incident-meta',
+                        text: [it.isProvider ? `${it.spName} (RPC provider)` : it.spName,
+                            it.status, dur?.text].filter(Boolean).join(' · ')
+                    })
+                ]),
+                el('div', { class: 'incident-side' }, [
+                    el('span', { class: `sev sev-${sev.key}` }, [el('span', { class: 'sev-mark' }), sev.label])
+                ])
+            ]));
+        }
+        body.appendChild(sec);
+    }
+
+    // ── relationships ──
+    const relSec = drawerSection('Relationships');
+    let hasRel = false;
+    if (e.l1Parent != null) { relSec.appendChild(detailRow('Settles on', chainLink(e.l1Parent))); hasRel = true; }
+    if (e.mainnet != null) { relSec.appendChild(detailRow('Testnet of', chainLink(e.mainnet))); hasRel = true; }
+    if (e.l2Children?.length) {
+        relSec.appendChild(detailRow(`L2s / L3s (${e.l2Children.length})`, e.l2Children.slice(0, 30).map(chainLink)));
+        hasRel = true;
+    }
+    if (e.testnetChildren?.length) {
+        relSec.appendChild(detailRow(`Testnets (${e.testnetChildren.length})`, e.testnetChildren.slice(0, 30).map(chainLink)));
+        hasRel = true;
+    }
+    if (!hasRel) relSec.appendChild(detailRow('Related chains', el('span', { class: 'dim', text: 'None recorded' })));
+    body.appendChild(relSec);
+
+    // ── L2BEAT ──
+    if (l2b) {
+        const sec = drawerSection('L2BEAT classification');
+        sec.appendChild(detailRow('Value secured', el('span', { class: 'strong', text: fmtUsd(l2b.tvs) })));
+        sec.appendChild(detailRow('Stage', l2b.stage
+            ? el('span', { class: 'pill pill-stage', text: l2b.stage })
+            : el('span', { class: 'dim', text: '—' })));
+        if (l2b.category) sec.appendChild(detailRow('Category', el('span', { text: l2b.category })));
+        if (l2b.stack) sec.appendChild(detailRow('Stack', el('span', { text: l2b.stack })));
+        if (l2b.daLayer) sec.appendChild(detailRow('Data availability', el('span', { text: l2b.daLayer })));
+        body.appendChild(sec);
+    }
+
+    // ── registry detail (fetched) ──
+    const infoSec = drawerSection('Network detail');
+    const extraBox = el('div');
+    infoSec.appendChild(extraBox);
+    if (sp) {
+        infoSec.appendChild(detailRow('Status page',
+            el('a', { href: safeUrl(sp.url), target: '_blank', rel: 'noopener', text: safeHost(sp.url) || sp.name })));
+    }
+    body.appendChild(infoSec);
+
+    // ── live RPC ──
+    const rpcSec = drawerSection('RPC endpoints');
+    const headCell = el('span', { class: 'mono', text: '…' });
+    rpcSec.appendChild(detailRow('Block head', headCell));
+    const rpcBox = el('div', { class: 'rpc-list' }, [
+        el('span', { class: 'dim', text: 'Probing endpoints…' })
+    ]);
+    rpcSec.appendChild(detailRow('Reachable', rpcBox));
+    const clientBox = el('div', { class: 'd-value dim', text: '—' });
+    rpcSec.appendChild(detailRow('Clients (live)', clientBox));
+    body.appendChild(rpcSec);
+
+    // ── forum ──
+    const forumBox = el('div', { class: 'rpc-list' });
+    const forumSec = drawerSection('Recent forum posts');
+    forumSec.appendChild(forumBox);
+    forumSec.classList.add('hidden');
+    body.appendChild(forumSec);
+
+    byId('detailDrawer').classList.remove('hidden');
+    byId('closeDrawer')?.focus();
+
+    loadChainDetail(chainId, extraBox);
+    loadForumNews(chainId, forumBox, forumSec);
+    loadLiveRpc(chainId, rpcBox, headCell);
+    loadLiveClients(chainId, clientBox);
+}
+
+// /summary is slim, so currency/explorers/website need the full chain record.
+async function loadChainDetail(chainId, box) {
+    let d = state.byId.get(chainId) || {};
+    if (!d.nativeCurrency && !d.explorers && !d.infoURL) {
+        try { d = await api(`/chains/${chainId}`); } catch { /* render what we have */ }
+    }
+    if (openChainId !== chainId) return;
+    clear(box);
+    if (d.nativeCurrency) {
+        const cur = `${d.nativeCurrency.name || d.nativeCurrency.symbol} (${d.nativeCurrency.symbol})`;
+        box.appendChild(detailRow('Native currency', el('span', { text: cur })));
+    }
+    // Price exists for only ~32 chains and rollups are mapped to their L1's
+    // token, so label it as the token price rather than implying a chain metric.
+    if (typeof d.price?.usd === 'number') {
+        box.appendChild(detailRow('Token price', el('span', {
+            title: `Source: CoinGecko, cached. Read ${relTime(d.price.updatedAt)}. Rollups are mapped to their settlement token.`,
+            text: `$${d.price.usd.toLocaleString()} · ${relTime(d.price.updatedAt)}`
+        })));
+    }
+    if (d.explorers?.length) {
+        box.appendChild(detailRow('Explorers', d.explorers.slice(0, 6).map(x =>
+            el('a', { href: safeUrl(x.url), target: '_blank', rel: 'noopener', text: x.name || safeHost(x.url) }))));
+    }
+    if (d.infoURL) {
+        box.appendChild(detailRow('Website',
+            el('a', { href: safeUrl(d.infoURL), target: '_blank', rel: 'noopener', text: safeHost(d.infoURL) || d.infoURL })));
+    }
+    if (d.forumUrl) {
+        box.appendChild(detailRow('Forum',
+            el('a', { href: safeUrl(d.forumUrl), target: '_blank', rel: 'noopener', text: safeHost(d.forumUrl) || d.forumUrl })));
+    }
+    if (d.slip44 != null) box.appendChild(detailRow('SLIP-44', el('span', { class: 'mono', text: String(d.slip44) })));
+    if (d.statusReason) box.appendChild(detailRow('Status note', el('span', { class: 'dim', text: d.statusReason })));
+}
+
+async function loadForumNews(chainId, box, section) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 10000);
+    try {
+        const res = await fetch(`${FORUM_NEWS_BASE}/news?chainId=${chainId}&limit=4`, {
+            headers: { accept: 'application/json' }, signal: ctrl.signal
+        });
+        if (!res.ok) return;
+        let posts = (await res.json()).news || [];
+        posts = [...new Map(posts.map(p => [forumThreadKey(p.url), p])).values()].slice(0, 4);
+        if (openChainId !== chainId || !posts.length) return;
+        clear(box);
+        for (const p of posts) {
+            box.appendChild(el('div', { class: 'forum-post' }, [
+                el('a', { href: safeUrl(p.url), target: '_blank', rel: 'noopener', text: p.title }),
+                el('span', { class: 'forum-when', text: relTime(p.publishedAt) })
+            ]));
+        }
+        section.classList.remove('hidden');
+    } catch { /* section stays hidden */ }
+    finally { clearTimeout(timer); }
+}
+
+function clientNameVersion(cv) {
+    if (!cv) return null;
+    return String(cv).split('/').slice(0, 2).join(' ').trim() || null;
+}
+
+async function loadLiveRpc(chainId, box, headCell) {
+    stopBlockHead();
+    const usable = urls => urls
+        .map(u => typeof u === 'string' ? u : u?.url)
+        .filter(u => u && u.startsWith('http') && !u.includes('${'));
+    let staticUrls = usable(state.byId.get(chainId)?.rpc || []);
+    let results = [];
+
+    const [healthRes, endpointsRes] = await Promise.allSettled([
+        api(`/rpc-monitor/${chainId}`),
+        staticUrls.length || !state.byId.get(chainId)?.rpcCount
+            ? Promise.resolve(null)
+            : api(`/endpoints/${chainId}`)
+    ]);
+    if (healthRes.status === 'fulfilled') {
+        const d = healthRes.value;
+        results = d.endpoints || d.results || (Array.isArray(d) ? d : []);
+    }
+    if (endpointsRes.status === 'fulfilled' && endpointsRes.value) {
+        staticUrls = usable(endpointsRes.value.rpc || []);
+    }
+    if (openChainId !== chainId) return;
+
+    const working = results.filter(r => r.status === 'working' || r.ok === true);
+    const failed = results.filter(r => r.status === 'failed');
+    clear(box);
+
+    if (working.length) {
+        for (const r of working.slice(0, 12)) {
+            const ver = clientNameVersion(r.clientVersion);
+            box.appendChild(el('div', { class: 'rpc-row' }, [
+                el('span', { class: 'dot dot-ok' }),
+                el('span', { class: 'rpc-host', text: safeHost(r.url) || r.url, title: r.url }),
+                ver ? el('span', { class: 'rpc-meta', text: ver }) : null
+            ]));
+        }
+    }
+    // Failures were previously discarded entirely. Reporting the count (and why)
+    // is the difference between "no endpoints" and "we probed and they failed".
+    if (failed.length) {
+        const reasons = [...new Set(failed.map(r => r.error).filter(Boolean))].slice(0, 2);
+        box.appendChild(el('div', { class: 'rpc-row' }, [
+            el('span', { class: 'dot dot-bad' }),
+            el('span', {
+                class: 'dim',
+                text: `${failed.length} of ${results.length} probed endpoint${results.length === 1 ? '' : 's'} failed`
+                    + (reasons.length ? ` — ${reasons.join('; ')}` : '')
+            })
+        ]));
+    }
+    if (!results.length) {
+        box.appendChild(el('span', {
+            class: 'dim',
+            text: staticUrls.length
+                ? `${staticUrls.length} endpoint${staticUrls.length === 1 ? '' : 's'} in the registry, not yet probed`
+                : 'No endpoints in the registry.'
+        }));
+    }
+    const total = state.byId.get(chainId)?.rpcCount || 0;
+    if (results.length && total > results.length) {
+        box.appendChild(el('span', {
+            class: 'dim',
+            text: `The monitor samples up to 5 endpoints per chain; the registry lists ${total}.`
+        }));
+    }
+
+    const candidates = [...new Set([...working.map(r => r.url), ...staticUrls])];
+    if (candidates.length) startBlockHead(candidates, headCell);
+    else headCell.textContent = '—';
+}
+
+async function loadLiveClients(chainId, box) {
+    try {
+        const d = await api(`/clients/${chainId}`);
+        if (openChainId !== chainId) return;
+        const clients = d.clients || [];
+        if (!clients.length) { box.textContent = 'No client data yet.'; return; }
+        clear(box);
+        box.classList.remove('dim');
+        for (const cl of clients) {
+            const vers = cl.versions || [];
+            const breakdown = vers.map(x => `${x.version}${x.nodeCount ? ` ×${x.nodeCount}` : ''}`).join(' · ');
+            const children = [cl.name];
+            // Only inline a version when there is exactly one — otherwise the
+            // pill would pair one node's version with the whole client's count.
+            if (vers.length === 1) {
+                children.push(' ', el('span', { class: 'client-ver', text: vers[0].version }));
+                if (cl.nodeCount) children.push(` ×${cl.nodeCount}`);
+            } else {
+                if (cl.nodeCount) children.push(` ×${cl.nodeCount}`);
+                if (breakdown) children.push(' ', el('span', { class: 'client-ver', text: `(${breakdown})` }));
+            }
+            box.appendChild(el('span', { class: 'client-pill', title: breakdown }, children));
+        }
+    } catch { box.textContent = '—'; }
+}
+
+// ─── client-side block-head polling ──────────────────────────────────────
+let blockHeadTimer = null;
+let blockHeadToken = 0;
+function stopBlockHead() {
+    if (blockHeadTimer) { clearInterval(blockHeadTimer); blockHeadTimer = null; }
+}
+async function rpcBlockNumber(url) {
+    try {
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] })
+        });
+        if (!res.ok) return null;
+        const d = await res.json();
+        const n = typeof d.result === 'string' ? parseInt(d.result, 16) : null;
+        return Number.isFinite(n) ? n : null;
+    } catch { return null; }
+}
+function startBlockHead(urls, cell) {
+    stopBlockHead();
+    const token = ++blockHeadToken;
+    let liveUrl = null;
+    const poll = async () => {
+        for (const u of (liveUrl ? [liveUrl, ...urls] : urls)) {
+            const n = await rpcBlockNumber(u);
+            if (token !== blockHeadToken) return;
+            if (n != null) {
+                liveUrl = u;
+                cell.textContent = `#${n.toLocaleString()}`;
+                cell.title = `Polled directly from your browser via ${safeHost(u) || u}`;
+                return;
+            }
+        }
+        if (token === blockHeadToken && !liveUrl) cell.textContent = 'unreachable from this browser';
+    };
+    poll();
+    blockHeadTimer = setInterval(poll, 5000);
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// Assistant
+//
+// The anti-hallucination design here is provenance, not cleverness: the model
+// only reaches data through this API's own tools, and every reply shows which
+// tools produced it plus one-tap links to the chains those calls touched. A
+// claim you cannot trace to a tool call is a claim to distrust — and the panel
+// says so in its own lead text.
+//
+// Conversation lives in memory only: the URL would leak chat text into
+// shareable links, and localStorage would resurrect stale conversations on a
+// public dashboard.
+// ═════════════════════════════════════════════════════════════════════════
+const assistant = { messages: [], busy: false, enabled: null, disabledNoticeShown: false };
+
+function initAssistant() {
+    byId('assistantFab')?.addEventListener('click', () => toggleAssistant());
+    byId('assistantClose')?.addEventListener('click', () => toggleAssistant(false));
+    byId('assistantNew')?.addEventListener('click', () => resetAssistantChat());
+    byId('assistantForm')?.addEventListener('submit', e => { e.preventDefault(); submitAssistantInput(); });
+    byId('assistantInput')?.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitAssistantInput(); }
+    });
+    document.querySelectorAll('#assistantChips .chat-chip').forEach(chip =>
+        chip.addEventListener('click', () => sendAssistantMessage(chip.textContent)));
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape' && !byId('assistantOverlay')?.classList.contains('hidden')) toggleAssistant(false);
+    });
+}
+
+function toggleAssistant(open) {
+    const overlay = byId('assistantOverlay');
+    if (!overlay) return;
+    const show = open ?? overlay.classList.contains('hidden');
+    overlay.classList.toggle('hidden', !show);
+    byId('assistantFab')?.setAttribute('aria-expanded', String(show));
+    if (show) {
+        probeAssistant();
+        if (assistant.enabled !== false) byId('assistantInput')?.focus();
+    }
+}
+
+async function probeAssistant() {
+    const meta = byId('assistantMeta');
+    let online = false;
+    try {
+        const info = await api('/assistant');
+        assistant.enabled = !!info.enabled;
+        online = assistant.enabled && info.reachable !== false;
+    } catch {
+        assistant.enabled = false;
+    }
+    if (meta) {
+        meta.textContent = online ? 'online' : 'offline';
+        meta.className = 'pill-meta';
+        meta.style.color = online ? Viz.cssVar('--good') : Viz.cssVar('--critical');
+    }
+    if (!assistant.enabled && !assistant.disabledNoticeShown) {
+        assistant.disabledNoticeShown = true;
+        appendChatNotice('The assistant is not configured on this server (no language model connected). Everything else on the dashboard works as usual.');
+        setAssistantBusy(true);
+    }
+}
+
+function submitAssistantInput() {
+    const input = byId('assistantInput');
+    const text = (input?.value || '').trim();
+    if (!text) return;
+    input.value = '';
+    sendAssistantMessage(text);
+}
+
+async function sendAssistantMessage(text) {
+    if (assistant.busy || assistant.enabled === false) return;
+    byId('assistantChips')?.classList.add('hidden');
+    assistant.messages.push({ role: 'user', content: text.slice(0, 4000) });
+    if (assistant.messages.length > 20) assistant.messages = assistant.messages.slice(-20);
+    appendChatBubble('user', text);
+    setAssistantBusy(true);
+    const thinking = appendChatThinking();
+    try {
+        const context = { view: activeView, ...(openChainId != null ? { chainId: openChainId } : {}) };
+        let res = await apiPost('/assistant/chat', { messages: assistant.messages, context });
+        // Slow runs return 202 + a job id; poll so a reverse-proxy timeout can
+        // never kill a long-held request.
+        if (res.status === 202 && res.data?.jobId) {
+            thinking.setSteps(assistantStepsFrom(res.data));
+            res = await pollAssistantJob(res.data.jobId, res.data.pollAfterMs, res.data.budgetMs, thinking.setSteps);
+        }
+        thinking.remove();
+        if (res.ok && res.data?.reply != null) {
+            assistant.messages.push({ role: 'assistant', content: res.data.reply });
+            appendChatBubble('assistant', res.data.reply, {
+                toolCalls: res.data.toolCalls,
+                degraded: res.data.degraded,
+                viaFallback: res.data.viaFallback
+            });
+        } else if (res.status === 429) {
+            appendChatNotice('Too many questions in a short window. Try again in a minute.');
+        } else if (res.status === 503) {
+            const msg = res.data?.error || '';
+            appendChatNotice(
+                msg === 'Assistant not configured' ? 'The assistant is not configured on this server.'
+                    : msg === 'Assistant LLM unreachable' || msg === 'Assistant failed'
+                        ? 'The assistant\'s language model is unreachable right now. Try again shortly.'
+                        : msg || 'The assistant is unavailable right now.');
+        } else {
+            appendChatNotice(res.data?.error || 'Something went wrong. Please try again.');
+        }
+    } catch {
+        thinking.remove();
+        appendChatNotice('Network error — the request did not reach the server.');
+    } finally {
+        setAssistantBusy(assistant.enabled === false);
+        byId('assistantInput')?.focus();
+    }
+}
+
+async function pollAssistantJob(jobId, pollAfterMs, budgetMs, onStep = () => { }) {
+    const windowMs = Math.min((budgetMs || 4 * 60 * 1000) + 60 * 1000, 15 * 60 * 1000);
+    const deadline = Date.now() + windowMs;
+    const delay = Math.max(1000, pollAfterMs || 2000);
+    let consecutiveMisses = 0;
+    while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, delay));
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 15000);
+        let res, data;
+        try {
+            res = await fetch(`${API_BASE}/assistant/chat/${jobId}`, {
+                headers: { accept: 'application/json' }, signal: ctrl.signal
+            });
+            data = res.ok ? await res.json().catch(() => null) : null;
+        } catch { continue; }
+        finally { clearTimeout(timer); }
+
+        if (res.status === 404) {
+            // Jobs live in one replica's memory, so behind a round-robin load
+            // balancer a poll routinely lands on a pod that never saw this job.
+            // Only a long unbroken run of misses means it is really gone.
+            if (++consecutiveMisses >= 15) {
+                return { status: 503, ok: false, data: { error: 'The answer expired before it could be fetched. Please ask again.' } };
+            }
+            continue;
+        }
+        consecutiveMisses = 0;
+        if (!res.ok) continue;
+        if (data?.status === 'running') { onStep(assistantStepsFrom(data)); continue; }
+        if (data?.status === 'error') return { status: 503, ok: false, data: { error: data.error } };
+        if (data?.status === 'done') return { status: 200, ok: true, data };
+    }
+    return { status: 503, ok: false, data: { error: 'The assistant is taking too long. Please try again.' } };
+}
+
+function setAssistantBusy(busy) {
+    assistant.busy = busy;
+    for (const id of ['assistantSend', 'assistantInput', 'assistantNew']) {
+        const node = byId(id);
+        if (node) node.disabled = busy;
+    }
+}
+
+function resetAssistantChat() {
+    if (assistant.busy) return;
+    assistant.messages = [];
+    clear(byId('assistantLog'));
+    byId('assistantChips')?.classList.remove('hidden');
+    byId('assistantInput')?.focus();
+}
+
+function appendChatBubble(role, text, { toolCalls, degraded, viaFallback } = {}) {
+    const log = byId('assistantLog');
+    const body = el('div', { class: 'chat-bubble-body' });
+    renderAssistantMarkdown(text, body);
+    const extras = [];
+
+    if (role === 'assistant') {
+        // Clarifying replies list options as "- Name: chainId"; turn those into
+        // one-tap answers.
+        const opts = parseChatOptions(text);
+        if (opts.length) {
+            extras.push(el('div', { class: 'chat-quick' }, opts.map(o =>
+                el('button', {
+                    class: 'chip', type: 'button', text: o.label,
+                    onclick: () => sendAssistantMessage(o.reply)
+                }))));
+        }
+    }
+    if (degraded) extras.push(el('span', { class: 'chat-flag', text: 'partial answer' }));
+    if (viaFallback) extras.push(el('span', { class: 'chat-flag', text: 'backup model' }));
+
+    // Provenance: the tools that produced this answer, plus links into the
+    // dashboard for the chains those calls actually referenced. Chain links come
+    // from tool ARGUMENTS, never from parsing numbers out of the prose — a
+    // number in text is not evidence the model looked it up.
+    if (toolCalls?.length) {
+        const names = [...new Set(toolCalls.map(c => c.name))];
+        const sources = el('div', { class: 'chat-sources' }, [
+            el('div', { class: 'chat-sources-label', text: `Answered using ${names.length} API tool${names.length === 1 ? '' : 's'}` }),
+            el('div', { class: 'chat-tool-list' }, names.map(n => el('span', { class: 'chat-tool', text: n })))
+        ]);
+        const ids = [...new Set(toolCalls
+            .map(c => c.args?.chainId)
+            .filter(id => id != null && state.byId.has(Number(id)))
+            .map(Number))];
+        if (ids.length) {
+            sources.appendChild(el('div', { class: 'affected-chains' }, ids.slice(0, 6).map(id =>
+                el('button', {
+                    class: 'chain-chip', type: 'button',
+                    text: state.byId.get(id)?.name || `Chain ${id}`,
+                    onclick: () => openChainDetail(id)
+                }))));
+        }
+        extras.push(sources);
+    }
+
+    const bubble = el('div', { class: `chat-bubble ${role}` }, [body, ...extras]);
+    log.appendChild(bubble);
+    log.scrollTop = log.scrollHeight;
+    return bubble;
+}
+
+// The leading bullet is REQUIRED so an ordinary line like "Chain ID: 8453"
+// does not sprout a button.
+function parseChatOptions(text) {
+    const opts = [];
+    const seen = new Set();
+    for (const line of String(text).split('\n')) {
+        const m = line.match(/^\s*[-*]\s+(.{1,48}?):\s*`?(\d{2,10})`?\s*$/);
+        const id = m && String(parseInt(m[2], 10));
+        if (m && !seen.has(id)) {
+            seen.add(id);
+            opts.push({ label: m[1].trim(), reply: `${m[1].trim()} (${m[2]})` });
+        }
+        if (opts.length >= 6) break;
+    }
+    return opts;
+}
+
+function appendChatNotice(text) {
+    const log = byId('assistantLog');
+    const notice = el('div', { class: 'chat-notice', text });
+    log.appendChild(notice);
+    log.scrollTop = log.scrollHeight;
+    return notice;
+}
+
+// Normalize the step trace across server versions.
+function assistantStepsFrom(data) {
+    if (Array.isArray(data?.steps)) return data.steps.map(s => (typeof s === 'string' ? { label: s } : s));
+    if (data?.step) return [{ label: data.step }];
+    return null;
+}
+
+function appendChatThinking() {
+    const log = byId('assistantLog');
+    const trace = el('div', { class: 'chat-trace hidden' });
+    const elapsed = el('span', { class: 'chat-elapsed' });
+    const bubble = el('div', {
+        class: 'chat-bubble assistant chat-thinking', 'aria-label': 'Assistant is working'
+    }, [
+        el('div', { class: 'chat-dots-row' }, [
+            el('div', { class: 'chat-dots' }, [el('span'), el('span'), el('span')]),
+            elapsed
+        ]),
+        trace
+    ]);
+    log.appendChild(bubble);
+    log.scrollTop = log.scrollHeight;
+
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+        elapsed.textContent = `${Math.round((Date.now() - startedAt) / 1000)}s`;
+    }, 1000);
+    const baseRemove = bubble.remove.bind(bubble);
+    bubble.remove = () => { clearInterval(timer); baseRemove(); };
+
+    let renderedKey = null;
+    bubble.setSteps = steps => {
+        if (!Array.isArray(steps) || steps.length === 0) return;
+        const last = steps[steps.length - 1];
+        const key = `${steps.length}|${last.at ?? ''}|${last.label}`;
+        if (key === renderedKey) return;
+        renderedKey = key;
+        // Only auto-scroll when already at the bottom — never yank the reader
+        // away from history they scrolled up to read.
+        const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 48;
+        clear(trace);
+        steps.forEach((s, i) => {
+            const current = i === steps.length - 1;
+            const durMs = !current && s.at != null && steps[i + 1]?.at != null ? steps[i + 1].at - s.at : null;
+            const label = current ? `${s.label}…`
+                : durMs != null && durMs >= 100 ? `${s.label} (${(durMs / 1000).toFixed(1)}s)`
+                    : s.label;
+            trace.appendChild(el('div', { class: `chat-trace-step${current ? ' active' : ' done'}` }, [
+                el('span', { class: 'chat-trace-mark', text: current ? '›' : '✓' }),
+                el('span', { text: label })
+            ]));
+        });
+        trace.classList.remove('hidden');
+        if (nearBottom) log.scrollTop = log.scrollHeight;
+    };
+    return bubble;
+}
+
+// Minimal markdown for assistant replies, built as DOM NODES rather than an HTML string.
+//
+// This used to assemble markup by hand and assign innerHTML, escaping &<>" first. That escaping
+// was correct as far as I could reason about it, but it left model output one regex edit away
+// from XSS, and CodeQL flagged the sink (js/xss, high). createTextNode cannot execute anything,
+// so the bug class is removed rather than guarded: there is no HTML string left to get wrong.
+//
+// Supports: `code`, **bold**, bullet lists, bare http(s) URLs, paragraphs.
+function renderAssistantMarkdown(text, target) {
+    for (const block of String(text).split(/\n{2,}/)) {
+        const lines = block.split('\n');
+        const isList = lines.every(line => /^\s*[-*] /.test(line) || line.trim() === '');
+        if (isList && lines.some(line => line.trim())) {
+            const ul = document.createElement('ul');
+            for (const line of lines.filter(l => l.trim())) {
+                const li = document.createElement('li');
+                appendInlineMd(li, line.replace(/^\s*[-*] /, ''));
+                ul.appendChild(li);
+            }
+            target.appendChild(ul);
+            continue;
+        }
+        const p = document.createElement('p');
+        lines.forEach((line, i) => {
+            if (i) p.appendChild(document.createElement('br'));
+            appendInlineMd(p, line);
+        });
+        target.appendChild(p);
+    }
+}
+
+// One pass over the alternatives, so a span produced by one rule is never rescanned by another —
+// the old chained .replace() calls could reprocess their own output.
+const INLINE_MD = /`([^`]+)`|\*\*([^*]+)\*\*|(https?:\/\/[^\s<)]+)/g;
+function appendInlineMd(target, text) {
+    const source = String(text);
+    let last = 0;
+    for (const m of source.matchAll(INLINE_MD)) {
+        if (m.index > last) target.appendChild(document.createTextNode(source.slice(last, m.index)));
+        if (m[1] != null) {
+            const code = document.createElement('code');
+            code.textContent = m[1];
+            target.appendChild(code);
+        } else if (m[2] != null) {
+            const strong = document.createElement('strong');
+            strong.textContent = m[2];
+            target.appendChild(strong);
+        } else {
+            // Same protocol rule as every other link on the page; a non-http(s) match stays text.
+            const href = safeUrl(m[3]);
+            if (href) {
+                const a = document.createElement('a');
+                a.href = href;
+                a.target = '_blank';
+                a.rel = 'noopener';
+                a.textContent = m[3];
+                target.appendChild(a);
+            } else {
+                target.appendChild(document.createTextNode(m[3]));
+            }
+        }
+        last = m.index + m[0].length;
+    }
+    if (last < source.length) target.appendChild(document.createTextNode(source.slice(last)));
+}
+function inlineMd(s) {
+    return s
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/(https?:\/\/[^\s<)]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// Ecosystem news (chains-news)
+//
+// The third feed, and the one with the loosest link to the registry: it relays
+// industry articles, and only a minority mention a chain the registry knows.
+// That shapes the whole view — the unit is a STORY, not a chain.
+//
+// Stories, not articles: `?group=story` folds the same event reported by
+// several publishers into one entry with `articleCount` and `sources[]`. Listing
+// raw articles would make a widely-covered story look like N separate events.
+//
+// Enrichment is optional here in a way it is not for the other feeds: the
+// service runs as a pure relay unless LLM_ENABLED is set, and its WS `hello`
+// frame carries `enrichment: false` to say phase two will never arrive. The
+// classification filters stay hidden in that case rather than offering filters
+// that can only ever match nothing.
+// ═════════════════════════════════════════════════════════════════════════
+const news = {
+    stories: new Map(),          // storyId → story
+    enrichByStory: new Map(),
+    sources: new Map(),          // sourceId → {id, name, count}
+    loaded: false, loading: false, unreachable: false,
+    ws: null, retries: 0, rerenderTimer: null,
+    scope: 'all', classFilter: 'all',
+    // null = not yet known; false = the relay will never classify.
+    enrichmentAvailable: null,
+    shown: null
+};
+const NEWS_PAGE = 25;
+
+// Low-signal classes the feed deliberately tags rather than drops, so the
+// consumer decides. Surfacing the choice beats silently hiding rows.
+const LOW_SIGNAL_CLASSES = new Set(['market']);
+
+function initNewsControls() {
+    document.querySelectorAll('#newsScope .chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+            news.scope = chip.dataset.scope;
+            news.shown = null;
+            document.querySelectorAll('#newsScope .chip').forEach(c =>
+                c.setAttribute('aria-pressed', String(c === chip)));
+            renderNewsList();
+        });
+    });
+}
+
+function ensureNewsView() {
+    if (news.loaded) { renderNewsSources(); return; }
+    if (news.loading) return;
+    news.loading = true;
+    setNewsLive(false);
+    loadNewsFeed();
+}
+function setNewsLive(live) { setLiveDot('newsMeta', live); }
+
+async function loadNewsFeed() {
+    try {
+        // Ask for stories directly; the service does the cross-publisher grouping.
+        const res = await fetch(`${NEWS_BASE}/news?limit=200&group=story`, {
+            headers: { accept: 'application/json' },
+            signal: AbortSignal.timeout(20000)
+        });
+        if (!res.ok) throw new Error(String(res.status));
+        const payload = await res.json();
+        for (const story of payload.news || []) upsertStory(story);
+        news.loaded = true;
+        news.unreachable = false;
+    } catch {
+        news.unreachable = true;
+        renderNewsUnavailable();
+        return;
+    } finally {
+        news.loading = false;
+    }
+    rebuildNewsSources();
+    renderNewsStats();
+    renderNewsSources();
+    renderNewsClassChips();
+    renderNewsList();
+    connectNewsFeed();
+}
+
+function renderNewsUnavailable() {
+    const list = byId('newsList');
+    if (list) {
+        clear(list);
+        list.appendChild(el('div', { class: 'feed-empty' }, [
+            el('div', { text: 'Ecosystem news feed unavailable (chains-news).' }),
+            el('div', {
+                class: 'note', style: 'border:0;margin-top:8px;padding:0',
+                text: 'This feed is a separate service. If it has not been deployed and routed yet, this tab stays empty — every other view is unaffected.'
+            })
+        ]));
+    }
+    const note = byId('newsNote');
+    if (note) note.textContent = '';
+    // Don't leave an empty "Classification" filter group (or stale counts)
+    // stranded above an unavailable feed.
+    byId('newsClassGroup')?.classList.add('hidden');
+    for (const id of ['newsChainCount', 'newsMultiCount', 'newsCount']) {
+        const n = byId(id);
+        if (n) n.textContent = '';
+    }
+    clear(byId('newsStats'));
+    setNewsLive(false);
+}
+
+function upsertStory(s) {
+    const id = s.storyId || s.id;
+    if (!id) return false;
+    const whenMs = Date.parse(s.publishedAt || s.updatedAt || '');
+    const item = {
+        storyId: id,
+        title: s.title || '(untitled)',
+        url: s.url || null,
+        summary: s.summary || '',
+        whenMs: Number.isNaN(whenMs) ? null : whenMs,
+        articleCount: s.articleCount ?? (Array.isArray(s.articles) ? s.articles.length : 1),
+        // A story can be carried by several publishers; keep them all.
+        sources: Array.isArray(s.sources) ? s.sources
+            : s.source ? [s.source] : [],
+        chains: Array.isArray(s.chains) ? s.chains.filter(c => c?.chainId != null) : [],
+        tags: Array.isArray(s.tags) ? s.tags : [],
+        articles: Array.isArray(s.articles) ? s.articles : []
+    };
+    const prev = news.stories.get(id);
+    if (prev && (prev.whenMs || 0) >= (item.whenMs || 0) && prev.articleCount >= item.articleCount) return false;
+    news.stories.set(id, item);
+    if (s.enrichment) news.enrichByStory.set(id, s.enrichment);
+    return true;
+}
+
+// A raw `news.item` frame is an ARTICLE. Fold it into its story so the live
+// stream and the grouped backfill stay in the same unit.
+function upsertArticle(a) {
+    const sid = a.storyId || a.id;
+    if (!sid) return false;
+    const existing = news.stories.get(sid);
+    const whenMs = Date.parse(a.publishedAt || a.updatedAt || '');
+    if (!existing) {
+        return upsertStory({
+            storyId: sid, title: a.title, url: a.url, summary: a.summary,
+            publishedAt: a.publishedAt, articleCount: 1,
+            sources: a.source ? [a.source] : [], chains: a.chains, tags: a.tags,
+            articles: [a], enrichment: a.enrichment
+        });
+    }
+    // Already known: merge the publisher and refresh recency.
+    let changed = false;
+    if (a.source?.id && !existing.sources.some(x => x.id === a.source.id)) {
+        existing.sources.push(a.source);
+        existing.articleCount += 1;
+        changed = true;
+    }
+    if (!Number.isNaN(whenMs) && (existing.whenMs == null || whenMs > existing.whenMs)) {
+        existing.whenMs = whenMs;
+        changed = true;
+    }
+    if (a.enrichment) { news.enrichByStory.set(sid, a.enrichment); changed = true; }
+    return changed;
+}
+
+function connectNewsFeed() {
+    setNewsLive(false);
+    const wsUrl = `${NEWS_BASE.replace(/^http/, 'ws')}/ws?replay=1`;
+    let ws;
+    try { ws = new WebSocket(wsUrl); } catch { return; }
+    news.ws = ws;
+    ws.onopen = () => { news.retries = 0; setNewsLive(true); };
+    ws.onmessage = ev => {
+        let m;
+        try { m = JSON.parse(ev.data); } catch { return; }
+        if (m.type === 'hello') {
+            // Authoritative answer to "will classifications ever arrive?".
+            news.enrichmentAvailable = Boolean(m.enrichment);
+            renderNewsClassChips();
+            renderNewsStats();
+            return;
+        }
+        if (m.type === 'news.item' && m.item) {
+            if (upsertArticle(m.item)) scheduleNewsRerender();
+        } else if (m.type === 'news.enrichment' && (m.storyId || m.eventId || m.id)) {
+            const key = m.storyId || m.eventId || m.id;
+            // Enrichments are story-keyed; an article id resolves via its story.
+            const target = news.stories.has(key)
+                ? key
+                : [...news.stories.values()].find(s => s.articles.some(a => a.id === key))?.storyId;
+            if (target) {
+                news.enrichByStory.set(target, m);
+                news.enrichmentAvailable = true;
+                scheduleNewsRerender();
+            }
+        }
+    };
+    ws.onerror = () => { try { ws.close(); } catch { /* noop */ } };
+    ws.onclose = () => {
+        news.ws = null;
+        setNewsLive(false);
+        if (news.retries < 6) {
+            const delay = Math.min(1000 * 2 ** news.retries, 20000);
+            news.retries++;
+            setTimeout(connectNewsFeed, delay);
+        }
+    };
+}
+
+function scheduleNewsRerender() {
+    if (news.rerenderTimer) return;
+    news.rerenderTimer = setTimeout(() => {
+        news.rerenderTimer = null;
+        rebuildNewsSources();
+        if (activeView === 'news') {
+            renderNewsStats();
+            renderNewsSources();
+            renderNewsClassChips();
+            renderNewsList();
+        }
+    }, 400);
+}
+
+function rebuildNewsSources() {
+    const map = new Map();
+    for (const s of news.stories.values()) {
+        for (const src of s.sources) {
+            if (!src?.id) continue;
+            const cur = map.get(src.id) || { id: src.id, name: src.name || src.id, count: 0, weight: src.weight || null };
+            cur.count += 1;
+            map.set(src.id, cur);
+        }
+    }
+    news.sources = map;
+}
+
+function newsList() { return [...news.stories.values()].sort((a, b) => (b.whenMs || 0) - (a.whenMs || 0)); }
+function enrichmentOfStory(s) { return news.enrichByStory.get(s.storyId) || null; }
+function storyClass(s) {
+    const e = enrichmentOfStory(s);
+    return e?.class ? String(e.class) : null;
+}
+
+function newsMatchesSearch(s, q) {
+    if (s.title.toLowerCase().includes(q)) return true;
+    if (s.sources.some(x => (x.name || '').toLowerCase().includes(q))) return true;
+    if ((s.tags || []).some(t => String(t).toLowerCase().includes(q))) return true;
+    return s.chains.some(c => String(c.chainId).includes(q) || (c.name || '').toLowerCase().includes(q));
+}
+
+function visibleNews() {
+    let items = newsList();
+    if (news.scope === 'chain') items = items.filter(s => s.chains.length);
+    else if (news.scope === 'multi') items = items.filter(s => s.articleCount > 1);
+    if (news.classFilter !== 'all') items = items.filter(s => storyClass(s) === news.classFilter);
+    if (searchQuery) items = items.filter(s => newsMatchesSearch(s, searchQuery));
+    return items;
+}
+
+function renderNewsStats() {
+    const wrap = byId('newsStats');
+    if (!wrap) return;
+    const all = newsList();
+    const articles = all.reduce((n, s) => n + s.articleCount, 0);
+    const withChain = all.filter(s => s.chains.length);
+    const multi = all.filter(s => s.articleCount > 1);
+    const enriched = all.filter(s => enrichmentOfStory(s)).length;
+    clear(wrap);
+    wrap.appendChild(statTile({
+        label: 'Stories', value: fmtNum(all.length), hero: true,
+        sub: `from ${fmtNum(articles)} article${articles === 1 ? '' : 's'}`,
+        hint: 'One story groups the same event as reported by several publishers, so widely-covered news is not double counted.'
+    }));
+    wrap.appendChild(statTile({
+        label: 'Publishers', value: fmtNum(news.sources.size),
+        sub: 'currently in the retained window'
+    }));
+    wrap.appendChild(statTile({
+        label: 'Mentions a known chain', value: all.length ? Viz.fmtPct((withChain.length / all.length) * 100, 0) : '—',
+        sub: `${fmtNum(withChain.length)} of ${fmtNum(all.length)} stories`,
+        hint: 'Share of stories naming a chain the registry recognises. Most ecosystem news is not chain-specific, so a low figure is expected.'
+    }));
+    wrap.appendChild(statTile({
+        label: 'Covered by several outlets', value: fmtNum(multi.length),
+        sub: multi.length ? 'more than one publisher' : 'no overlapping coverage yet',
+        hint: 'Stories carried by more than one source. Corroboration across publishers, not an importance score.'
+    }));
+    // Only claim a classification rate when classification is actually running.
+    if (news.enrichmentAvailable !== false && enriched > 0) {
+        wrap.appendChild(statTile({
+            label: 'AI classified', value: all.length ? Viz.fmtPct((enriched / all.length) * 100, 0) : '—',
+            sub: `${fmtNum(enriched)} of ${fmtNum(all.length)} stories`,
+            hint: 'Share of stories with an LLM classification from the feed. Unclassified stories are never given a guessed class.'
+        }));
+    }
+}
+
+function renderNewsSources() {
+    const host = byId('chartNewsSources');
+    if (!host || !news.loaded) return;
+    const data = [...news.sources.values()]
+        .sort((a, b) => b.count - a.count)
+        .map(s => ({ label: s.name, value: s.count }));
+    const res = Viz.barChart(host, {
+        data, valueFmt: Viz.fmtNum, axisFmt: Viz.fmtAxisNum,
+        unit: 'Articles retained', tableCaption: 'Articles retained per publisher'
+    });
+    const actions = byId('newsSourceActions');
+    if (actions && res?.table) {
+        clear(actions);
+        host.appendChild(res.table);
+        Viz.attachTableToggle(host, res.table, actions);
+    }
+}
+
+// Classification chips are built from what the feed actually returned. When the
+// relay runs unclassified they are hidden entirely — an empty filter row that
+// can never match is worse than no filter row.
+function renderNewsClassChips() {
+    const group = byId('newsClassGroup');
+    const wrap = byId('newsClassChips');
+    if (!group || !wrap) return;
+    const counts = new Map();
+    for (const s of newsList()) {
+        const c = storyClass(s);
+        if (c) counts.set(c, (counts.get(c) || 0) + 1);
+    }
+    if (!counts.size) {
+        group.classList.add('hidden');
+        news.classFilter = 'all';
+        return;
+    }
+    group.classList.remove('hidden');
+    clear(wrap);
+    const mk = (key, label, count) => wrap.appendChild(el('button', {
+        class: 'chip', type: 'button',
+        'aria-pressed': String(news.classFilter === key),
+        onclick: () => { news.classFilter = key; news.shown = null; renderNewsClassChips(); renderNewsList(); }
+    }, [label, count != null ? el('span', { class: 'chip-count', text: fmtNum(count) }) : null]));
+    mk('all', 'Any', newsList().length);
+    for (const [c, n] of [...counts.entries()].sort((a, b) => b[1] - a[1])) {
+        const label = c.replace(/_/g, ' ') + (LOW_SIGNAL_CLASSES.has(c) ? ' (low signal)' : '');
+        mk(c, label, n);
+    }
+}
+
+function newsCard(s) {
+    const enr = enrichmentOfStory(s);
+    const sev = severityMeta(enr?.severity);
+    const when = s.whenMs ? relTime(new Date(s.whenMs).toISOString()) : null;
+    const publishers = s.sources.map(x => x.name || x.id).filter(Boolean);
+
+    const main = el('div', { class: 'incident-main' }, [
+        el('div', { class: 'incident-title' }, [
+            s.articleCount > 1
+                ? el('span', { class: 'kind-tag', title: `Reported by ${s.articleCount} sources`, text: `${s.articleCount}×` })
+                : null,
+            el('span', { class: 'incident-title-text' }, [
+                s.url
+                    ? el('a', { href: safeUrl(s.url), target: '_blank', rel: 'noopener', text: s.title })
+                    : el('span', { text: s.title })
+            ])
+        ]),
+        el('div', {
+            class: 'incident-meta',
+            // Name every publisher: which outlets carried a story is the
+            // corroboration signal, and it is cheap to show.
+            text: [publishers.slice(0, 3).join(', ') + (publishers.length > 3 ? ` +${publishers.length - 3}` : ''), when]
+                .filter(Boolean).join(' · ')
+        })
+    ]);
+
+    if (s.summary) {
+        main.appendChild(el('div', { class: 'ai-summary', style: 'margin-top:6px', text: Viz.truncate(plainText(s.summary), 260) }));
+    }
+
+    // AI classification, attributed exactly like the incident cards.
+    if (enr?.class || enr?.summary) {
+        const conf = Number.isFinite(enr.confidence) ? enr.confidence : null;
+        const head = el('div', { class: 'ai-head' }, [
+            el('span', { class: 'ai-tag', text: 'AI' }),
+            enr.class ? el('span', { class: 'ai-class', text: String(enr.class).replace(/_/g, ' ') }) : null
+        ]);
+        if (conf != null) {
+            const bar = el('span', { class: 'ai-conf-bar' }, [el('span', { class: 'ai-conf-fill' })]);
+            bar.firstChild.style.width = `${Math.round(conf * 100)}%`;
+            head.appendChild(el('span', { class: 'ai-conf', title: 'Model-reported confidence in this classification' }, [
+                'confidence ', bar, `${Math.round(conf * 100)}%`
+            ]));
+        }
+        if (enr.model) head.appendChild(el('span', { text: `· ${enr.model}` }));
+        const block = el('div', { class: 'ai-block' }, [head]);
+        if (enr.summary && enr.summary !== s.summary) {
+            block.appendChild(el('div', { class: 'ai-summary', text: plainText(enr.summary) }));
+        }
+        main.appendChild(block);
+    }
+
+    if (s.chains.length) {
+        const chips = el('div', { class: 'affected-chains' });
+        for (const c of s.chains.slice(0, 10)) {
+            chips.appendChild(el('button', {
+                class: 'chain-chip', type: 'button',
+                text: c.name || `Chain ${c.chainId}`,
+                onclick: () => openChainDetail(c.chainId)
+            }));
+        }
+        main.appendChild(chips);
+    }
+
+    const side = el('div', { class: 'incident-side' }, [
+        enr?.severity
+            ? el('span', { class: `sev sev-${sev.key}` }, [el('span', { class: 'sev-mark' }), sev.label])
+            : null,
+        s.chains.length
+            ? el('span', { class: 'pill', text: `${s.chains.length} chain${s.chains.length === 1 ? '' : 's'}` })
+            : null
+    ]);
+
+    return el('div', { class: 'incident-card' }, [main, side]);
+}
+
+function renderNewsList() {
+    const list = byId('newsList');
+    if (!list) return;
+    if (news.unreachable) { renderNewsUnavailable(); return; }
+    if (!news.loaded) return;
+
+    const items = visibleNews();
+    const countEl = byId('newsCount');
+    if (countEl) {
+        const bits = [`${fmtNum(items.length)} stor${items.length === 1 ? 'y' : 'ies'}`];
+        if (news.scope === 'chain') bits.push('mentioning a chain');
+        if (news.scope === 'multi') bits.push('with multiple sources');
+        if (news.classFilter !== 'all') bits.push(news.classFilter.replace(/_/g, ' '));
+        if (searchQuery) bits.push(`matching “${searchQuery}”`);
+        countEl.textContent = bits.join(' · ');
+    }
+    const all = newsList();
+    const cc = byId('newsChainCount');
+    if (cc) cc.textContent = fmtNum(all.filter(s => s.chains.length).length);
+    const mc = byId('newsMultiCount');
+    if (mc) mc.textContent = fmtNum(all.filter(s => s.articleCount > 1).length);
+
+    clear(list);
+    if (!items.length) {
+        list.appendChild(el('div', { class: 'feed-empty', text: 'No stories match these filters.' }));
+        return;
+    }
+    const limit = news.shown ?? (isNarrow() ? 10 : NEWS_PAGE);
+    for (const s of items.slice(0, limit)) list.appendChild(newsCard(s));
+    if (items.length > limit) {
+        list.appendChild(el('div', { class: 'table-foot' }, [
+            el('button', {
+                class: 'btn', type: 'button',
+                text: `Show more — ${fmtNum(items.length - limit)} remaining`,
+                onclick: () => { news.shown = limit + (isNarrow() ? 10 : NEWS_PAGE) * 2; renderNewsList(); }
+            })
+        ]));
+    }
+
+    const note = byId('newsNote');
+    if (note) {
+        const parts = [
+            `${fmtNum(all.length)} stories from ${fmtNum(all.reduce((n, s) => n + s.articleCount, 0))} retained articles across ${fmtNum(news.sources.size)} publishers.`
+        ];
+        if (news.enrichmentAvailable === false) {
+            parts.push('This feed is running as a pure relay right now, so no AI classification is available and none is implied.');
+        }
+        parts.push('Chain links appear only where an article named a chain the registry recognises; the feed tags market commentary rather than dropping it, so low-signal stories are filterable but never hidden from you silently.');
+        note.textContent = parts.join(' ');
+    }
+}
+
+// ═══ Timeline view (GET /upgrades) ══════════════════════════════════════════
+// Scheduled network upgrades and maintenance windows on one time axis, with the incidents
+// that followed an activation attached to it. Ported from the pre-rebuild dashboard; the
+// SVG helper, the DOM accessor and the link gating are this file's, and the per-network
+// avatar it used does not exist in this design, so the row names its network as a chain
+// chip instead.
 // ─────────────────────────────── Timeline (upgrades ↔ fallout ↔ coverage) ───────────────────────────────
 // An activity view over the API's /upgrades correlation layer, not a list of
 // cards: a density chart across a real time axis with NOW in it, so pending
@@ -1911,13 +4672,6 @@ const TL_STREAMS = [
     ['done', 'Completed']
 ];
 
-const SVG_NS = 'http://www.w3.org/2000/svg';
-function svgEl(tag, props = {}, children = []) {
-    const node = document.createElementNS(SVG_NS, tag);
-    for (const [k, v] of Object.entries(props)) if (v !== null && v !== undefined) node.setAttribute(k, v);
-    for (const c of [].concat(children)) if (c != null) node.appendChild(c);
-    return node;
-}
 
 function ensureTimelineView() {
     initTimelineControls();
@@ -1996,9 +4750,9 @@ function timelineDomain(items, now) {
 }
 
 function renderTimeline() {
-    const rowsWrap = document.getElementById('timelineRows');
+    const rowsWrap = byId('timelineRows');
     if (!rowsWrap) return;
-    const meta = document.getElementById('timelineMeta');
+    const meta = byId('timelineMeta');
 
     if (timeline.error) {
         const msg = timeline.error === 'old-api'
@@ -2008,7 +4762,7 @@ function renderTimeline() {
         rowsWrap.appendChild(el('div', { class: 'feed-empty', text: msg }));
         timeline.hover = null;
         hideTimelineHover();
-        document.getElementById('timelineChartWrap')?.setAttribute('hidden', '');
+        byId('timelineChartWrap')?.setAttribute('hidden', '');
         if (meta) meta.textContent = '';
         return;
     }
@@ -2017,7 +4771,7 @@ function renderTimeline() {
         rowsWrap.appendChild(el('div', { class: 'feed-empty', text: 'Loading upgrade timeline…' }));
         return;
     }
-    document.getElementById('timelineChartWrap')?.removeAttribute('hidden');
+    byId('timelineChartWrap')?.removeAttribute('hidden');
 
     const now = Date.now();
     const searched = searchQuery ? timeline.upgrades.filter(u => timelineMatchesSearch(u, searchQuery)) : timeline.upgrades;
@@ -2036,11 +4790,11 @@ function renderTimeline() {
     renderTimelineChart(inRange, items, [lo, hi], now, undated.length);
     renderTimelineRows(items, now);
 
-    if (meta) meta.textContent = `${timeline.upgrades.length} windows`;
+    if (meta) meta.textContent = `${timeline.upgrades.length} tracked`;
     // Only a DATED window can be counted down to. An undated announcement must never
     // produce a "next window in ..." headline.
     const nextUp = searched.filter(isDated).map(timelineActivationMs).filter(t => t > now).sort((a, b) => a - b)[0];
-    const notice = document.getElementById('timelineNextNotice');
+    const notice = byId('timelineNextNotice');
     if (notice) {
         notice.textContent = '';
         if (nextUp != null) {
@@ -2059,7 +4813,7 @@ function renderTimeline() {
 }
 
 function renderTimelineTabs(inRange, now) {
-    const bar = document.getElementById('timelineTabs');
+    const bar = byId('timelineTabs');
     if (!bar) return;
     bar.textContent = '';
     for (const [key, label] of TL_STREAMS) {
@@ -2084,11 +4838,11 @@ const TL_CHART_H = 150;
 const TL_BUCKETS = 96;
 
 function renderTimelineChart(inRange, selected, [lo, hi], now, undatedCount = 0) {
-    const host = document.getElementById('timelineChart');
+    const host = byId('timelineChart');
     if (!host) return;
     host.textContent = '';
     // Say what the chart cannot show. A silently short axis reads as "nothing else exists".
-    const omitted = document.getElementById('timelineOmitted');
+    const omitted = byId('timelineOmitted');
     if (omitted) {
         omitted.textContent = undatedCount
             ? `${undatedCount} window${undatedCount === 1 ? '' : 's'} not plotted — no date announced`
@@ -2114,31 +4868,31 @@ function renderTimelineChart(inRange, selected, [lo, hi], now, undatedCount = 0)
     const line = pts.map(([px, py], i) => `${i ? 'L' : 'M'}${px.toFixed(1)},${py.toFixed(1)}`).join(' ');
     const nowX = Math.max(0, Math.min(TL_CHART_W, x(now)));
 
-    const defs = svgEl('defs', {}, [
-        svgEl('linearGradient', { id: 'tlxFill', x1: '0', y1: '0', x2: '0', y2: '1' }, [
-            svgEl('stop', { offset: '0%', 'stop-color': 'var(--tlx-accent)', 'stop-opacity': '0.45' }),
-            svgEl('stop', { offset: '100%', 'stop-color': 'var(--tlx-accent)', 'stop-opacity': '0.02' })
+    const defs = Viz.svgEl('defs', {}, [
+        Viz.svgEl('linearGradient', { id: 'tlxFill', x1: '0', y1: '0', x2: '0', y2: '1' }, [
+            Viz.svgEl('stop', { offset: '0%', 'stop-color': 'var(--tlx-accent)', 'stop-opacity': '0.45' }),
+            Viz.svgEl('stop', { offset: '100%', 'stop-color': 'var(--tlx-accent)', 'stop-opacity': '0.02' })
         ]),
-        svgEl('pattern', { id: 'tlxHatch', width: '6', height: '6', patternUnits: 'userSpaceOnUse', patternTransform: 'rotate(45)' }, [
-            svgEl('rect', { width: '6', height: '6', fill: 'var(--tlx-accent)', 'fill-opacity': '0.06' }),
-            svgEl('line', { x1: '0', y1: '0', x2: '0', y2: '6', stroke: 'var(--tlx-accent)', 'stroke-opacity': '0.35', 'stroke-width': '1.5' })
+        Viz.svgEl('pattern', { id: 'tlxHatch', width: '6', height: '6', patternUnits: 'userSpaceOnUse', patternTransform: 'rotate(45)' }, [
+            Viz.svgEl('rect', { width: '6', height: '6', fill: 'var(--tlx-accent)', 'fill-opacity': '0.06' }),
+            Viz.svgEl('line', { x1: '0', y1: '0', x2: '0', y2: '6', stroke: 'var(--tlx-accent)', 'stroke-opacity': '0.35', 'stroke-width': '1.5' })
         ]),
         // Past and future share one outline; each clip reveals its own half.
-        svgEl('clipPath', { id: 'tlxPast' }, [svgEl('rect', { x: '0', y: '0', width: String(nowX), height: String(TL_CHART_H) })]),
-        svgEl('clipPath', { id: 'tlxFuture' }, [svgEl('rect', { x: String(nowX), y: '0', width: String(TL_CHART_W - nowX), height: String(TL_CHART_H) })])
+        Viz.svgEl('clipPath', { id: 'tlxPast' }, [Viz.svgEl('rect', { x: '0', y: '0', width: String(nowX), height: String(TL_CHART_H) })]),
+        Viz.svgEl('clipPath', { id: 'tlxFuture' }, [Viz.svgEl('rect', { x: String(nowX), y: '0', width: String(TL_CHART_W - nowX), height: String(TL_CHART_H) })])
     ]);
 
     const area = `${line} L${TL_CHART_W},${TL_CHART_H} L0,${TL_CHART_H} Z`;
-    const svg = svgEl('svg', {
+    const svg = Viz.svgEl('svg', {
         viewBox: `0 0 ${TL_CHART_W} ${TL_CHART_H}`, preserveAspectRatio: 'none',
         class: 'tlx-svg', role: 'img',
         'aria-label': `Upgrade window density, ${new Date(lo).toLocaleDateString()} to ${new Date(hi).toLocaleDateString()}`
     }, [
         defs,
-        svgEl('path', { d: area, fill: 'url(#tlxFill)', 'clip-path': 'url(#tlxPast)' }),
-        svgEl('path', { d: area, fill: 'url(#tlxHatch)', 'clip-path': 'url(#tlxFuture)' }),
-        svgEl('path', { d: line, fill: 'none', stroke: 'var(--tlx-accent)', 'stroke-width': '1.5', 'vector-effect': 'non-scaling-stroke' }),
-        svgEl('line', { x1: String(nowX), y1: '0', x2: String(nowX), y2: String(TL_CHART_H), class: 'tlx-nowline', 'vector-effect': 'non-scaling-stroke' })
+        Viz.svgEl('path', { d: area, fill: 'url(#tlxFill)', 'clip-path': 'url(#tlxPast)' }),
+        Viz.svgEl('path', { d: area, fill: 'url(#tlxHatch)', 'clip-path': 'url(#tlxFuture)' }),
+        Viz.svgEl('path', { d: line, fill: 'none', stroke: 'var(--tlx-accent)', 'stroke-width': '1.5', 'vector-effect': 'non-scaling-stroke' }),
+        Viz.svgEl('line', { x1: String(nowX), y1: '0', x2: String(nowX), y2: String(TL_CHART_H), class: 'tlx-nowline', 'vector-effect': 'non-scaling-stroke' })
     ]);
     host.appendChild(svg);
 
@@ -2168,7 +4922,7 @@ function bucketize(items, lo, hi) {
 // Pins: the windows a reader should notice first — anything with fallout, then
 // the most urgent, then the soonest. Capped so they never collide into mush.
 function renderTimelinePins(inRange, selected, x, now) {
-    const host = document.getElementById('timelinePins');
+    const host = byId('timelinePins');
     if (!host) return;
     host.textContent = '';
     const weight = (u) => (u.followedByIncidents?.length ? 100 : 0)
@@ -2202,7 +4956,7 @@ function renderTimelinePins(inRange, selected, x, now) {
 // The thin strip under the chart: one blob per window, coloured by urgency —
 // AppControl's temperature ribbon, carrying severity instead of heat.
 function renderTimelineHeat(inRange, x) {
-    const host = document.getElementById('timelineHeat');
+    const host = byId('timelineHeat');
     if (!host) return;
     host.textContent = '';
     for (const u of inRange) {
@@ -2217,7 +4971,7 @@ function renderTimelineHeat(inRange, x) {
 }
 
 function renderTimelineAxis(lo, hi, nowX) {
-    const host = document.getElementById('timelineAxis');
+    const host = byId('timelineAxis');
     if (!host) return;
     host.textContent = '';
     const span = hi - lo;
@@ -2247,7 +5001,7 @@ function renderTimelineAxis(lo, hi, nowX) {
 const TL_TOOLTIP_ROWS = 6;
 
 function initTimelineHover() {
-    const wrap = document.getElementById('timelineChartWrap');
+    const wrap = byId('timelineChartWrap');
     if (!wrap || wrap.dataset.hoverBound) return;
     wrap.dataset.hoverBound = '1';
     // Pointer events rather than mouse events, so a stylus or touch drag reads
@@ -2259,9 +5013,9 @@ function initTimelineHover() {
 }
 
 function onTimelineHover(e) {
-    const wrap = document.getElementById('timelineChartWrap');
-    const cross = document.getElementById('timelineCrosshair');
-    const tip = document.getElementById('timelineTooltip');
+    const wrap = byId('timelineChartWrap');
+    const cross = byId('timelineCrosshair');
+    const tip = byId('timelineTooltip');
     if (!wrap || !cross || !tip || !timeline.hover) return;
 
     const rect = wrap.getBoundingClientRect();
@@ -2283,8 +5037,8 @@ function onTimelineHover(e) {
 }
 
 function hideTimelineHover() {
-    const cross = document.getElementById('timelineCrosshair');
-    const tip = document.getElementById('timelineTooltip');
+    const cross = byId('timelineCrosshair');
+    const tip = byId('timelineTooltip');
     if (cross) cross.hidden = true;
     if (tip) tip.hidden = true;
 }
@@ -2338,11 +5092,14 @@ const TL_SORTS = [
 const TL_URGENCY_RANK = { mandatory: 3, critical: 3, urgent: 2, standard: 1 };
 
 function renderTimelineRows(items, now) {
-    const wrap = document.getElementById('timelineRows');
+    const wrap = byId('timelineRows');
     if (!wrap) return;
     wrap.textContent = '';
-    const count = document.getElementById('timelineCount');
-    if (count) count.textContent = `${items.length} window${items.length === 1 ? '' : 's'}${searchQuery ? ` · “${searchQuery}”` : ''}`;
+    const count = byId('timelineCount');
+    // Says what it is SCOPED to: the header pill counts everything tracked, this counts what
+    // survived the range and the search, and two bare "N windows" a few pixels apart read as a
+    // contradiction rather than as two different questions.
+    if (count) count.textContent = `${items.length} in range${searchQuery ? ` · “${searchQuery}”` : ''}`;
 
     if (!items.length) {
         wrap.appendChild(el('div', { class: 'feed-empty', text: searchQuery ? 'Nothing matches.' : 'No windows in this range.' }));
@@ -2458,7 +5215,7 @@ function timelineFalloutRows(u) {
     return (u.followedByIncidents || []).slice(0, 4).map(inc =>
         el('div', { class: 'tl-fallout' }, [
             el('span', { class: 'tl-fallout-arrow', text: '↳' }),
-            inc.url ? el('a', { href: inc.url, target: '_blank', rel: 'noopener', text: inc.title }) : el('span', { text: inc.title }),
+            inc.url ? el('a', { href: safeUrl(inc.url), target: '_blank', rel: 'noopener', text: inc.title }) : el('span', { text: inc.title }),
             el('span', { class: 'muted', text: `+${inc.hoursAfterActivation}h after activation (suspected)` }),
             el('span', {
                 class: inc.durationEvidence === 'ongoing' ? 'tl-fallout-open' : 'muted',
@@ -2473,7 +5230,7 @@ function timelineFalloutRows(u) {
 function timelineContextRows(u) {
     const row = (label, item) => el('div', { class: 'tl-context' }, [
         el('span', { class: 'tl-context-kind', text: label }),
-        el('a', { href: item.url, target: '_blank', rel: 'noopener', text: item.title }),
+        el('a', { href: safeUrl(item.url), target: '_blank', rel: 'noopener', text: item.title }),
         item.publishedAt ? el('span', { class: 'muted', text: relTime(item.publishedAt) }) : null
     ]);
     const seen = new Set();
@@ -2529,10 +5286,17 @@ function timelineRow(u, now) {
         el('span', { class: `tlx-row-dot ${urgencyClass(u.urgency)}` }),
         when,
         el('span', { class: 'tlx-row-main' }, [
-            networkIcon(label, iconColorFor(chainId), 'net-icon sm'),
-            u.url ? el('a', { class: 'tlx-row-title', href: u.url, target: '_blank', rel: 'noopener', text: u.title })
+            u.url ? el('a', { class: 'tlx-row-title', href: safeUrl(u.url), target: '_blank', rel: 'noopener', text: u.title })
                 : el('span', { class: 'tlx-row-title', text: u.title }),
-            el('span', { class: 'tlx-row-sub muted', text: [label, u.provider].filter(Boolean).join(' · ') })
+            // The network resolves to a registry chain often enough to be worth a link, and a
+            // chip here behaves like the affected-chain chips on incident cards. When it does
+            // not resolve it stays plain text rather than becoming a dead control.
+            el('span', { class: 'tlx-row-sub muted' }, [
+                chainId != null && state.byId.has(chainId)
+                    ? el('button', { class: 'chain-chip', type: 'button', text: label, onclick: e => { e.preventDefault(); e.stopPropagation(); openChainDetail(chainId); } })
+                    : el('span', { text: label }),
+                u.provider ? el('span', { text: ` · ${u.provider}` }) : null
+            ])
         ]),
         el('span', { class: 'tlx-row-chips' }, chips),
         urgencyPill(u.urgency),
@@ -2560,7 +5324,7 @@ function timelineRow(u, now) {
 
 // Range + sort controls. Built once; re-render only repaints their active state.
 function initTimelineControls() {
-    const rangeBar = document.getElementById('timelineRange');
+    const rangeBar = byId('timelineRange');
     if (rangeBar && !rangeBar.childElementCount) {
         for (const [label, days] of TL_RANGES) {
             rangeBar.appendChild(el('button', {
@@ -2574,15 +5338,16 @@ function initTimelineControls() {
             }));
         }
     }
-    const sortSel = document.getElementById('timelineSort');
+    const sortSel = byId('timelineSort');
     if (sortSel && !sortSel.childElementCount) {
         for (const [key, label] of TL_SORTS) sortSel.appendChild(el('option', { value: key, text: label }));
         sortSel.value = timeline.sort;
         sortSel.addEventListener('change', () => { timeline.sort = sortSel.value; renderTimeline(); });
     }
 }
-// ─────────────────────────────── Report-wrong-info affordance (⚑) ───────────────────────────────
-// The feeds are correlated by heuristics, so some links are inevitably wrong
+
+// ─── Wrong-info reporting ────────────────────────────────────────────────
+// A feed can be confidently wrong — the wrong chain, a stale version, a misread time
 // — and only a human reader can tell which. Every timeline and incident card
 // gets a small flag that unfolds an inline report form posting to /feedback.
 const FEEDBACK_REASONS = [
@@ -2637,597 +5402,4 @@ function feedbackAffordance({ kind, refId }) {
     wrap.appendChild(btn);
     wrap.appendChild(form);
     return wrap;
-}
-
-// ─────────────────────────────── Assistant (floating chat overlay) ───────────────────────────────
-// A corner button opens a chat panel that floats over every view, so the user
-// can ask about whatever they're looking at (the active view + open chain are
-// sent as context). Conversation lives in memory only: persisting it to the
-// URL would leak chat text into shareable links, and localStorage would
-// resurrect stale conversations on a public dashboard.
-const assistant = { messages: [], busy: false, enabled: null, disabledNoticeShown: false };
-
-function initAssistant() {
-    document.getElementById('assistantFab')?.addEventListener('click', () => toggleAssistant());
-    document.getElementById('assistantClose')?.addEventListener('click', () => toggleAssistant(false));
-    document.getElementById('assistantNew')?.addEventListener('click', () => resetAssistantChat());
-    document.getElementById('assistantForm')?.addEventListener('submit', e => { e.preventDefault(); submitAssistantInput(); });
-    document.getElementById('assistantInput')?.addEventListener('keydown', e => {
-        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitAssistantInput(); }
-    });
-    document.querySelectorAll('#assistantChips .chat-chip').forEach(chip =>
-        chip.addEventListener('click', () => sendAssistantMessage(chip.textContent)));
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') toggleAssistant(false); });
-}
-
-function toggleAssistant(open) {
-    const overlay = document.getElementById('assistantOverlay');
-    if (!overlay) return;
-    const show = open ?? overlay.classList.contains('hidden');
-    overlay.classList.toggle('hidden', !show);
-    document.getElementById('assistantFab')?.classList.toggle('fab-open', show);
-    if (show) {
-        probeAssistant(); // refresh the online/offline pill on every open (server caches ~30s)
-        if (assistant.enabled !== false) document.getElementById('assistantInput')?.focus();
-    }
-}
-
-async function probeAssistant() {
-    // The pill shows live reachability (server pings the LLM, cached ~30s) —
-    // not just whether the assistant is configured. No model info exposed.
-    const meta = document.getElementById('assistantMeta');
-    let online = false;
-    try {
-        const info = await api('/assistant');
-        assistant.enabled = !!info.enabled;
-        online = assistant.enabled && info.reachable !== false;
-    } catch {
-        assistant.enabled = false;
-    }
-    if (meta) {
-        meta.textContent = online ? 'online' : 'offline';
-        meta.className = `src-pill ${online ? 'pill-online' : 'pill-offline'}`;
-    }
-    if (!assistant.enabled && !assistant.disabledNoticeShown) {
-        assistant.disabledNoticeShown = true;
-        appendChatNotice('The assistant isn’t configured on this server yet (no LLM connected). Everything else on the dashboard works as usual.');
-        setAssistantBusy(true); // permanently disable the form
-    }
-}
-
-function submitAssistantInput() {
-    const input = document.getElementById('assistantInput');
-    const text = (input?.value || '').trim();
-    if (!text) return;
-    input.value = '';
-    sendAssistantMessage(text);
-}
-
-async function sendAssistantMessage(text) {
-    if (assistant.busy || assistant.enabled === false) return;
-    document.getElementById('assistantChips')?.classList.add('hidden');
-    assistant.messages.push({ role: 'user', content: text.slice(0, 4000) });
-    // The server caps history at 20 messages; keep the newest turns.
-    if (assistant.messages.length > 20) assistant.messages = assistant.messages.slice(-20);
-    appendChatBubble('user', text);
-    setAssistantBusy(true);
-    const thinking = appendChatThinking();
-    try {
-        const context = { view: activeView, ...(openChainId != null ? { chainId: openChainId } : {}) };
-        let res = await apiPost('/assistant/chat', { messages: assistant.messages, context });
-        // Slow LLM runs come back as 202 + a job id — poll until the answer is
-        // ready. Each poll is a fast request, so reverse-proxy timeouts that
-        // would kill one long-held request never trigger. Poll responses carry
-        // the harness's full step trace ("using search_chains", …) — show it.
-        if (res.status === 202 && res.data?.jobId) {
-            thinking.setSteps(assistantStepsFrom(res.data));
-            res = await pollAssistantJob(res.data.jobId, res.data.pollAfterMs, res.data.budgetMs, thinking.setSteps);
-        }
-        thinking.remove();
-        if (res.ok && res.data?.reply != null) {
-            assistant.messages.push({ role: 'assistant', content: res.data.reply });
-            appendChatBubble('assistant', res.data.reply, { toolCalls: res.data.toolCalls, degraded: res.data.degraded, viaFallback: res.data.viaFallback });
-        } else if (res.status === 429) {
-            appendChatNotice('Slow down a little — too many questions in a short time. Try again in a minute.');
-        } else if (res.status === 503) {
-            const msg = res.data?.error || '';
-            appendChatNotice(msg === 'Assistant not configured' ? 'The assistant isn’t configured on this server.'
-                : msg === 'Assistant LLM unreachable' || msg === 'Assistant failed' ? 'The assistant’s language model is unreachable right now. Try again shortly.'
-                : msg || 'The assistant is unavailable right now. Try again shortly.');
-        } else {
-            appendChatNotice(res.data?.error || 'Something went wrong. Please try again.');
-        }
-    } catch {
-        thinking.remove();
-        appendChatNotice('Network error — the request didn’t reach the server. Please try again.');
-    } finally {
-        setAssistantBusy(assistant.enabled === false);
-        document.getElementById('assistantInput')?.focus();
-    }
-}
-
-// Poll an async chat job until it finishes. The window follows the server's
-// declared per-request budget (202 budgetMs) plus a grace minute, capped at
-// 15 min, defaulting to 5 min for older servers that don't send it — so a
-// raised ASSISTANT_TIMEOUT_MS can't silently outlive the client. Returns the
-// same {status, ok, data} shape as apiPost so the caller's branching is
-// unchanged.
-async function pollAssistantJob(jobId, pollAfterMs, budgetMs, onStep = () => {}) {
-    const windowMs = Math.min((budgetMs || 4 * 60 * 1000) + 60 * 1000, 15 * 60 * 1000);
-    const deadline = Date.now() + windowMs;
-    const delay = Math.max(1000, pollAfterMs || 2000);
-    let consecutiveMisses = 0;
-    while (Date.now() < deadline) {
-        await new Promise(r => setTimeout(r, delay));
-        // Each poll gets its own abort timeout — a single black-holed response
-        // must not hang the loop past the deadline and strand the chat in the
-        // busy state (same hazard api()/apiPost() guard against).
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 15000);
-        let res, data;
-        try {
-            res = await fetch(`${API_BASE}/assistant/chat/${jobId}`, { headers: { accept: 'application/json' }, signal: ctrl.signal });
-            data = res.ok ? await res.json().catch(() => null) : null;
-        } catch { continue; } // transient network blip or timeout — keep polling
-        finally { clearTimeout(timer); }
-        if (res.status === 404) {
-            // Jobs live in ONE server replica's memory: behind a round-robin
-            // load balancer a poll routinely lands on a pod that never heard
-            // of this job. A miss is transient — keep polling, the next one
-            // may hit the owner. Only a long unbroken run of misses means the
-            // job is truly gone (pod restarted, TTL expired).
-            if (++consecutiveMisses >= 15) {
-                return { status: 503, ok: false, data: { error: 'The answer expired before it could be fetched. Please ask again.' } };
-            }
-            continue;
-        }
-        consecutiveMisses = 0;
-        if (!res.ok) continue;
-        if (data?.status === 'running') { onStep(assistantStepsFrom(data)); continue; }
-        if (data?.status === 'error') return { status: 503, ok: false, data: { error: data.error } };
-        if (data?.status === 'done') return { status: 200, ok: true, data };
-    }
-    return { status: 503, ok: false, data: { error: 'The assistant is taking too long. Please try again.' } };
-}
-
-function setAssistantBusy(busy) {
-    assistant.busy = busy;
-    for (const id of ['assistantSend', 'assistantInput', 'assistantNew']) {
-        const el = document.getElementById(id);
-        if (el) el.disabled = busy;
-    }
-}
-
-function resetAssistantChat() {
-    if (assistant.busy) return; // a run is in flight — its reply would land in the fresh chat
-    assistant.messages = [];
-    const log = document.getElementById('assistantLog');
-    if (log) log.textContent = '';
-    document.getElementById('assistantChips')?.classList.remove('hidden');
-    document.getElementById('assistantInput')?.focus();
-}
-
-function appendChatBubble(role, text, { toolCalls, degraded, viaFallback } = {}) {
-    const log = document.getElementById('assistantLog');
-    const body = el('div', { class: 'chat-bubble-body' });
-    body.innerHTML = renderAssistantMarkdown(text);
-    const extras = [];
-    // Clarifying questions list options as "- Name: chainId" lines (per the
-    // system prompt) — turn them into one-tap quick-reply buttons.
-    if (role === 'assistant') {
-        const opts = parseChatOptions(text);
-        if (opts.length) {
-            extras.push(el('div', { class: 'chat-quick' },
-                opts.map(o => el('button', { class: 'chip chat-quick-btn', text: o.label, onclick: () => sendAssistantMessage(o.reply) }))));
-        }
-    }
-    if (degraded) extras.push(el('span', { class: 'chat-degraded', text: 'partial answer' }));
-    if (viaFallback) extras.push(el('span', { class: 'chat-degraded', text: 'backup model' }));
-    if (toolCalls?.length) {
-        const names = [...new Set(toolCalls.map(c => c.name))].join(', ');
-        extras.push(el('div', { class: 'chat-tools', text: `used: ${names}` }));
-    }
-    const bubble = el('div', { class: `chat-bubble ${role}` }, [body, ...extras]);
-    log.appendChild(bubble);
-    log.scrollTop = log.scrollHeight;
-    return bubble;
-}
-
-// Extract "- Name: 8453" bullet option lines from a clarifying reply. The
-// button label is the name; clicking sends "Name (8453)" so the follow-up is
-// unambiguous to the model. The leading bullet ("- "/"* ") is REQUIRED so an
-// ordinary answer line like "Chain ID: 8453" doesn't sprout a button, and the
-// id allows up to 10 digits so 8-digit testnets (e.g. Sepolia 11155111) work.
-function parseChatOptions(text) {
-    const opts = [];
-    const seen = new Set();
-    for (const line of String(text).split('\n')) {
-        const m = line.match(/^\s*[-*]\s+(.{1,48}?):\s*`?(\d{2,10})`?\s*$/);
-        // Dedupe by numeric chain id (normalized, so "08453" and "8453" are
-        // one) — a repeated option line must not become a duplicate button.
-        const id = m && String(parseInt(m[2], 10));
-        if (m && !seen.has(id)) {
-            seen.add(id);
-            opts.push({ label: m[1].trim(), reply: `${m[1].trim()} (${m[2]})` });
-        }
-        if (opts.length >= 6) break;
-    }
-    return opts;
-}
-
-function appendChatNotice(text) {
-    const log = document.getElementById('assistantLog');
-    const notice = el('div', { class: 'chat-notice', text });
-    log.appendChild(notice);
-    log.scrollTop = log.scrollHeight;
-    return notice;
-}
-
-// Normalize a chat/poll payload's step trace across server versions: current
-// servers send steps: [{label, at}], pre-1.7.4 send a single step string —
-// during a Pages-before-API deploy window the new frontend must still narrate.
-function assistantStepsFrom(data) {
-    if (Array.isArray(data?.steps)) return data.steps.map(s => (typeof s === 'string' ? { label: s } : s));
-    if (data?.step) return [{ label: data.step }];
-    return null;
-}
-
-/* ─── LLM loading state — pixel-grid loader for long-running work ───
-   Ported from a React/Tailwind original to this page's idiom: no build step, so
-   the grid is built with el() and the per-cell delays go through the CSSOM (a
-   style ATTRIBUTE is dropped under `style-src 'self'`). Tailwind's --ink/--ink-3
-   map onto this palette's --text-main/--text-muted.
-
-   Variants:
-     drive — square cells, chevron wavefront driving right; the 650ms cycle is
-             shorter than the sweep, so two fronts are always in flight
-     dots  — same wavefront, circular cells
-     orbit — a comet lapping the grid perimeter
-
-   Reduced motion freezes the grid to its dim state (see style.css); the elapsed
-   timer still ticks, because that is information rather than decoration. */
-const CHEVRON_DELAYS = Array.from({ length: 9 }, (_, i) => {
-    const r = Math.floor(i / 3), c = i % 3;
-    return (c + Math.abs(r - 1)) * 90;
-});
-
-const ORBIT_ORDER = [0, 1, 2, 5, 8, 7, 6, 3];
-const ORBIT_DELAYS = Array.from({ length: 9 }, (_, i) => {
-    const k = ORBIT_ORDER.indexOf(i);
-    return k === -1 ? null : k * 110;   // null = the centre cell, which never lights
-});
-
-const LOADER_PATTERNS = {
-    drive: { delays: CHEVRON_DELAYS, dur: 650, round: false },
-    dots: { delays: CHEVRON_DELAYS, dur: 650, round: true },
-    orbit: { delays: ORBIT_DELAYS, dur: 950, round: false }
-};
-
-function pixelLoader(variant = 'drive') {
-    const { delays, dur, round } = LOADER_PATTERNS[variant] ?? LOADER_PATTERNS.drive;
-    return el('span', { class: 'pixel-grid', 'aria-hidden': 'true' }, delays.map(d => el('span', {
-        class: `pixel-cell${round ? ' round' : ''}`,
-        style: d === null
-            ? { opacity: '0.07' }
-            : { opacity: '0.15', animation: `pixel-on ${dur}ms ease-in-out ${d}ms infinite` }
-    })));
-}
-
-// Tenths of a second, then minutes past 60s. Deliberately finer than the whole
-// seconds this used to show: a run here regularly takes one to three minutes,
-// and a figure that visibly moves is the difference between "working" and
-// "stuck" — the single most common question during a long answer.
-function fmtElapsed(ms) {
-    const total = ms / 1000;
-    if (total < 60) return `${total.toFixed(1)}s`;
-    return `${Math.floor(total / 60)}m ${(total % 60).toFixed(1)}s`;
-}
-
-function appendChatThinking() {
-    const log = document.getElementById('assistantLog');
-    const trace = el('div', { class: 'chat-trace hidden' });
-    const elapsed = el('span', { class: 'chat-elapsed' });
-    // The label carries what is happening NOW; the trace below carries what is
-    // already done. Before, the current step appeared in both.
-    const label = el('span', { class: 'chat-shimmer', text: 'Thinking' });
-    const bubble = el('div', { class: 'chat-bubble assistant chat-thinking', 'aria-label': 'Assistant is thinking' }, [
-        el('div', { class: 'chat-dots-row' }, [pixelLoader('drive'), label, elapsed]),
-        trace
-    ]);
-    log.appendChild(bubble);
-    log.scrollTop = log.scrollHeight;
-
-    // Elapsed timer; cleared deterministically by wrapping remove() — every
-    // exit path in sendAssistantMessage goes through thinking.remove().
-    const startedAt = Date.now();
-    const tick = () => { elapsed.textContent = fmtElapsed(Date.now() - startedAt); };
-    tick();   // paint 0.0s immediately rather than showing an empty slot for the first tick
-    const timer = setInterval(tick, 100);
-    const baseRemove = bubble.remove.bind(bubble);
-    bubble.remove = () => { clearInterval(timer); baseRemove(); };
-
-    // Renders the harness's full step trace: finished steps get a check and
-    // their duration, the current one an arrow + animated ellipsis. Poll
-    // responses carry the whole history, so brief steps are never missed.
-    let renderedKey = null;
-    bubble.setSteps = (steps) => {
-        if (!Array.isArray(steps) || steps.length === 0) return;
-        const last = steps[steps.length - 1];
-        // Skip the rebuild when nothing changed — most polls during a long
-        // "thinking" stretch. Rebuilding anyway would destroy text selection
-        // in the trace for no reason.
-        const key = `${steps.length}|${last.at ?? ''}|${last.label}`;
-        if (key === renderedKey) return;
-        renderedKey = key;
-        // Only auto-scroll if the user is already at the bottom — never yank
-        // them away from history they scrolled up to read.
-        const nearBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 48;
-        // The newest step is the one in flight — it becomes the shimmering label,
-        // so it is not also listed below. The shimmer says "in progress" better
-        // than the animated ellipsis it replaces.
-        if (last.label) label.textContent = last.label;
-        trace.textContent = '';
-        steps.slice(0, -1).forEach((s, i) => {
-            const durMs = s.at != null && steps[i + 1]?.at != null ? steps[i + 1].at - s.at : null;
-            const text = durMs != null && durMs >= 100 ? `${s.label} (${(durMs / 1000).toFixed(1)}s)` : s.label;
-            trace.appendChild(el('div', { class: 'chat-trace-step done' }, [
-                el('span', { class: 'chat-trace-mark', text: '✓' }),
-                el('span', { text })
-            ]));
-        });
-        // Nothing finished yet on the first step, so an empty trace stays hidden
-        // rather than opening an empty box under the label.
-        trace.classList.toggle('hidden', trace.childElementCount === 0);
-        if (nearBottom) log.scrollTop = log.scrollHeight;
-    };
-    return bubble;
-}
-
-// Minimal markdown renderer for assistant replies. HTML-escapes FIRST, then
-// layers formatting on the escaped text — so model output can never inject
-// markup. Supports: `code`, **bold**, bullet lists, bare URLs, paragraphs.
-function renderAssistantMarkdown(text) {
-    const escaped = String(text)
-        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    const blocks = escaped.split(/\n{2,}/).map(block => {
-        const lines = block.split('\n');
-        const isList = lines.every(l => /^\s*[-*] /.test(l) || l.trim() === '');
-        if (isList && lines.some(l => l.trim())) {
-            const items = lines.filter(l => l.trim()).map(l => `<li>${inlineMd(l.replace(/^\s*[-*] /, ''))}</li>`).join('');
-            return `<ul>${items}</ul>`;
-        }
-        return `<p>${lines.map(inlineMd).join('<br>')}</p>`;
-    });
-    return blocks.join('');
-}
-
-function inlineMd(s) {
-    return s
-        .replace(/`([^`]+)`/g, '<code>$1</code>')
-        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-        .replace(/(https?:\/\/[^\s<)]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
-}
-
-// ─────────────────────────────── Detail drawer ───────────────────────────────
-function initDrawer() {
-    document.getElementById('closeDrawer')?.addEventListener('click', () => closeDrawer());
-    document.getElementById('drawerScrim')?.addEventListener('click', () => closeDrawer());
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDrawer(); });
-}
-function closeDrawer(opts = {}) {
-    document.getElementById('detailDrawer')?.classList.add('hidden');
-    stopBlockHead();
-    openChainId = null;
-    if (!opts.fromUrl) updateUrl();
-}
-function chainLink(id) {
-    const c = state.byId.get(id);
-    return el('a', { class: 'chip-link', href: '#', text: c?.name || `Chain ${id}`, onclick: e => { e.preventDefault(); openChainDetail(id); } });
-}
-function detailRow(label, valueNode) {
-    return el('div', { class: 'd-row' }, [el('span', { class: 'd-label', text: label }), el('div', { class: 'd-value' }, [].concat(valueNode))]);
-}
-function openChainDetail(chainId, opts = {}) {
-    const c = state.byId.get(chainId); if (!c) return;
-    openChainId = chainId;
-    if (!opts.fromUrl) updateUrl();
-    const body = document.getElementById('drawerBody');
-    const type = classify(c);
-    const e = state.rel.get(chainId) || {};
-    const l2b = state.l2beat.get(chainId);
-    const sp = state.statusPagesByChain.get(chainId);
-    body.textContent = '';
-
-    const icon = networkIcon(c.name, COLORS[type], 'd-icon');
-    const badgeList = [el('span', { class: 'badge', text: `ID: ${c.chainId}` })];
-    if (c.status) badgeList.push(statusBadge(c.status));
-    (c.tags || []).forEach(t => badgeList.push(el('span', { class: `tag tag-${t.toLowerCase()}`, text: t })));
-    const badges = el('div', { class: 'd-badges' }, badgeList);
-    body.appendChild(el('div', { class: 'd-header' }, [icon, el('div', {}, [
-        el('h2', { text: c.name || `Chain ${c.chainId}` }), badges
-    ])]));
-
-    const content = el('div', { class: 'd-content' });
-    // Rows that need the full chain record land here — /summary is slim, so
-    // detail (currency, explorers, website) is fetched per chain on open.
-    const extraBox = el('div', { class: 'd-extra' });
-    content.appendChild(extraBox);
-    if (e.l1Parent != null) content.appendChild(detailRow('L1 / parent', chainLink(e.l1Parent)));
-    if (e.mainnet != null) content.appendChild(detailRow('Mainnet', chainLink(e.mainnet)));
-    if (e.l2Children?.length) content.appendChild(detailRow(`L2 / L3 (${e.l2Children.length})`, e.l2Children.slice(0, 30).map(chainLink)));
-    if (e.testnetChildren?.length) content.appendChild(detailRow(`Testnets (${e.testnetChildren.length})`, e.testnetChildren.slice(0, 30).map(chainLink)));
-    if (l2b) content.appendChild(detailRow('L2BEAT', el('div', { class: 'l2b-grid' }, [
-        el('span', { class: 'pill pill-stage', text: l2b.stage || '—' }), el('span', { class: 'muted', text: l2b.category || '' }),
-        el('span', { class: 'strong', text: fmtUsd(l2b.tvs) }), l2b.daLayer ? el('span', { class: 'muted', text: `DA: ${l2b.daLayer}` }) : null
-    ])));
-    if (sp) { const host = safeHost(sp.url); content.appendChild(detailRow('Status page', el('a', { href: sp.url, target: '_blank', rel: 'noopener', text: host || sp.name }))); }
-    // Forum news row stays hidden unless this chain's forum actually has
-    // recent posts — only ~60 of ~3000 chains have a tracked forum.
-    const forumBox = el('div', { class: 'd-forum' });
-    const forumRow = detailRow('Forum news', forumBox);
-    forumRow.classList.add('hidden');
-    content.appendChild(forumRow);
-    loadChainDetail(chainId, extraBox, badges);
-    loadForumNews(chainId, forumBox, forumRow);
-
-    const headCell = el('span', { class: 'mono', text: '…' });
-    content.appendChild(detailRow('Block head', headCell));
-    const rpcBox = el('div', { class: 'd-rpc' }, [el('div', { class: 'd-rpc-loading', text: 'Checking RPC endpoints…' })]);
-    content.appendChild(detailRow('RPC endpoints', rpcBox));
-    const clientBox = el('div', { class: 'd-clients muted', text: '—' });
-    content.appendChild(detailRow('Clients (live)', clientBox));
-
-    body.appendChild(content);
-    document.getElementById('detailDrawer').classList.remove('hidden');
-    loadLiveRpc(chainId, rpcBox, headCell);
-    loadLiveClients(chainId, clientBox);
-}
-// Fill the detail-only rows (currency, price, explorers, website, SLIP-44)
-// from the full chain record. /summary is slim, so this usually needs a
-// /chains/:id fetch; the /export fallback already carries everything.
-async function loadChainDetail(chainId, box, badges) {
-    let d = state.byId.get(chainId) || {};
-    if (!d.nativeCurrency && !d.explorers && !d.infoURL) {
-        try { d = await api(`/chains/${chainId}`); } catch { /* render what we have */ }
-    }
-    if (openChainId !== chainId) return; // drawer moved on while fetching
-    box.textContent = '';
-    const currency = d.nativeCurrency ? `${d.nativeCurrency.name} (${d.nativeCurrency.symbol})` : '—';
-    const price = typeof d.price?.usd === 'number' ? ` · $${d.price.usd.toLocaleString()}` : '';
-    box.appendChild(detailRow('Native currency', el('span', { text: currency + price })));
-    if (d.status && !badges.querySelector('.pill')) badges.appendChild(statusBadge(d.status));
-    if (d.explorers?.length) box.appendChild(detailRow('Explorers', d.explorers.slice(0, 6).map(x => el('a', { href: x.url, target: '_blank', rel: 'noopener', text: x.name || safeHost(x.url) }))));
-    if (d.infoURL) { const host = safeHost(d.infoURL); box.appendChild(detailRow('Website', host ? el('a', { href: d.infoURL, target: '_blank', rel: 'noopener', text: host }) : el('span', { text: d.infoURL }))); }
-    if (d.forumUrl) { const host = safeHost(d.forumUrl); box.appendChild(detailRow('Forum', el('a', { href: d.forumUrl, target: '_blank', rel: 'noopener', text: host || d.forumUrl }))); }
-    if (d.slip44 != null) box.appendChild(detailRow('SLIP-44', el('span', { class: 'mono', text: String(d.slip44) })));
-}
-
-// "2026-07-05T…" → "3h ago" / "2d ago"
-function relTime(iso) {
-    const t = Date.parse(iso || '');
-    if (Number.isNaN(t)) return '';
-    const s = Math.max(0, (Date.now() - t) / 1000);
-    if (s < 3600) return `${Math.max(1, Math.round(s / 60))}m ago`;
-    if (s < 86400) return `${Math.round(s / 3600)}h ago`;
-    return `${Math.round(s / 86400)}d ago`;
-}
-
-// Recent community/governance posts for this chain from chains-forum-news.
-// The row is revealed only when posts exist; any failure just leaves it hidden.
-async function loadForumNews(chainId, box, row) {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 10000);
-    try {
-        const res = await fetch(`${FORUM_NEWS_BASE}/news?chainId=${chainId}&limit=4`, { headers: { accept: 'application/json' }, signal: ctrl.signal });
-        if (!res.ok) return;
-        let posts = (await res.json()).news || [];
-        // One row per thread — the feed can carry the same thread twice.
-        posts = [...new Map(posts.map(p => [forumThreadKey(p.url), p])).values()].slice(0, 4);
-        if (openChainId !== chainId || !posts.length) return; // drawer moved on / nothing to show
-        box.textContent = '';
-        for (const p of posts) {
-            box.appendChild(el('div', { class: 'forum-post' }, [
-                el('a', { href: p.url, target: '_blank', rel: 'noopener', text: p.title }),
-                el('span', { class: 'muted forum-when', text: relTime(p.publishedAt) })
-            ]));
-        }
-        row.classList.remove('hidden');
-    } catch { /* row stays hidden */ }
-    finally { clearTimeout(timer); }
-}
-
-// "Geth/v1.13.0/linux/go1.21" → "Geth v1.13.0"
-function clientNameVersion(cv) {
-    if (!cv) return null;
-    return String(cv).split('/').slice(0, 2).join(' ').trim() || null;
-}
-async function loadLiveRpc(chainId, box, headCell) {
-    stopBlockHead();
-    const usable = urls => urls.map(u => typeof u === 'string' ? u : u?.url).filter(u => u && u.startsWith('http') && !u.includes('${'));
-    let staticUrls = usable(state.byId.get(chainId)?.rpc || []);
-    let results = [];
-    // Health results + (when on slim /summary data) the registry URL list.
-    const [healthRes, endpointsRes] = await Promise.allSettled([
-        api(`/rpc-monitor/${chainId}`),
-        staticUrls.length || !state.byId.get(chainId)?.rpcCount ? Promise.resolve(null) : api(`/endpoints/${chainId}`)
-    ]);
-    if (healthRes.status === 'fulfilled') { const d = healthRes.value; results = d.results || d.endpoints || (Array.isArray(d) ? d : []); }
-    if (endpointsRes.status === 'fulfilled' && endpointsRes.value) staticUrls = usable(endpointsRes.value.rpc || []);
-    if (openChainId !== chainId) return; // drawer moved on while fetching
-    const working = results.filter(r => r.status === 'working' || r.ok === true);
-    // List only reachable endpoints (failed ones are ignored). If nothing has
-    // been health-checked yet, fall back to the registry list as untested.
-    const listed = working.length ? working : (results.length ? [] : staticUrls.map(u => ({ url: u })));
-    box.textContent = '';
-    if (listed.length) {
-        for (const r of listed.slice(0, 20)) {
-            const ver = clientNameVersion(r.clientVersion);
-            box.appendChild(el('div', { class: 'rpc-row' }, [
-                el('span', { class: 'dot dot-ok' }),
-                el('span', { class: 'rpc-host mono', text: safeHost(r.url) || r.url }),
-                ver ? el('span', { class: 'rpc-meta muted', text: ver }) : null
-            ]));
-        }
-    } else {
-        box.appendChild(el('span', { class: 'muted', text: 'No reachable endpoints.' }));
-    }
-    // Block head: poll one live endpoint client-side every 5s. Try working
-    // first, then any registry endpoint (browser CORS can differ from the
-    // server's reachability).
-    const candidates = [...new Set([...working.map(r => r.url), ...staticUrls])];
-    if (candidates.length) startBlockHead(candidates, headCell); else headCell.textContent = '—';
-}
-async function loadLiveClients(chainId, box) {
-    try {
-        const d = await api(`/clients/${chainId}`);
-        const clients = d.clients || [];
-        if (!clients.length) { box.textContent = 'No client data yet.'; return; }
-        box.textContent = ''; box.classList.remove('muted');
-        for (const cl of clients) {
-            const vers = cl.versions || [];
-            const breakdown = vers.map(x => `${x.version}${x.nodeCount ? ` ×${x.nodeCount}` : ''}`).join(' · ');
-            const children = [cl.name];
-            // Only show a version inline when there's exactly one — otherwise a
-            // pill would pair one node's version with the whole client's count
-            // (e.g. "mega-reth v2.1.0@node-a ×3" when 2 of 3 run v2.0.21). For
-            // multiple versions, show the count + the per-version breakdown.
-            if (vers.length === 1) {
-                children.push(' ', el('span', { class: 'client-ver', text: vers[0].version }));
-                if (cl.nodeCount) children.push(el('span', { class: 'client-count', text: ` ×${cl.nodeCount}` }));
-            } else {
-                if (cl.nodeCount) children.push(el('span', { class: 'client-count', text: ` ×${cl.nodeCount}` }));
-                if (breakdown) children.push(' ', el('span', { class: 'client-ver muted', text: `(${breakdown})` }));
-            }
-            box.appendChild(el('span', { class: 'client-pill', title: breakdown }, children));
-        }
-    } catch { box.textContent = '—'; }
-}
-
-// ─── client-side block-head polling (one endpoint, every 5s) ───
-let blockHeadTimer = null;
-let blockHeadToken = 0;
-function stopBlockHead() { if (blockHeadTimer) { clearInterval(blockHeadTimer); blockHeadTimer = null; } }
-async function rpcBlockNumber(url) {
-    try {
-        const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }) });
-        if (!res.ok) return null;
-        const d = await res.json();
-        const n = typeof d.result === 'string' ? parseInt(d.result, 16) : null;
-        return Number.isFinite(n) ? n : null;
-    } catch { return null; }
-}
-function startBlockHead(urls, cell) {
-    stopBlockHead();
-    const token = ++blockHeadToken;
-    let liveUrl = null;
-    const poll = async () => {
-        for (const u of (liveUrl ? [liveUrl, ...urls] : urls)) {
-            const n = await rpcBlockNumber(u);
-            if (token !== blockHeadToken) return;         // drawer changed/closed
-            if (n != null) { liveUrl = u; cell.textContent = `#${n.toLocaleString()}`; cell.title = safeHost(u) || u; return; }
-        }
-        if (token === blockHeadToken && !liveUrl) cell.textContent = '—';
-    };
-    poll();
-    blockHeadTimer = setInterval(poll, 5000);
 }

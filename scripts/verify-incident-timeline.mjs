@@ -12,13 +12,25 @@
 //   (cd public && python3 -m http.server 8793) &
 //   node scripts/verify-incident-timeline.mjs
 // It fetches LIVE production data over the network, so output varies with what is
-// actually happening. No dependencies: Node's built-in WebSocket speaks CDP.
+// actually happening. No dependencies: Node's built-in WebSocket speaks CDP — which needs
+// Node >= 22, checked below, even though the project itself runs on >= 20.
 import { spawn } from 'node:child_process';
 
 
 const PORT = process.env.PORT || '8793';
 const CDP_PORT = process.env.CDP_PORT || '9335';
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// package.json allows Node >=20, but the global WHATWG WebSocket this uses to speak CDP only
+// became available unflagged in Node 22. Say so plainly rather than failing later with a bare
+// ReferenceError that reads like the dashboard is broken. Checked BEFORE chromium is spawned,
+// so exiting here does not leave an orphaned browser behind. (Adding `ws` would put a
+// dependency in scripts that deliberately have none.)
+if (typeof WebSocket === 'undefined') {
+  console.error(`This script drives chromium over CDP using Node's global WebSocket, which is
+unavailable on ${process.version} (needs Node >= 22). The rest of the project runs on Node >= 20.`);
+  process.exit(2);
+}
 
 const chrome = spawn('/usr/bin/chromium-browser', [
   '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-sandbox',
