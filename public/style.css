@@ -1617,3 +1617,26 @@ a.tlx-row-title:hover { color: var(--accent-hover); }
 .report-send:disabled { opacity: .5; cursor: default; }
 .report-thanks { font-size: var(--fs-100); color: var(--good); }
 .report-note { font-size: var(--fs-100); color: var(--critical); }
+
+
+/* ═══ Drawer open: freeze and de-layer everything behind it ═════════════
+   Two separate problems, one class.
+
+   The page behind stayed scrollable while the drawer was open, so a swipe meant to scroll
+   the drawer scrolled the background instead — invisible on desktop where the drawer is a
+   side panel, disorienting on a phone where it is full width.
+
+   And a background sticky header could end up parked mid-viewport under the drawer. Its
+   z-index (--z-sticky, 50) is far below the drawer's (300), which is correct on Chrome and
+   Firefox, but sticky-inside-a-scroller compositing above a fixed sibling is a known mobile
+   quirk — reported from a phone with the chains table's ID/NAME/TYPE row floating across an
+   open incident card. Making those headers static while the drawer is open removes the
+   possibility rather than relying on every browser agreeing about z-order. */
+/* On <html>, not <body>: the document element is the scroller here, and hiding overflow on
+   body alone left the page scrolling anyway — verified, not assumed. */
+.drawer-open, .drawer-open body { overflow: hidden; }
+/* Table headers only. The appbar is deliberately left sticky: on desktop the drawer is a
+   side panel, and unsticking the top bar there would move it for no benefit. */
+.drawer-open .data-table thead th { position: static; z-index: auto; }
+/* Keep a scroll gesture inside the drawer from chaining to the page behind it. */
+.drawer-panel { overscroll-behavior: contain; }
