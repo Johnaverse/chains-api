@@ -3432,6 +3432,7 @@ function initDrawer() {
 }
 function closeDrawer(opts = {}) {
     byId('detailDrawer')?.classList.add('hidden');
+    document.documentElement.classList.remove('drawer-open');
     stopBlockHead();
     openChainId = null;
     if (!opts.fromUrl) updateUrl();
@@ -3569,6 +3570,13 @@ function openChainDetail(chainId, opts = {}) {
     body.appendChild(forumSec);
 
     byId('detailDrawer').classList.remove('hidden');
+    // Lock the page behind the drawer. Without this the background keeps scrolling under a
+    // full-width mobile drawer, which is disorienting on its own and also parks the chains
+    // table's sticky header mid-viewport — where a mobile compositor can paint it OVER the
+    // drawer, reported from Samsung Internet with the ID/NAME/TYPE row floating across an
+    // incident card. The CSS also neutralises those sticky headers while this class is set,
+    // so the overlap cannot happen even on a browser that composites sticky above fixed.
+    document.documentElement.classList.add('drawer-open');
     byId('closeDrawer')?.focus();
 
     loadChainDetail(chainId, extraBox);
