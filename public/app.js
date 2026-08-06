@@ -3584,13 +3584,45 @@ async function loadChainDetail(chainId, box) {
         const cur = `${d.nativeCurrency.name || d.nativeCurrency.symbol} (${d.nativeCurrency.symbol})`;
         box.appendChild(detailRow('Native currency', el('span', { text: cur })));
     }
-    // Price exists for only ~32 chains and rollups are mapped to their L1's
-    // token, so label it as the token price rather than implying a chain metric.
+    // Market figures exist for only ~29 chains, and rollups are mapped to their settlement
+    // token — so every row here is labelled with the ASSET it describes, never as a property
+    // of the chain. Base and Arbitrum both show ETH's volume, which is correct and would be
+    // badly misleading under a bare "Volume" label.
     if (typeof d.price?.usd === 'number') {
-        box.appendChild(detailRow('Token price', el('span', {
-            title: `Source: CoinGecko, cached. Read ${relTime(d.price.updatedAt)}. Rollups are mapped to their settlement token.`,
-            text: `$${d.price.usd.toLocaleString()} · ${relTime(d.price.updatedAt)}`
+        const sym = d.nativeCurrency?.symbol || 'token';
+        const p = d.price;
+        // A quote CoinGecko has not moved in over a day is not a current market. Say when it
+        // stopped rather than presenting a dead number as live — three of the mapped assets
+        // were months stale when this was written.
+        const asOfText = p.asOf ? relTime(p.asOf) : null;
+        const staleNote = p.stale
+            ? ` Upstream stopped updating this quote ${asOfText} — it is not a current market.`
+            : '';
+        box.appendChild(detailRow(`${sym} price`, el('span', {
+            class: p.stale ? 'dim' : null,
+            title: `${sym} spot price from CoinGecko${p.asOf ? `, last moved ${asOfText}` : ''}.`
+                + ` Read ${relTime(p.updatedAt)}. Rollups are mapped to their settlement token.${staleNote}`,
+            text: `$${p.usd.toLocaleString()}${p.stale ? ` · stale (${asOfText})` : ''}`
         })));
+        // 24h volume is the ASSET's trading activity, not the chain's throughput. A stale
+        // quote arrives with this already nulled by the service, so absence here means
+        // "no current figure" and needs no second staleness check.
+        if (typeof p.vol24h === 'number') {
+            box.appendChild(detailRow(`${sym} 24h volume`, el('span', {
+                title: `Trading volume of ${sym} across exchanges over the last 24 hours, from CoinGecko`
+                    + `${p.asOf ? ` (last moved ${asOfText})` : ''}. This is market activity for the asset —`
+                    + ' not this chain\u2019s transaction count or throughput. Chains that share a settlement'
+                    + ' token report the same figure.',
+                text: Viz.fmtUsd(p.vol24h)
+            })));
+        }
+        if (typeof p.marketCap === 'number') {
+            box.appendChild(detailRow(`${sym} market cap`, el('span', {
+                title: `Circulating market capitalisation of ${sym}, from CoinGecko. A property of the asset,`
+                    + ' not of this chain.',
+                text: Viz.fmtUsd(p.marketCap)
+            })));
+        }
     }
     if (d.explorers?.length) {
         box.appendChild(detailRow('Explorers', d.explorers.slice(0, 6).map(x =>

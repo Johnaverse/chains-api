@@ -4,6 +4,8 @@ vi.mock('../../config.js', () => ({
   PRICE_CACHE_TTL_MS: 3600000,
   PRICE_NEGATIVE_CACHE_TTL_MS: 300000,
   PRICE_FETCH_TIMEOUT_MS: 3000,
+  PRICE_QUOTE_MAX_AGE_MS: 86400000,
+  PRICE_REFRESH_INTERVAL_MS: 3600000,
   PROXY_URL: '',
   PROXY_ENABLED: false,
 }));
@@ -18,6 +20,8 @@ import {
   getPricesForChains,
   getCoinGeckoId,
   clearPriceCache,
+  startPriceRefresh,
+  stopPriceRefresh,
 } from '../../priceService.js';
 
 describe('priceService', () => {
@@ -39,8 +43,11 @@ describe('priceService', () => {
       expect(getCoinGeckoId(8453)).toBe('ethereum');
     });
 
-    it('should return matic-network for Polygon (137)', () => {
-      expect(getCoinGeckoId(137)).toBe('matic-network');
+    // POL, not MATIC: chain 137's native currency migrated, and CoinGecko still serves a
+    // matic-network quote that stopped moving in Feb 2026 — so the old id was not merely
+    // outdated, it was a live-looking wrong answer.
+    it('should return polygon-ecosystem-token for Polygon (137)', () => {
+      expect(getCoinGeckoId(137)).toBe('polygon-ecosystem-token');
     });
   });
 
@@ -144,7 +151,7 @@ describe('priceService', () => {
         ok: true,
         json: async () => ({
           ethereum: { usd: 2000.5 },
-          'matic-network': { usd: 0.8 },
+          'polygon-ecosystem-token': { usd: 0.8 },
         }),
       });
       const result = await getPricesForChains([1, 137, 10]); // 10 shares ETH with 1
@@ -152,7 +159,7 @@ describe('priceService', () => {
       // Verify the URL contains both ids (not three)
       const url = vi.mocked(fetchUtil.proxyFetch).mock.calls[0][0];
       expect(url).toContain('ethereum');
-      expect(url).toContain('matic-network');
+      expect(url).toContain('polygon-ecosystem-token');
       expect(result.get(1)).toMatchObject({ usd: 2000.5 });
       expect(result.get(137)).toMatchObject({ usd: 0.8 });
       expect(result.get(10)).toMatchObject({ usd: 2000.5 }); // sibling reuse
@@ -210,12 +217,222 @@ describe('priceService', () => {
         ok: true,
         json: async () => ({
           ethereum: { usd: 2000.5 },
-          // matic-network is missing
+          // polygon-ecosystem-token is missing
         }),
       });
       const result = await getPricesForChains([1, 137]);
       expect(result.get(1)).toMatchObject({ usd: 2000.5 });
       expect(result.get(137)).toBeNull();
+    });
+  });
+
+  describe('volume, market cap and upstream freshness', () => {
+    const HOUR = 3600000;
+    const secs = (ms) => Math.floor(ms / 1000);
+
+    it('asks CoinGecko for volume, market cap and its own timestamp', async () => {
+      vi.mocked(fetchUtil.proxyFetch).mockResolvedValue({
+        ok: true, json: async () => ({ ethereum: { usd: 2000.5 } })
+      });
+      await getPriceForChain(1);
+      const url = vi.mocked(fetchUtil.proxyFetch).mock.calls[0][0];
+      expect(url).toContain('include_24hr_vol=true');
+      expect(url).toContain('include_market_cap=true');
+      // Without this the response cannot be distinguished from a months-old one.
+      expect(url).toContain('include_last_updated_at=true');
+    });
+
+    it('surfaces volume and market cap, and converts the timestamp to an ISO instant', async () => {
+      const at = Date.now() - HOUR;
+      vi.mocked(fetchUtil.proxyFetch).mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          ethereum: {
+            usd: 2000.5, usd_24h_vol: 7241466518.33,
+            usd_market_cap: 226115143171.46, last_updated_at: secs(at)
+          }
+        })
+      });
+      const q = await getPriceForChain(1);
+      expect(q.vol24h).toBeCloseTo(7241466518.33, 2);
+      expect(q.marketCap).toBeCloseTo(226115143171.46, 2);
+      expect(q.asOf).toBe(new Date(secs(at) * 1000).toISOString());
+      expect(q.stale).toBe(false);
+    });
+
+    it('flags a quote whose upstream timestamp is older than the threshold', async () => {
+      // Observed live: oec-token had not moved in 274 days while still being served.
+      const longAgo = Date.now() - 274 * 24 * HOUR;
+      vi.mocked(fetchUtil.proxyFetch).mockResolvedValue({
+        ok: true,
+        json: async () => ({ ethereum: { usd: 4.96, usd_24h_vol: 3700, last_updated_at: secs(longAgo) } })
+      });
+      const q = await getPriceForChain(1);
+      expect(q.stale).toBe(true);
+      // The PRICE survives: a last known price plus its age is still informative.
+      expect(q.usd).toBe(4.96);
+      expect(q.asOf).toBe(new Date(secs(longAgo) * 1000).toISOString());
+      // Volume and market cap do NOT: they describe a window that has since closed, so a
+      // months-old figure is a different question rather than a weaker answer. Nulled by the
+      // service so every consumer gets one answer — an earlier cut left the dashboard hiding
+      // them while the API served them.
+      expect(q.vol24h).toBeNull();
+      expect(q.marketCap).toBeNull();
+    });
+
+    it('holds the line exactly at the staleness threshold', async () => {
+      // Time is frozen because the boundary is otherwise unreachable: last_updated_at has
+      // second granularity while the threshold is in milliseconds, so a wall-clock test can
+      // never make the age EXACTLY the threshold — and a version of this test that only
+      // checked "a second inside" and "a minute outside" passed happily when > was mutated
+      // to >=, which is the one distinction it claimed to pin.
+      vi.useFakeTimers();
+      try {
+        const now = 1785946000000; // whole second, so the arithmetic below is exact
+        vi.setSystemTime(now);
+        const exactly = (now - 86400000) / 1000;
+
+        vi.mocked(fetchUtil.proxyFetch).mockResolvedValue({
+          ok: true,
+          json: async () => ({ ethereum: { usd: 10, usd_24h_vol: 555, last_updated_at: exactly } })
+        });
+        // Age === threshold. `stale` is a strict >, so this is still current.
+        const atBoundary = await getPriceForChain(1);
+        expect(atBoundary.stale).toBe(false);
+        expect(atBoundary.vol24h).toBe(555);
+
+        clearPriceCache();
+        vi.mocked(fetchUtil.proxyFetch).mockResolvedValue({
+          ok: true,
+          json: async () => ({ ethereum: { usd: 10, usd_24h_vol: 555, last_updated_at: exactly - 1 } })
+        });
+        // One second past it, and the volume goes.
+        const pastBoundary = await getPriceForChain(1);
+        expect(pastBoundary.stale).toBe(true);
+        expect(pastBoundary.vol24h).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('re-warms every mapped asset on a timer, in one batched call per tick', async () => {
+      // The point of the timer: without it, entries expire and the next caller to touch an
+      // expired one waits on the round trip. Nothing else in this file exercises a tick.
+      vi.useFakeTimers();
+      try {
+        vi.mocked(fetchUtil.proxyFetch).mockResolvedValue({
+          ok: true, json: async () => ({ ethereum: { usd: 1 } })
+        });
+        startPriceRefresh();
+        expect(fetchUtil.proxyFetch).not.toHaveBeenCalled(); // start alone must not fetch
+
+        await vi.advanceTimersByTimeAsync(3600000);
+        expect(fetchUtil.proxyFetch).toHaveBeenCalledTimes(1); // one batch, not one per asset
+
+        await vi.advanceTimersByTimeAsync(3600000);
+        expect(fetchUtil.proxyFetch).toHaveBeenCalledTimes(2);
+      } finally {
+        stopPriceRefresh();
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not stack timers when started twice, and stops cleanly', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.mocked(fetchUtil.proxyFetch).mockResolvedValue({
+          ok: true, json: async () => ({ ethereum: { usd: 1 } })
+        });
+        startPriceRefresh();
+        startPriceRefresh(); // a second call must be a no-op, not a second interval
+        await vi.advanceTimersByTimeAsync(3600000);
+        expect(fetchUtil.proxyFetch).toHaveBeenCalledTimes(1);
+
+        stopPriceRefresh();
+        await vi.advanceTimersByTimeAsync(3600000 * 3);
+        expect(fetchUtil.proxyFetch).toHaveBeenCalledTimes(1); // nothing after stop
+      } finally {
+        stopPriceRefresh();
+        vi.useRealTimers();
+      }
+    });
+
+    it('keeps the schedule when the upstream fetch fails', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.mocked(fetchUtil.proxyFetch).mockRejectedValue(new Error('network'));
+        startPriceRefresh();
+        await vi.advanceTimersByTimeAsync(3600000);
+        vi.mocked(fetchUtil.proxyFetch).mockResolvedValue({
+          ok: true, json: async () => ({ ethereum: { usd: 1 } })
+        });
+        // A failed upstream call must not stop the schedule — that would silently freeze
+        // prices until a restart. Note this exercises a FAILED FETCH, not a thrown tick:
+        // prefetchAllPrices swallows fetch errors internally, so the .catch in the interval
+        // is unreachable belt-and-braces today (confirmed by mutation: deleting it fails
+        // nothing). It stays because that is an internal detail of another function.
+        await vi.advanceTimersByTimeAsync(3600000);
+        expect(fetchUtil.proxyFetch).toHaveBeenCalledTimes(2);
+      } finally {
+        stopPriceRefresh();
+        vi.useRealTimers();
+      }
+    });
+
+    it('has no mapping for a chain whose asset CoinGecko delisted', async () => {
+      // Chain 66 (OKXChain, OKT): /coins/oec-token answers "coin not found" and a search for
+      // OKT returns nothing, yet /simple/price still serves a husk frozen at $4.96 since
+      // Nov 2025. Flagging that stale would park an unrecoverable number on the chain
+      // forever, so the honest answer is that we have no source.
+      expect(getCoinGeckoId(66)).toBeNull();
+      expect(await getPriceForChain(66)).toBeNull();
+    });
+
+    it('treats a non-positive market cap as unknown rather than as zero', async () => {
+      // Both observed live: -1 from oec-token, 0 from fantom. Neither is a market cap.
+      vi.mocked(fetchUtil.proxyFetch).mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          ethereum: { usd: 4.96, usd_market_cap: -1 },
+          'polygon-ecosystem-token': { usd: 0.03, usd_market_cap: 0, usd_24h_vol: 31.66 }
+        })
+      });
+      const m = await getPricesForChains([1, 137]);
+      expect(m.get(1).marketCap).toBeNull();
+      expect(m.get(137).marketCap).toBeNull();
+      // Volume of 31.66 is a real reported figure for a dead market — kept, not nulled.
+      expect(m.get(137).vol24h).toBeCloseTo(31.66, 2);
+    });
+
+    it('reports missing volume as null, never as zero', async () => {
+      vi.mocked(fetchUtil.proxyFetch).mockResolvedValue({
+        ok: true, json: async () => ({ ethereum: { usd: 2000.5 } })
+      });
+      const q = await getPriceForChain(1);
+      expect(q.vol24h).toBeNull();
+      expect(q.marketCap).toBeNull();
+      expect(q.asOf).toBeNull();
+      // No upstream timestamp means we cannot judge staleness, so we do not claim it is stale.
+      expect(q.stale).toBe(false);
+    });
+
+    it('shares the full quote with sibling chains on the same asset', async () => {
+      vi.mocked(fetchUtil.proxyFetch).mockResolvedValue({
+        ok: true,
+        json: async () => ({ ethereum: { usd: 2000.5, usd_24h_vol: 123456, last_updated_at: secs(Date.now()) } })
+      });
+      const m = await getPricesForChains([1, 10, 8453, 42161]);
+      // Base and Arbitrum legitimately report ETH's volume — the number describes the ASSET,
+      // not the chain, which is why consumers must name the asset when they show it.
+      for (const id of [1, 10, 8453, 42161]) expect(m.get(id).vol24h).toBe(123456);
+      expect(vi.mocked(fetchUtil.proxyFetch)).toHaveBeenCalledTimes(1);
+    });
+
+    it('still negative-caches an id upstream does not know', async () => {
+      vi.mocked(fetchUtil.proxyFetch).mockResolvedValue({ ok: true, json: async () => ({}) });
+      expect(await getPriceForChain(1)).toBeNull();
+      await getPriceForChain(1);
+      expect(vi.mocked(fetchUtil.proxyFetch)).toHaveBeenCalledTimes(1);
     });
   });
 });
