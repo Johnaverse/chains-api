@@ -39,6 +39,9 @@ build/Release
 
 # Dependency directories
 node_modules/
+# Without this a SYMLINK named node_modules slips past the pattern above — a trailing
+# slash matches directories only, and one was committed that way.
+node_modules
 jspm_packages/
 
 # Snowpack dependency directory (https://snowpack.dev/)

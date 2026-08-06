@@ -140,9 +140,14 @@ export const PRICE_QUOTE_MAX_AGE_MS = parseIntEnv('PRICE_QUOTE_MAX_AGE_MS', 8640
 
 // How often to re-warm every mapped asset in the background. Without this, prices refresh
 // only when a request happens to find an expired entry, which makes one unlucky caller per
-// hour wait on a CoinGecko round trip. One batched request per tick — 24 calls a day against
+// hour wait on a CoinGecko round trip. One batched request per tick — ~32 calls a day against
 // a free tier that allows tens per minute. 0 disables it and restores purely lazy refresh.
-export const PRICE_REFRESH_INTERVAL_MS = parseIntEnv('PRICE_REFRESH_INTERVAL_MS', 3600000);
+//
+// Deliberately SHORTER than PRICE_CACHE_TTL_MS. Setting the two equal, as the first cut did,
+// means the cache expires at the same instant the refresher fires — so a request landing in
+// that gap still pays the round trip, which is the one thing this timer exists to prevent.
+// Re-warming at 45 minutes keeps an hour-long entry continuously warm.
+export const PRICE_REFRESH_INTERVAL_MS = parseIntEnv('PRICE_REFRESH_INTERVAL_MS', 2700000);
 
 // Live incidents feed (chains-status-news). Used by the get_live_incidents
 // tool so the assistant/MCP can answer "is X down" questions server-side.
