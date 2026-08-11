@@ -3943,7 +3943,7 @@ async function probeAssistant() {
     if (meta) {
         meta.textContent = online ? 'online' : 'offline';
         meta.className = 'pill-meta';
-        meta.style.color = online ? Viz.cssVar('--good') : Viz.cssVar('--critical');
+        meta.style.color = online ? Viz.cssVar('--good-text') : Viz.cssVar('--critical-text');
     }
     if (!assistant.enabled && !assistant.disabledNoticeShown) {
         assistant.disabledNoticeShown = true;

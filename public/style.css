@@ -113,7 +113,7 @@
 
     --ink-1: #ededee;
     --ink-2: #a1a1a8;
-    --ink-3: #75757d;
+    --ink-3: #8d8d94;
     --ink-on-fill: #ffffff;
 
     --rule: #26262a;
@@ -141,11 +141,18 @@
     --div-cool: #3987e5;
     --div-mid: #2b3038;
 
-    /* status — reserved, always paired with a text label */
+    /* status — reserved, always paired with a text label. The base token is
+       the FILL (dots, bars, chart marks); the -text variant is the same hue
+       tuned to clear 4.5:1 as running text on any surface, because a fill
+       that reads on a swatch can still fail as glyphs. */
     --good: #0ca30c;
     --warn: #fab219;
     --serious: #ec835a;
     --critical: #d03b3b;
+    --good-text: #0ca30c;
+    --warn-text: #fab219;
+    --serious-text: #ec835a;
+    --critical-text: #e26666;
 
     /* Links and focus only. Muted on purpose: a saturated chrome blue next
        to the chart blue makes the page look like the charts are decoration. */
@@ -179,7 +186,7 @@
 
         --ink-1: #17171a;
         --ink-2: #55555c;
-        --ink-3: #78787f;
+        --ink-3: #6a6a71;
         --ink-on-fill: #ffffff;
 
         --rule: #e4e4e1;
@@ -208,6 +215,14 @@
         --accent-hover: #32506f;
         --focus: #44607f;
 
+        /* status text variants, darkened for white surfaces — the fills
+           stay shared with dark, but amber/green glyphs on white fail hard
+           (1.8:1 / 3.4:1) without these. */
+        --good-text: #077807;
+        --warn-text: #8a6100;
+        --serious-text: #b4491f;
+        --critical-text: #c22f2f;
+
         --sel: var(--ink-1);
         --fill-ink: #1d1d21;
         --fill-on-ink: #ffffff;
@@ -232,7 +247,7 @@
 
     --ink-1: #17171a;
     --ink-2: #55555c;
-    --ink-3: #78787f;
+    --ink-3: #6a6a71;
     --ink-on-fill: #ffffff;
 
     --rule: #e4e4e1;
@@ -260,6 +275,11 @@
     --accent: #44607f;
     --accent-hover: #32506f;
     --focus: #44607f;
+
+    --good-text: #077807;
+    --warn-text: #8a6100;
+    --serious-text: #b4491f;
+    --critical-text: #c22f2f;
 
     --sel: var(--ink-1);
     --fill-ink: #1d1d21;
@@ -391,7 +411,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .tab-badge {
     display: inline-flex; align-items: center; gap: 4px;
     margin-left: 6px; font-size: var(--fs-100); font-weight: 600;
-    color: var(--critical); font-variant-numeric: tabular-nums;
+    color: var(--critical-text); font-variant-numeric: tabular-nums;
 }
 .tab-badge::before {
     content: ''; width: 5px; height: 5px; border-radius: 50%;
@@ -413,6 +433,8 @@ button, input, textarea, select { font: inherit; color: inherit; }
 }
 #searchInput::placeholder { color: var(--ink-3); }
 #searchInput:focus { border-color: var(--accent); }
+/* The border swap alone is a 1px cue — keyboard focus gets the real ring. */
+#searchInput:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .search-hint {
     position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
     font-size: var(--fs-50); color: var(--ink-3); font-family: var(--font-mono);
@@ -484,7 +506,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
     box-shadow: var(--shadow-3);
     font-size: var(--fs-300); font-weight: 600;
 }
-.banner-icon { color: var(--critical); flex-shrink: 0; }
+.banner-icon { color: var(--critical-text); flex-shrink: 0; }
 
 /* ═══ Cards ══════════════════════════════════════════════════════════ */
 .card {
@@ -592,10 +614,10 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .stat-tile.is-skeleton .stat-sub { width: 75%; }
 @keyframes skeleton-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
 
-.stat-tile.tone-good .stat-value { color: var(--good); }
-.stat-tile.tone-warn .stat-value { color: var(--warn); }
-.stat-tile.tone-serious .stat-value { color: var(--serious); }
-.stat-tile.tone-critical .stat-value { color: var(--critical); }
+.stat-tile.tone-good .stat-value { color: var(--good-text); }
+.stat-tile.tone-warn .stat-value { color: var(--warn-text); }
+.stat-tile.tone-serious .stat-value { color: var(--serious-text); }
+.stat-tile.tone-critical .stat-value { color: var(--critical-text); }
 
 /* Meter — fill carries severity, track is a neutral groove. */
 .meter {
@@ -885,9 +907,9 @@ button, input, textarea, select { font: inherit; color: inherit; }
     padding: 1px 5px; border-radius: var(--r-xs);
     background: var(--surface-3); color: var(--ink-2); white-space: nowrap;
 }
-.pill-active { color: var(--good); }
-.pill-deprecated { color: var(--critical); }
-.pill-incubating { color: var(--warn); }
+.pill-active { color: var(--good-text); }
+.pill-deprecated { color: var(--critical-text); }
+.pill-incubating { color: var(--warn-text); }
 .pill-stage { color: var(--ink-1); }
 
 /* Status pills: color + label, never color alone. */
@@ -926,10 +948,10 @@ button, input, textarea, select { font: inherit; color: inherit; }
    reserving red for real incidents is the same rule the provider board states and the same
    one the severity floor in chains-status-news enforces — the palette this was ported from
    painted 'Scheduled' and 'In progress' the same red as a major outage, contradicting both. */
-.st-resolved, .st-completed, .st-operational { color: var(--good); }
+.st-resolved, .st-completed, .st-operational { color: var(--good-text); }
 .st-monitoring, .st-verifying { color: var(--accent); }
-.st-identified, .st-update, .st-degraded { color: var(--warn); }
-.st-investigating, .st-partialoutage, .st-majoroutage { color: var(--critical); }
+.st-identified, .st-update, .st-degraded { color: var(--warn-text); }
+.st-investigating, .st-partialoutage, .st-majoroutage { color: var(--critical-text); }
 .st-scheduled, .st-inprogress { color: var(--cat-0); }
 
 .badge {
@@ -950,7 +972,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
     transition: background var(--dur-fast) var(--ease);
 }
 .incident-card:hover { background: var(--surface-2); }
-.incident-card.is-open { border-left-color: var(--critical); }
+.incident-card.is-open { border-left-color: var(--critical-text); }
 .incident-card.is-scheduled { border-left-color: var(--cat-0); }
 
 .incident-main { min-width: 0; }
@@ -1000,7 +1022,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
     font-size: var(--fs-200); margin-top: var(--sp-2);
     display: flex; gap: 6px; align-items: baseline;
 }
-.ai-action-label { font-weight: 600; color: var(--warn); flex-shrink: 0; }
+.ai-action-label { font-weight: 600; color: var(--warn-text); flex-shrink: 0; }
 .ai-unclassified { font-size: var(--fs-100); color: var(--ink-3); font-style: italic; margin-top: var(--sp-2); }
 
 .affected-chains { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-top: var(--sp-2); }
@@ -1228,7 +1250,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .chat-flag {
     display: inline-block; font-size: var(--fs-100); font-weight: 500;
     padding: 1px 5px; border-radius: var(--r-xs);
-    background: var(--surface-3); color: var(--warn); margin-top: var(--sp-2);
+    background: var(--surface-3); color: var(--warn-text); margin-top: var(--sp-2);
 }
 .chat-notice {
     align-self: center; font-size: var(--fs-200); color: var(--ink-2);
@@ -1245,6 +1267,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
     font-size: var(--fs-300); padding: var(--sp-2) var(--sp-3); outline: none;
 }
 .chat-form textarea:focus { border-color: var(--accent); }
+.chat-form textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .chat-form textarea:disabled { opacity: .5; }
 /* The one filled button in the interface, and it is ink — a solid accent
    here would be the only saturated block on the page. */
@@ -1269,7 +1292,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .chat-trace-step.done { color: var(--ink-3); }
 .chat-trace-step.active { color: var(--ink-1); }
 .chat-trace-mark { width: 10px; flex-shrink: 0; text-align: center; }
-.chat-trace-step.done .chat-trace-mark { color: var(--good); }
+.chat-trace-step.done .chat-trace-mark { color: var(--good-text); }
 .chat-trace-step.active .chat-trace-mark { color: var(--ink-2); }
 .chat-new-btn { margin-left: auto; font-size: var(--fs-100); padding: 2px var(--sp-2); }
 
@@ -1358,8 +1381,10 @@ button, input, textarea, select { font: inherit; color: inherit; }
     .calendars { grid-template-columns: 1fr; }
 
     /* Comfortable touch targets. Filter chips sit at 36px (dense controls) and
-       primary buttons at 44px. */
+       primary buttons at 44px. The Activity sub-nav is primary navigation on a
+       phone, so it gets the full 44px. */
     .chip { min-height: 36px; padding: 6px var(--sp-3); }
+    .subtab { min-height: 44px; }
     .btn { min-height: 44px; }
     .icon-btn { width: 38px; height: 38px; }
     /* Titles wrap instead of truncating: on a phone the headline is the primary
@@ -1428,11 +1453,11 @@ button, input, textarea, select { font: inherit; color: inherit; }
     font-size: var(--fs-200); line-height: 1.55; color: var(--ink-3);
 }
 .pb-caption-note strong { color: var(--ink-2); }
-.pb-caption-note .pb-warn { color: var(--warn); }
+.pb-caption-note .pb-warn { color: var(--warn-text); }
 
 /* Open incidents are red; a maintenance window running to schedule is planned work and is
    deliberately NOT red — the same rule the lifecycle palette and the severity floor use. */
-.pill-ongoing { background: color-mix(in srgb, var(--critical) 16%, transparent); color: var(--critical); }
+.pill-ongoing { background: color-mix(in srgb, var(--critical) 16%, transparent); color: var(--critical-text); }
 .pill-quiet { background: var(--surface-3); color: var(--ink-3); }
 .pill-maint { background: color-mix(in srgb, var(--cat-0) 22%, transparent); color: var(--ink-2); }
 .pill.sm { font-size: var(--fs-100); padding: 0 6px; }
@@ -1474,9 +1499,9 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .pb-bar-fill { display: block; height: 100%; min-width: 2px; border-radius: 2px; }
 .pb-sub { display: block; font-size: var(--fs-100); color: var(--ink-3); }
 /* A sample too small to trust is amber, not silent. */
-.pb-thin { color: var(--warn); cursor: help; }
+.pb-thin { color: var(--warn-text); cursor: help; }
 /* An incident open longer than a week is a different thing from one opened this morning. */
-.pb-stale { color: var(--critical); }
+.pb-stale { color: var(--critical-text); }
 .pb-dash { color: var(--ink-3); }
 .pb-none .pb-sub { color: var(--ink-3); }
 
@@ -1580,7 +1605,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
     white-space: nowrap; background: var(--surface-3); color: var(--ink-2);
     border: 1px solid var(--rule-strong);
 }
-.tlx-pin-badge.urg-urgent { background: var(--warn); color: #241a00; border-color: var(--warn); }
+.tlx-pin-badge.urg-urgent { background: var(--warn); color: #241a00; border-color: var(--warn-text); }
 .tlx-pin-badge.urg-mandatory, .tlx-pin-badge.urg-critical { background: var(--critical); color: #fff; }
 .tlx-pin-stem { width: 1px; height: 14px; background: var(--rule-strong); }
 
@@ -1596,7 +1621,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .tlx-tick { position: absolute; top: 5px; transform: translateX(-50%); font-size: var(--fs-100); color: var(--ink-3); white-space: nowrap; }
 .tlx-tick:first-child { transform: none; left: 6px !important; }
 .tlx-tick-end { transform: translateX(-100%); margin-left: -4px; }
-.tlx-tick-now { color: var(--good); font-weight: 600; }
+.tlx-tick-now { color: var(--good-text); font-weight: 600; }
 
 /* ─── Hover crosshair + readout ───
    Spans the plot and the ribbon, stopping short of the axis so the tick labels stay legible
@@ -1624,24 +1649,24 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .tlx-tip-dot.urg-urgent { background: var(--warn); }
 .tlx-tip-dot.urg-mandatory, .tlx-tip-dot.urg-critical { background: var(--critical); }
 .tlx-tip-when { font-size: var(--fs-100); color: var(--ink-3); }
-.tlx-tip-when.pending { color: var(--good); font-weight: 600; }
+.tlx-tip-when.pending { color: var(--good-text); font-weight: 600; }
 .tlx-tip-title { font-size: var(--fs-200); font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; color: var(--ink-1); }
 .tlx-tip-meta, .tlx-tip-sw, .tlx-tip-fallout { grid-column: 3; font-size: var(--fs-100); }
 .tlx-tip-meta { color: var(--ink-3); }
 .tlx-tip-sw { color: var(--ink-2); }
-.tlx-tip-fallout { color: var(--critical); }
+.tlx-tip-fallout { color: var(--critical-text); }
 .tlx-tip-more { font-size: var(--fs-100); color: var(--ink-3); padding-top: 5px; }
 
 /* Evidence badges. Colour encodes how well the time is KNOWN, not severity: a reader must be
    able to tell a stated window from a timestamp that merely records when someone posted. */
 .tlx-chip-ev { font-size: var(--fs-100); font-weight: 500; padding: 1px 5px; border-radius: var(--r-xs); white-space: nowrap; cursor: help; }
-.ev-exact { background: color-mix(in srgb, var(--good) 14%, transparent); color: var(--good); }
+.ev-exact { background: color-mix(in srgb, var(--good) 14%, transparent); color: var(--good-text); }
 .ev-approx { background: var(--tint); color: var(--ink-3); }
-.ev-unknown { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
-.tlx-when-tba { flex-shrink: 0; width: 92px; font-size: var(--fs-200); font-weight: 500; color: var(--warn); cursor: help; }
-.tl-fallout-open { flex-shrink: 0; font-size: var(--fs-100); color: var(--critical); font-weight: 500; }
+.ev-unknown { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn-text); }
+.tlx-when-tba { flex-shrink: 0; width: 92px; font-size: var(--fs-200); font-weight: 500; color: var(--warn-text); cursor: help; }
+.tl-fallout-open { flex-shrink: 0; font-size: var(--fs-100); color: var(--critical-text); font-weight: 500; }
 .tlx-omitted {
-    padding: 5px var(--sp-3); font-size: var(--fs-100); color: var(--warn);
+    padding: 5px var(--sp-3); font-size: var(--fs-100); color: var(--warn-text);
     background: color-mix(in srgb, var(--warn) 8%, transparent); border-top: 1px solid var(--rule);
 }
 
@@ -1679,7 +1704,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
 /* Pending is carried by the row's border and its green time column; the dot
    does not also need to glow and blink. */
 .tlx-row.pending .tlx-row-dot { background: var(--good); }
-.tlx-when { flex-shrink: 0; width: 92px; font-size: var(--fs-300); font-weight: 600; font-variant-numeric: tabular-nums; color: var(--good); }
+.tlx-when { flex-shrink: 0; width: 92px; font-size: var(--fs-300); font-weight: 600; font-variant-numeric: tabular-nums; color: var(--good-text); }
 .tlx-when.past { color: var(--ink-3); font-weight: 600; }
 .tlx-row-main { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; flex: 1; }
 .tlx-row-title { font-size: var(--fs-300); font-weight: 600; color: var(--ink-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1692,7 +1717,7 @@ a.tlx-row-title:hover { color: var(--accent-hover); }
 .tlx-chip-dim { font-size: var(--fs-100); font-weight: 500; padding: 1px 5px; border-radius: var(--r-xs); background: var(--tint); color: var(--ink-3); }
 .tlx-chip-fallout {
     font-size: var(--fs-100); font-weight: 500; padding: 1px 5px; border-radius: var(--r-xs);
-    background: color-mix(in srgb, var(--critical) 14%, transparent); color: var(--critical);
+    background: color-mix(in srgb, var(--critical) 14%, transparent); color: var(--critical-text);
 }
 .tlx-row-toggle {
     flex-shrink: 0; background: none; border: 1px solid var(--rule); border-radius: var(--r-sm);
@@ -1705,7 +1730,7 @@ a.tlx-row-title:hover { color: var(--accent-hover); }
 .tl-fallout, .tl-context { display: flex; align-items: baseline; gap: 7px; margin-top: 4px; font-size: var(--fs-200); min-width: 0; }
 .tl-fallout a, .tl-context a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tl-fallout .muted, .tl-context .muted { flex-shrink: 0; font-size: var(--fs-100); }
-.tl-fallout-arrow { color: var(--critical); flex-shrink: 0; }
+.tl-fallout-arrow { color: var(--critical-text); flex-shrink: 0; }
 .tl-context-kind { flex-shrink: 0; font-size: var(--fs-100); font-weight: 500; color: var(--ink-3); }
 
 /* At the shared phone breakpoint the row collapses to two lines: time + title, then meta.
@@ -1726,7 +1751,7 @@ a.tlx-row-title:hover { color: var(--accent-hover); }
 /* ═══ Report-wrong-info affordance (⚑ on timeline rows and incident cards) ═══ */
 .report-wrap { margin-top: 6px; }
 .report-btn { background: transparent; border: none; color: var(--ink-3); font-size: var(--fs-100); font-weight: 600; cursor: pointer; padding: 0; opacity: .6; }
-.report-btn:hover { opacity: 1; color: var(--warn); }
+.report-btn:hover { opacity: 1; color: var(--warn-text); }
 .report-btn:disabled { cursor: default; opacity: .4; }
 .report-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 5px; }
 .report-form select, .report-form input {
@@ -1742,8 +1767,8 @@ a.tlx-row-title:hover { color: var(--accent-hover); }
 }
 .report-send:hover:not(:disabled) { background: var(--surface-3); }
 .report-send:disabled { opacity: .5; cursor: default; }
-.report-thanks { font-size: var(--fs-100); color: var(--good); }
-.report-note { font-size: var(--fs-100); color: var(--critical); }
+.report-thanks { font-size: var(--fs-100); color: var(--good-text); }
+.report-note { font-size: var(--fs-100); color: var(--critical-text); }
 
 
 /* ═══ Drawer open: freeze and de-layer everything behind it ═════════════
