@@ -84,16 +84,12 @@
                 aria-controls="view-networks">Networks</button>
             <button class="tab" id="tab-graph" data-view="graph" role="tab" aria-selected="false"
                 aria-controls="view-graph">Relationships</button>
-            <button class="tab" id="tab-incidents" data-view="incidents" role="tab" aria-selected="false"
-                aria-controls="view-incidents">Incidents<span class="tab-badge hidden" id="tabBadgeIncidents"></span></button>
-            <button class="tab" id="tab-providers" data-view="providers" role="tab" aria-selected="false"
-                aria-controls="view-providers">Providers</button>
-            <button class="tab" id="tab-timeline" data-view="timeline" role="tab" aria-selected="false"
-                aria-controls="view-timeline">Timeline</button>
-            <button class="tab" id="tab-news" data-view="news" role="tab" aria-selected="false"
-                aria-controls="view-news">News</button>
-            <button class="tab" id="tab-forum" data-view="forum" role="tab" aria-selected="false"
-                aria-controls="view-forum">Forum</button>
+            <!-- One entry for the five feed views (incidents, providers,
+                 timeline, news, forum). data-view tracks the last feed the
+                 reader was on, so clicking returns there; the feeds are picked
+                 apart by the sub-nav that app.js builds inside each view. -->
+            <button class="tab" id="tab-activity" data-view="incidents" role="tab" aria-selected="false"
+                aria-controls="view-incidents">Activity<span class="tab-badge hidden" id="tabBadgeIncidents"></span></button>
         </nav>
     </header>
 
@@ -267,11 +263,11 @@
                             <th class="num" data-sort="chainId" aria-sort="ascending" scope="col">ID<span class="sort-caret">▲</span></th>
                             <th data-sort="name" aria-sort="none" scope="col">Network<span class="sort-caret">▲</span></th>
                             <th data-sort="type" aria-sort="none" scope="col" title="A single taxonomy with four exclusive groups: an L2 running on a testnet counts as Testnet, not L2 / rollup. That is why this count is smaller than the registry's total L2 tag count.">Type<span class="sort-caret">▲</span></th>
-                            <th data-sort="stage" aria-sort="none" scope="col">Stage<span class="sort-caret">▲</span></th>
-                            <th class="num" data-sort="tvs" aria-sort="none" scope="col" title="From L2BEAT, and only for classified rollups — L2BEAT could match a minority of its projects to a chain ID, so most rows are blank by design.">Value secured<span class="sort-caret">▲</span></th>
+                            <th class="col-l2b" data-sort="stage" aria-sort="none" scope="col">Stage<span class="sort-caret">▲</span></th>
+                            <th class="num col-l2b" data-sort="tvs" aria-sort="none" scope="col" title="From L2BEAT, and only for classified rollups — L2BEAT could match a minority of its projects to a chain ID, so most rows are blank by design.">Value secured<span class="sort-caret">▲</span></th>
                             <th class="num" data-sort="rpcs" aria-sort="none" scope="col" title="Usable endpoint URLs listed in the registry. Larger than the up-to-5 sample the health monitor actually probes per chain.">RPCs<span class="sort-caret">▲</span></th>
                             <th data-sort="status" aria-sort="none" scope="col">Status<span class="sort-caret">▲</span></th>
-                            <th data-sort="incident" aria-sort="none" scope="col">Incident<span class="sort-caret">▲</span></th>
+                            <th class="col-incident" data-sort="incident" aria-sort="none" scope="col">Incident<span class="sort-caret">▲</span></th>
                         </tr>
                     </thead>
                     <tbody id="chainsTableBody"></tbody>
@@ -344,7 +340,7 @@
     </section>
 
     <!-- ═══ View: Incidents ════════════════════════════════════════════ -->
-    <section id="view-incidents" class="view scroll-view" role="tabpanel" aria-labelledby="tab-incidents" tabindex="0">
+    <section id="view-incidents" class="view scroll-view" role="tabpanel" aria-label="Chain incidents" tabindex="0">
         <div class="view-inner">
             <div class="view-head">
                 <h2 class="view-title">Chain incidents</h2>
@@ -388,13 +384,13 @@
                 <span class="toolbar-count" id="incidentsCount"></span>
             </div>
             <div id="incidentsList" class="feed-list" aria-live="polite">
-                <div class="feed-empty">Connecting to the live status feed…</div>
+                <div class="feed-empty">Waiting for the live status feed…</div>
             </div>
         </div>
     </section>
 
     <!-- ═══ View: Providers ════════════════════════════════════════════ -->
-    <section id="view-providers" class="view scroll-view" role="tabpanel" aria-labelledby="tab-providers" tabindex="0">
+    <section id="view-providers" class="view scroll-view" role="tabpanel" aria-label="RPC provider incidents" tabindex="0">
         <div class="view-inner">
             <div class="view-head">
                 <h2 class="view-title">RPC provider incidents</h2>
@@ -429,14 +425,14 @@
                 <span class="toolbar-count" id="providersCount"></span>
             </div>
             <div id="providersList" class="feed-list" aria-live="polite">
-                <div class="feed-empty">Connecting to the live status feed…</div>
+                <div class="feed-empty">Waiting for the live status feed…</div>
             </div>
         </div>
     </section>
 
     <!-- ═══ View: News (chains-news ecosystem relay) ═══════════════════ -->
     <!-- ─── View: Timeline — upgrade windows linked to their fallout ───────── -->
-    <section id="view-timeline" class="view scroll-view" role="tabpanel" aria-labelledby="tab-timeline" tabindex="0">
+    <section id="view-timeline" class="view scroll-view" role="tabpanel" aria-label="Upgrade timeline" tabindex="0">
         <div class="view-inner">
             <div class="view-head">
                 <h2 class="view-title">Upgrade timeline <span class="pill-meta" id="timelineMeta"></span></h2>
@@ -484,7 +480,7 @@
         </div>
     </section>
 
-    <section id="view-news" class="view scroll-view" role="tabpanel" aria-labelledby="tab-news" tabindex="0">
+    <section id="view-news" class="view scroll-view" role="tabpanel" aria-label="Ecosystem news" tabindex="0">
         <div class="view-inner">
             <div class="view-head">
                 <h2 class="view-title">Ecosystem news</h2>
@@ -530,7 +526,7 @@
     </section>
 
     <!-- ═══ View: Forum ════════════════════════════════════════════════ -->
-    <section id="view-forum" class="view scroll-view" role="tabpanel" aria-labelledby="tab-forum" tabindex="0">
+    <section id="view-forum" class="view scroll-view" role="tabpanel" aria-label="Governance and community activity" tabindex="0">
         <div class="view-inner">
             <div class="view-head">
                 <h2 class="view-title">Governance &amp; community activity</h2>

@@ -578,6 +578,11 @@ function initAppbarHeight() {
 
 // ─────────────────────────────── tabs / routing ──────────────────────────
 const VIEWS = ['overview', 'networks', 'graph', 'incidents', 'providers', 'timeline', 'news', 'forum'];
+// The five feed views share one top-level "Activity" tab; the strip built by
+// initSubTabs() inside each of their sections picks between them. URLs are
+// untouched — ?view=news still deep-links, it just lights up Activity + News.
+const FEED_VIEWS = ['incidents', 'providers', 'timeline', 'news', 'forum'];
+const FEED_LABELS = { incidents: 'Incidents', providers: 'Providers', timeline: 'Timeline', news: 'News', forum: 'Forum' };
 const DEFAULT_VIEW = 'overview';
 let activeView = DEFAULT_VIEW;
 let searchQuery = '';
@@ -589,17 +594,53 @@ function initTabs() {
     byId('tabs')?.addEventListener('keydown', e => {
         if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
         e.preventDefault();
+        // The Activity button's dataset.view tracks the active feed (see
+        // switchView), so this lookup also matches while a feed is open.
         const i = tabs.findIndex(t => t.dataset.view === activeView);
         const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length];
         next.focus();
         switchView(next.dataset.view);
     });
+    initSubTabs();
+}
+
+// One identical feed-switcher strip per feed section. Five copies of the same
+// strip (rather than one reparented node) keep every section self-contained:
+// no DOM moves on tab switch, and the sections stay independently printable.
+function initSubTabs() {
+    for (const host of FEED_VIEWS) {
+        const inner = document.querySelector(`#view-${host} .view-inner`);
+        if (!inner) continue;
+        const strip = el('div', { class: 'subtabs', role: 'tablist', 'aria-label': 'Activity feeds' });
+        for (const v of FEED_VIEWS) {
+            const btn = el('button', {
+                class: 'subtab', type: 'button', role: 'tab',
+                'data-view': v, 'aria-selected': String(v === host),
+                'aria-controls': `view-${v}`,
+                onclick: () => switchView(v)
+            }, [FEED_LABELS[v]]);
+            if (v === 'incidents') {
+                btn.appendChild(el('span', { class: 'tab-badge subtab-badge-incidents hidden' }));
+            }
+            strip.appendChild(btn);
+        }
+        inner.prepend(strip);
+    }
 }
 
 function switchView(view, opts = {}) {
     if (!VIEWS.includes(view)) view = DEFAULT_VIEW;
     activeView = view;
+    // The Activity tab remembers the feed the reader was on: its dataset.view
+    // is updated to the current feed, which also makes the generic
+    // aria-selected loop below light it up for any of the five.
+    if (FEED_VIEWS.includes(view)) {
+        const act = byId('tab-activity');
+        if (act) { act.dataset.view = view; act.setAttribute('aria-controls', `view-${view}`); }
+    }
     document.querySelectorAll('#tabs .tab').forEach(b =>
+        b.setAttribute('aria-selected', String(b.dataset.view === view)));
+    document.querySelectorAll('.subtabs .subtab').forEach(b =>
         b.setAttribute('aria-selected', String(b.dataset.view === view)));
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     byId(`view-${view}`)?.classList.add('active');
@@ -1119,12 +1160,16 @@ function buildOpenIncidentIndex() {
 function openIncidents() { return incidents.items.filter(isOpen); }
 
 function renderTabBadge() {
-    const badge = byId('tabBadgeIncidents');
-    if (!badge) return;
     const n = incidents.items.filter(it => isOpen(it) && !it.isProvider).length;
-    badge.textContent = n ? String(n) : '';
-    badge.classList.toggle('hidden', !n);
-    badge.title = n ? `${n} open chain incident${n === 1 ? '' : 's'}` : '';
+    const title = n ? `${n} open chain incident${n === 1 ? '' : 's'}` : '';
+    // The count lives on the top-level Activity tab AND on the Incidents
+    // sub-tab in every feed section, so it is visible from both levels.
+    for (const badge of [byId('tabBadgeIncidents'), ...document.querySelectorAll('.subtab-badge-incidents')]) {
+        if (!badge) continue;
+        badge.textContent = n ? String(n) : '';
+        badge.classList.toggle('hidden', !n);
+        badge.title = title;
+    }
 }
 
 // ─── feed transport ──────────────────────────────────────────────────────
@@ -1234,10 +1279,10 @@ function renderOverview({ force = false } = {}) {
 
 function statTile({ label, value, sub, tone, meter, hero, hint }) {
     const tile = el('div', { class: `stat-tile${tone ? ` tone-${tone}` : ''}${hero ? ' is-hero' : ''}` });
-    const lab = el('div', { class: 'stat-label' }, [label]);
-    if (hint) {
-        lab.appendChild(el('span', { class: 'info-dot', text: 'i', title: hint, 'aria-label': hint, role: 'img' }));
-    }
+    // The definition rides on the label itself (cursor:help via [title]), not
+    // on an ⓘ dot — six of them in one strip was circled punctuation, and the
+    // strip is the most-looked-at row on the page.
+    const lab = el('div', hint ? { class: 'stat-label', title: hint } : { class: 'stat-label' }, [label]);
     tile.appendChild(lab);
     tile.appendChild(el('div', { class: 'stat-value', text: value }));
     if (sub) tile.appendChild(el('div', { class: 'stat-sub', text: sub }));
@@ -1347,11 +1392,18 @@ function renderImpact() {
     const rows = buildImpactRows();
     clear(host);
 
+    // Zero open incidents is the NORMAL state, so it renders as one quiet
+    // line, not as 460px of reserved emptiness. The fixed height exists to
+    // stop arriving rows from shifting the page — it only applies once
+    // there are rows to hold (see .live-panel.is-collapsed).
+    host.classList.toggle('is-collapsed', !rows.length);
     if (!rows.length) {
         host.appendChild(el('div', {
             class: 'feed-empty',
             text: incidents.items.length
-                ? 'Nothing open in this scope — every incident the feed retains is resolved or completed.'
+                ? (openIncidents().length
+                    ? 'Nothing open in this scope.'
+                    : `No open incidents — ${state.chains.length ? fmtNum(state.chains.length) + ' networks clear' : 'all clear'}.`)
                 : 'Waiting for the live status feed…'
         }));
         return;
@@ -1845,6 +1897,24 @@ function renderChainsTable() {
     if (!body) return;
     const q = searchQuery;
 
+    // Columns that are absence on ~95% of rows stay hidden until a filter
+    // makes them meaningful: Stage + Value secured appear with the L2BEAT
+    // filter, Incident appears while anything is open (or its filter is on).
+    // A grid of em-dashes reads as broken data even when it is correct.
+    const showL2b = chainTvsOnly;
+    const showIncident = chainIncidentOnly || state.openByChain.size > 0;
+    // If the sort key's column is being hidden, fall back to the default
+    // order — a table silently sorted by an invisible column is a puzzle.
+    if ((!showL2b && (chainSort.key === 'tvs' || chainSort.key === 'stage'))
+        || (!showIncident && chainSort.key === 'incident')) {
+        chainSort = { key: 'chainId', dir: 1 };
+        document.querySelectorAll('#chainsTable thead th[data-sort]').forEach(o =>
+            o.setAttribute('aria-sort', o.dataset.sort === 'chainId' ? 'ascending' : 'none'));
+    }
+    const table = byId('chainsTable');
+    table?.classList.toggle('cols-l2b-off', !showL2b);
+    table?.classList.toggle('cols-incident-off', !showIncident);
+
     let rows = state.chains.filter(c => {
         if (chainTypeFilter !== 'all' && netClass(c).key !== chainTypeFilter) return false;
         if (chainStatusFilter !== 'all' && statusOf(c) !== chainStatusFilter) return false;
@@ -1915,11 +1985,11 @@ function renderChainsTable() {
             td('Type', [typeTag(r.cls)]),
             td('Stage', [r.stage
                 ? el('span', { class: 'pill pill-stage', text: r.stage })
-                : el('span', { class: 'dim', text: '—' })], { empty: !r.stage }),
-            td('Value secured', [r.tvs != null ? fmtUsd(r.tvs) : '—'], { num: true, empty: r.tvs == null }),
+                : el('span', { class: 'dim', text: '—' })], { empty: !r.stage, cls: 'col-l2b' }),
+            td('Value secured', [r.tvs != null ? fmtUsd(r.tvs) : '—'], { num: true, empty: r.tvs == null, cls: 'col-l2b' }),
             td('RPCs', [r.rpcs ? fmtNum(r.rpcs) : '—'], { num: true, empty: !r.rpcs }),
             td('Status', [el('span', { class: `pill pill-${r.status}`, text: r.status })]),
-            td('Incident', [incidentCell], { empty: !r.openCount })
+            td('Incident', [incidentCell], { empty: !r.openCount, cls: 'col-incident' })
         ]));
     }
 
