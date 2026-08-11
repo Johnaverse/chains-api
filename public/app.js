@@ -604,27 +604,30 @@ function initTabs() {
     initSubTabs();
 }
 
-// One identical feed-switcher strip per feed section. Five copies of the same
-// strip (rather than one reparented node) keep every section self-contained:
-// no DOM moves on tab switch, and the sections stay independently printable.
+// ONE feed-switcher strip, reparented into the active feed section by
+// switchView(). A single node means a single badge and a single aria pass —
+// the five-copies version this replaces needed a document-wide fan-out to
+// keep 25 buttons and 5 badges in sync, and still printed five nav strips.
+//
+// Deliberately plain navigation, NOT a tablist: the five feed sections are
+// tabpanels of the TOP tablist, so a nested tablist inside a panel whose
+// selected tab points at its own ancestor reads as circular to AT. Buttons
+// mark the current feed with aria-current instead, and stay ordinary
+// sequential tab stops.
+let subTabStrip = null;
+let subTabBadge = null;
 function initSubTabs() {
-    for (const host of FEED_VIEWS) {
-        const inner = document.querySelector(`#view-${host} .view-inner`);
-        if (!inner) continue;
-        const strip = el('div', { class: 'subtabs', role: 'tablist', 'aria-label': 'Activity feeds' });
-        for (const v of FEED_VIEWS) {
-            const btn = el('button', {
-                class: 'subtab', type: 'button', role: 'tab',
-                'data-view': v, 'aria-selected': String(v === host),
-                'aria-controls': `view-${v}`,
-                onclick: () => switchView(v)
-            }, [FEED_LABELS[v]]);
-            if (v === 'incidents') {
-                btn.appendChild(el('span', { class: 'tab-badge subtab-badge-incidents hidden' }));
-            }
-            strip.appendChild(btn);
+    subTabStrip = el('nav', { class: 'subtabs', 'aria-label': 'Activity feeds' });
+    for (const v of FEED_VIEWS) {
+        const btn = el('button', {
+            class: 'subtab', type: 'button', 'data-view': v,
+            onclick: () => switchView(v)
+        }, [FEED_LABELS[v]]);
+        if (v === 'incidents') {
+            subTabBadge = el('span', { class: 'tab-badge hidden' });
+            btn.appendChild(subTabBadge);
         }
-        inner.prepend(strip);
+        subTabStrip.appendChild(btn);
     }
 }
 
@@ -640,10 +643,25 @@ function switchView(view, opts = {}) {
     }
     document.querySelectorAll('#tabs .tab').forEach(b =>
         b.setAttribute('aria-selected', String(b.dataset.view === view)));
-    document.querySelectorAll('.subtabs .subtab').forEach(b =>
-        b.setAttribute('aria-selected', String(b.dataset.view === view)));
+    if (subTabStrip) {
+        for (const b of subTabStrip.children) {
+            if (b.dataset.view === view) b.setAttribute('aria-current', 'true');
+            else b.removeAttribute('aria-current');
+        }
+    }
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
     byId(`view-${view}`)?.classList.add('active');
+    // Move the shared feed strip into the section being shown — AFTER the
+    // section is active: a node move drops focus to <body>, and re-focusing
+    // an element inside a display:none ancestor is a silent no-op.
+    if (FEED_VIEWS.includes(view) && subTabStrip) {
+        const inner = document.querySelector(`#view-${view} .view-inner`);
+        if (inner && subTabStrip.parentElement !== inner) {
+            const hadFocus = subTabStrip.contains(document.activeElement);
+            inner.prepend(subTabStrip);
+            if (hadFocus) subTabStrip.querySelector(`[data-view="${view}"]`)?.focus();
+        }
+    }
     document.body.classList.toggle('graph-active', view === 'graph');
 
     if (view === 'networks' && chainsTableStale) { chainsTableStale = false; renderChainsTable(); }
@@ -1160,16 +1178,19 @@ function buildOpenIncidentIndex() {
 function openIncidents() { return incidents.items.filter(isOpen); }
 
 function renderTabBadge() {
-    const n = incidents.items.filter(it => isOpen(it) && !it.isProvider).length;
-    const title = n ? `${n} open chain incident${n === 1 ? '' : 's'}` : '';
-    // The count lives on the top-level Activity tab AND on the Incidents
-    // sub-tab in every feed section, so it is visible from both levels.
-    for (const badge of [byId('tabBadgeIncidents'), ...document.querySelectorAll('.subtab-badge-incidents')]) {
-        if (!badge) continue;
+    // Two badges, two scopes. The Activity tab fronts all five feeds, so its
+    // count is EVERY open incident — provider-only trouble must not leave it
+    // looking quiet. The Incidents sub-tab keeps the chain-only count its
+    // feed actually shows.
+    const open = incidents.items.filter(isOpen);
+    const setBadge = (badge, n, what) => {
+        if (!badge) return;
         badge.textContent = n ? String(n) : '';
         badge.classList.toggle('hidden', !n);
-        badge.title = title;
-    }
+        badge.title = n ? `${n} open ${what}${n === 1 ? '' : 's'}` : '';
+    };
+    setBadge(byId('tabBadgeIncidents'), open.length, 'incident');
+    setBadge(subTabBadge, open.filter(it => !it.isProvider).length, 'chain incident');
 }
 
 // ─── feed transport ──────────────────────────────────────────────────────
@@ -1281,8 +1302,11 @@ function statTile({ label, value, sub, tone, meter, hero, hint }) {
     const tile = el('div', { class: `stat-tile${tone ? ` tone-${tone}` : ''}${hero ? ' is-hero' : ''}` });
     // The definition rides on the label itself (cursor:help via [title]), not
     // on an ⓘ dot — six of them in one strip was circled punctuation, and the
-    // strip is the most-looked-at row on the page.
+    // strip is the most-looked-at row on the page. But title on a plain div
+    // is hover-only, so the same sentence also goes into the tile as sr-only
+    // text: screen readers get it in flow, without a dot to hunt for.
     const lab = el('div', hint ? { class: 'stat-label', title: hint } : { class: 'stat-label' }, [label]);
+    if (hint) lab.appendChild(el('span', { class: 'sr-only', text: `. ${hint}` }));
     tile.appendChild(lab);
     tile.appendChild(el('div', { class: 'stat-value', text: value }));
     if (sub) tile.appendChild(el('div', { class: 'stat-sub', text: sub }));
@@ -1392,19 +1416,23 @@ function renderImpact() {
     const rows = buildImpactRows();
     clear(host);
 
-    // Zero open incidents is the NORMAL state, so it renders as one quiet
-    // line, not as 460px of reserved emptiness. The fixed height exists to
-    // stop arriving rows from shifting the page — it only applies once
-    // there are rows to hold (see .live-panel.is-collapsed).
-    host.classList.toggle('is-collapsed', !rows.length);
+    // Geometry rule: the reserved height holds until the feed has SETTLED
+    // (backfill landed), and collapses only on a confirmed zero. Collapsing
+    // during the waiting state looked nicer but meant every load with an
+    // open incident shifted the page ~400px downward when the feed arrived —
+    // the exact CLS the fixed height was added to prevent. Under this rule a
+    // load with incidents never shifts, and a zero-incident load shifts once,
+    // upward, into a state that then stays stable.
+    const settled = incidents.backfilled;
+    host.classList.toggle('is-collapsed', !rows.length && settled);
     if (!rows.length) {
         host.appendChild(el('div', {
             class: 'feed-empty',
-            text: incidents.items.length
-                ? (openIncidents().length
+            text: !settled
+                ? 'Waiting for the live status feed…'
+                : (incidents.items.some(isOpen)
                     ? 'Nothing open in this scope.'
                     : `No open incidents — ${state.chains.length ? fmtNum(state.chains.length) + ' networks clear' : 'all clear'}.`)
-                : 'Waiting for the live status feed…'
         }));
         return;
     }
@@ -1761,6 +1789,20 @@ let chainTypeFilter = 'all';
 let chainStatusFilter = 'all';
 let chainIncidentOnly = false;
 let chainTvsOnly = false;
+// Once the Incident column has appeared it stays for the session: its
+// visibility rides on live WebSocket state, and letting the last upstream
+// resolution yank the column (and the reader's sort) out from under a
+// scrolled table was worse than one now-empty column.
+let incidentColLatched = false;
+
+// aria-sort has exactly one writer. Both the header click handler and the
+// hidden-column sort fallback in renderChainsTable() route through here, so
+// the caret can never disagree with chainSort.
+function syncChainSortHeaders() {
+    document.querySelectorAll('#chainsTable thead th[data-sort]').forEach(th =>
+        th.setAttribute('aria-sort', th.dataset.sort !== chainSort.key ? 'none'
+            : chainSort.dir === 1 ? 'ascending' : 'descending'));
+}
 // A stacked card is far taller than a table row, so a phone gets a smaller
 // first page. pageSize() is read at render time, not cached, so rotating the
 // device picks up the new size on the next paint.
@@ -1779,11 +1821,7 @@ function initChainsTable() {
             const k = th.dataset.sort;
             chainSort.dir = chainSort.key === k ? -chainSort.dir : 1;
             chainSort.key = k;
-            // aria-sort must reflect the real state — screen readers announce it
-            // and the caret is driven from the same attribute.
-            document.querySelectorAll('#chainsTable thead th[data-sort]').forEach(o =>
-                o.setAttribute('aria-sort', 'none'));
-            th.setAttribute('aria-sort', chainSort.dir === 1 ? 'ascending' : 'descending');
+            syncChainSortHeaders();
             renderChainsTable();
         };
         th.setAttribute('tabindex', '0');
@@ -1897,23 +1935,27 @@ function renderChainsTable() {
     if (!body) return;
     const q = searchQuery;
 
-    // Columns that are absence on ~95% of rows stay hidden until a filter
-    // makes them meaningful: Stage + Value secured appear with the L2BEAT
-    // filter, Incident appears while anything is open (or its filter is on).
-    // A grid of em-dashes reads as broken data even when it is correct.
-    const showL2b = chainTvsOnly;
-    const showIncident = chainIncidentOnly || state.openByChain.size > 0;
+    // Columns that are absence on ~95% of rows stay hidden until the reader
+    // signals intent toward them — a grid of em-dashes reads as broken data
+    // even when it is correct. Intent for the L2BEAT pair is any of: the
+    // L2BEAT filter, the L2/rollup type filter (every visible row has the
+    // data then), or a sort on one of the two columns. Deliberately NOT
+    // data-driven from the row set: search results changing per keystroke
+    // must not make columns pop in and out.
+    const showL2b = chainTvsOnly || chainTypeFilter === 'l2'
+        || chainSort.key === 'tvs' || chainSort.key === 'stage';
+    const showIncident = chainIncidentOnly || incidentColLatched || state.openByChain.size > 0;
+    if (showIncident) incidentColLatched = true;
     // If the sort key's column is being hidden, fall back to the default
     // order — a table silently sorted by an invisible column is a puzzle.
-    if ((!showL2b && (chainSort.key === 'tvs' || chainSort.key === 'stage'))
-        || (!showIncident && chainSort.key === 'incident')) {
+    if (!showIncident && chainSort.key === 'incident') {
         chainSort = { key: 'chainId', dir: 1 };
-        document.querySelectorAll('#chainsTable thead th[data-sort]').forEach(o =>
-            o.setAttribute('aria-sort', o.dataset.sort === 'chainId' ? 'ascending' : 'none'));
+        syncChainSortHeaders();
     }
     const table = byId('chainsTable');
     table?.classList.toggle('cols-l2b-off', !showL2b);
     table?.classList.toggle('cols-incident-off', !showIncident);
+    const visibleCols = 8 - (showL2b ? 0 : 2) - (showIncident ? 0 : 1);
 
     let rows = state.chains.filter(c => {
         if (chainTypeFilter !== 'all' && netClass(c).key !== chainTypeFilter) return false;
@@ -1945,7 +1987,7 @@ function renderChainsTable() {
     clear(body);
     if (!rows.length) {
         body.appendChild(el('tr', {}, [
-            el('td', { colspan: '8', class: 'cell-primary' }, [el('div', {
+            el('td', { colspan: String(visibleCols), class: 'cell-primary' }, [el('div', {
                 class: 'table-empty',
                 text: state.chains.length
                     ? 'No networks match these filters.'
@@ -3943,7 +3985,10 @@ async function probeAssistant() {
     if (meta) {
         meta.textContent = online ? 'online' : 'offline';
         meta.className = 'pill-meta';
-        meta.style.color = online ? Viz.cssVar('--good-text') : Viz.cssVar('--critical-text');
+        // Assign the var() itself, not its resolved hex: an inline literal
+        // freezes the theme it was computed under, and nothing re-probes the
+        // assistant when the reader toggles themes.
+        meta.style.color = online ? 'var(--good-text)' : 'var(--critical-text)';
     }
     if (!assistant.enabled && !assistant.disabledNoticeShown) {
         assistant.disabledNoticeShown = true;
@@ -4914,7 +4959,6 @@ function renderTimeline() {
         notice.textContent = '';
         if (nextUp != null) {
             const u = searched.find(x => timelineActivationMs(x) === nextUp);
-            notice.appendChild(el('span', { class: 'tlx-next-dot' }));
             notice.appendChild(el('span', { class: 'tlx-next-label', text: 'Next window' }));
             notice.appendChild(el('span', { class: 'tlx-next-count mono tl-countdown', 'data-at': String(nextUp), text: countdownText(nextUp - now) }));
             notice.appendChild(el('span', { class: 'tlx-next-title', text: `${timelineNetworkLabel(u)} · ${u.title}` }));

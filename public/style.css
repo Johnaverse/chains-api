@@ -149,9 +149,12 @@
     --warn: #fab219;
     --serious: #ec835a;
     --critical: #d03b3b;
-    --good-text: #0ca30c;
-    --warn-text: #fab219;
-    --serious-text: #ec835a;
+    /* Aliases, not copies: retune a fill and its text variant follows.
+       Only critical genuinely diverges in dark (the fill is too dark to
+       read as glyphs on these surfaces). */
+    --good-text: var(--good);
+    --warn-text: var(--warn);
+    --serious-text: var(--serious);
     --critical-text: #e26666;
 
     /* Links and focus only. Muted on purpose: a saturated chrome blue next
@@ -160,9 +163,10 @@
     --accent-hover: #96acc6;
     --focus: #96acc6;
 
-    /* Selected / pressed chrome. Ink, never a hue. */
-    --sel: var(--ink-1);
-    --fill-ink: #ededee;
+    /* Pressed-control fill. In dark the fill IS the primary ink (light
+       block on dark page) with dark text on it — the inverse of
+       --ink-on-fill, which is white text for accent-filled surfaces. */
+    --fill-ink: var(--ink-1);
     --fill-on-ink: #131315;
 
     --shadow-1: 0 1px 2px rgba(0, 0, 0, .3);
@@ -223,7 +227,6 @@
         --serious-text: #b4491f;
         --critical-text: #c22f2f;
 
-        --sel: var(--ink-1);
         --fill-ink: #1d1d21;
         --fill-on-ink: #ffffff;
 
@@ -281,7 +284,6 @@
     --serious-text: #b4491f;
     --critical-text: #c22f2f;
 
-    --sel: var(--ink-1);
     --fill-ink: #1d1d21;
     --fill-on-ink: #ffffff;
 
@@ -397,15 +399,23 @@ button, input, textarea, select { font: inherit; color: inherit; }
    The filled-chip-with-accent-bar version this replaces made eight tabs
    read as eight buttons competing for the click. */
 .tabs { display: flex; gap: var(--sp-4); flex-shrink: 0; align-self: stretch; align-items: stretch; }
-.tab {
+/* One recipe for every underline tab in the product: the app bar's tabs,
+   the Activity sub-nav (.subtab) and the timeline's stream picker
+   (.tlx-tab). Their STRIPS differ; the buttons must not — stating this
+   three times is how the product grew three differently-shaped tab
+   controls last time. Selected underline is currentColor, so it follows
+   the ink with no extra token. */
+.tab, .subtab, .tlx-tab {
     background: transparent; border: none; color: var(--ink-2);
     padding: 0 1px; margin-bottom: -1px;
     border-bottom: 2px solid transparent;
     font-size: var(--fs-300); font-weight: 500; cursor: pointer;
     transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
 }
-.tab:hover { color: var(--ink-1); }
-.tab[aria-selected="true"] { color: var(--ink-1); border-bottom-color: var(--sel); }
+.tab:hover, .subtab:hover, .tlx-tab:hover { color: var(--ink-1); }
+.tab[aria-selected="true"], .subtab[aria-current], .tlx-tab.active {
+    color: var(--ink-1); border-bottom-color: currentColor;
+}
 /* A count, not a notification blob: the number is the point, so it is set
    in the same ink as the tab and marked by the dot beside it. */
 .tab-badge {
@@ -486,15 +496,8 @@ button, input, textarea, select { font: inherit; color: inherit; }
     overflow-x: auto; scrollbar-width: none;
 }
 .subtabs::-webkit-scrollbar { display: none; }
-.subtab {
-    background: none; border: none; border-bottom: 2px solid transparent;
-    padding: 0 1px var(--sp-2); margin-bottom: -1px;
-    color: var(--ink-2); font-size: var(--fs-300); font-weight: 500;
-    cursor: pointer; white-space: nowrap;
-    transition: color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
-}
-.subtab:hover { color: var(--ink-1); }
-.subtab[aria-selected="true"] { color: var(--ink-1); border-bottom-color: var(--sel); }
+/* Deltas only — the recipe lives on the shared .tab/.subtab/.tlx-tab rule. */
+.subtab { padding-bottom: var(--sp-2); white-space: nowrap; }
 
 /* ── Banner ── */
 .banner {
@@ -527,10 +530,6 @@ button, input, textarea, select { font: inherit; color: inherit; }
     padding-bottom: var(--sp-3); border-bottom: 1px solid var(--rule);
 }
 .card-title { font-size: var(--fs-300); font-weight: 600; }
-.card-sub {
-    flex-basis: 100%; font-size: var(--fs-200); color: var(--ink-3);
-    line-height: var(--lh-snug); max-width: 84ch;
-}
 .card-actions { margin-left: auto; display: flex; align-items: center; gap: var(--sp-2); }
 
 .grid { display: grid; gap: var(--sp-4); }
@@ -579,16 +578,17 @@ button, input, textarea, select { font: inherit; color: inherit; }
     border: 1px solid var(--rule); border-radius: var(--r-md);
     overflow: hidden;
 }
+/* The strip's border lives on the container now, so a row with no tiles —
+   a cleared feed-failure state, a not-yet-rendered view — must vanish
+   entirely rather than paint a stray bordered sliver. */
+.stat-row:empty { display: none; }
 .stat-tile {
     padding: var(--sp-3) var(--sp-4);
     display: flex; flex-direction: column; gap: 1px;
     border-left: 1px solid var(--rule); border-top: 1px solid var(--rule);
     margin-left: -1px; margin-top: -1px;
 }
-.stat-label {
-    font-size: var(--fs-200); font-weight: 400; color: var(--ink-3);
-    display: flex; align-items: center; gap: var(--sp-1);
-}
+.stat-label { font-size: var(--fs-200); font-weight: 400; color: var(--ink-3); }
 /* A label carrying a metric definition says so with the cursor, not with a
    ⓘ dot per tile. */
 .stat-label[title] { cursor: help; }
@@ -756,8 +756,12 @@ button, input, textarea, select { font: inherit; color: inherit; }
    every extra pixel of row padding is a row that fell off the screen. */
 .data-table tbody td { padding: 7px var(--sp-4); border-bottom: 1px solid var(--rule); white-space: nowrap; }
 /* In a table, status is already a column — the label does not also need a
-   container around it on all 2,920 rows. */
-.data-table .pill { background: none; padding: 0; }
+   container around it on all 2,920 rows. Scoped to the two tables whose
+   pills are pure lifecycle labels: a blanket `.data-table .pill` also hit
+   the provider board (its rows carry .pill-ongoing/.pill-maint, where the
+   tinted background IS the maintenance-vs-outage encoding) and out-ranked
+   those classes on specificity. */
+#chainsTable .pill, #impactBody .pill { background: none; padding: 0; }
 
 /* Columns that would be em-dashes on ~95% of rows are withheld until a
    filter makes them meaningful — renderChainsTable() sets these classes.
@@ -1434,7 +1438,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
 }
 
 @media print {
-    #appbar, .assistant-fab, .assistant-overlay, .drawer, .chart-table-toggle { display: none !important; }
+    #appbar, .subtabs, .assistant-fab, .assistant-overlay, .drawer, .chart-table-toggle { display: none !important; }
     .scroll-view { padding-top: 0; }
     .view { display: block !important; }
     .chart-table { display: table !important; }
@@ -1554,7 +1558,6 @@ button, input, textarea, select { font: inherit; color: inherit; }
 /* No `display` on the hidden state is a trap: `.tlx-next` sets display:flex, which beats the
    UA `[hidden]` rule, so the banner stayed visible as an empty box whenever JS hid it. */
 .tlx-next[hidden] { display: none; }
-.tlx-next-dot { display: none; }
 .tlx-next-label { font-size: var(--fs-200); font-weight: 500; color: var(--ink-3); }
 .tlx-next-count { font-size: var(--fs-400); font-weight: 600; color: var(--ink-1); font-variant-numeric: tabular-nums; }
 .tlx-next-title { font-size: var(--fs-200); color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
@@ -1565,13 +1568,8 @@ button, input, textarea, select { font: inherit; color: inherit; }
     display: flex; gap: var(--sp-4); flex-wrap: wrap; margin-bottom: var(--sp-4);
     border-bottom: 1px solid var(--rule);
 }
-.tlx-tab {
-    display: flex; align-items: baseline; gap: 6px; cursor: pointer;
-    background: none; border: none; border-bottom: 2px solid transparent;
-    padding: 0 1px var(--sp-2); margin-bottom: -1px; color: var(--ink-3);
-}
-.tlx-tab:hover { color: var(--ink-1); }
-.tlx-tab.active { color: var(--ink-1); border-bottom-color: var(--sel); }
+/* Deltas only — the recipe lives on the shared .tab/.subtab/.tlx-tab rule. */
+.tlx-tab { display: flex; align-items: baseline; gap: 6px; padding-bottom: var(--sp-2); }
 .tlx-tab-label { font-size: var(--fs-300); font-weight: 500; }
 .tlx-tab-count { font-size: var(--fs-200); font-variant-numeric: tabular-nums; color: var(--ink-3); }
 
