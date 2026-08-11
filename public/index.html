@@ -18,7 +18,7 @@
     <link rel="preload" href="fonts/inter-400.woff2" as="font" type="font/woff2" crossorigin>
 
     <!-- Inline SVG favicon: avoids a 404 round-trip and needs no asset. -->
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%233987e5'/%3E%3Cpath d='M11 21V11h3.2v3.4h3.6V11H21v10h-3.2v-3.6h-3.6V21z' fill='white'/%3E%3C/svg%3E">
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='4' fill='%231d1d21'/%3E%3Cpath d='M11 21V11h3.2v3.4h3.6V11H21v10h-3.2v-3.6h-3.6V21z' fill='white'/%3E%3C/svg%3E">
 
     <link rel="stylesheet" href="fonts/inter.css">
     <link rel="stylesheet" href="style.css">
@@ -36,7 +36,6 @@
     <!-- ─── Top app bar ─── -->
     <header id="appbar">
         <div class="appbar-brand">
-            <span class="brand-mark" aria-hidden="true">CH</span>
             <div class="brand-text">
                 <h1>Chains</h1>
             </div>
@@ -85,16 +84,12 @@
                 aria-controls="view-networks">Networks</button>
             <button class="tab" id="tab-graph" data-view="graph" role="tab" aria-selected="false"
                 aria-controls="view-graph">Relationships</button>
-            <button class="tab" id="tab-incidents" data-view="incidents" role="tab" aria-selected="false"
-                aria-controls="view-incidents">Incidents<span class="tab-badge hidden" id="tabBadgeIncidents"></span></button>
-            <button class="tab" id="tab-providers" data-view="providers" role="tab" aria-selected="false"
-                aria-controls="view-providers">Providers</button>
-            <button class="tab" id="tab-timeline" data-view="timeline" role="tab" aria-selected="false"
-                aria-controls="view-timeline">Timeline</button>
-            <button class="tab" id="tab-news" data-view="news" role="tab" aria-selected="false"
-                aria-controls="view-news">News</button>
-            <button class="tab" id="tab-forum" data-view="forum" role="tab" aria-selected="false"
-                aria-controls="view-forum">Forum</button>
+            <!-- One entry for the five feed views (incidents, providers,
+                 timeline, news, forum). data-view tracks the last feed the
+                 reader was on, so clicking returns there; the feeds are picked
+                 apart by the sub-nav that app.js builds inside each view. -->
+            <button class="tab" id="tab-activity" data-view="incidents" role="tab" aria-selected="false"
+                aria-controls="view-incidents">Activity<span class="tab-badge hidden" id="tabBadgeIncidents"></span></button>
         </nav>
     </header>
 
@@ -114,7 +109,7 @@
         <div class="view-inner">
             <div class="view-head">
                 <h2 class="view-title">Operational overview</h2>
-                <p class="view-lead">Open incidents, L2 value and data quality right now — a point-in-time snapshot, not trends.</p>
+                <p class="view-lead">Point-in-time snapshot — no history is stored.</p>
             </div>
 
             <!-- Skeleton tiles reserve the row's exact height before app.js runs.
@@ -160,7 +155,7 @@
                             <button class="chip" type="button" data-scope="provider" aria-pressed="false">RPC providers</button>
                         </div>
                     </div>
-                    <p class="card-sub" title="One provider incident fans out to every chain it names, so a single outage can appear against many networks.">Open incidents joined to the registry by chain ID.</p>
+                    <span class="pill-meta" title="One provider incident fans out to every chain it names, so a single outage can appear against many networks.">joined by chain ID</span>
                 </div>
                 <div id="impactBody" class="live-panel"></div>
             </div>
@@ -170,7 +165,6 @@
                     <div class="card-head">
                         <h3 class="card-title">Value secured by rollup stage</h3>
                         <div class="card-actions" id="tvsStageActions"></div>
-                        <p class="card-sub">L2BEAT maturity ladder: Stage 0 training wheels → Stage 2 permissionless.</p>
                     </div>
                     <div id="chartTvsStage"></div>
                 </div>
@@ -179,7 +173,6 @@
                     <div class="card-head">
                         <h3 class="card-title">Value secured by data-availability layer</h3>
                         <div class="card-actions" id="tvsDaActions"></div>
-                        <p class="card-sub" title="Concentration is systemic risk: a single DA layer holding most value is a single point of failure.">Where each rollup publishes its data.</p>
                     </div>
                     <div id="chartTvsDa"></div>
                 </div>
@@ -188,7 +181,6 @@
                     <div class="card-head">
                         <h3 class="card-title">Value secured by stack</h3>
                         <div class="card-actions" id="tvsStackActions"></div>
-                        <p class="card-sub">The framework each rollup is built on.</p>
                     </div>
                     <div id="chartTvsStack"></div>
                 </div>
@@ -197,7 +189,6 @@
                     <div class="card-head">
                         <h3 class="card-title">Largest networks by value secured</h3>
                         <div class="card-actions" id="tvsTopActions"></div>
-                        <p class="card-sub" title="Only projects the registry could match to a chain ID are clickable.">Click a bar to open the network.</p>
                     </div>
                     <div id="chartTvsTop"></div>
                 </div>
@@ -207,7 +198,6 @@
                 <div class="card-head">
                     <h3 class="card-title">How concentrated is L2 value?</h3>
                     <div class="card-actions" id="concentrationActions"></div>
-                    <p class="card-sub">Share of value secured held by the largest projects.</p>
                 </div>
                 <div id="chartConcentration"></div>
             </div>
@@ -217,7 +207,7 @@
                     <div class="card-head">
                         <h3 class="card-title">Cross-source data quality</h3>
                         <span class="pill-meta" id="validateMeta"></span>
-                        <p class="card-sub" title="Found by the API's validation rules. These are known data conflicts between sources, not service errors.">Disagreements between the five upstream sources.</p>
+                        <span class="pill-meta" title="Found by the API's validation rules. These are known data conflicts between sources, not service errors.">source disagreements</span>
                     </div>
                     <div id="dataQualityBody"><div class="feed-empty">Loading validation report…</div></div>
                 </div>
@@ -226,7 +216,6 @@
                     <div class="card-head">
                         <h3 class="card-title">Source freshness</h3>
                         <span class="pill-meta" id="healthMeta"></span>
-                        <p class="card-sub" title="Also shows whether the background refreshers are currently running.">When each source was last read.</p>
                     </div>
                     <div id="freshnessBody"><div class="feed-empty">Loading health…</div></div>
                 </div>
@@ -239,7 +228,7 @@
         <div class="view-inner">
             <div class="view-head">
                 <h2 class="view-title">Networks</h2>
-                <p class="view-lead">Every chain in the registry with its L2BEAT class, endpoint count and open incidents.</p>
+                
             </div>
 
             <div class="toolbar">
@@ -274,11 +263,11 @@
                             <th class="num" data-sort="chainId" aria-sort="ascending" scope="col">ID<span class="sort-caret">▲</span></th>
                             <th data-sort="name" aria-sort="none" scope="col">Network<span class="sort-caret">▲</span></th>
                             <th data-sort="type" aria-sort="none" scope="col" title="A single taxonomy with four exclusive groups: an L2 running on a testnet counts as Testnet, not L2 / rollup. That is why this count is smaller than the registry's total L2 tag count.">Type<span class="sort-caret">▲</span></th>
-                            <th data-sort="stage" aria-sort="none" scope="col">Stage<span class="sort-caret">▲</span></th>
-                            <th class="num" data-sort="tvs" aria-sort="none" scope="col" title="From L2BEAT, and only for classified rollups — L2BEAT could match a minority of its projects to a chain ID, so most rows are blank by design.">Value secured<span class="sort-caret">▲</span></th>
+                            <th class="col-l2b" data-sort="stage" aria-sort="none" scope="col">Stage<span class="sort-caret">▲</span></th>
+                            <th class="num col-l2b" data-sort="tvs" aria-sort="none" scope="col" title="From L2BEAT, and only for classified rollups — L2BEAT could match a minority of its projects to a chain ID, so most rows are blank by design.">Value secured<span class="sort-caret">▲</span></th>
                             <th class="num" data-sort="rpcs" aria-sort="none" scope="col" title="Usable endpoint URLs listed in the registry. Larger than the up-to-5 sample the health monitor actually probes per chain.">RPCs<span class="sort-caret">▲</span></th>
                             <th data-sort="status" aria-sort="none" scope="col">Status<span class="sort-caret">▲</span></th>
-                            <th data-sort="incident" aria-sort="none" scope="col">Incident<span class="sort-caret">▲</span></th>
+                            <th class="col-incident" data-sort="incident" aria-sort="none" scope="col">Incident<span class="sort-caret">▲</span></th>
                         </tr>
                     </thead>
                     <tbody id="chainsTableBody"></tbody>
@@ -351,11 +340,11 @@
     </section>
 
     <!-- ═══ View: Incidents ════════════════════════════════════════════ -->
-    <section id="view-incidents" class="view scroll-view" role="tabpanel" aria-labelledby="tab-incidents" tabindex="0">
+    <section id="view-incidents" class="view scroll-view" role="tabpanel" aria-label="Chain incidents" tabindex="0">
         <div class="view-inner">
             <div class="view-head">
                 <h2 class="view-title">Chain incidents</h2>
-                <p class="view-lead">Incidents and maintenance published by chain and coin operators, over a rolling recent window.</p>
+                <p class="view-lead">Rolling recent window, not full history.</p>
             </div>
 
             <div class="stat-row u-mb-4" id="incidentStats"></div>
@@ -365,7 +354,7 @@
                     <h3 class="card-title">Events per day</h3>
                     <span class="pill-meta live-pill" id="incidentsMeta">live</span>
                     <div class="card-actions" id="incidentHistActions"></div>
-                    <p class="card-sub" title="Counts what the feed still retains, not everything that ever happened. Click a bar or a calendar day to filter the list below.">Events retained per day. Click to filter.</p>
+                    <span class="pill-meta" title="Counts what the feed still retains, not everything that ever happened. Click a bar or a calendar day to filter the list below.">retained only · click to filter</span>
                 </div>
                 <div id="incidentHistogram"></div>
                 <div class="calendars u-mt-5" id="incidentCalendar"></div>
@@ -395,17 +384,17 @@
                 <span class="toolbar-count" id="incidentsCount"></span>
             </div>
             <div id="incidentsList" class="feed-list" aria-live="polite">
-                <div class="feed-empty">Connecting to the live status feed…</div>
+                <div class="feed-empty">Waiting for the live status feed…</div>
             </div>
         </div>
     </section>
 
     <!-- ═══ View: Providers ════════════════════════════════════════════ -->
-    <section id="view-providers" class="view scroll-view" role="tabpanel" aria-labelledby="tab-providers" tabindex="0">
+    <section id="view-providers" class="view scroll-view" role="tabpanel" aria-label="RPC provider incidents" tabindex="0">
         <div class="view-inner">
             <div class="view-head">
                 <h2 class="view-title">RPC provider incidents</h2>
-                <p class="view-lead">Commercial RPC providers, with each incident mapped to the chains the provider named.</p>
+                
             </div>
 
             <div class="stat-row u-mb-4" id="providerStats"></div>
@@ -436,18 +425,18 @@
                 <span class="toolbar-count" id="providersCount"></span>
             </div>
             <div id="providersList" class="feed-list" aria-live="polite">
-                <div class="feed-empty">Connecting to the live status feed…</div>
+                <div class="feed-empty">Waiting for the live status feed…</div>
             </div>
         </div>
     </section>
 
     <!-- ═══ View: News (chains-news ecosystem relay) ═══════════════════ -->
     <!-- ─── View: Timeline — upgrade windows linked to their fallout ───────── -->
-    <section id="view-timeline" class="view scroll-view" role="tabpanel" aria-labelledby="tab-timeline" tabindex="0">
+    <section id="view-timeline" class="view scroll-view" role="tabpanel" aria-label="Upgrade timeline" tabindex="0">
         <div class="view-inner">
             <div class="view-head">
                 <h2 class="view-title">Upgrade timeline <span class="pill-meta" id="timelineMeta"></span></h2>
-                <p class="view-lead">Scheduled upgrades and maintenance on one time axis. Everything right of <em>now</em> is scheduled, not done.</p>
+                <p class="view-lead">Everything right of <em>now</em> is scheduled, not done.</p>
             </div>
 
             <!-- Pending-window banner: the one fact a visitor most often wants ("is anything about
@@ -491,11 +480,11 @@
         </div>
     </section>
 
-    <section id="view-news" class="view scroll-view" role="tabpanel" aria-labelledby="tab-news" tabindex="0">
+    <section id="view-news" class="view scroll-view" role="tabpanel" aria-label="Ecosystem news" tabindex="0">
         <div class="view-inner">
             <div class="view-head">
                 <h2 class="view-title">Ecosystem news</h2>
-                <p class="view-lead">Ecosystem articles grouped into stories, so one event covered by several outlets counts once.</p>
+                <p class="view-lead">One story is the same event across outlets, counted once.</p>
             </div>
 
             <div class="stat-row u-mb-4" id="newsStats"></div>
@@ -505,7 +494,6 @@
                     <h3 class="card-title">Coverage by source</h3>
                     <span class="pill-meta live-pill" id="newsMeta">live</span>
                     <div class="card-actions" id="newsSourceActions"></div>
-                    <p class="card-sub" title="Volume reflects how often each source publishes, not how important it is.">Articles retained per publisher.</p>
                 </div>
                 <div id="chartNewsSources"></div>
             </div>
@@ -538,11 +526,11 @@
     </section>
 
     <!-- ═══ View: Forum ════════════════════════════════════════════════ -->
-    <section id="view-forum" class="view scroll-view" role="tabpanel" aria-labelledby="tab-forum" tabindex="0">
+    <section id="view-forum" class="view scroll-view" role="tabpanel" aria-label="Governance and community activity" tabindex="0">
         <div class="view-inner">
             <div class="view-head">
                 <h2 class="view-title">Governance &amp; community activity</h2>
-                <p class="view-lead">Posts from official governance forums. Tile size = posts retained, colour = this week vs last.</p>
+                
             </div>
 
             <div class="card">
@@ -593,10 +581,8 @@
                     title="Start a new conversation">New</button>
                 <button id="assistantClose" class="close-btn chat-close" type="button" aria-label="Close">&times;</button>
             </div>
-            <p class="chat-lead">Answers are produced by calling this API's own endpoints; each reply lists the
-                tools it used so you can check the source. It cannot see anything the API does not expose: most
-                of the registry is a current snapshot, though provider availability is available over 24h/7d/30d
-                windows and upgrade windows have dates, so those can be asked about.</p>
+            <p class="chat-lead">Answers come from this API's own endpoints, and each reply lists the tools it
+                used. Mostly a current snapshot — provider availability (24h/7d/30d) and upgrade windows have dates.</p>
 
             <div id="assistantLog" class="chat-log" role="log" aria-live="polite"></div>
 
