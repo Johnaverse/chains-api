@@ -1,5 +1,9 @@
-# Use official Node.js LTS version
-FROM node:20-alpine
+# Official Node.js LTS, pinned by digest so the same source commit always
+# builds against the same base-image contents (a mutable tag can be repointed
+# upstream). The digest is the multi-arch OCI index for the tag in the
+# comment; refresh it deliberately — resolve the tag's current index digest
+# (e.g. `docker buildx imagetools inspect node:20-alpine`), update, rescan.
+FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293
 
 # Set working directory
 WORKDIR /app
