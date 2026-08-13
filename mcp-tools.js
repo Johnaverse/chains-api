@@ -895,7 +895,11 @@ const toolHandlers = {
  */
 export async function handleToolCall(name, args) {
   try {
-    const handler = toolHandlers[name];
+    // Own-property lookup only: a bare toolHandlers[name] reaches the
+    // prototype chain, so a caller asking for "constructor" got Object
+    // invoked as the handler (returning its args as the response) instead
+    // of an unknown-tool error.
+    const handler = Object.hasOwn(toolHandlers, name) ? toolHandlers[name] : null;
     if (!handler) {
       return errorResponse(`Unknown tool: ${name}`);
     }

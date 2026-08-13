@@ -990,6 +990,17 @@ describe('MCP Tools - Shared Module', () => {
       expect(data.error).toBe('Unknown tool: unknown_tool');
     });
 
+    // The handler map is a plain object literal, so a bare toolHandlers[name]
+    // resolves prototype-chain keys: 'constructor' invoked Object as the
+    // handler and echoed the args back as the response instead of erroring.
+    it.each(['constructor', '__proto__', 'toString', 'hasOwnProperty'])(
+      'should treat prototype-chain key %s as an unknown tool', async (name) => {
+        const result = await handleToolCall(name, {});
+        expect(result.isError).toBe(true);
+        const data = JSON.parse(result.content[0].text);
+        expect(data.error).toBe(`Unknown tool: ${name}`);
+      });
+
     it('should handle internal errors gracefully', async () => {
       vi.mocked(dataService.getAllChains).mockImplementation(() => {
         throw new Error('Database error');
