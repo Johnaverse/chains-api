@@ -82,6 +82,29 @@ describe('chainRefresher', () => {
       expect(cachedData.rpcHealth?.[999]).toBeUndefined();
     });
 
+    it('never probes an RPC URL that is not publicly routable', async () => {
+      // Registry URLs are community-submitted, and this sweep runs unattended. A crafted entry
+      // pointing at a cluster address would otherwise have the refresher reach inside the
+      // network on our behalf on every pass. Only the public endpoint may be dialled.
+      seedCacheWith([seedChain(1, [
+        'http://10.43.0.1:8545',
+        'http://127.0.0.1:8545',
+        'http://169.254.169.254/latest/meta-data',
+        'http://chains-api:3000',
+        'http://db.svc.cluster.local:5432',
+        'https://rpc-public.example'
+      ])]);
+      jsonRpcCall.mockResolvedValueOnce('Geth/v1.0').mockResolvedValueOnce('0x10');
+
+      await processChainRpc(1);
+
+      expect(cachedData.rpcHealth[1]).toHaveLength(1);
+      expect(cachedData.rpcHealth[1][0].url).toBe('https://rpc-public.example');
+      // Two calls: clientVersion + blockNumber, for the one endpoint that survived.
+      expect(jsonRpcCall).toHaveBeenCalledTimes(2);
+      for (const [url] of jsonRpcCall.mock.calls) expect(url).toBe('https://rpc-public.example');
+    });
+
     it('writes per-endpoint results and stamps chain.lastTested', async () => {
       seedCacheWith([seedChain(1, ['https://rpc-a.example', 'https://rpc-b.example'])]);
       jsonRpcCall

@@ -29,6 +29,7 @@ import { getForumNews } from './src/sources/forumNews.js';
 import { getWeb3News } from './src/sources/web3News.js';
 import { getChainUpgrades } from './src/services/upgrades.js';
 import { getProviderStats } from './src/services/providerStats.js';
+import { checkChainHalt } from './src/services/chainHalt.js';
 
 /**
  * Get the list of MCP tool definitions (schemas)
@@ -194,6 +195,21 @@ export function getToolDefinitions() {
           chainId: {
             type: 'number',
             description: 'The chain ID to get RPC monitoring results for (e.g., 1 for Ethereum mainnet)',
+          },
+        },
+        required: ['chainId'],
+      },
+    },
+    {
+      name: 'check_chain_halt',
+      description:
+        'Check whether a chain has STOPPED PRODUCING BLOCKS. Probes the chain\'s public RPC endpoints live for the latest block (height + block timestamp) and cross-checks a block explorer, then returns a verdict: "halted" (every responding source agrees on the same block and it is overdue), "delayed" (overdue but sources disagree), "endpoint_lagging" (chain is fine, a source is stuck on an old block — NOT a chain problem), "healthy", or "unknown" (fewer than two sources answered — this does NOT mean the chain is down). Use for "is X halted/stuck/stalled", "is X still producing blocks", "is X down". Distinct from get_rpc_monitor_by_id, which reports whether our probe could REACH an endpoint, and from get_live_incidents, which reports what the operator ANNOUNCED.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          chainId: {
+            type: 'number',
+            description: 'The chain ID to check for a halt (e.g., 1 for Ethereum mainnet)',
           },
         },
         required: ['chainId'],
@@ -710,6 +726,15 @@ async function handleGetRpcMonitorById(args) {
   return { content: [{ type: 'text', text: lines.join('\n') }] };
 }
 
+async function handleCheckChainHalt(args) {
+  const { chainId } = args;
+  if (!isValidChainId(chainId)) {
+    return errorResponse('Invalid chain ID');
+  }
+  const result = await checkChainHalt(chainId);
+  return textResponse(result);
+}
+
 function handleGetClients(args) {
   if (args.chainId === undefined) {
     const results = getRpcMonitoringResults();
@@ -873,6 +898,7 @@ const toolHandlers = {
   traverse_relations: handleTraverseRelations,
   get_rpc_monitor: handleGetRpcMonitor,
   get_rpc_monitor_by_id: handleGetRpcMonitorById,
+  check_chain_halt: handleCheckChainHalt,
   get_scaling_chains: handleGetScalingChains,
   get_l2beat_by_id: handleGetL2BeatById,
   get_refresher_status: handleGetRefresherStatus,
