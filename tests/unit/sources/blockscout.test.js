@@ -36,11 +36,12 @@ function blocksPayload({ tip = 1000, intervalSeconds = 12, tipIso = '2026-08-07T
       timestamp: new Date(tipMs - i * 2 * intervalSeconds * 1000).toISOString()
     });
   }
-  return { ok: true, status: 200, headers: new Headers(), json: async () => ({ items }) };
+  const body = JSON.stringify({ items });
+  return { ok: true, status: 200, headers: new Headers(), text: async () => body, json: async () => ({ items }) };
 }
 
 function notFound() {
-  return { ok: false, status: 404, headers: new Headers(), json: async () => ({}) };
+  return { ok: false, status: 404, headers: new Headers(), text: async () => '{}', json: async () => ({}) };
 }
 
 const blockscoutChain = { explorers: [{ name: 'blockscout', url: 'https://eth.blockscout.com' }] };
@@ -134,7 +135,7 @@ describe('blockscout source', () => {
       ok: false,
       status: 429,
       headers: new Headers({ 'x-ratelimit-reset': '60' }),
-      json: async () => ({})
+      text: async () => '{}', json: async () => ({})
     });
 
     expect(await getExplorerTip(1)).toBeNull();
@@ -175,5 +176,59 @@ describe('blockscout source', () => {
     const tip = await getExplorerTip(1);
 
     expect(tip).toMatchObject({ baseUrl: 'https://gnosis.blockscout.com', height: 42 });
+  });
+
+  it('refuses an explorer URL pointing inside the cluster', async () => {
+    // chains.json is community-maintained, so these URLs are attacker-influenceable input.
+    // Without this the halt check — reachable from the assistant — becomes an internal port
+    // scanner: "http://10.43.0.1:8080/blockscout" matches the blockscout filter perfectly.
+    for (const url of [
+      'http://10.43.0.1:8080/blockscout',
+      'http://127.0.0.1:4000/blockscout',
+      'http://169.254.169.254/blockscout',
+      'http://litellm.litellm.svc.cluster.local:4000/blockscout',
+      'http://blockscout/api',
+      'http://192.168.1.5/blockscout',
+      'http://172.16.0.9/blockscout'
+    ]) {
+      _resetBlockscoutCacheForTests();
+      getChainById.mockReturnValue({ explorers: [{ name: 'blockscout', url }] });
+      expect(await getExplorerTip(1)).toBeNull();
+      expect(proxyFetch).not.toHaveBeenCalled();
+    }
+  });
+
+  it('still accepts an ordinary public explorer', async () => {
+    getChainById.mockReturnValue({ explorers: [{ name: 'blockscout', url: 'https://eth.blockscout.com' }] });
+    proxyFetch.mockResolvedValue(blocksPayload({ tip: 5 }));
+    expect(await getExplorerTip(1)).toMatchObject({ height: 5 });
+  });
+
+  it('ignores a response whose declared length is over the cap', async () => {
+    // The payload here is PERFECTLY VALID and small — only the declared length is absurd. An
+    // earlier version of this test sent junk, so it passed on the JSON parse error whether or
+    // not the cap existed: green for the wrong reason.
+    getChainById.mockReturnValue({ explorers: [{ name: 'blockscout', url: 'https://eth.blockscout.com' }] });
+    const valid = blocksPayload({ tip: 1000 });
+    proxyFetch.mockResolvedValue({
+      ...valid,
+      headers: new Headers({ 'content-length': String(50 * 1024 * 1024) })
+    });
+    expect(await getExplorerTip(1)).toBeNull();
+  });
+
+  it('ignores an oversized body that declared no length', async () => {
+    // Valid JSON again, genuinely over the cap: a declared length is only a claim, so the
+    // decoded size has to be checked too.
+    getChainById.mockReturnValue({ explorers: [{ name: 'blockscout', url: 'https://eth.blockscout.com' }] });
+    const items = Array.from({ length: 40000 }, (_, i) => ({
+      height: 1000 - i, timestamp: '2026-08-07T12:00:00.000Z', padding: 'x'.repeat(60)
+    }));
+    const body = JSON.stringify({ items });
+    expect(body.length).toBeGreaterThan(2 * 1024 * 1024);   // the fixture must actually exceed it
+    proxyFetch.mockResolvedValue({
+      ok: true, status: 200, headers: new Headers(), text: async () => body, json: async () => ({ items })
+    });
+    expect(await getExplorerTip(1)).toBeNull();
   });
 });

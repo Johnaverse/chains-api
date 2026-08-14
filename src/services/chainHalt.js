@@ -7,6 +7,7 @@ import {
 import { jsonRpcCall } from '../../rpcUtil.js';
 import { getChainById, getEndpointsById } from '../store/queries.js';
 import { getExplorerTip } from '../sources/blockscout.js';
+import { safeExternalUrl } from '../util/publicHost.js';
 import { logger } from '../util/logger.js';
 
 /**
@@ -59,7 +60,13 @@ function usableRpcUrls(chainId) {
   const raw = Array.isArray(endpoints?.rpc) ? endpoints.rpc : [];
   const normalized = raw
     .map((entry) => (typeof entry === 'string' ? entry : entry?.url))
-    .filter((url) => typeof url === 'string' && url.startsWith('http') && !url.includes('${'));
+    .filter((url) => typeof url === 'string' && !url.includes('${'))
+    // These URLs come from the chain registry, which is community-maintained — so they are
+    // attacker-influenceable, and this check is reachable on demand through the assistant.
+    // Without the host filter a crafted RPC entry turns it into an internal port scanner.
+    // (The background refresher probes the same list and predates this guard; that is a
+    // separate, lower-exposure path, but worth closing there too.)
+    .filter((url) => safeExternalUrl(url) !== null);
   return Array.from(new Set(normalized)).slice(0, HALT_CHECK_MAX_ENDPOINTS);
 }
 

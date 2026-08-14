@@ -22,6 +22,7 @@
  * working unchanged.
  */
 import { jsonRpcCall } from '../../rpcUtil.js';
+import { safeExternalUrl } from '../util/publicHost.js';
 import {
   RPC_CHECK_TIMEOUT_MS,
   L2BEAT_REFRESH_INTERVAL_MS,
@@ -92,8 +93,12 @@ function parseBlockHeight(value) {
 async function checkRpcEndpoint(url) {
   const result = { url, ok: false, clientVersion: null, blockHeight: null, error: null };
 
-  if (!url?.startsWith('http')) {
-    result.error = 'Unsupported RPC URL';
+  // Registry URLs are community-submitted input, not configuration, so a host check belongs
+  // here and not only at the call site: this function is also reached by the on-demand path
+  // (ensureChainRpcResults). Without it a crafted entry has the refresher probe cluster-internal
+  // addresses on our behalf.
+  if (safeExternalUrl(url) === null) {
+    result.error = 'Unsupported or non-public RPC URL';
     return result;
   }
   if (url.includes('${')) {
@@ -134,8 +139,12 @@ export async function processChainRpc(chainId) {
   // https://mainnet.infura.io/v3/${INFURA_API_KEY}) require an API key we don't
   // have, so they can never be reached. Exclude them entirely rather than
   // report them as perpetually "failed" — they aren't real public endpoints.
+  //
+  // Non-public hosts are dropped for the same reason they are refused in checkRpcEndpoint —
+  // and dropped HERE too so they never consume one of the MAX_ENDPOINTS_PER_CHAIN slots that a
+  // reachable endpoint could have used.
   const urls = Array.from(new Set(normalized))
-    .filter(u => u.startsWith('http') && !u.includes('${'))
+    .filter(u => !u.includes('${') && safeExternalUrl(u) !== null)
     .slice(0, MAX_ENDPOINTS_PER_CHAIN);
   if (urls.length === 0) return;
 

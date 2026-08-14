@@ -8,6 +8,7 @@ import {
 import { proxyFetch } from '../../fetchUtil.js';
 import { getChainById } from '../store/queries.js';
 import { logger } from '../util/logger.js';
+import { safeExternalUrl } from '../util/publicHost.js';
 
 /**
  * Keyless Blockscout client, used by the chain-halt check as an independent
@@ -34,6 +35,11 @@ import { logger } from '../util/logger.js';
 // the tip's height and timestamp, plus enough history to derive the average
 // block interval. Verified against /api/v2/stats on Ethereum: both give 12.00s.
 const BLOCKS_PATH = '/api/v2/blocks?type=block';
+
+// Hard cap on a single explorer response. A declared content-length is only a claim, so the
+// decoded length is checked too — UTF-8 is at least one byte per character, so a string longer
+// than the cap proves the body was over it.
+const MAX_BODY_BYTES = 2 * 1024 * 1024;
 
 // chainId -> { baseUrl: string|null, at: number }. Negative entries matter as
 // much as positive ones: they keep the ~2200 explorer-less chains from being
@@ -120,7 +126,20 @@ async function fetchJson(url) {
       return null;
     }
     if (!response.ok) return null;
-    return await response.json();
+    // Cap the body. This is a third-party host reached over a URL taken from a community
+    // registry, so its response size is not ours to trust — and response.json() buffers
+    // whatever arrives. A blocks listing is a few tens of KB; 2 MiB is ~50x headroom.
+    const declared = Number(response.headers.get('content-length'));
+    if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) {
+      logger.warn({ url, declared }, 'Blockscout response too large; ignoring');
+      return null;
+    }
+    const text = await response.text();
+    if (text.length > MAX_BODY_BYTES) {
+      logger.warn({ url, bytes: text.length }, 'Blockscout response exceeded the cap; ignoring');
+      return null;
+    }
+    return JSON.parse(text);
   } catch (err) {
     logger.debug({ url, err: err.message }, 'Blockscout request failed');
     return null;
@@ -141,7 +160,9 @@ function candidateUrls(chain) {
   const urls = [];
   for (const entry of explorers) {
     const url = typeof entry === 'string' ? entry : entry?.url;
-    if (typeof url !== 'string' || !url.startsWith('http')) continue;
+    // Explorer URLs arrive from the community-maintained registry, so they are input rather
+    // than configuration: reject anything not http(s) to a publicly routable host.
+    if (safeExternalUrl(url) === null) continue;
     const haystack = `${url} ${typeof entry === 'string' ? '' : `${entry?.name ?? ''} ${entry?.icon ?? ''}`}`;
     if (!/blockscout/i.test(haystack)) continue;
     const trimmed = url.replace(/\/+$/, '');

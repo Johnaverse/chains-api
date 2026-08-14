@@ -199,6 +199,20 @@ describe('chain halt check', () => {
     expect(result.verdict).toBe(VERDICTS.DELAYED);
   });
 
+  it('refuses to probe an RPC URL pointing inside the cluster', async () => {
+    // The registry is community-maintained and this check is reachable from the assistant, so
+    // a crafted entry would otherwise make it an on-demand internal port scanner.
+    getEndpointsById.mockReturnValue({
+      rpc: ['http://10.43.0.1:8545', 'http://127.0.0.1:8545', 'http://chains-api:3000', A]
+    });
+    rpcReturning({ [A]: block(1000, 5) });
+
+    const result = await checkChainHalt(1, { now });
+
+    expect(result.sourcesQueried).toBe(1);
+    expect(result.evidence.map(e => e.source)).toEqual([A]);
+  });
+
   it('skips endpoints needing an API key rather than counting them silent', async () => {
     // ${INFURA_API_KEY}-style URLs can never be reached, so treating them as
     // non-responding sources would drag every verdict toward unknown.
