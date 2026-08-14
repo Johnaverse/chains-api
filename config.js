@@ -149,6 +149,33 @@ export const PRICE_QUOTE_MAX_AGE_MS = parseIntEnv('PRICE_QUOTE_MAX_AGE_MS', 8640
 // Re-warming at 45 minutes keeps an hour-long entry continuously warm.
 export const PRICE_REFRESH_INTERVAL_MS = parseIntEnv('PRICE_REFRESH_INTERVAL_MS', 2700000);
 
+// Blockscout explorer (keyless). Used as an independent, non-RPC witness for
+// the chain-halt check: a chain's own RPC endpoints can agree with each other
+// and still all be wrong, so a second opinion from a different stack matters.
+// Per-instance endpoints (eth.blockscout.com/api/v2) need no API key and cap
+// at 10 rps per IP — the whole pod shares one IP, hence MAX_RPS well under it.
+export const BLOCKSCOUT_ENABLED = parseBooleanEnv('BLOCKSCOUT_ENABLED', true);
+// Liveness data: a short TTL absorbs repeat questions without serving stale
+// heights into a halt verdict.
+export const BLOCKSCOUT_CACHE_TTL_MS = parseIntEnv('BLOCKSCOUT_CACHE_TTL_MS', 15000);
+// Which instance serves a chain changes on the order of never, and ~2200 of
+// the ~2700 registry chains have none — so resolution (including the negative
+// result) is cached for hours to keep them from being re-probed per question.
+export const BLOCKSCOUT_INSTANCE_CACHE_TTL_MS = parseIntEnv('BLOCKSCOUT_INSTANCE_CACHE_TTL_MS', 21600000);
+export const BLOCKSCOUT_FETCH_TIMEOUT_MS = parseIntEnv('BLOCKSCOUT_FETCH_TIMEOUT_MS', 4000);
+export const BLOCKSCOUT_MAX_RPS = parseIntEnv('BLOCKSCOUT_MAX_RPS', 5);
+
+// Chain-halt check. Probes a chain's public RPC endpoints live (plus the
+// explorer above) and decides whether the chain itself has stopped producing
+// blocks, as opposed to a single endpoint falling behind.
+export const HALT_CHECK_MAX_ENDPOINTS = parseIntEnv('HALT_CHECK_MAX_ENDPOINTS', 8);
+export const HALT_CHECK_TIMEOUT_MS = parseIntEnv('HALT_CHECK_TIMEOUT_MS', 5000);
+// A block is "overdue" once it is older than MULTIPLIER x the chain's average
+// block time. MIN_SECONDS is a floor, not a nicety: on a 2s-block chain a bare
+// multiple would call a halt after six seconds of ordinary jitter.
+export const HALT_BLOCK_TIME_MULTIPLIER = parseIntEnv('HALT_BLOCK_TIME_MULTIPLIER', 3);
+export const HALT_MIN_SECONDS = parseIntEnv('HALT_MIN_SECONDS', 90);
+
 // Live incidents feed (chains-status-news). Used by the get_live_incidents
 // tool so the assistant/MCP can answer "is X down" questions server-side.
 export const LIVE_INCIDENTS_URL = parseStringEnv(

@@ -277,6 +277,24 @@ describe('buildSystemPrompt', () => {
     // The mocked registry has two tools — both must appear in the manifest
     expect(prompt).toContain('ALL of these tools exist and are callable: search_chains, get_chain_by_id');
   });
+
+  it('routes halt questions to check_chain_halt and separates it from the other live tools', () => {
+    const prompt = buildSystemPrompt(undefined, new Date('2026-07-06T12:00:00Z'));
+    expect(prompt).toContain('check_chain_halt');
+    expect(prompt).toContain('"halted"');
+    // The three live tools answer different questions; without this the model
+    // reaches for whichever it saw last.
+    expect(prompt).toContain('THE THREE LIVE TOOLS ANSWER DIFFERENT QUESTIONS');
+    expect(prompt).toMatch(/get_rpc_monitor_by_id = could we REACH/);
+  });
+
+  it('spells out that an unknown or lagging halt verdict is not a down chain', () => {
+    // The single most likely way this tool makes the assistant worse.
+    const prompt = buildSystemPrompt(undefined, new Date('2026-07-06T12:00:00Z'));
+    expect(prompt).toContain('HALT VERDICTS MEAN EXACTLY WHAT THEY SAY');
+    expect(prompt).toMatch(/"endpoint_lagging" means the CHAIN IS FINE/);
+    expect(prompt).toMatch(/never[\s\S]{0,40}that it is halted or down/);
+  });
 });
 
 describe('sanitizeReply', () => {
