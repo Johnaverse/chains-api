@@ -42,6 +42,7 @@ import { clientsRoutes } from './routes/clients.js';
 import { scalingRoutes } from './routes/scaling.js';
 import { statusPagesRoutes } from './routes/statusPages.js';
 import { upgradesRoutes } from './routes/upgrades.js';
+import { forksRoutes } from './routes/forks.js';
 import { providersRoutes } from './routes/providers.js';
 import { feedbackRoutes } from './routes/feedback.js';
 import { adminRoutes } from './routes/admin.js';
@@ -315,6 +316,7 @@ export async function buildApp(options = {}) {
   await fastify.register(scalingRoutes);
   await fastify.register(statusPagesRoutes);
   await fastify.register(upgradesRoutes);
+  await fastify.register(forksRoutes);
   await fastify.register(providersRoutes);
   await fastify.register(feedbackRoutes);
   await fastify.register(metricsRoute);

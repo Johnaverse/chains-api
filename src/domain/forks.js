@@ -33,6 +33,12 @@
  */
 export const FORK_ACTIVATION_EVIDENCE = ['stated', 'observed', 'estimated'];
 
+// Ceiling on explorer round trips for one buildForks call, and on candidate chains per fork.
+// The client paces requests process-wide, so these bound worst-case latency for the caller and
+// protect the shared rate budget rather than being about correctness.
+const DEFAULT_MAX_TIP_LOOKUPS = 8;
+const MAX_TIP_CHAINS_PER_FORK = 2;
+
 /** Where a fork sits relative to now. */
 export const FORK_PHASE = Object.freeze({
   UPCOMING: 'upcoming',
@@ -194,12 +200,20 @@ export function bestState(statements = []) {
  * @param {number} [opts.now]
  * @returns {Promise<object[]>} forks, soonest upcoming first, then unscheduled, then past
  */
-export async function buildForks(events = [], { tipFor = null, now = Date.now() } = {}) {
+export async function buildForks(events = [], { tipFor = null, now = Date.now(), maxTipLookups = DEFAULT_MAX_TIP_LOOKUPS } = {}) {
+  let tipBudget = maxTipLookups;
   const byKey = new Map();
   for (const event of events) {
     const fork = event?.enrichment?.fork;
     if (!fork) continue;
-    const chainIds = (event.chains ?? []).map(c => c.chainId).filter(id => Number.isFinite(id));
+    // Declared chains PLUS the ones the model named and the catalog resolved. Filtering on
+    // declared chains alone under-reports: an OP Stack window naming nine networks declares
+    // none of them, so `?chainId=` would answer "no forks" for a chain that is genuinely
+    // affected. Same reasoning the incident feed already applies to its own chain filter.
+    const chainIds = [...new Set([
+      ...(event.chains ?? []).map(c => c.chainId),
+      ...(event.enrichment?.chains ?? [])
+    ])].filter(id => Number.isFinite(id));
     // One event may be about several networks ("Stellar - Mainnet & Testnet"), and each of those
     // is a separate activation with its own date. The event contributes to every one.
     for (const scope of forkScopes(event)) {
@@ -217,8 +231,14 @@ export async function buildForks(events = [], { tipFor = null, now = Date.now() 
     // stated-time fork costs no explorer call at all.
     const needsTip = members.some(m => m.fork.activationBlock && !m.fork.activationAt);
     let tip = null;
-    if (needsTip && tipFor) {
-      for (const chainId of chainIds) {
+    if (needsTip && tipFor && tipBudget > 0) {
+      // Bounded on purpose. Tip lookups are serialised by the explorer client's shared rate
+      // limiter, so an unbounded loop over height-only forks could stall one request for
+      // minutes AND drain the rate budget the halt check depends on. Past the budget a fork
+      // keeps its height and stays unscheduled, which is the same honest answer as an
+      // unreachable explorer.
+      for (const chainId of chainIds.slice(0, MAX_TIP_CHAINS_PER_FORK)) {
+        tipBudget -= 1;
         tip = await tipFor(chainId);
         if (tip) break;
       }

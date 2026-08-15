@@ -3,7 +3,7 @@
   "info": {
     "title": "Chains API",
     "description": "Aggregated blockchain chain data from five external sources (TheGraph, Chainlist, Chain ID Network, SLIP-0044, L2BEAT): chain metadata, relations, RPC endpoints and health, L2 scaling, and operator status.",
-    "version": "1.7.29"
+    "version": "1.7.31"
   },
   "components": {
     "schemas": {}
@@ -545,6 +545,65 @@
               "minimum": 1,
               "maximum": 200,
               "default": 20
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/forks": {
+      "get": {
+        "tags": [
+          "Meta"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer"
+            },
+            "in": "query",
+            "name": "chainId",
+            "required": false,
+            "description": "Only forks touching this chain ID"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "upcoming",
+                "past",
+                "cancelled",
+                "unscheduled"
+              ]
+            },
+            "in": "query",
+            "name": "phase",
+            "required": false,
+            "description": "upcoming (activation ahead), past (behind), cancelled (a source said so), unscheduled (marked as a fork, no date known)"
+          },
+          {
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "in": "query",
+            "name": "scheduledOnly",
+            "required": false,
+            "description": "Drop forks with no known activation time. What a calendar wants — distinct from phase, because a fork can be real and announced with no day named yet."
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
             },
             "in": "query",
             "name": "limit",
