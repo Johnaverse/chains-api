@@ -84,6 +84,15 @@ export async function getLiveIncidents({ type = 'all', chainId, provider, ongoin
  * layer. Shares the cache/TTL with getLiveIncidents, so enabling correlation
  * adds zero upstream requests.
  */
+/**
+ * When the cached feed data was actually fetched. Exposed because loadIncidents serves the last
+ * good cache through an upstream outage, so a consumer that stamps its own "now" would present
+ * stale data as fresh.
+ */
+export function getLiveEventsFetchedAt() {
+  return cache.fetchedAt ? new Date(cache.fetchedAt).toISOString() : null;
+}
+
 export async function getLiveEvents() {
   await loadIncidents();
   return cache.events ?? [];
@@ -134,6 +143,7 @@ function dedupeEvents(normalized) {
 function normalizeEvent(ev) {
   const statusPage = ev.statusPage || {};
   const publishedMs = parseEventTime(ev);
+  const enrichment = slimEnrichment(ev.enrichment);
   return {
     title: ev.title || '(untitled)',
     url: ev.url || null,
@@ -178,7 +188,7 @@ function normalizeEvent(ev) {
     // "Stellar") that scopes it.
     //
     // Omitted entirely when the event has none, so the field's presence means something.
-    ...(slimEnrichment(ev.enrichment) ? { enrichment: slimEnrichment(ev.enrichment) } : {})
+    ...(enrichment ? { enrichment } : {})
   };
 }
 
@@ -192,8 +202,18 @@ function slimEnrichment(enrichment) {
   if (!enrichment || typeof enrichment !== 'object') return null;
   const slim = {};
   if (typeof enrichment.class === 'string') slim.class = enrichment.class;
+  // A class the model was unsure of must not read as fact. Upstream flags roughly a third of
+  // enrichments this way (mostly class `other`), and carrying the label without the caveat is
+  // how a guess becomes an assertion downstream.
+  if (enrichment.lowConfidence === true) slim.lowConfidence = true;
   if (Array.isArray(enrichment.affectedChains)) {
     slim.affectedChains = enrichment.affectedChains.filter((n) => typeof n === 'string');
+  }
+  // The chains the model NAMED, resolved against the catalog upstream. Measured on the live
+  // feed, this attributes 5 events that declare no chains of their own — including OP Stack
+  // windows that touch nine networks — so filtering on declared chains alone under-reports.
+  if (Array.isArray(enrichment.chains)) {
+    slim.chains = enrichment.chains.filter((id) => Number.isFinite(id));
   }
   if (enrichment.fork && typeof enrichment.fork === 'object') {
     const { name, activationAt, activationBlock, state } = enrichment.fork;

@@ -758,7 +758,13 @@ async function handleCheckChainHalt(args) {
 }
 
 async function handleGetForks(args) {
-  return textResponse(await getForks(args ?? {}));
+  try {
+    return textResponse(await getForks(args ?? {}));
+  } catch (error) {
+    // The upstream status feed being unreachable is routine, and every sibling handler says so
+    // rather than letting handleToolCall report it as an internal error.
+    return errorResponse('Fork timeline unavailable', error.message);
+  }
 }
 
 function handleGetClients(args) {

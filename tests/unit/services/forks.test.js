@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { getForks } from '../../../src/services/forks.js';
-import { getLiveEvents } from '../../../src/sources/liveIncidents.js';
+import { getLiveEvents, getLiveEventsFetchedAt } from '../../../src/sources/liveIncidents.js';
 import { getExplorerTip } from '../../../src/sources/blockscout.js';
 
-vi.mock('../../../src/sources/liveIncidents.js', () => ({ getLiveEvents: vi.fn() }));
+vi.mock('../../../src/sources/liveIncidents.js', () => ({ getLiveEvents: vi.fn(), getLiveEventsFetchedAt: vi.fn() }));
 vi.mock('../../../src/sources/blockscout.js', () => ({ getExplorerTip: vi.fn() }));
 
 const fork = (o = {}) => ({ name: null, activationAt: null, activationBlock: null, state: null, ...o });
@@ -20,6 +20,7 @@ describe('getForks', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getExplorerTip.mockResolvedValue(null);
+    getLiveEventsFetchedAt.mockReturnValue('2026-08-15T00:00:00.000Z');
   });
 
   it('groups a fork across sources and reports where it came from', async () => {
@@ -113,6 +114,64 @@ describe('getForks', () => {
 
     expect((await getForks({ chainId: 1 })).count).toBe(1);
     expect((await getForks({ phase: 'past' })).forks[0].name).toBe('b');
+  });
+
+  it('compacts member events instead of embedding them whole', async () => {
+    // Measured before this: 2210 bytes per fork, so a 50-fork page pretty-printed to ~250 KB
+    // and the assistant — which truncates tool results at 8000 chars — would have seen two
+    // forks under a header reading count: 50, truncated: false.
+    getLiveEvents.mockResolvedValue([
+      event('a', { fork: fork({ name: 'Rex6', activationAt: '2026-09-01T00:00:00Z' }), affectedChains: ['MegaETH Mainnet'] })
+    ]);
+
+    const out = await getForks();
+    const [member] = out.forks[0].events;
+
+    expect(Object.keys(member).sort()).toEqual(['provider', 'publishedAt', 'status', 'title', 'url']);
+    // publishedMs is an internal sort key; get_live_incidents already strips it for this reason.
+    expect(member.publishedMs).toBeUndefined();
+    expect(member.enrichment).toBeUndefined();
+  });
+
+  it('does not present an internal scope key as a network name', async () => {
+    // `chain:8453` and `unscoped` are grouping keys. The tool description tells the model each
+    // fork "carries network", so emitting those put an internal identifier in an answer.
+    getLiveEvents.mockResolvedValue([
+      event('a', { fork: fork({ name: 'Rex6', activationAt: '2026-09-01T00:00:00Z' }), chains: [8453] }),
+      event('b', { fork: fork({ name: 'Other', activationAt: '2026-09-02T00:00:00Z' }) })
+    ]);
+
+    const out = await getForks();
+
+    expect(out.forks.map(f => f.network)).toEqual([null, null]);
+  });
+
+  it('reports the feed fetch time, not its own', async () => {
+    // loadIncidents serves the last good cache through an upstream outage, so stamping "now"
+    // would present hours-old forks as freshly fetched.
+    getLiveEventsFetchedAt.mockReturnValue('2026-08-14T06:00:00.000Z');
+    getLiveEvents.mockResolvedValue([]);
+
+    expect((await getForks()).fetchedAt).toBe('2026-08-14T06:00:00.000Z');
+  });
+
+  it('attributes a fork to chains the model resolved, not only declared ones', async () => {
+    // An OP Stack window names nine networks and declares none of them; filtering on declared
+    // chains alone answered "no forks" for a chain that is genuinely affected.
+    getLiveEvents.mockResolvedValue([{
+      id: 'op', title: 'OP Stack upgrade', publishedAt: '2026-08-14T00:00:00Z',
+      updatedAt: '2026-08-14T00:00:00Z', statusPage: { id: 'quicknode' }, chains: [],
+      enrichment: {
+        fork: fork({ name: 'Isthmus', activationAt: '2026-09-01T00:00:00Z' }),
+        affectedChains: ['OP Mainnet'],
+        chains: [10, 8453]
+      }
+    }]);
+
+    const out = await getForks({ chainId: 8453 });
+
+    expect(out.count).toBe(1);
+    expect(out.forks[0].chains).toEqual(expect.arrayContaining([10, 8453]));
   });
 
   it('returns an empty result rather than throwing when nothing carries a fork', async () => {

@@ -1,4 +1,4 @@
-import { getLiveEvents } from '../sources/liveIncidents.js';
+import { getLiveEvents, getLiveEventsFetchedAt } from '../sources/liveIncidents.js';
 import { getExplorerTip } from '../sources/blockscout.js';
 import { buildForks, FORK_PHASE } from '../domain/forks.js';
 import { logger } from '../util/logger.js';
@@ -11,6 +11,11 @@ import { logger } from '../util/logger.js';
  * rules be tested without a network, and it is also why the explorer stays optional — a fork
  * whose activation is stated needs no lookup at all.
  */
+
+async function liveEvents() {
+  const events = await getLiveEvents();
+  return { events, fetchedAt: getLiveEventsFetchedAt() };
+}
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -44,8 +49,8 @@ async function tipFor(chainId) {
  * @param {number} [opts.limit]
  */
 export async function getForks({ chainId, phase, scheduledOnly = false, limit = DEFAULT_LIMIT } = {}) {
-  const events = await getLiveEvents();
-  const forks = await buildForks(events, { tipFor });
+  const { events, fetchedAt } = await liveEvents();
+  const forks = (await buildForks(events, { tipFor })).map(present);
 
   let filtered = forks;
   if (chainId != null) filtered = filtered.filter((f) => f.chains.includes(Number(chainId)));
@@ -58,7 +63,10 @@ export async function getForks({ chainId, phase, scheduledOnly = false, limit = 
   const capped = Math.max(1, Math.min(Number(limit) || DEFAULT_LIMIT, MAX_LIMIT));
   const sliced = filtered.slice(0, capped);
   return {
-    fetchedAt: new Date().toISOString(),
+    // The FEED's fetch time, not ours. loadIncidents serves the last good cache when upstream
+    // is down, so stamping "now" would present hours-old forks as freshly fetched — and this
+    // is the one field a consumer would use to notice.
+    fetchedAt,
     totalMatched: filtered.length,
     count: sliced.length,
     truncated: filtered.length > sliced.length,
@@ -67,6 +75,41 @@ export async function getForks({ chainId, phase, scheduledOnly = false, limit = 
     byPhase: countByPhase(filtered),
     forks: sliced
   };
+}
+
+/**
+ * The wire shape of a fork.
+ *
+ * Member events are COMPACTED. buildForks attaches each contributing event whole, which is
+ * right for the domain but wrong on the wire: measured at 2210 bytes per fork, a 50-fork page
+ * is ~107 KB, and the MCP surface pretty-prints it to ~250 KB. The assistant truncates tool
+ * results at 8000 chars, so it would see two forks under a header reading `count: 50,
+ * truncated: false` — the "model loses track of totals" failure the sizing convention exists to
+ * prevent. Same `compact` shape as the upgrade timeline uses for its related items.
+ *
+ * `publishedMs` in particular must not survive: it is an internal sort key, and
+ * handleGetLiveIncidents already strips it for the same reason.
+ */
+function present(fork) {
+  return {
+    ...fork,
+    // `unscoped` and `chain:8453` are grouping keys, not network names. Exposing them put an
+    // internal identifier in front of a reader who was told this field names the network.
+    network: publicNetwork(fork.network),
+    events: fork.events.map((e) => ({
+      title: e.title,
+      url: e.url,
+      publishedAt: e.publishedAt,
+      status: e.status,
+      provider: e.statusPage?.id ?? null
+    }))
+  };
+}
+
+/** A scope key is only a network name when it came from a network name. */
+function publicNetwork(scope) {
+  if (typeof scope !== 'string') return null;
+  return scope === 'unscoped' || scope.startsWith('chain:') ? null : scope;
 }
 
 function countByPhase(forks) {
