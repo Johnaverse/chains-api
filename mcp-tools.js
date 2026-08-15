@@ -28,6 +28,7 @@ import { getLiveIncidents } from './src/sources/liveIncidents.js';
 import { getForumNews } from './src/sources/forumNews.js';
 import { getWeb3News } from './src/sources/web3News.js';
 import { getChainUpgrades } from './src/services/upgrades.js';
+import { getForks } from './src/services/forks.js';
 import { getProviderStats } from './src/services/providerStats.js';
 import { checkChainHalt } from './src/services/chainHalt.js';
 
@@ -359,7 +360,7 @@ export function getToolDefinitions() {
     {
       name: 'get_chain_upgrades',
       description:
-        'Get the cross-feed upgrade timeline: scheduled/completed network upgrades and maintenance windows with the REQUIRED SOFTWARE ({client, version} operators must run), urgency (standard/urgent/mandatory), activation time WITH ITS EVIDENCE, incidents that followed on the same network within 24h (labelled suspectedCause: "upgrade" — temporal correlation, not asserted causation), and related forum discussion + news coverage. Use for "when is the next upgrade for X", "what version is required", "did the upgrade cause incidents", "hard fork schedule". `network` accepts a name for chains with no EVM chain ID (e.g. "Solana", "Canton"). NEVER read `activationAt` without `activationEvidence`: `window`/`scheduled` mean a stated time you may count down to; `started`/`completed` are OBSERVED and approximate (`completed` is an upper bound on the run, not its start, so say "completed by"); `announced` means the provider announced the upgrade and never named a day — `activationAt` is null and you must say the date is not announced yet rather than implying one. Evidence strength wins over recency, so a later exact window overrides an earlier undated announcement. `windowMinutes`/`windowEndAt` exist only for `window` evidence. On followedByIncidents, `durationEvidence` is `observed` (resolvedAt is real), `ongoing` (still open), or `unpublished` (the page never said when it ended — do not state a duration). Returns a capped list with totalMatched/truncated — say when you are showing a subset.',
+        'Get the cross-feed upgrade timeline: scheduled/completed network upgrades and maintenance windows with the REQUIRED SOFTWARE ({client, version} operators must run), urgency (standard/urgent/mandatory), activation time WITH ITS EVIDENCE, incidents that followed on the same network within 24h (labelled suspectedCause: "upgrade" — temporal correlation, not asserted causation), and related forum discussion + news coverage. Use for "when is the next upgrade for X", "what version is required", "did the upgrade cause incidents". NOT for a fork schedule: this returns one entry per PROVIDER WINDOW, so a single fork appears here several times over. For forks themselves — one entry per fork per network, with every provider window attached — use get_forks. `network` accepts a name for chains with no EVM chain ID (e.g. "Solana", "Canton"). NEVER read `activationAt` without `activationEvidence`: `window`/`scheduled` mean a stated time you may count down to; `started`/`completed` are OBSERVED and approximate (`completed` is an upper bound on the run, not its start, so say "completed by"); `announced` means the provider announced the upgrade and never named a day — `activationAt` is null and you must say the date is not announced yet rather than implying one. Evidence strength wins over recency, so a later exact window overrides an earlier undated announcement. `windowMinutes`/`windowEndAt` exist only for `window` evidence. On followedByIncidents, `durationEvidence` is `observed` (resolvedAt is real), `ongoing` (still open), or `unpublished` (the page never said when it ended — do not state a duration). Returns a capped list with totalMatched/truncated — say when you are showing a subset.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -375,6 +376,27 @@ export function getToolDefinitions() {
             type: 'number',
             description: 'Max upgrades to return (default 20, max 50)',
           },
+        },
+      },
+    },
+    {
+      name: 'get_forks',
+      description:
+        'Get FORKS as entities: one entry per fork per network, with every provider window and the network\'s own announcement grouped under it. A fork produces many events (each provider posts its own maintenance window), so get_chain_upgrades shows the same fork repeatedly — this collapses them. Use for "what forks are coming", "when does X fork", "is the fork still on". Each fork carries: `name` (codename such as "Protocol 28", or null when the text marked a fork without naming one), `network`, `phase`, `activationAt` WITH `activationEvidence`, `activationBlock`, `state`, and `sources` (which status pages reported it — more than one means independent confirmation). NEVER read activationAt without activationEvidence: `stated` is a time a source actually gave; `observed` is derived from a block height already reached; `estimated` is a height still ahead multiplied by the average block rate, so it is an order-of-magnitude answer and must be described as approximate, never as a schedule. `phase` is upcoming / past / cancelled / unscheduled — `unscheduled` means it IS a real fork whose date nobody has named, so say the date is not announced rather than implying one, and `cancelled` only ever appears when a source said so (a quietly dropped fork stays upcoming until its date passes). Pass scheduledOnly=true for a calendar view. Returns a capped list with totalMatched/truncated plus byPhase counts over everything matched — quote byPhase for totals rather than counting the rows shown.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          chainId: { type: 'number', description: 'Only forks touching this chain ID' },
+          phase: {
+            type: 'string',
+            enum: ['upcoming', 'past', 'cancelled', 'unscheduled'],
+            description: 'Filter by lifecycle phase'
+          },
+          scheduledOnly: {
+            type: 'boolean',
+            description: 'Only forks with a known activation time — what a calendar needs'
+          },
+          limit: { type: 'number', description: 'Max forks to return (default 50, max 200)' }
         },
       },
     },
@@ -735,6 +757,10 @@ async function handleCheckChainHalt(args) {
   return textResponse(result);
 }
 
+async function handleGetForks(args) {
+  return textResponse(await getForks(args ?? {}));
+}
+
 function handleGetClients(args) {
   if (args.chainId === undefined) {
     const results = getRpcMonitoringResults();
@@ -910,6 +936,7 @@ const toolHandlers = {
   get_forum_news: handleGetForumNews,
   get_web3_news: handleGetWeb3News,
   get_chain_upgrades: handleGetChainUpgrades,
+  get_forks: handleGetForks,
   get_provider_stats: handleGetProviderStats,
 };
 

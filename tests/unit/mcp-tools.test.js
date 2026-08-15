@@ -221,10 +221,10 @@ describe('MCP Tools - Shared Module', () => {
   });
 
   describe('getToolDefinitions', () => {
-    it('should return an array of 22 tools', () => {
+    it('should return an array of 27 tools', () => {
       const tools = getToolDefinitions();
       expect(Array.isArray(tools)).toBe(true);
-      expect(tools.length).toBe(26);
+      expect(tools.length).toBe(27);
     });
 
     it('should include all expected tool names', () => {

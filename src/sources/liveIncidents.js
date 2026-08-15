@@ -167,8 +167,44 @@ function normalizeEvent(ev) {
     chains: Array.isArray(ev.chains)
       ? ev.chains.filter((c) => c?.chainId != null).map((c) => ({ chainId: c.chainId, name: c.name ?? null }))
       : [],
-    affectedComponents: Array.isArray(ev.affectedComponents) ? ev.affectedComponents : []
+    affectedComponents: Array.isArray(ev.affectedComponents) ? ev.affectedComponents : [],
+    // A DELIBERATELY PARTIAL enrichment: `class`, `fork` and `affectedChains` only.
+    //
+    // The full record also carries `summary` and `context`, which are prose and cost tokens in
+    // exactly the consumers this normalizer exists to keep cheap — the same reason the entry
+    // body above is parsed and then dropped. These three are small, structured, and are what
+    // downstream actually joins on: fork identity groups every provider window under one
+    // upgrade, and affectedChains carries the network qualifier ("Stellar Mainnet", not
+    // "Stellar") that scopes it.
+    //
+    // Omitted entirely when the event has none, so the field's presence means something.
+    ...(slimEnrichment(ev.enrichment) ? { enrichment: slimEnrichment(ev.enrichment) } : {})
   };
+}
+
+/**
+ * The joinable part of an enrichment, or null when there is nothing to carry.
+ *
+ * Kept separate from normalizeEvent so the omission above is a single decision rather than
+ * three inline guards, and so the "partial by design" contract has somewhere to live.
+ */
+function slimEnrichment(enrichment) {
+  if (!enrichment || typeof enrichment !== 'object') return null;
+  const slim = {};
+  if (typeof enrichment.class === 'string') slim.class = enrichment.class;
+  if (Array.isArray(enrichment.affectedChains)) {
+    slim.affectedChains = enrichment.affectedChains.filter((n) => typeof n === 'string');
+  }
+  if (enrichment.fork && typeof enrichment.fork === 'object') {
+    const { name, activationAt, activationBlock, state } = enrichment.fork;
+    slim.fork = {
+      name: typeof name === 'string' ? name : null,
+      activationAt: typeof activationAt === 'string' ? activationAt : null,
+      activationBlock: Number.isSafeInteger(activationBlock) ? activationBlock : null,
+      state: typeof state === 'string' ? state : null
+    };
+  }
+  return Object.keys(slim).length ? slim : null;
 }
 
 /**

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { getLiveIncidents, _resetLiveIncidentsCacheForTests } from '../../../src/sources/liveIncidents.js';
+import { getLiveIncidents, getLiveEvents, _resetLiveIncidentsCacheForTests } from '../../../src/sources/liveIncidents.js';
 import { proxyFetch } from '../../../fetchUtil.js';
 
 vi.mock('../../../fetchUtil.js', () => ({
@@ -162,5 +162,68 @@ describe('getLiveIncidents', () => {
   it('throws on non-2xx responses with no cache', async () => {
     proxyFetch.mockResolvedValue({ ok: false, status: 502 });
     await expect(getLiveIncidents()).rejects.toThrow(/502/);
+  });
+});
+
+describe('enrichment passthrough (the fork join key)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    _resetLiveIncidentsCacheForTests();
+  });
+
+  it('carries fork identity and affectedChains through to consumers', async () => {
+    // This is where the fork pipeline silently broke once already: the feed served the field,
+    // the normalizer dropped it, and every consumer joined on data that was never there.
+    proxyFetch.mockResolvedValue(okResponse([feedEvent({
+      enrichment: {
+        class: 'planned_software_update',
+        summary: 'a long prose summary that costs tokens',
+        context: { whatChanged: 'x', actionRequired: 'y', references: [] },
+        affectedChains: ['Stellar Mainnet'],
+        fork: { name: 'Protocol 28', activationAt: '2026-09-16T17:00:00Z', activationBlock: null, state: 'scheduled' }
+      }
+    })]));
+
+    const [event] = await getLiveEvents();
+
+    expect(event.enrichment.fork).toEqual({
+      name: 'Protocol 28', activationAt: '2026-09-16T17:00:00Z', activationBlock: null, state: 'scheduled'
+    });
+    expect(event.enrichment.affectedChains).toEqual(['Stellar Mainnet']);
+    expect(event.enrichment.class).toBe('planned_software_update');
+  });
+
+  it('drops the prose fields, which is the whole reason this is partial', async () => {
+    // The normalizer parses and discards the entry body for exactly this reason; carrying
+    // summary/context would put it straight back into the assistant's context window.
+    proxyFetch.mockResolvedValue(okResponse([feedEvent({
+      enrichment: {
+        class: 'provider_incident',
+        summary: 'prose',
+        context: { whatChanged: 'x', actionRequired: 'y', references: [] }
+      }
+    })]));
+
+    const [event] = await getLiveEvents();
+
+    expect(event.enrichment.summary).toBeUndefined();
+    expect(event.enrichment.context).toBeUndefined();
+    expect(event.enrichment.class).toBe('provider_incident');
+  });
+
+  it('omits enrichment entirely when the event has none, so its presence means something', async () => {
+    proxyFetch.mockResolvedValue(okResponse([feedEvent()]));
+    const [event] = await getLiveEvents();
+    expect(event.enrichment).toBeUndefined();
+  });
+
+  it('rejects a malformed fork rather than passing junk to the grouping', async () => {
+    proxyFetch.mockResolvedValue(okResponse([feedEvent({
+      enrichment: { fork: { name: 42, activationAt: {}, activationBlock: '18,813,000', state: ['x'] } }
+    })]));
+
+    const [event] = await getLiveEvents();
+
+    expect(event.enrichment.fork).toEqual({ name: null, activationAt: null, activationBlock: null, state: null });
   });
 });
