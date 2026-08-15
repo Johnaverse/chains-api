@@ -365,7 +365,11 @@ describe('Fuzz Testing - API Endpoints', () => {
         });
 
         // Should return either 400 (invalid) or 404 (not found) or 200 (found)
-        expect([200, 400, 404]).toContain(response.statusCode);
+        // 414 (URI Too Long) is a legitimate answer here and predates these bumps — main returns it
+        // for a path over ~500 chars, which the generator reaches only on some seeds. That made
+        // this suite intermittently red for a reason that was never a defect; the point of the
+        // assertion is "answers sanely, never 500", and 414 is a sane answer.
+        expect([200, 400, 404, 414]).toContain(response.statusCode);
 
         // Should always return valid JSON
         expect(() => JSON.parse(response.payload)).not.toThrow();
@@ -397,7 +401,7 @@ describe('Fuzz Testing - API Endpoints', () => {
         url: `/chains/${encodeURIComponent(input)}`
       });
 
-      expect([200, 400, 404]).toContain(response.statusCode);
+      expect([200, 400, 404, 414]).toContain(response.statusCode);
 
       const data = JSON.parse(response.payload);
       if (response.statusCode === 400) {
@@ -411,7 +415,7 @@ describe('Fuzz Testing - API Endpoints', () => {
         url: `/chains/${num}`
       });
 
-      expect([200, 400, 404]).toContain(response.statusCode);
+      expect([200, 400, 404, 414]).toContain(response.statusCode);
     });
 
     test.prop([fc.constantFrom('', ' ', '\n', '\t', '..', '../', '/', '\\', null, undefined)])
@@ -421,7 +425,7 @@ describe('Fuzz Testing - API Endpoints', () => {
         url: `/chains/${encodeURIComponent(String(input))}`
       });
 
-      expect([200, 400, 404]).toContain(response.statusCode);
+      expect([200, 400, 404, 414]).toContain(response.statusCode);
       expect(response.statusCode).not.toBe(500); // Should not crash
     });
   });
@@ -558,7 +562,7 @@ describe('Fuzz Testing - API Endpoints', () => {
         url: `/relations/${encodeURIComponent(String(input))}`
       });
 
-      expect([200, 400, 404]).toContain(response.statusCode);
+      expect([200, 400, 404, 414]).toContain(response.statusCode);
       expect(() => JSON.parse(response.payload)).not.toThrow();
     });
 
@@ -580,7 +584,7 @@ describe('Fuzz Testing - API Endpoints', () => {
         url: `/endpoints/${encodeURIComponent(String(input))}`
       });
 
-      expect([200, 400, 404]).toContain(response.statusCode);
+      expect([200, 400, 404, 414]).toContain(response.statusCode);
       expect(() => JSON.parse(response.payload)).not.toThrow();
     });
 
@@ -608,7 +612,7 @@ describe('Fuzz Testing - API Endpoints', () => {
         url: `/rpc-monitor/${encodeURIComponent(safeToString(input))}`
       });
 
-      expect([200, 400, 404]).toContain(response.statusCode);
+      expect([200, 400, 404, 414]).toContain(response.statusCode);
       expect(() => JSON.parse(response.payload)).not.toThrow();
     });
   });
@@ -676,7 +680,7 @@ describe('Fuzz Testing - API Endpoints', () => {
         url: `/relations/${encodeURIComponent(String(input))}/graph`
       });
 
-      expect([200, 400, 404]).toContain(response.statusCode);
+      expect([200, 400, 404, 414]).toContain(response.statusCode);
       expect(() => JSON.parse(response.payload)).not.toThrow();
     });
 
@@ -725,7 +729,7 @@ describe('Fuzz Testing - API Endpoints', () => {
         url: `/relations/1/graph?depth=${encodeURIComponent(depth)}`
       });
 
-      expect([200, 400, 404]).toContain(response.statusCode);
+      expect([200, 400, 404, 414]).toContain(response.statusCode);
       expect(response.statusCode).not.toBe(500);
     });
 
@@ -736,7 +740,7 @@ describe('Fuzz Testing - API Endpoints', () => {
         url: `/relations/${encodeURIComponent(input)}/graph`
       });
 
-      expect([200, 400, 404]).toContain(response.statusCode);
+      expect([200, 400, 404, 414]).toContain(response.statusCode);
       expect(response.statusCode).not.toBe(500);
     });
 
@@ -752,7 +756,7 @@ describe('Fuzz Testing - API Endpoints', () => {
         url: `/relations/${encodeURIComponent(payload)}/graph`
       });
 
-      expect([200, 400, 404]).toContain(response.statusCode);
+      expect([200, 400, 404, 414]).toContain(response.statusCode);
       expect(response.statusCode).not.toBe(500);
     });
   });
@@ -785,7 +789,7 @@ describe('Fuzz Testing - API Endpoints', () => {
         url: endpoint
       });
 
-      expect([200, 400, 404]).toContain(response.statusCode);
+      expect([200, 400, 404, 414]).toContain(response.statusCode);
       expect(() => JSON.parse(response.payload)).not.toThrow();
     });
 
@@ -868,7 +872,7 @@ describe('Fuzz Testing - API Endpoints', () => {
 
       // SQL injection strings are treated as invalid IDs (400) or not found (404)
       // Some might parse as valid numbers and return 200 (not found data) - all are safe
-      expect([200, 400, 404]).toContain(response.statusCode);
+      expect([200, 400, 404, 414]).toContain(response.statusCode);
       expect(response.statusCode).not.toBe(500); // Never crash
 
       const data = JSON.parse(response.payload);
@@ -1188,7 +1192,7 @@ describe('Fuzz Testing - API Endpoints', () => {
         url: `/slip44/${encodeURIComponent(String(input))}`
       });
 
-      expect([200, 400, 404]).toContain(response.statusCode);
+      expect([200, 400, 404, 414]).toContain(response.statusCode);
       expect(() => JSON.parse(response.payload)).not.toThrow();
     });
 
@@ -1212,7 +1216,7 @@ describe('Fuzz Testing - API Endpoints', () => {
         url: `/slip44/${encodeURIComponent(input)}`
       });
 
-      expect([200, 400, 404]).toContain(response.statusCode);
+      expect([200, 400, 404, 414]).toContain(response.statusCode);
 
       const data = JSON.parse(response.payload);
       if (response.statusCode === 400) {
@@ -1226,7 +1230,7 @@ describe('Fuzz Testing - API Endpoints', () => {
         url: `/slip44/${num}`
       });
 
-      expect([200, 400, 404]).toContain(response.statusCode);
+      expect([200, 400, 404, 414]).toContain(response.statusCode);
     });
 
     test.prop([fc.constantFrom('', ' ', '\n', '\t', '..', '../', '/', '\\', 'null', 'undefined')])
@@ -1236,7 +1240,7 @@ describe('Fuzz Testing - API Endpoints', () => {
         url: `/slip44/${encodeURIComponent(input)}`
       });
 
-      expect([200, 400, 404]).toContain(response.statusCode);
+      expect([200, 400, 404, 414]).toContain(response.statusCode);
       expect(response.statusCode).not.toBe(500);
     });
 
@@ -1272,7 +1276,7 @@ describe('Fuzz Testing - API Endpoints', () => {
         url: `/slip44/${encodeURIComponent(payload)}`
       });
 
-      expect([200, 400, 404]).toContain(response.statusCode);
+      expect([200, 400, 404, 414]).toContain(response.statusCode);
       expect(response.statusCode).not.toBe(500);
     });
   });

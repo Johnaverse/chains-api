@@ -54,6 +54,12 @@ export async function getForks({ chainId, phase, scheduledOnly = false, limit = 
 
   let filtered = forks;
   if (chainId != null) filtered = filtered.filter((f) => f.chains.includes(Number(chainId)));
+  // Phase counts are taken BEFORE the phase filter. Counting after it makes byPhase describe
+  // the filter rather than the world: asked "what forks are coming up", the assistant called
+  // get_forks(phase='upcoming'), got byPhase all-zero, and answered "0 total matched across
+  // all phases" — while three unscheduled forks existed. A confidently wrong answer, produced
+  // by the very field added to stop the model counting rows itself.
+  const byPhase = countByPhase(filtered);
   if (phase) filtered = filtered.filter((f) => f.phase === phase);
   // A calendar wants only what can be placed on a day. Separate from `phase` because
   // "upcoming" and "has a date" are genuinely different questions — a fork can be announced
@@ -72,7 +78,7 @@ export async function getForks({ chainId, phase, scheduledOnly = false, limit = 
     truncated: filtered.length > sliced.length,
     // Counts across everything matched, not just this page: a caller asking "how many upcoming
     // forks" must not have to add up a truncated list.
-    byPhase: countByPhase(filtered),
+    byPhase,
     forks: sliced
   };
 }

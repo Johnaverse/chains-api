@@ -1,6 +1,6 @@
 {
   "name": "chains-api",
-  "version": "1.7.31",
+  "version": "1.7.32",
   "description": "API query service for blockchain chain data from multiple sources",
   "main": "index.js",
   "type": "module",
@@ -35,21 +35,21 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@fastify/compress": "^9.0.0",
-    "@fastify/cors": "^11.2.0",
+    "@fastify/compress": "^9.2.0",
+    "@fastify/cors": "^11.3.0",
     "@fastify/helmet": "^13.0.2",
     "@fastify/rate-limit": "^10.3.0",
     "@fastify/static": "^10.1.2",
-    "@fastify/swagger": "^9.7.0",
+    "@fastify/swagger": "^9.8.1",
     "@fastify/swagger-ui": "^6.1.1",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "ajv": "^8.18.0",
     "ajv-errors": "^3.0.0",
     "express": "^5.2.1",
-    "fastify": "^5.8.5",
+    "fastify": "^5.11.3",
     "https-proxy-agent": "^7.0.6",
     "pino": "^10.3.0",
-    "ws": "^8.21.0"
+    "ws": "^8.21.3"
   },
   "devDependencies": {
     "@fast-check/vitest": "^0.2.4",
