@@ -106,6 +106,24 @@ describe('getForks', () => {
     expect(out.byPhase).toMatchObject({ upcoming: 2, past: 1 });
   });
 
+  it('counts every phase even when filtering to one', async () => {
+    // Caught by asking the live assistant "what forks are coming up?". It called
+    // get_forks(phase='upcoming'), byPhase came back all-zero because it was computed after
+    // the filter, and the model answered "0 total matched across all phases" while three
+    // unscheduled forks existed.
+    getLiveEvents.mockResolvedValue([
+      event('up', { fork: fork({ name: 'up', activationAt: '2099-01-01T00:00:00Z' }), affectedChains: ['x'] }),
+      event('un1', { fork: fork({ name: 'un1' }), affectedChains: ['y'] }),
+      event('un2', { fork: fork({ name: 'un2' }), affectedChains: ['z'] })
+    ]);
+
+    const out = await getForks({ phase: 'upcoming' });
+
+    expect(out.count).toBe(1);            // the filter still applies to the list
+    expect(out.totalMatched).toBe(1);
+    expect(out.byPhase).toMatchObject({ upcoming: 1, unscheduled: 2 });   // ...but not to the counts
+  });
+
   it('filters by chain and by phase', async () => {
     getLiveEvents.mockResolvedValue([
       event('1', { fork: fork({ name: 'a', activationAt: '2026-09-01T00:00:00Z' }), chains: [1] }),
