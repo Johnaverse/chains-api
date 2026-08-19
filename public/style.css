@@ -1000,6 +1000,14 @@ button, input, textarea, select { font: inherit; color: inherit; }
     font-size: var(--fs-100); font-weight: 500;
     color: var(--ink-3); flex-shrink: 0;
 }
+/* "Scheduled" is muted because planned work is unremarkable. This one is the opposite: an
+   unplanned incident inside somebody's maintenance window, which is the pairing most worth
+   chasing — so it carries the warning ink and a border, like every other value on this
+   dashboard that a reader must not skim past. */
+.kind-tag.during-maint {
+    color: var(--warn-text); cursor: help;
+    border: 1px solid var(--warn); border-radius: var(--r-sm); padding: 0 5px;
+}
 
 /* ── AI enrichment block ──
    Every AI-derived value is visibly attributed: an "AI" tag, the model, the
