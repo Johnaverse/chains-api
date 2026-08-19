@@ -1488,6 +1488,26 @@ button, input, textarea, select { font: inherit; color: inherit; }
    without reading the pills. */
 .pb-row.pb-ongoing { box-shadow: inset 3px 0 0 var(--critical); }
 .pb-name-main { font-weight: 600; color: var(--ink-1); margin-right: var(--sp-2); }
+/* The provider name is also the control that filters the event list below. Styled as text
+   rather than as a button: ten real buttons down the primary column would out-shout the
+   numbers the table exists to compare, so the affordance is a dotted underline that goes
+   solid on hover — and the pills beside it stay outside the hit area, since they label the
+   row rather than doing anything. */
+.pb-name-btn {
+    background: none; border: 0; padding: 0; font: inherit; color: inherit;
+    text-align: inherit; cursor: pointer;
+    border-bottom: 1px dashed var(--rule-strong);
+    margin-right: var(--sp-2);
+}
+.pb-name-btn .pb-name-main { margin-right: 0; }
+.pb-name-btn:hover { border-bottom-color: var(--accent-hover); }
+.pb-name-btn:hover .pb-name-main { color: var(--accent-hover); }
+.pb-name-btn[aria-pressed="true"] { border-bottom: 1px solid var(--accent); }
+.pb-name-btn[aria-pressed="true"] .pb-name-main { color: var(--accent); }
+/* Selection is a background so it composes with the ongoing row's inset red bar rather than
+   replacing it — a provider can be both selected and on fire. One step past the hover tint
+   (--surface-2), or "selected" and "the pointer happens to be here" would look identical. */
+.pb-row.pb-selected { background: var(--surface-3); }
 .pb-flag {
     margin-left: var(--sp-2); font-size: var(--fs-100); color: var(--ink-3);
     border: 1px dashed var(--rule-strong); border-radius: var(--r-sm); padding: 0 5px; cursor: help;

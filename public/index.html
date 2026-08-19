@@ -417,7 +417,10 @@
                 <div class="scale-legend" id="providerScaleLegend"></div>
             </div>
 
-            <div class="toolbar u-mt-4">
+            <!-- id is the scroll target for the performance table's provider names, which
+                 filter this list; the toolbar rather than the list itself, so the chips and
+                 count that name the active filter land in view with it. -->
+            <div class="toolbar u-mt-4" id="providerListTop">
                 <div class="toolbar-group">
                     <span class="toolbar-label" id="lblProv">Provider</span>
                     <div class="chip-row" id="providerFilter" role="group" aria-labelledby="lblProv"></div>
