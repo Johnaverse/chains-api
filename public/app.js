@@ -892,7 +892,11 @@ const SEVERITY_META = {
     critical: { key: 'critical', label: 'Critical', cssVar: '--critical' },
     major: { key: 'major', label: 'Major', cssVar: '--serious' },
     minor: { key: 'minor', label: 'Minor', cssVar: '--warn' },
-    none: { key: 'none', label: 'Not classified', cssVar: '--cat-0' }
+    none: { key: 'none', label: 'Not classified', cssVar: '--cat-0' },
+    // A severity the feed sent that this scale does not know. Contract §8 records that the
+    // two feeds do not share a vocabulary and expects drift, so folding an unknown level into
+    // "Not classified" would deflate the classified count with nothing anywhere to say why.
+    unknown: { key: 'unknown', label: 'Unrecognized severity', cssVar: '--cat-1' }
 };
 
 const incidents = {
@@ -903,7 +907,11 @@ const incidents = {
     // backfill, but live WS `status.enrichment` frames arrive separately and
     // are keyed by raw eventId. eventToKey resolves an eventId to its incident;
     // enrichPending stashes frames that beat their item.
-    eventToKey: new Map(), enrichByKey: new Map(), enrichPending: new Map(), enrichTimer: null
+    eventToKey: new Map(), enrichByKey: new Map(), enrichPending: new Map(), enrichTimer: null,
+    // Whether phase two can EVER arrive, per the feed's own `hello` frame (contract §7).
+    // null until the socket says. Without it "0% classified" and "classifier switched off
+    // upstream" are the same picture, and the second one is not this dashboard's fault.
+    enrichmentAvailable: null
 };
 const providers = { filter: 'all', dayFilter: null, shown: null };
 // Rendering every retained event made Providers ~48 phone-screens tall and
@@ -1014,12 +1022,15 @@ function addIncidents(events) {
             incidents.eventToKey.set(ev.id, m.key);
             capMap(incidents.eventToKey, MAX_EVENT_KEYS);
             const early = incidents.enrichPending.get(ev.id);
-            if (early) { incidents.enrichPending.delete(ev.id); applyEnrichment(m.key, early); }
+            if (early) { incidents.enrichPending.delete(ev.id); applyEnrichment(m.key, early, m.whenMs); }
         }
         // The REST backfill ships enrichment INLINE on most events. The old
         // dashboard only read WS enrichment frames, so several hundred existing
         // AI classifications were discarded on every page load.
-        if (ev.enrichment) applyEnrichment(m.key, ev.enrichment);
+        //
+        // Several events of one incident each carry their own classification, so the event's
+        // own time is what orders them — see enrichmentStamp.
+        if (ev.enrichment) applyEnrichment(m.key, ev.enrichment, m.whenMs);
 
         const existing = incidents.byKey.get(m.key);
         if (!existing) { incidents.byKey.set(m.key, m); changed = true; continue; }
@@ -1073,16 +1084,55 @@ function addEnrichment(enr) {
         capMap(incidents.enrichPending, MAX_ENRICH_PENDING);
         return;
     }
-    if (applyEnrichment(key, enr)) scheduleEnrichmentRerender();
+    // A live frame with no timestamp of its own is, by definition, the newest thing we know.
+    if (applyEnrichment(key, enr, Date.now())) scheduleEnrichmentRerender();
 }
 
-// Newest enrichment wins per incident (a later update can re-classify it). An
-// older frame loses; equal/absent timestamps let the later arrival win so a
-// re-classification is never dropped.
-function applyEnrichment(key, enr) {
+// When a classification was made, resolved against fields that actually exist on the wire.
+// `createdAt` was the sole ordering key here and appears NOWHERE else in this repo — not in
+// the service contract, not in the server-side reader, not in a fixture. When it is absent
+// Date.parse yields NaN, both sides of the comparison collapse to 0, and "newest wins"
+// quietly becomes "whichever was processed last". That is invisible live (a re-classification
+// does arrive last) and wrong after a reload, where the REST backfill replays every event of
+// an incident and the winner is decided by array order.
+//
+// So: the feed's own classification time if it sends one, then the frame's emittedAt
+// (contract §7 puts it on every frame), then the time of the event being classified.
+function enrichmentStamp(enr, fallbackMs) {
+    for (const raw of [enr?.createdAt, enr?.emittedAt]) {
+        if (raw == null) continue;
+        // Contract §9 says ISO-8601, but this whole finding was about trusting a field shape
+        // nobody had verified — so an epoch number is read as one rather than handed to
+        // Date.parse, which would read 1770000000000 as a year and answer with a real-looking
+        // timestamp in the far future that then wins every comparison forever.
+        if (typeof raw === 'number') {
+            if (Number.isFinite(raw)) return raw;
+            continue;
+        }
+        const t = Date.parse(raw);
+        if (!Number.isNaN(t)) return t;
+    }
+    return fallbackMs ?? 0;
+}
+
+// Newest enrichment wins per incident (a later update can re-classify it). An older frame
+// loses; equal timestamps let the later arrival win so a re-classification is never dropped.
+// Stores the resolved stamp beside the payload — recomputing it from the stored object would
+// reintroduce the same problem for whichever field was missing.
+function applyEnrichment(key, enr, atMs) {
+    // Never store a classification-free payload. The feed can send `enrichment: {}`, or an
+    // object carrying only fields this dashboard does not read, and storing it made
+    // enrichmentOf() truthy for an event with nothing classified about it — which is how the
+    // stat and the card came to disagree in the first place. Enforcing it here means "we have
+    // an enrichment" and "there is a classification" cannot drift apart again.
+    if (!hasClassification(enr)) return false;
+    // Seeing a classification at all is proof phase two is running, whatever `hello` said
+    // (or if the socket never sent one because the data came over REST).
+    incidents.enrichmentAvailable = true;
+    const at = enrichmentStamp(enr, atMs);
     const prev = incidents.enrichByKey.get(key);
-    if (prev && (Date.parse(prev.createdAt) || 0) > (Date.parse(enr.createdAt) || 0)) return false;
-    incidents.enrichByKey.set(key, enr);
+    if (prev && prev.at > at) return false;
+    incidents.enrichByKey.set(key, { data: enr, at });
     return true;
 }
 function scheduleEnrichmentRerender() {
@@ -1124,13 +1174,15 @@ function repaintIncidentSurfaces() {
 // "Not classified" instead of printing itself — and no feed string ever reaches the DOM
 // or a class attribute. Both call paths (incident cards, news cards) go through here.
 function severityMeta(raw) {
-    const key = raw ? String(raw).toLowerCase() : null;
-    return SEVERITY_META[key] || SEVERITY_META.none;
+    if (raw == null || raw === '') return SEVERITY_META.none;
+    // Nothing sent vs. something sent that we cannot place are different states: the first is
+    // an unclassified event, the second is a taxonomy drift someone needs to fix.
+    return SEVERITY_META[String(raw).toLowerCase()] || SEVERITY_META.unknown;
 }
 function severityOf(it) {
-    return severityMeta(incidents.enrichByKey.get(it.key)?.severity);
+    return severityMeta(enrichmentOf(it)?.severity);
 }
-function enrichmentOf(it) { return incidents.enrichByKey.get(it.key) || null; }
+function enrichmentOf(it) { return incidents.enrichByKey.get(it.key)?.data || null; }
 
 // An incident is open when the feed says so. Fall back to the status label only
 // for older cached events that predate the `ongoing` flag.
@@ -1207,6 +1259,15 @@ function connectStatusFeed() {
     ws.onmessage = ev => {
         let m;
         try { m = JSON.parse(ev.data); } catch { return; }
+        // The feed's own answer to "can a classification ever arrive?" (contract §7). The
+        // news socket has always honoured this; this one ignored it, so a feed running as a
+        // pure relay showed "AI classified 0%" and a severity filter that could never match
+        // — a switched-off classifier upstream rendered as a broken panel here.
+        if (m.type === 'hello') {
+            incidents.enrichmentAvailable = Boolean(m.enrichment);
+            scheduleIncidentRepaint();
+            return;
+        }
         if (m.type === 'status.item' && m.item) addIncidents([m.item]);
         else if (m.type === 'status.enrichment' && m.eventId) addEnrichment(m);
     };
@@ -2415,6 +2476,18 @@ function renderSeverityChips() {
         counts.set(k, (counts.get(k) || 0) + 1);
     }
     clear(wrap);
+
+    // A severity filter whose only non-empty bucket is "Not classified" cannot sort anything,
+    // so hide the labelled group entirely. Keyed on what is actually classified rather than on
+    // the feed's `hello` flag: a feed that has switched its classifier OFF can still be
+    // serving events classified while it was on, and those stay filterable.
+    const group = wrap.closest('.toolbar-group');
+    if (![...counts.keys()].some(k => k !== 'none')) {
+        incidents.severity = 'all';
+        group?.classList.add('hidden');
+        return;
+    }
+    group?.classList.remove('hidden');
     const mk = (key, label, count, cssVar) => wrap.appendChild(el('button', {
         class: 'chip', type: 'button',
         'aria-pressed': String(incidents.severity === key),
@@ -2429,7 +2502,9 @@ function renderSeverityChips() {
         count != null ? el('span', { class: 'chip-count', text: fmtNum(count) }) : null
     ]));
     mk('all', 'Any', base.length, null);
-    for (const key of ['critical', 'major', 'minor', 'none']) {
+    // 'unknown' only ever appears once the feed sends a level outside the scale, so it is
+    // invisible until there is drift and unmissable the moment there is.
+    for (const key of ['critical', 'major', 'minor', 'unknown', 'none']) {
         if (!counts.get(key)) continue;
         mk(key, SEVERITY_META[key].label, counts.get(key), SEVERITY_META[key].cssVar);
     }
@@ -2450,7 +2525,9 @@ function renderIncidentStats() {
     const all = chainIncidents();
     const open = all.filter(isOpen);
     const scheduled = all.filter(it => it.kind === 'scheduled');
-    const enriched = all.filter(it => enrichmentOf(it)).length;
+    // The same predicate the card gates on. Counting mere presence here is what let the strip
+    // claim an event was classified while the card below it said otherwise.
+    const enriched = all.filter(it => hasClassification(enrichmentOf(it))).length;
     clear(wrap);
     wrap.appendChild(statTile({
         label: 'Open now', value: fmtNum(open.length), hero: true,
@@ -2465,10 +2542,23 @@ function renderIncidentStats() {
         label: 'Networks named', value: fmtNum(new Set(all.flatMap(it => it.chainIds)).size),
         sub: 'resolved to a registry chain ID'
     }));
+    // Three distinct states, and 0% used to stand for all of them. "off" is a claim about the
+    // pipeline and only the feed's `hello` frame can make it; a rate is a claim about the
+    // events. A feed that has switched its classifier off mid-life is both at once — it still
+    // serves what it classified earlier — so that case keeps the real rate and says the rest.
+    const classifierOff = incidents.enrichmentAvailable === false;
+    const rate = all.length ? Viz.fmtPct((enriched / all.length) * 100, 0) : '—';
     wrap.appendChild(statTile({
-        label: 'AI classified', value: all.length ? Viz.fmtPct((enriched / all.length) * 100, 0) : '—',
-        sub: `${fmtNum(enriched)} of ${fmtNum(all.length)} events`,
-        hint: 'Share of events with an LLM classification from the feed. Unclassified events are never given a guessed severity.'
+        label: 'AI classified',
+        value: classifierOff && !enriched ? 'off' : rate,
+        sub: classifierOff
+            ? (enriched
+                ? `${fmtNum(enriched)} of ${fmtNum(all.length)} events · no new ones`
+                : 'classifier disabled upstream')
+            : `${fmtNum(enriched)} of ${fmtNum(all.length)} events`,
+        hint: classifierOff
+            ? 'The status feed is relaying events without classifying them, so no further event can gain a severity. This is a setting on that service, not a fault here.'
+            : 'Share of events with an LLM classification from the feed. Unclassified events are never given a guessed severity.'
     }));
 }
 
@@ -2621,39 +2711,14 @@ function incidentCard(it) {
     ]);
 
     // ── AI enrichment, fully attributed ──
-    if (enr?.summary) {
-        const conf = Number.isFinite(enr.confidence) ? enr.confidence : null;
-        const head = el('div', { class: 'ai-head' }, [
-            el('span', { class: 'ai-tag', text: 'AI' }),
-            enr.class ? el('span', { class: 'ai-class', text: String(enr.class).replace(/_/g, ' ') }) : null
-        ]);
-        if (conf != null) {
-            const bar = el('span', { class: 'ai-conf-bar' }, [el('span', { class: 'ai-conf-fill' })]);
-            bar.firstChild.style.width = `${Math.round(conf * 100)}%`;
-            head.appendChild(el('span', { class: 'ai-conf', title: 'Model-reported confidence in this classification' }, [
-                'confidence ', bar, `${Math.round(conf * 100)}%`
-            ]));
-        }
-
-
-        const block = el('div', { class: 'ai-block' }, [
-            head,
-            el('div', { class: 'ai-summary', text: plainText(enr.summary) })
-        ]);
-        const action = enr.context?.actionRequired;
-        if (action && String(action).toLowerCase() !== 'none') {
-            block.appendChild(el('div', { class: 'ai-action' }, [
-                el('span', { class: 'ai-action-label', text: 'Action:' }),
-                el('span', { text: String(action) })
-            ]));
-        }
-        main.appendChild(block);
-    } else {
-        main.appendChild(el('div', {
-            class: 'ai-unclassified',
-            text: 'Not classified by the AI pipeline — severity unknown.'
-        }));
-    }
+    main.appendChild(hasClassification(enr) ? aiBlock(enr) : el('div', {
+        class: 'ai-unclassified',
+        // Which of the two silences this is. "Nothing classified this event" and "nothing can
+        // classify anything right now" send the reader to different places.
+        text: incidents.enrichmentAvailable === false
+            ? 'The status feed is running as a pure relay right now, so no AI classification is available and none is implied.'
+            : 'Not classified by the AI pipeline — severity unknown.'
+    }));
 
     // Affected chains: clickable only when resolved to a registry chain ID.
     if (it.chainIds.length) {
@@ -2686,6 +2751,82 @@ function incidentCard(it) {
     ]);
 
     return el('div', { class: cls.join(' ') }, [main, side]);
+}
+
+// Is there a classification here at all? Deliberately NOT "does it have a summary": the
+// severity badge, the severity filter and the "AI classified" stat all key off the presence
+// of the enrichment object, so gating the body on `summary` alone produced cards whose side
+// badge read "Critical" while the body underneath read "Not classified — severity unknown",
+// counted all the while as classified in the stat above. Summary-less enrichments are a real
+// shape in this system, not a hypothetical: the server-side reader strips `summary`
+// deliberately to keep it out of the assistant's context window.
+function hasClassification(enr) {
+    if (!enr) return false;
+    if (enr.class || enr.summary || enr.lowConfidence || enr.context?.actionRequired) return true;
+    // A severity counts only where it says something. An explicit "none" grade carrying
+    // nothing else is the absence of a classification, not a classification of absence.
+    return Boolean(enr.severity) && severityMeta(enr.severity).key !== 'none';
+}
+
+// Producers disagree on scale — some report 0–1, some 0–100. Normalise, then clamp: the bar
+// is a percentage width, so an unclamped 0–100 producer rendered "8500%" and overflowed it.
+function normalizeConfidence(v) {
+    if (!Number.isFinite(v)) return null;
+    return Math.min(1, Math.max(0, v > 1 ? v / 100 : v));
+}
+
+// The severity as a head label, for a classification that carries no class. Attributing the
+// side badge to the model is the point — nothing else on the card says the badge is inferred.
+function aiSeverityLabel(enr) {
+    if (!enr.severity) return null;
+    const meta = severityMeta(enr.severity);
+    return meta.key === 'none' ? null : el('span', { class: 'ai-class', text: meta.label });
+}
+
+// Every part is independent, because the feed sends them independently.
+function aiBlock(enr) {
+    const head = el('div', { class: 'ai-head' }, [
+        el('span', { class: 'ai-tag', text: 'AI' }),
+        // Falling back to the severity keeps the head from rendering as a bare "AI" tag, and
+        // it attributes the side badge: that badge is the model's reading, not the operator's,
+        // and nothing else on the card says so.
+        enr.class
+            ? el('span', { class: 'ai-class', text: String(enr.class).replace(/_/g, ' ') })
+            // …but not when that label is "Not classified": a feed that explicitly grades an
+            // event as no-severity would otherwise render the head as "AI · Not classified".
+            : aiSeverityLabel(enr)
+    ]);
+    // Upstream flags a substantial share of classifications as low-confidence — mostly class
+    // `other` — and the server-side reader carries the flag for exactly this reason: printing
+    // the label without the caveat is how a guess becomes an assertion. This surface dropped
+    // it on the floor and showed those classifications as fact.
+    if (enr.lowConfidence === true) {
+        head.appendChild(el('span', {
+            class: 'ai-lowconf',
+            title: 'The model reported low confidence in this classification. Treat it as a guess, not a finding.',
+            text: 'low confidence'
+        }));
+    }
+    const conf = normalizeConfidence(enr.confidence);
+    if (conf != null) {
+        const pct = Math.round(conf * 100);
+        const bar = el('span', { class: 'ai-conf-bar' }, [el('span', { class: 'ai-conf-fill' })]);
+        bar.firstChild.style.width = `${pct}%`;
+        head.appendChild(el('span', { class: 'ai-conf', title: 'Model-reported confidence in this classification' }, [
+            'confidence ', bar, `${pct}%`
+        ]));
+    }
+
+    const block = el('div', { class: 'ai-block' }, [head]);
+    if (enr.summary) block.appendChild(el('div', { class: 'ai-summary', text: plainText(enr.summary) }));
+    const action = enr.context?.actionRequired;
+    if (action && String(action).toLowerCase() !== 'none') {
+        block.appendChild(el('div', { class: 'ai-action' }, [
+            el('span', { class: 'ai-action-label', text: 'Action:' }),
+            el('span', { text: String(action) })
+        ]));
+    }
+    return block;
 }
 
 function renderIncidentList() {
