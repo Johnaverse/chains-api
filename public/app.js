@@ -1191,9 +1191,35 @@ function enrichmentOf(it) { return incidents.enrichByKey.get(it.key)?.data || nu
 
 // An incident is open when the feed says so. Fall back to the status label only
 // for older cached events that predate the `ongoing` flag.
+// Raw feed statuses that mean the event is over. Tested against the feed's own enum rather
+// than the display label, which is what the fallback below used to do: 'maintenance_completed'
+// closed only by the accident of its label ('Completed') matching a token in the list, while
+// 'maintenance_scheduled' renders as 'Scheduled', matched nothing, and read as OPEN.
+const CLOSED_STATUSES = new Set(['resolved', 'maintenance_completed', 'operational']);
+
 function isOpen(it) {
+    // Planned work is never an open incident, however the feed flags it. A maintenance window
+    // — upcoming or actively running — belongs to the scheduled counters, and counting it here
+    // put a single event into both "Open now" and "Scheduled maintenance", tinted the hero tile
+    // amber, marked every chain it named as currently affected in the Networks table, the
+    // Overview impact panel and the graph, and let durationInfo report "open 3h 20m" for a
+    // window that had not started. Checked before `ongoing`, because a running window is still
+    // planned work: `ongoing: true` on maintenance means "the window is in progress", not
+    // "something is wrong".
+    if (it.kind === 'scheduled') return false;
     if (it.ongoing != null) return it.ongoing;
+    if (it.rawStatus) return !CLOSED_STATUSES.has(it.rawStatus);
+    // Older cached events predate rawStatus; keep the label comparison for those alone.
     return Boolean(it.status && !['resolved', 'completed', 'closed'].includes(it.status.toLowerCase()));
+}
+
+// A maintenance window actually running now, as distinct from one still upcoming or already
+// finished. Exists so the rule above does not make active planned work invisible: it is not an
+// incident, but "in progress" and "next Tuesday" are not the same thing to a reader.
+function isMaintenanceRunning(it) {
+    if (it.kind !== 'scheduled') return false;
+    if (it.rawStatus === 'maintenance_in_progress') return true;
+    return it.ongoing === true && it.rawStatus !== 'maintenance_completed';
 }
 
 // Duration, stated for what it actually is:
@@ -2539,9 +2565,14 @@ function renderIncidentStats() {
         sub: `of ${fmtNum(all.length)} retained events`,
         tone: open.length === 0 ? 'good' : 'warn'
     }));
+    // Now that planned work is excluded from "Open now", this tile is the only place a running
+    // window is visible — so it says when one is running instead of only counting the bucket.
+    const running = scheduled.filter(isMaintenanceRunning).length;
     wrap.appendChild(statTile({
         label: 'Scheduled maintenance', value: fmtNum(scheduled.length),
-        sub: 'includes upcoming windows'
+        sub: running ? `${fmtNum(running)} running now` : 'includes upcoming windows',
+        hint: 'Planned windows published by the operator. Counted separately from open incidents — '
+            + 'a window running to schedule is planned work, not an outage.'
     }));
     wrap.appendChild(statTile({
         label: 'Networks named', value: fmtNum(new Set(all.flatMap(it => it.chainIds)).size),
