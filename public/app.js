@@ -958,31 +958,21 @@ function eventTimeMs(ev) {
     return Number.isNaN(t) ? null : t;
 }
 function classifyKind(ev) {
-    if (!SCHEDULED_STATUSES.has(ev.status)) return 'incident';
-    // A window the operator has flagged critical/major impact — or urgent — is no longer
-    // planned work going to plan. It is a real incident that happens to have started inside a
-    // maintenance window, which is exactly the case worth chasing, so it is classified as an
-    // incident here rather than left sitting quietly in the scheduled bucket.
-    //
-    // Escalating at CLASSIFICATION time, not in isOpen(): flipping only the open test would
-    // land the same event in both "Open now" and "Scheduled maintenance", which is the
-    // double-count this whole change exists to remove.
-    return isEscalated(ev) ? 'incident' : 'scheduled';
+    if (SCHEDULED_STATUSES.has(ev.status)) return 'scheduled';
+    return 'incident';
 }
-
-// Published impact levels that describe a real problem rather than planned work. Statuspage
-// reserves `maintenance` for a window and `none`/`minor` for the unremarkable, so `critical`
-// or `major` on an event whose status is still maintenance_* is the operator themselves saying
-// the window has gone wrong.
-const ESCALATING_IMPACTS = new Set(['critical', 'major']);
-
-// Reads only operator-published fields — never the model's classification. An LLM that
-// mislabels a window must not be able to manufacture an incident, and one that mislabels an
-// outage must not be able to hide it.
-function isEscalated(ev) {
-    if (ESCALATING_IMPACTS.has(String(ev.impact || '').toLowerCase())) return true;
-    return String(ev.urgency || '').toLowerCase() === 'urgent';
-}
+// No impact/urgency escalation here, deliberately — an earlier attempt at one was wrong twice
+// over. `urgency` grades PLANNED work (standard/urgent/mandatory), and providers bolt "[Urgent]"
+// onto ordinary upgrade titles and add or drop it between updates of the same window, so
+// reading it as "this window has gone wrong" reclassified routine maintenance as an incident
+// and flipped it update to update. `impact` fared no better: the escalation was never gated on
+// the window having started, so a future window with `impact: major` became an open incident
+// marking its chains affected days early.
+//
+// Nothing is lost. A window that genuinely goes wrong gets its status changed off maintenance_*
+// by the operator, and newest-event-wins already flips `kind` to incident; an outage during a
+// window is published as its own entry and is already open on its own merits. Both paths need
+// no heuristic, and neither can be spoofed by a title decoration.
 
 // A status page is one of three kinds: a chain operator, a coin, or a
 // commercial RPC provider. Providers get their own tab because one provider
@@ -1215,11 +1205,16 @@ function enrichmentOf(it) { return incidents.enrichByKey.get(it.key)?.data || nu
 
 // An incident is open when the feed says so. Fall back to the status label only
 // for older cached events that predate the `ongoing` flag.
-// Raw feed statuses that mean the event is over. Tested against the feed's own enum rather
-// than the display label, which is what the fallback below used to do: 'maintenance_completed'
-// closed only by the accident of its label ('Completed') matching a token in the list, while
-// 'maintenance_scheduled' renders as 'Scheduled', matched nothing, and read as OPEN.
-const CLOSED_STATUSES = new Set(['resolved', 'maintenance_completed', 'operational']);
+// Feed statuses that mean an incident is LIVE. An explicit allowlist, and it has to be one:
+// `status` is passed through the feed unvalidated and `unknown` is carried by 178 of 438 live
+// events (see the note in src/services/providerStats.js). A "not in the closed set" test —
+// which is what this was briefly — therefore read 41% of the feed as permanently open,
+// inflating "Open now", holding the hero tile amber, and marking every chain those events named
+// as currently affected via buildOpenIncidentIndex. Unrecognized means unknown, and unknown is
+// not open.
+const OPEN_STATUSES = new Set([
+    'investigating', 'identified', 'monitoring', 'degraded', 'partial_outage', 'major_outage'
+]);
 
 function isOpen(it) {
     // Planned work is never an open incident, however the feed flags it. A maintenance window
@@ -1231,9 +1226,11 @@ function isOpen(it) {
     // planned work: `ongoing: true` on maintenance means "the window is in progress", not
     // "something is wrong".
     if (it.kind === 'scheduled') return false;
+    // §13: the feed's `ongoing` flag is the authoritative "still live" signal where it exists.
     if (it.ongoing != null) return it.ongoing;
-    if (it.rawStatus) return !CLOSED_STATUSES.has(it.rawStatus);
-    // Older cached events predate rawStatus; keep the label comparison for those alone.
+    if (it.rawStatus) return OPEN_STATUSES.has(it.rawStatus);
+    // Older cached events predate rawStatus; keep the label comparison for those alone. An
+    // unrecognized status leaves `it.status` null here, so it closes rather than falling open.
     return Boolean(it.status && !['resolved', 'completed', 'closed'].includes(it.status.toLowerCase()));
 }
 
@@ -1242,8 +1239,14 @@ function isOpen(it) {
 // incident, but "in progress" and "next Tuesday" are not the same thing to a reader.
 function isMaintenanceRunning(it) {
     if (it.kind !== 'scheduled') return false;
-    if (it.rawStatus === 'maintenance_in_progress') return true;
-    return it.ongoing === true && it.rawStatus !== 'maintenance_completed';
+    // BOTH signals must agree, and `ongoing` gets to veto. Reading the status alone — as this
+    // did — claimed a window from three weeks ago was running now, because a provider that
+    // never posts a completion leaves it at maintenance_in_progress forever, and §12 records
+    // that some providers label window entries `maintenance_completed` up front anyway. There
+    // is no clock to check against here: the window's real start and end live in the
+    // `THIS IS A SCHEDULED EVENT` body banner (§12), which the incident model does not carry,
+    // so requiring the feed to still assert `ongoing` is the strongest honest test available.
+    return it.ongoing === true && it.rawStatus === 'maintenance_in_progress';
 }
 
 // Duration, stated for what it actually is:
