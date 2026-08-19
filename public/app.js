@@ -1120,7 +1120,13 @@ function enrichmentStamp(enr, fallbackMs) {
 // Stores the resolved stamp beside the payload — recomputing it from the stored object would
 // reintroduce the same problem for whichever field was missing.
 function applyEnrichment(key, enr, atMs) {
-    // Seeing any classification at all is proof phase two is running, whatever `hello` said
+    // Never store a classification-free payload. The feed can send `enrichment: {}`, or an
+    // object carrying only fields this dashboard does not read, and storing it made
+    // enrichmentOf() truthy for an event with nothing classified about it — which is how the
+    // stat and the card came to disagree in the first place. Enforcing it here means "we have
+    // an enrichment" and "there is a classification" cannot drift apart again.
+    if (!hasClassification(enr)) return false;
+    // Seeing a classification at all is proof phase two is running, whatever `hello` said
     // (or if the socket never sent one because the data came over REST).
     incidents.enrichmentAvailable = true;
     const at = enrichmentStamp(enr, atMs);
@@ -2519,7 +2525,9 @@ function renderIncidentStats() {
     const all = chainIncidents();
     const open = all.filter(isOpen);
     const scheduled = all.filter(it => it.kind === 'scheduled');
-    const enriched = all.filter(it => enrichmentOf(it)).length;
+    // The same predicate the card gates on. Counting mere presence here is what let the strip
+    // claim an event was classified while the card below it said otherwise.
+    const enriched = all.filter(it => hasClassification(enrichmentOf(it))).length;
     clear(wrap);
     wrap.appendChild(statTile({
         label: 'Open now', value: fmtNum(open.length), hero: true,
@@ -2753,8 +2761,11 @@ function incidentCard(it) {
 // shape in this system, not a hypothetical: the server-side reader strips `summary`
 // deliberately to keep it out of the assistant's context window.
 function hasClassification(enr) {
-    return Boolean(enr && (enr.class || enr.severity || enr.summary || enr.lowConfidence
-        || enr.context?.actionRequired));
+    if (!enr) return false;
+    if (enr.class || enr.summary || enr.lowConfidence || enr.context?.actionRequired) return true;
+    // A severity counts only where it says something. An explicit "none" grade carrying
+    // nothing else is the absence of a classification, not a classification of absence.
+    return Boolean(enr.severity) && severityMeta(enr.severity).key !== 'none';
 }
 
 // Producers disagree on scale — some report 0–1, some 0–100. Normalise, then clamp: the bar
@@ -2762,6 +2773,14 @@ function hasClassification(enr) {
 function normalizeConfidence(v) {
     if (!Number.isFinite(v)) return null;
     return Math.min(1, Math.max(0, v > 1 ? v / 100 : v));
+}
+
+// The severity as a head label, for a classification that carries no class. Attributing the
+// side badge to the model is the point — nothing else on the card says the badge is inferred.
+function aiSeverityLabel(enr) {
+    if (!enr.severity) return null;
+    const meta = severityMeta(enr.severity);
+    return meta.key === 'none' ? null : el('span', { class: 'ai-class', text: meta.label });
 }
 
 // Every part is independent, because the feed sends them independently.
@@ -2773,7 +2792,9 @@ function aiBlock(enr) {
         // and nothing else on the card says so.
         enr.class
             ? el('span', { class: 'ai-class', text: String(enr.class).replace(/_/g, ' ') })
-            : enr.severity ? el('span', { class: 'ai-class', text: severityMeta(enr.severity).label }) : null
+            // …but not when that label is "Not classified": a feed that explicitly grades an
+            // event as no-severity would otherwise render the head as "AI · Not classified".
+            : aiSeverityLabel(enr)
     ]);
     // Upstream flags a substantial share of classifications as low-confidence — mostly class
     // `other` — and the server-side reader carries the flag for exactly this reason: printing
