@@ -131,6 +131,11 @@ function el(tag, props = {}, children = []) {
 }
 function byId(id) { return document.getElementById(id); }
 function clear(node) { if (node) node.textContent = ''; }
+// The CSS honours prefers-reduced-motion globally (style.css), but a smooth scroll asked for
+// from JS bypasses that guard entirely — it has to be read here too.
+function prefersReducedMotion() {
+    return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+}
 // One place decides "is this a phone-sized viewport", matched to the CSS
 // breakpoint so JS and CSS never disagree about the layout in force.
 function isNarrow() { return window.matchMedia('(max-width: 760px)').matches; }
@@ -2907,6 +2912,19 @@ function providerMatchesSearch(it, q) {
 
 function initProviderControls() { /* chips are generated in renderProviderFilter */ }
 
+// WHY the list is empty, which is three different states. A provider selected from the
+// performance table can legitimately have nothing here — that table is served by the API over
+// a 30-day window while this list holds only what the browser's own feed has retained — and
+// saying so is the difference between "two sources disagree" and "this page is broken".
+function providerEmptyMessage() {
+    if (!providerIncidents().length) return 'Waiting for the live status feed…';
+    if (providers.filter !== 'all' && !providers.dayFilter && !searchQuery) {
+        return `No events retained for ${providerLabel(providers.filter)} in this live feed — `
+            + 'the performance table above measures a longer window than the feed keeps.';
+    }
+    return 'No events match these filters.';
+}
+
 function renderProviders() {
     renderProviderStats();
     renderProviderBoard();
@@ -2998,7 +3016,8 @@ function renderProviderBoard() {
     }))]));
 
     const body = el('tbody');
-    for (const p of sortProviders(comparable)) body.appendChild(providerRow(p, columns));
+    const retainedMap = retainedByProvider();
+    for (const p of sortProviders(comparable)) body.appendChild(providerRow(p, columns, retainedMap));
     if (partial.length) {
         // Below a divider rather than interleaved: a page that publishes nothing must not be
         // able to top a ranking built from what pages publish.
@@ -3011,7 +3030,7 @@ function renderProviderBoard() {
                 })
             ])
         ]));
-        for (const p of sortProviders(partial)) body.appendChild(providerRow(p, columns));
+        for (const p of sortProviders(partial)) body.appendChild(providerRow(p, columns, retainedMap));
     }
     table.appendChild(body);
     host.appendChild(el('div', { class: 'table-wrap' }, [table]));
@@ -3085,7 +3104,7 @@ function sortProviders(list) {
     });
 }
 
-function providerRow(p, columns) {
+function providerRow(p, columns, retainedMap) {
     const a = p.availability || {};
     const pct = a.last30d?.percent;
     const lost = a.last30d?.chainHoursLost;
@@ -3123,9 +3142,15 @@ function providerRow(p, columns) {
             })
         ], { num: true, cls: 'pb-avail' });
 
-    return el('tr', { class: `pb-row${p.ongoingNow > 0 ? ' pb-ongoing' : ''}` }, [
+    const retained = retainedMap.get(p.id) || NO_RETAINED;
+    const selected = providers.filter === p.id;
+
+    return el('tr', {
+        class: ['pb-row', p.ongoingNow > 0 ? 'pb-ongoing' : '', selected ? 'pb-selected' : '']
+            .filter(Boolean).join(' ')
+    }, [
         td('Provider', [
-            el('span', { class: 'pb-name-main', text: p.name || p.id }),
+            providerNameControl(p, retained, selected),
             p.ongoingNow > 0 ? el('span', { class: 'pill pill-ongoing sm', text: `${p.ongoingNow} ongoing` }) : null,
             // Red is reserved for real incidents. A window running to schedule is planned
             // work and gets a neutral chip, not an alarm.
@@ -3157,6 +3182,87 @@ function providerRow(p, columns) {
                 : el('span', { class: 'pb-sub', text: '—' })
         ], { num: true, cls: 'pb-trend', empty: !p.dailySeries?.length })
     ]);
+}
+
+// The provider name doubles as the control that filters the event list at the bottom of the
+// view — the table answers "who is worst", and the obvious next question is "at what", which
+// until now meant scrolling past the table and hunting the right chip.
+//
+// It is a control only when it has something to reveal. The board is served by the API's
+// /providers/stats over a 30-day window, while the list below holds whatever THIS browser's
+// feed connection has retained — two independent paths, so a provider can rank here with
+// nothing to show there. Offering a click that lands on an empty list would read as a broken
+// table, so those rows stay plain text.
+function providerNameControl(p, retained, selected) {
+    const label = p.name || p.id;
+    if (!retained.total) {
+        return el('span', {
+            class: 'pb-name-main',
+            title: 'No events from this provider are retained in the live feed below.',
+            text: label
+        });
+    }
+    const openPart = retained.open ? `, ${retained.open} still open` : '';
+    return el('button', {
+        class: 'pb-name-btn', type: 'button',
+        'aria-pressed': String(selected),
+        title: selected
+            ? 'Showing this provider’s events below — activate again to show every provider.'
+            : `Show the ${retained.total} retained event${retained.total === 1 ? '' : 's'} from ${label}${openPart}.`,
+        onclick: () => focusProviderIncidents(p.id)
+    }, [el('span', { class: 'pb-name-main', text: label })]);
+}
+
+// What the list below actually holds per provider, which is not what the board's own
+// incidents30d counts — see providerNameControl. Built once per board render rather than
+// per row: the board repaints on every feed frame, and a scan per row made that ten passes
+// over the whole retained set for a table of ten.
+function retainedByProvider() {
+    const m = new Map();
+    for (const it of providerIncidents()) {
+        let e = m.get(it.spId);
+        if (!e) m.set(it.spId, e = { total: 0, open: 0 });
+        e.total++;
+        if (isOpen(it)) e.open++;
+    }
+    return m;
+}
+
+const NO_RETAINED = { total: 0, open: 0 };
+
+// One place turns a provider id into something readable — the feed's name where an event
+// carries it, the board's where only the API knows the provider, and the bare id only if
+// neither source has a name to offer.
+function providerLabel(id) {
+    return providerIncidents().find(it => it.spId === id)?.spName
+        || providerBoard.data?.providers?.find(p => p.id === id)?.name
+        || id;
+}
+
+// Selecting from the table drives the SAME state as the chip row below, so the chips, the
+// histogram, the calendar and the count all follow one selection instead of two competing
+// ones. Activating the selected provider again clears it, matching how a day cell toggles.
+function focusProviderIncidents(id) {
+    providers.filter = providers.filter === id ? 'all' : id;
+    // A day picked earlier in the calendar would survive the jump and hide most of what the
+    // click just promised, so the older, narrower filter yields to the newer one.
+    providers.dayFilter = null;
+    providers.shown = null;
+    renderProviders();
+
+    // Scroll to the toolbar rather than the list: it carries the chips and the count, which
+    // are what say WHICH filter is now active. Landing on the bare list would look like the
+    // feed had changed on its own.
+    const anchor = byId('providerListTop') || byId('providersList');
+    if (!anchor) return;
+    anchor.scrollIntoView({ block: 'start', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+    // Focus follows the scroll, or a keyboard user is moved away from the row they just
+    // activated with focus left behind it. -1 keeps the list out of the tab order otherwise.
+    const list = byId('providersList');
+    if (list) {
+        list.setAttribute('tabindex', '-1');
+        list.focus({ preventScroll: true });
+    }
 }
 
 // The age of the oldest still-open incident. A provider sitting on a 12-day-old unresolved
@@ -3327,6 +3433,10 @@ function renderProviderList() {
     const countEl = byId('providersCount');
     if (countEl) {
         const bits = [`${fmtNum(items.length)} event${items.length === 1 ? '' : 's'}`];
+        // Name the provider: the selection can now be made from the performance table, far
+        // enough above the chips that the count is the nearest thing confirming what the
+        // click actually did.
+        if (providers.filter !== 'all') bits.push(`from ${providerLabel(providers.filter)}`);
         if (providers.dayFilter) bits.push(`on ${providers.dayFilter}`);
         if (searchQuery) bits.push(`matching “${searchQuery}”`);
         countEl.textContent = bits.join(' · ');
@@ -3334,10 +3444,7 @@ function renderProviderList() {
 
     clear(list);
     if (!items.length) {
-        list.appendChild(el('div', {
-            class: 'feed-empty',
-            text: providerIncidents().length ? 'No events match these filters.' : 'Waiting for the live status feed…'
-        }));
+        list.appendChild(el('div', { class: 'feed-empty', text: providerEmptyMessage() }));
         return;
     }
     const limit = providers.shown ?? feedPageSize();
