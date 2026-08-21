@@ -52,7 +52,7 @@
     "ws": "^8.21.3"
   },
   "devDependencies": {
-    "@fast-check/vitest": "^0.2.4",
+    "@fast-check/vitest": "^0.4.1",
     "@vitest/coverage-v8": "^4.1.9",
     "eslint": "^10.3.0",
     "fast-check": "^4.5.3",
