@@ -2591,11 +2591,18 @@ function renderIncidentStats() {
     // The same predicate the card gates on. Counting mere presence here is what let the strip
     // claim an event was classified while the card below it said otherwise.
     const enriched = all.filter(it => hasClassification(enrichmentOf(it))).length;
+    // The overview's "Open incidents" counts chain-side AND provider-side; this feed shows
+    // only the first. Without naming the remainder here, a reader who saw 9 on the overview
+    // lands on 3 with no bridge — both numbers are right, and they look contradictory.
+    const providerOpen = incidents.items.filter(it => it.isProvider && isOpen(it)).length;
     clear(wrap);
     wrap.appendChild(statTile({
         label: 'Open now', value: fmtNum(open.length), hero: true,
-        sub: `of ${fmtNum(all.length)} retained events`,
-        tone: open.length === 0 ? 'good' : 'warn'
+        sub: providerOpen
+            ? `chain-side · ${fmtNum(providerOpen)} more provider-side in the Providers feed`
+            : `of ${fmtNum(all.length)} retained events`,
+        tone: open.length === 0 ? 'good' : 'warn',
+        hint: 'Chain and coin status pages only. The overview\u2019s "Open incidents" adds RPC-provider incidents on top of this number \u2014 those are listed in the Providers feed, one sub-tab over.'
     }));
     // Now that planned work is excluded from "Open now", this tile is the only place a running
     // window is visible — so it says when one is running instead of only counting the bucket.
@@ -3416,10 +3423,14 @@ function renderProviderStats() {
     const open = all.filter(isOpen);
     const affected = new Set(open.flatMap(it => it.chainIds));
     clear(wrap);
+    const chainOpen = incidents.items.filter(it => !it.isProvider && isOpen(it)).length;
     wrap.appendChild(statTile({
         label: 'Open provider incidents', value: fmtNum(open.length), hero: true,
-        sub: `of ${fmtNum(all.length)} retained events`,
-        tone: open.length === 0 ? 'good' : 'warn'
+        sub: chainOpen
+            ? `provider-side · ${fmtNum(chainOpen)} more chain-side in the Incidents feed`
+            : `of ${fmtNum(all.length)} retained events`,
+        tone: open.length === 0 ? 'good' : 'warn',
+        hint: 'RPC-provider status pages only. The overview\u2019s "Open incidents" is this number plus the chain-side count in the Incidents feed.'
     }));
     wrap.appendChild(statTile({
         label: 'Providers tracked', value: fmtNum(new Set(all.map(it => it.spId)).size),
