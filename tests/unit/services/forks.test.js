@@ -25,7 +25,7 @@ describe('getForks', () => {
 
   it('groups a fork across sources and reports where it came from', async () => {
     getLiveEvents.mockResolvedValue([
-      event('a', { fork: fork({ name: 'Protocol 28', activationAt: '2026-09-16T17:00:00Z' }), affectedChains: ['Stellar Mainnet'], page: 'xlm' }),
+      event('a', { fork: fork({ name: 'Protocol 28', activationAt: '2099-09-16T17:00:00Z' }), affectedChains: ['Stellar Mainnet'], page: 'xlm' }),
       event('b', { fork: fork({ name: 'Protocol 28' }), affectedChains: ['Stellar Mainnet'], page: 'quicknode' })
     ]);
 
@@ -39,7 +39,7 @@ describe('getForks', () => {
   it('does not call the explorer when every activation is already stated', async () => {
     // The common case must cost no network round trip.
     getLiveEvents.mockResolvedValue([
-      event('a', { fork: fork({ name: 'Rex6', activationAt: '2026-09-01T00:00:00Z' }), affectedChains: ['MegaETH Mainnet'] })
+      event('a', { fork: fork({ name: 'Rex6', activationAt: '2099-09-01T00:00:00Z' }), affectedChains: ['MegaETH Mainnet'] })
     ]);
 
     await getForks();
@@ -78,7 +78,7 @@ describe('getForks', () => {
 
   it('scheduledOnly drops forks with no known date — what a calendar needs', async () => {
     getLiveEvents.mockResolvedValue([
-      event('dated', { fork: fork({ name: 'Dated', activationAt: '2026-09-01T00:00:00Z' }), affectedChains: ['A'] }),
+      event('dated', { fork: fork({ name: 'Dated', activationAt: '2099-09-01T00:00:00Z' }), affectedChains: ['A'] }),
       event('undated', { fork: fork({ name: 'Undated' }), affectedChains: ['B'] })
     ]);
 
@@ -93,8 +93,8 @@ describe('getForks', () => {
   it('counts phases over everything matched, not just the page shown', async () => {
     // A caller asking "how many upcoming forks" must not have to add up a truncated list.
     getLiveEvents.mockResolvedValue([
-      event('1', { fork: fork({ name: 'a', activationAt: '2026-09-01T00:00:00Z' }), affectedChains: ['x'] }),
-      event('2', { fork: fork({ name: 'b', activationAt: '2026-09-02T00:00:00Z' }), affectedChains: ['y'] }),
+      event('1', { fork: fork({ name: 'a', activationAt: '2099-09-01T00:00:00Z' }), affectedChains: ['x'] }),
+      event('2', { fork: fork({ name: 'b', activationAt: '2099-09-02T00:00:00Z' }), affectedChains: ['y'] }),
       event('3', { fork: fork({ name: 'c', activationAt: '2020-01-01T00:00:00Z' }), affectedChains: ['z'] })
     ]);
 
@@ -126,7 +126,7 @@ describe('getForks', () => {
 
   it('filters by chain and by phase', async () => {
     getLiveEvents.mockResolvedValue([
-      event('1', { fork: fork({ name: 'a', activationAt: '2026-09-01T00:00:00Z' }), chains: [1] }),
+      event('1', { fork: fork({ name: 'a', activationAt: '2099-09-01T00:00:00Z' }), chains: [1] }),
       event('2', { fork: fork({ name: 'b', activationAt: '2020-01-01T00:00:00Z' }), chains: [8453] })
     ]);
 
@@ -139,7 +139,7 @@ describe('getForks', () => {
     // and the assistant — which truncates tool results at 8000 chars — would have seen two
     // forks under a header reading count: 50, truncated: false.
     getLiveEvents.mockResolvedValue([
-      event('a', { fork: fork({ name: 'Rex6', activationAt: '2026-09-01T00:00:00Z' }), affectedChains: ['MegaETH Mainnet'] })
+      event('a', { fork: fork({ name: 'Rex6', activationAt: '2099-09-01T00:00:00Z' }), affectedChains: ['MegaETH Mainnet'] })
     ]);
 
     const out = await getForks();
@@ -155,8 +155,8 @@ describe('getForks', () => {
     // `chain:8453` and `unscoped` are grouping keys. The tool description tells the model each
     // fork "carries network", so emitting those put an internal identifier in an answer.
     getLiveEvents.mockResolvedValue([
-      event('a', { fork: fork({ name: 'Rex6', activationAt: '2026-09-01T00:00:00Z' }), chains: [8453] }),
-      event('b', { fork: fork({ name: 'Other', activationAt: '2026-09-02T00:00:00Z' }) })
+      event('a', { fork: fork({ name: 'Rex6', activationAt: '2099-09-01T00:00:00Z' }), chains: [8453] }),
+      event('b', { fork: fork({ name: 'Other', activationAt: '2099-09-02T00:00:00Z' }) })
     ]);
 
     const out = await getForks();
@@ -180,7 +180,7 @@ describe('getForks', () => {
       id: 'op', title: 'OP Stack upgrade', publishedAt: '2026-08-14T00:00:00Z',
       updatedAt: '2026-08-14T00:00:00Z', statusPage: { id: 'quicknode' }, chains: [],
       enrichment: {
-        fork: fork({ name: 'Isthmus', activationAt: '2026-09-01T00:00:00Z' }),
+        fork: fork({ name: 'Isthmus', activationAt: '2099-09-01T00:00:00Z' }),
         affectedChains: ['OP Mainnet'],
         chains: [10, 8453]
       }

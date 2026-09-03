@@ -1,0 +1,6 @@
+version: 1
+versionFile: package.json
+images:
+  - name: chains-api
+    context: .
+    dockerfile: Dockerfile
