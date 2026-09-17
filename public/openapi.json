@@ -81,6 +81,18 @@
         }
       }
     },
+    "/validate/incidents": {
+      "get": {
+        "tags": [
+          "Validation"
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
     "/keywords": {
       "get": {
         "tags": [

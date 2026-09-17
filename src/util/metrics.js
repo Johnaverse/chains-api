@@ -68,7 +68,7 @@ const METRIC_HELP = {
  * Emit Prometheus exposition format. Gauges are computed on the fly from
  * the live cache to avoid drift.
  */
-export function renderMetrics({ cache, rpcStatus, l2beatStatus, validationSummary }) {
+export function renderMetrics({ cache, rpcStatus, l2beatStatus, validationSummary, incidentSummary }) {
   const lines = [];
 
   formatCounters(lines);
@@ -112,6 +112,16 @@ export function renderMetrics({ cache, rpcStatus, l2beatStatus, validationSummar
     lines.push('# TYPE chains_api_validation_errors gauge');
     for (const [ruleKey, count] of Object.entries(validationSummary)) {
       lines.push(`chains_api_validation_errors{rule="${escapeLabelValue(ruleKey)}"} ${count}`);
+    }
+  }
+
+  // Present only once /validate/incidents has run: this endpoint never triggers a feed fetch
+  // of its own, so a scrape cannot be taken down by a third-party outage.
+  if (incidentSummary) {
+    lines.push('# HELP chains_api_incident_sentinel_findings Incident-feed contradictions by rule');
+    lines.push('# TYPE chains_api_incident_sentinel_findings gauge');
+    for (const [ruleKey, count] of Object.entries(incidentSummary)) {
+      lines.push(`chains_api_incident_sentinel_findings{rule="${escapeLabelValue(ruleKey)}"} ${count}`);
     }
   }
 

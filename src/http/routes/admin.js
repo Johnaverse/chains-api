@@ -12,6 +12,7 @@ import { getAllKeywords } from '../../domain/keywords.js';
 import { loadData } from '../../services/loader.js';
 import { startRpcHealthCheck, getRpcMonitoringStatus } from '../../services/rpcHealth.js';
 import { validateChainData } from '../../services/validation.js';
+import { runIncidentSentinel } from '../../services/incidentSentinel.js';
 import { getL2BeatRefreshStatus } from '../../services/l2beatRefresher.js';
 import {
   RELOAD_RATE_LIMIT_MAX,
@@ -219,6 +220,18 @@ export async function adminRoutes(fastify) {
       return sendError(reply, 503, validationResults.error);
     }
     return validationResults;
+  });
+
+  // Separate from /validate rather than folded into it: that one is synchronous over the
+  // in-memory registry, while this reads the live incident feed behind its own async cache.
+  // Merging them would make a registry check fail whenever a third-party feed was down.
+  fastify.get('/validate/incidents', async (_request, reply) => {
+    try {
+      return await runIncidentSentinel();
+    } catch (error) {
+      fastify.log.error(error, 'Incident sentinel failed');
+      return sendError(reply, 503, 'Live incident feed unavailable');
+    }
   });
 
   fastify.get('/keywords', async () => {
