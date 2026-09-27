@@ -20,6 +20,12 @@
     <!-- Inline SVG favicon: avoids a 404 round-trip and needs no asset. -->
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='4' fill='%231d1d21'/%3E%3Cpath d='M11 21V11h3.2v3.4h3.6V11H21v10h-3.2v-3.6h-3.6V21z' fill='white'/%3E%3C/svg%3E">
 
+    <!-- Installable as a PWA. The manifest also asks supporting platforms to open sign-in
+         links inside the installed app rather than in the browser (handle_links). -->
+    <link rel="manifest" href="manifest.webmanifest">
+    <meta name="theme-color" content="#1d1d21">
+    <link rel="apple-touch-icon" href="icon-180.png">
+
     <link rel="stylesheet" href="fonts/inter.css">
     <link rel="stylesheet" href="style.css">
     <!-- Sets the theme before first paint so a saved light preference never flashes the
@@ -63,6 +69,8 @@
         </div>
 
         <div class="appbar-tools">
+            <!-- Shown by initAccountLink() only when the API has accounts turned on. -->
+            <a id="accountLink" class="appbar-account" href="login.html" hidden>Sign in</a>
             <button id="themeToggle" class="icon-btn" type="button" aria-label="Switch colour theme"
                 title="Switch between light and dark">
                 <svg class="theme-icon-dark" width="15" height="15" viewBox="0 0 24 24" fill="none"

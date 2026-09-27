@@ -51,12 +51,43 @@ import { refresherRoute } from './routes/refresher.js';
 import { summaryRoute } from './routes/summary.js';
 import { rootRoute } from './routes/root.js';
 import { assistantRoutes } from './routes/assistant.js';
+import { authRoutes } from './routes/auth.js';
+import { getAuth, authConfigProblems } from '../services/auth/index.js';
 import { prefetchAllPrices, startPriceRefresh } from '../../priceService.js';
 import { logger } from '../util/logger.js';
 
 function resolveCorsOrigin(value) {
   if (value === '*') return true;
   return value.split(',').map(s => s.trim());
+}
+
+/**
+ * Per-request CORS. The API's policy is unchanged for everyone — `credentials: false`, origin
+ * from CORS_ORIGIN — with two exceptions that exist only when accounts are configured:
+ *
+ *   The dashboard origins (AUTH_APP_URL and AUTH_ALLOWED_ORIGINS) get CREDENTIALED CORS, so
+ *   the browser sends the session cookie on the dashboard's cross-origin calls. The origin is
+ *   echoed back exactly — never reflected blindly — because CORS_ORIGIN='*' resolves to
+ *   "reflect any origin", and reflecting with credentials would let every site on the web
+ *   read a signed-in user's responses.
+ *
+ *   /auth/* gets no CORS headers for any other origin, so a foreign page cannot even read the
+ *   answer. (Its POSTs are refused outright by the Origin check in the auth routes.)
+ *
+ * @param {string} corsOrigin CORS_ORIGIN
+ * @param {() => object} authContext the auth context, read lazily per request
+ */
+export function corsDelegator(corsOrigin, authContext = getAuth) {
+  const base = { origin: resolveCorsOrigin(corsOrigin), credentials: false };
+  return (req, callback) => {
+    const auth = authContext();
+    if (!auth.enabled) return callback(null, base);
+    const origin = req.headers.origin;
+    if (origin && auth.origins.has(origin)) return callback(null, { origin, credentials: true });
+    const path = (req.url ?? '').split('?')[0];
+    if (path.startsWith('/auth/')) return callback(null, { origin: false });
+    return callback(null, base);
+  };
 }
 
 /**
@@ -215,10 +246,7 @@ export async function buildApp(options = {}) {
     transform: openapiTransform
   });
 
-  await fastify.register(cors, {
-    origin: resolveCorsOrigin(CORS_ORIGIN),
-    credentials: false
-  });
+  await fastify.register(cors, { delegator: corsDelegator(CORS_ORIGIN) });
 
   // Origin-side response compression. Multi-MB JSON payloads (/export,
   // /chains, /summary) shrink ~85% under gzip/brotli. A CDN may compress at
@@ -323,6 +351,8 @@ export async function buildApp(options = {}) {
   await fastify.register(refresherRoute);
   await fastify.register(summaryRoute);
   await fastify.register(assistantRoutes);
+  await fastify.register(authRoutes);
+  for (const problem of authConfigProblems()) logger.warn(problem);
   await fastify.register(rootRoute);
 
   // Interactive docs at /docs and the raw machine-readable spec at /openapi.json.

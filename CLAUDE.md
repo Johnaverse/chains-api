@@ -26,6 +26,14 @@ Each is consumed on **two independent paths**, which is easy to miss:
 
 **Assistant (optional):** `POST /assistant/chat` runs an LLM tool-use loop (`src/services/assistant.js`) over the same tool registry, against any OpenAI-compatible server (Ollama). Disabled unless `ASSISTANT_LLM_URL` is set; an optional fallback provider (`ASSISTANT_FALLBACK_LLM_URL`) takes over mid-run when the primary fails. The dashboard consumes it via a floating chat overlay (corner button, available on every view); the harness disambiguates mainnet/testnet and live-vs-static questions, asking the user back when unclear.
 
+**Accounts (optional):** email sign-in in the style of Claude's, an optional salted password, and password reset (`src/services/auth/`, `src/http/routes/auth.js`, `public/login.html`). **Off by default** — no `/auth` route is registered until `AUTH_ALLOWED_EMAILS`, `AUTH_APP_URL` and `SMTP_HOST` are all set, and a half-configured set logs a warning naming what is missing. When on, `GET /feedback` (owner review) requires a session; submitting feedback stays anonymous.
+- **Flow:** email (+ password if the account has one) → we email a magic link **and** a 6-digit code → either finishes. Every sign-in therefore proves inbox possession, and a password account needs both factors. The code is bound to the `attemptId` only the initiating window holds.
+- **PWA:** an installed app is its own browser context and iOS opens tapped links in Safari, so the code is a first-class path (it rides in the email subject, `autocomplete="one-time-code"`). Tokens travel in the URL **fragment** and are stripped on load; nothing is spent until a button press (link prefetchers can't burn it). The manifest sets `handle_links: preferred` + `navigate-existing`, which is why `login.js` also listens for `hashchange` — a link into an already-open page is a same-document navigation with no reload.
+- **No enumeration:** every email-only request gets the same 202 body; mail is dispatched after the response so latency can't tell cases apart; failed codes/links/passwords share one message; a password account asked for a code gets a private "use your password" email instead.
+- **Passwords:** scrypt (Node built-in, memory-hard), per-password random salt, PHC string with its cost params (rehash-on-login when raised), NFKC-normalized, 12–256 chars, dummy derivation when there's no hash so timing is flat.
+- **Sessions:** HttpOnly / SameSite=Lax / Secure cookie; tokens stored only as SHA-256 digests in `AUTH_STORE_FILE` (atomic writes, mode 0600, refuses to start on a corrupt file). CSRF = SameSite + an Origin check on every auth POST. CORS is credentialed **only** for the dashboard origins (`corsDelegator` in `src/http/app.js`) — `CORS_ORIGIN='*'` resolves to *reflect any origin*, so never enable credentials globally.
+- **Deploy constraints:** single process (accounts in a file, codes in memory) — run one replica. Dashboard and API must share a registrable domain for the Lax cookie to be sent.
+
 ## Quick Reference
 
 ```bash
@@ -170,6 +178,15 @@ Copy `.env.example` to `.env` for local configuration. Key variables:
 | `ASSISTANT_FALLBACK_LLM_URL` | (empty) | Optional backup LLM server; runs switch to it (sticky) when the primary fails |
 | `LIVE_INCIDENTS_URL` | `https://chains-status-news.johnaverse.cc` | Live incident feed used by the `get_live_incidents` tool |
 | `FORUM_NEWS_URL` | `https://chains-forum-news.johnaverse.cc` | Forum/governance news feed used by the `get_forum_news` tool |
+| `AUTH_ALLOWED_EMAILS` | (empty) | Who may sign in: addresses, or `@domain` for a whole domain. One of three switches that turn accounts on |
+| `AUTH_APP_URL` | (empty) | Dashboard base URL that sign-in/reset links open (`<url>login.html#…`); its origin gets credentialed CORS |
+| `AUTH_ALLOWED_ORIGINS` | (empty) | Extra dashboard origins granted credentialed CORS |
+| `AUTH_STORE_FILE` | `.cache/auth.json` | Accounts and hashed session tokens (atomic, mode 0600) |
+| `AUTH_SESSION_TTL_DAYS` | `30` | Session lifetime |
+| `AUTH_COOKIE_SECURE` | `true` | `false` only for plain-http local development |
+| `AUTH_RATE_LIMIT_MAX` | `10` | Per-IP budget on sign-in, code and reset endpoints |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` | (empty) / `587` / `false` | Outbound mail. STARTTLS is required on non-TLS ports (loopback exempt, for Mailpit) |
+| `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | (empty) / (empty) / `Chains <no-reply@localhost>` | SMTP credentials (never logged) and the From header |
 
 See `config.js` and `.env.example` for the full list.
 
@@ -242,6 +259,14 @@ Services: `chains-api` (port 3000) and `chains-api-mcp` (port 3001). Both have h
 | GET | `/docs` | Interactive API reference (Swagger UI) |
 | GET | `/openapi.json` | OpenAPI 3 specification (machine-readable) |
 | POST | `/reload` | Reload all data sources |
+| POST | `/auth/login/start` | Start signing in: emails a magic link + 6-digit code (always 202 for email-only requests) |
+| POST | `/auth/login/verify` | Finish with the code (`attemptId` + `code`); sets the session cookie |
+| POST | `/auth/login/link` | Finish with the magic-link token; signs in the calling browser |
+| GET | `/auth/session` | Who is signed in (always 200) |
+| POST | `/auth/logout` | Sign out this browser |
+| POST | `/auth/password` | Set or change the password (signs out other sessions) |
+| POST | `/auth/password/reset/start` | Email a reset link + code (always 202) |
+| POST | `/auth/password/reset/complete` | New password via code or link; revokes all sessions, signs in |
 
 ## Common Tasks
 
