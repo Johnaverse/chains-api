@@ -68,7 +68,7 @@ const METRIC_HELP = {
  * Emit Prometheus exposition format. Gauges are computed on the fly from
  * the live cache to avoid drift.
  */
-export function renderMetrics({ cache, rpcStatus, l2beatStatus, validationSummary }) {
+export function renderMetrics({ cache, rpcStatus, l2beatStatus, validationSummary, incidentSummary }) {
   const lines = [];
 
   formatCounters(lines);
@@ -112,6 +112,18 @@ export function renderMetrics({ cache, rpcStatus, l2beatStatus, validationSummar
     lines.push('# TYPE chains_api_validation_errors gauge');
     for (const [ruleKey, count] of Object.entries(validationSummary)) {
       lines.push(`chains_api_validation_errors{rule="${escapeLabelValue(ruleKey)}"} ${count}`);
+    }
+  }
+
+  // "observations", not "contradictions": the series carries A1, which the sentinel defines as
+  // a grounding measurement and deliberately keeps out of its own findings total. Labelling it
+  // a contradiction would have a healthy feed that attributes chains well look broken — and
+  // would be the exact kind of internal disagreement this sentinel exists to report.
+  if (incidentSummary) {
+    lines.push('# HELP chains_api_incident_sentinel_observations Incident-feed sentinel results by rule; S rules are contradictions, A rules are grounding measurements');
+    lines.push('# TYPE chains_api_incident_sentinel_observations gauge');
+    for (const [ruleKey, count] of Object.entries(incidentSummary)) {
+      lines.push(`chains_api_incident_sentinel_observations{rule="${escapeLabelValue(ruleKey)}"} ${count}`);
     }
   }
 

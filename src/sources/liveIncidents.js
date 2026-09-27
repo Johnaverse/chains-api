@@ -27,8 +27,29 @@ const FEED_FETCH_LIMIT = 500;
 // time, and dedup would replace it with the newest update's).
 let cache = { fetchedAt: 0, incidents: null, events: null };
 
+// A refresh already in flight. Without this, every caller arriving while the TTL is expired
+// starts its own upstream fetch — the MCP tools, the assistant and any route share this cache,
+// so a burst fanned out one-to-one onto a third-party feed. They now await the same promise,
+// which bounds the feed to one fetch per TTL no matter how many callers arrive at once.
+let pendingLoad = null;
+
 export function _resetLiveIncidentsCacheForTests() {
   cache = { fetchedAt: 0, incidents: null, events: null };
+  pendingLoad = null;
+}
+
+/**
+ * The cached feed WITHOUT triggering a fetch, or null when nothing is cached yet.
+ *
+ * Exists so a reader can be honest about staleness instead of amplifying: contract §10 treats
+ * an unauthenticated endpoint that can reach upstream as a fan-out vector, so a surface that
+ * only wants to describe what we already hold must be able to ask for exactly that.
+ *
+ * @returns {{events: object[], fetchedAt: string}|null}
+ */
+export function peekLiveEvents() {
+  if (!cache.events) return null;
+  return { events: cache.events, fetchedAt: new Date(cache.fetchedAt).toISOString() };
 }
 
 /**
@@ -102,6 +123,14 @@ async function loadIncidents() {
   if (cache.incidents && Date.now() - cache.fetchedAt < LIVE_INCIDENTS_CACHE_TTL_MS) {
     return cache.incidents;
   }
+  // Join the refresh already running rather than starting a second one. Cleared in `finally`
+  // so a failed fetch does not pin every later caller to the same rejection.
+  if (pendingLoad) return pendingLoad;
+  pendingLoad = fetchIncidents().finally(() => { pendingLoad = null; });
+  return pendingLoad;
+}
+
+async function fetchIncidents() {
   try {
     const response = await proxyFetch(`${LIVE_INCIDENTS_URL}/events?limit=${FEED_FETCH_LIMIT}`, {
       headers: { accept: 'application/json' },

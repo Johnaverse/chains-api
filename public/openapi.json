@@ -81,6 +81,37 @@
         }
       }
     },
+    "/validate/incidents": {
+      "get": {
+        "tags": [
+          "Validation"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "in": "query",
+            "name": "refresh",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "query",
+            "name": "token",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
     "/keywords": {
       "get": {
         "tags": [
