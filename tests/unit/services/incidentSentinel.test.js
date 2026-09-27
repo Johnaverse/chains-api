@@ -2,14 +2,16 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   buildIncidentSentinel,
   runIncidentSentinel,
+  inspectCachedIncidents,
   getLastIncidentSentinelSummary,
   _resetIncidentSentinelForTests
 } from '../../../src/services/incidentSentinel.js';
-import { getLiveEvents, getLiveEventsFetchedAt } from '../../../src/sources/liveIncidents.js';
+import { getLiveEvents, getLiveEventsFetchedAt, peekLiveEvents } from '../../../src/sources/liveIncidents.js';
 
 vi.mock('../../../src/sources/liveIncidents.js', () => ({
   getLiveEvents: vi.fn(),
-  getLiveEventsFetchedAt: vi.fn()
+  getLiveEventsFetchedAt: vi.fn(),
+  peekLiveEvents: vi.fn()
 }));
 
 /** A normalized feed event, shaped like src/sources/liveIncidents.js emits. */
@@ -66,9 +68,22 @@ describe('incidentSentinel', () => {
     it('counts an absent status as absent, not as unrecognized', () => {
       // §14: "unknown is null, never a stand-in" cuts both ways — a null the feed is entitled
       // to send is not the same finding as a value nobody recognizes.
-      const report = buildIncidentSentinel([ev({ status: null })]);
-      expect(report.rules.s1_unrecognized_status.count).toBe(0);
-      expect(report.coverage.statusAbsent).toBe(1);
+      for (const status of [null, undefined]) {
+        const report = buildIncidentSentinel([ev({ status })]);
+        expect(report.rules.s1_unrecognized_status.count).toBe(0);
+        expect(report.coverage.statusAbsent).toBe(1);
+      }
+    });
+
+    it('reports a present-but-malformed status instead of hiding it in the absent count', () => {
+      // The feed passes `status` through unvalidated, so a non-string is exactly the shape S1
+      // exists to catch. Treating every non-string as "absent" gave this rule a blind spot in
+      // the one direction it was written to cover.
+      for (const status of [42, true, { code: 'x' }, []]) {
+        const report = buildIncidentSentinel([ev({ status })]);
+        expect(report.rules.s1_unrecognized_status.count).toBe(1);
+        expect(report.coverage.statusAbsent).toBe(0);
+      }
     });
   });
 
@@ -226,6 +241,38 @@ describe('incidentSentinel', () => {
     it('lets a feed failure propagate so the route can answer 503', async () => {
       getLiveEvents.mockRejectedValue(new Error('feed down'));
       await expect(runIncidentSentinel()).rejects.toThrow('feed down');
+    });
+  });
+
+  describe('inspectCachedIncidents — the non-amplifying path', () => {
+    it('reports over the cache without reaching the feed', () => {
+      // Contract §10: a report about data we already hold must not be able to trigger an
+      // upstream fetch, or the open route becomes a fan-out vector.
+      peekLiveEvents.mockReturnValue({
+        events: [ev({ status: 'unknown' })],
+        fetchedAt: '2026-09-27T09:00:00.000Z'
+      });
+
+      const report = inspectCachedIncidents();
+      expect(report.fetchedAt).toBe('2026-09-27T09:00:00.000Z');
+      expect(report.summary.s1_unrecognized_status).toBe(1);
+      expect(getLiveEvents).not.toHaveBeenCalled();
+    });
+
+    it('returns null when nothing is cached, so the route can say so', () => {
+      peekLiveEvents.mockReturnValue(null);
+      expect(inspectCachedIncidents()).toBeNull();
+      expect(getLiveEvents).not.toHaveBeenCalled();
+    });
+
+    it('publishes its summary for /metrics just as the refreshing path does', () => {
+      peekLiveEvents.mockReturnValue({
+        events: [ev({ status: 'resolved', ongoing: true })],
+        fetchedAt: '2026-09-27T09:00:00.000Z'
+      });
+      expect(getLastIncidentSentinelSummary()).toBeNull();
+      inspectCachedIncidents();
+      expect(getLastIncidentSentinelSummary().s4_ongoing_terminal_status).toBe(1);
     });
   });
 });

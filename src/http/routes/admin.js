@@ -12,10 +12,12 @@ import { getAllKeywords } from '../../domain/keywords.js';
 import { loadData } from '../../services/loader.js';
 import { startRpcHealthCheck, getRpcMonitoringStatus } from '../../services/rpcHealth.js';
 import { validateChainData } from '../../services/validation.js';
-import { runIncidentSentinel } from '../../services/incidentSentinel.js';
+import { runIncidentSentinel, inspectCachedIncidents } from '../../services/incidentSentinel.js';
+import { tokenMatches } from '../../util/token.js';
 import { getL2BeatRefreshStatus } from '../../services/l2beatRefresher.js';
 import {
   RELOAD_RATE_LIMIT_MAX,
+  DIAGNOSTICS_TOKEN,
   RATE_LIMIT_WINDOW_MS,
   DATA_CACHE_ENABLED,
   DATA_CACHE_FILE,
@@ -223,15 +225,46 @@ export async function adminRoutes(fastify) {
   });
 
   // Separate from /validate rather than folded into it: that one is synchronous over the
-  // in-memory registry, while this reads the live incident feed behind its own async cache.
-  // Merging them would make a registry check fail whenever a third-party feed was down.
-  fastify.get('/validate/incidents', async (_request, reply) => {
-    try {
-      return await runIncidentSentinel();
-    } catch (error) {
-      fastify.log.error(error, 'Incident sentinel failed');
-      return sendError(reply, 503, 'Live incident feed unavailable');
+  // in-memory registry, while this describes the live incident feed. Merging them would make
+  // a registry check fail whenever a third-party feed was down.
+  //
+  // Two paths, split on SERVICE-CONTRACT §10. Reporting over the cache we already hold reaches
+  // nothing upstream, so it is open. `?refresh=true` DOES reach upstream, which makes it an
+  // amplifying endpoint, so it needs the token and is closed by default — 404 when no token is
+  // configured, per §10, because these services are routed publicly with `PathPrefix: /`.
+  fastify.get('/validate/incidents', {
+    schema: {
+      querystring: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          refresh: { type: 'boolean', default: false },
+          token: { type: 'string' }
+        }
+      }
     }
+  }, async (request, reply) => {
+    if (request.query.refresh) {
+      if (!DIAGNOSTICS_TOKEN) return sendError(reply, 404, 'Not found');
+      const provided = request.query.token ?? request.headers['x-diagnostics-token'];
+      if (!tokenMatches(DIAGNOSTICS_TOKEN, provided)) {
+        return sendError(reply, 401, 'Invalid or missing token');
+      }
+      try {
+        return await runIncidentSentinel();
+      } catch (error) {
+        fastify.log.error(error, 'Incident sentinel refresh failed');
+        return sendError(reply, 503, 'Live incident feed unavailable');
+      }
+    }
+
+    const report = inspectCachedIncidents();
+    if (!report) {
+      // Nothing cached yet is not a fault, and inventing a fetch to hide it is the amplification
+      // this split exists to avoid. Say so, and name the authenticated way to populate it.
+      return sendError(reply, 503, 'No live incident feed cached yet; retry with ?refresh=true and a token');
+    }
+    return report;
   });
 
   fastify.get('/keywords', async () => {

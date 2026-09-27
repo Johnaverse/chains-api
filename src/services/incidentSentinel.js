@@ -1,4 +1,4 @@
-import { getLiveEvents, getLiveEventsFetchedAt } from '../sources/liveIncidents.js';
+import { getLiveEvents, getLiveEventsFetchedAt, peekLiveEvents } from '../sources/liveIncidents.js';
 import { MAINTENANCE_STATUSES, INCIDENT_STATUSES } from './upgrades.js';
 
 /**
@@ -130,17 +130,21 @@ export function buildIncidentSentinel(events = []) {
   let statusAbsent = 0;
 
   for (const ev of list) {
-    const status = typeof ev?.status === 'string' ? ev.status : null;
+    const rawStatus = ev?.status;
+    // Absent means the feed sent nothing. A present-but-malformed value (a number, an object)
+    // is the opposite: something the feed DID carry that nobody recognizes, which is exactly
+    // what S1 exists to catch. Collapsing both to null hid the malformed case in the absent
+    // counter — the one place a rule about unvalidated pass-through must not have a blind spot.
+    const statusPresent = rawStatus !== null && rawStatus !== undefined;
+    const status = typeof rawStatus === 'string' ? rawStatus : null;
     const enr = ev?.enrichment ?? null;
     const cls = typeof enr?.class === 'string' ? enr.class : null;
     if (enr) withEnrichment += 1;
 
-    // Absent is not unrecognized: the feed is allowed not to know, and §14 wants that
-    // distinguished from a value it does carry but nobody recognizes.
-    if (status === null) {
+    if (!statusPresent) {
       statusAbsent += 1;
-    } else if (!KNOWN_STATUSES.has(status)) {
-      hit(rules.s1_unrecognized_status, ev, { status });
+    } else if (status === null || !KNOWN_STATUSES.has(status)) {
+      hit(rules.s1_unrecognized_status, ev, { status: rawStatus });
     }
 
     if (cls) {
@@ -219,7 +223,25 @@ export function _resetIncidentSentinelForTests() {
 }
 
 /**
- * Fetch the live feed and run every rule over it.
+ * Report over the feed this service already holds.
+ *
+ * Reads the cache and never fetches. Contract §10 treats an endpoint that can reach upstream
+ * as an amplification vector, and a report about data we hold has no business triggering a
+ * network call to produce itself — the same reasoning that keeps /metrics off the feed. The
+ * route pairs this with a token, which is what earns the right to refresh.
+ *
+ * @returns {object|null} the report, or null when the feed has never been loaded
+ */
+export function inspectCachedIncidents() {
+  const snapshot = peekLiveEvents();
+  if (!snapshot) return null;
+  const report = buildIncidentSentinel(snapshot.events);
+  lastSummary = report.summary;
+  return { fetchedAt: snapshot.fetchedAt, ...report };
+}
+
+/**
+ * Refresh the feed, then report. Token-gated at the route: this is the amplifying path.
  *
  * @returns {Promise<object>} the report, plus the feed's own `fetchedAt`
  */

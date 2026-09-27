@@ -205,6 +205,11 @@ export const FORUM_NEWS_CACHE_TTL_MS = parseIntEnv('FORUM_NEWS_CACHE_TTL_MS', 60
 export const FORUM_NEWS_FETCH_TIMEOUT_MS = parseIntEnv('FORUM_NEWS_FETCH_TIMEOUT_MS', 10000);
 
 // Assistant (optional LLM chat over the registry + live incidents).
+// Guards diagnostic routes that can reach a third-party feed. SERVICE-CONTRACT §10: an
+// endpoint with outbound amplification needs a token, and when the token is UNCONFIGURED the
+// route returns 404 — closed by default, because all three services are routed publicly with
+// `PathPrefix: /` and an open refresh endpoint is a free fan-out vector. Never logged.
+export const DIAGNOSTICS_TOKEN = parseStringEnv('DIAGNOSTICS_TOKEN', '');
 // Disabled unless ASSISTANT_LLM_URL points at an OpenAI-compatible server
 // (e.g. Ollama: http://localhost:11434).
 export const ASSISTANT_LLM_URL = parseStringEnv('ASSISTANT_LLM_URL', '');

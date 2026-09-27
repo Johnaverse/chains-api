@@ -23,7 +23,7 @@ const ENDPOINTS = {
   '/slip44/:coinType': 'Get specific SLIP-0044 coin type by ID',
   '/reload': 'Reload data from sources (POST)',
   '/validate': 'Validate chain data for potential human errors',
-  '/validate/incidents': 'Contradictions in the live incident feed and its LLM enrichment: unrecognized statuses/classes, model-vs-operator disagreement, and chains named only by the model',
+  '/validate/incidents': 'Contradictions in the cached live incident feed and its LLM enrichment: unrecognized statuses/classes, model-vs-operator disagreement, and chains named only by the model. ?refresh=true re-fetches the feed and needs DIAGNOSTICS_TOKEN (404 when unset)',
   '/keywords': 'Get extracted keywords (blockchain names, network names, client names, etc.)',
   '/rpc-monitor': 'Get RPC endpoint monitoring results',
   '/rpc-monitor/:id': 'Get RPC monitoring results for a specific chain by ID',
