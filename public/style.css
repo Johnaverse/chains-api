@@ -1826,3 +1826,74 @@ a.tlx-row-title:hover { color: var(--accent-hover); }
 .drawer-open .data-table thead th { position: static; z-index: auto; }
 /* Keep a scroll gesture inside the drawer from chaining to the page behind it. */
 .drawer-panel { overscroll-behavior: contain; }
+
+/* ── Sign in / account (login.html) ──
+   A single narrow card, centred, that stays usable as an installed PWA: safe-area insets so
+   nothing hides under a notch or home indicator, 16px inputs so iOS does not zoom the page
+   when a field takes focus, and 44px touch targets. */
+.auth-page { display: flex; min-height: 100vh; min-height: 100dvh; }
+.auth-shell {
+    width: 100%; max-width: 400px; margin: auto;
+    padding: max(var(--sp-6), env(safe-area-inset-top)) max(var(--sp-4), env(safe-area-inset-right))
+        max(var(--sp-6), env(safe-area-inset-bottom)) max(var(--sp-4), env(safe-area-inset-left));
+}
+.auth-brand {
+    display: inline-block; margin-bottom: var(--sp-5);
+    font-size: var(--fs-500); font-weight: 700; letter-spacing: -.01em;
+    color: var(--ink-1); text-decoration: none;
+}
+.auth-card {
+    background: var(--surface-1); border: 1px solid var(--rule);
+    border-radius: var(--r-lg); padding: var(--sp-6);
+}
+.auth-title { font-size: 20px; font-weight: 600; line-height: var(--lh-tight); letter-spacing: -.01em; }
+.auth-subtitle { font-size: var(--fs-400); font-weight: 600; margin-top: var(--sp-5); }
+.auth-lead { margin-top: var(--sp-2); color: var(--ink-2); font-size: var(--fs-400); line-height: var(--lh-snug); overflow-wrap: anywhere; }
+.auth-muted { color: var(--ink-3); }
+.auth-form { display: flex; flex-direction: column; gap: var(--sp-4); margin-top: var(--sp-5); }
+.auth-field { display: flex; flex-direction: column; gap: var(--sp-1); }
+.auth-label { font-size: var(--fs-300); font-weight: 600; color: var(--ink-1); }
+.auth-input {
+    width: 100%; min-height: 44px; padding: 10px var(--sp-3);
+    font: inherit; font-size: 16px; color: var(--ink-1);
+    background: var(--surface-sunken); border: 1px solid var(--rule-strong); border-radius: var(--r-md);
+}
+.auth-input:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+/* The code is the thing people read off another screen and retype: large, spaced, monospaced. */
+.auth-code {
+    font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    font-size: 24px; letter-spacing: .3em; text-align: center;
+}
+.auth-hint { font-size: var(--fs-200); color: var(--ink-3); line-height: var(--lh-snug); margin-top: var(--sp-3); }
+.auth-field .auth-hint { margin-top: 0; }
+.auth-error { color: var(--critical-text); font-size: var(--fs-300); }
+.auth-ok { color: var(--good-text); font-size: var(--fs-300); }
+.auth-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-height: 44px; padding: 0 var(--sp-5);
+    font: inherit; font-size: var(--fs-400); font-weight: 600; text-decoration: none;
+    color: var(--fill-on-ink); background: var(--fill-ink);
+    border: 1px solid var(--fill-ink); border-radius: var(--r-md); cursor: pointer;
+    transition: opacity var(--dur-fast) var(--ease);
+}
+.auth-btn:hover { opacity: .88; }
+.auth-btn:disabled { opacity: .5; cursor: progress; }
+.auth-btn:focus-visible, .auth-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.auth-btn-secondary { color: var(--ink-1); background: transparent; border-color: var(--rule-strong); }
+.auth-row { display: flex; flex-wrap: wrap; gap: var(--sp-3) var(--sp-5); align-items: center; margin-top: var(--sp-5); }
+.auth-link {
+    background: none; border: 0; padding: var(--sp-2) 0; min-height: 44px;
+    font: inherit; font-size: var(--fs-300); color: var(--ink-2); cursor: pointer;
+    text-decoration: underline; text-underline-offset: 3px;
+}
+.auth-link:hover { color: var(--ink-1); }
+.auth-link:disabled { cursor: default; text-decoration: none; color: var(--ink-3); }
+.auth-foot { margin-top: var(--sp-5); font-size: var(--fs-300); }
+.auth-foot a { color: var(--ink-2); }
+/* The installed-app note matters only when the app runs standalone; in a browser tab it would
+   be noise, so show it there only. */
+.auth-pwa-hint { display: none; }
+@media (display-mode: standalone), (display-mode: minimal-ui) { .auth-pwa-hint { display: block; } }
+/* The appbar account link on the dashboard. */
+.appbar-account { font-size: var(--fs-300); color: var(--ink-2); text-decoration: none; white-space: nowrap; }
+.appbar-account:hover { color: var(--ink-1); }

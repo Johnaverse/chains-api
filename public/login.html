@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <!-- Sign-in and reset links carry their token in the URL fragment. The fragment is never
+         sent to a server, and no-referrer keeps the page URL out of any request this page
+         makes, so the token cannot leak through a Referer header either. -->
+    <meta name="referrer" content="no-referrer">
+    <meta name="robots" content="noindex">
+    <meta name="theme-color" content="#1d1d21">
+    <title>Sign in · Chains</title>
+    <meta name="description" content="Sign in to Chains with a code or link sent to your email.">
+
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" href="icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="icon-180.png">
+    <link rel="stylesheet" href="fonts/inter.css">
+    <link rel="stylesheet" href="style.css">
+    <!-- Same-origin files only: the /ui copy runs under `script-src 'self'`. -->
+    <script src="theme-init.js"></script>
+    <script src="login.js" defer></script>
+</head>
+
+<body class="auth-page">
+    <main class="auth-shell">
+        <a class="auth-brand" href="./">Chains</a>
+        <section class="auth-card" id="authCard" aria-live="polite">
+            <div id="authView">
+                <p class="auth-muted">Loading…</p>
+            </div>
+            <noscript>
+                <p class="auth-muted">Signing in needs JavaScript.</p>
+            </noscript>
+        </section>
+        <p class="auth-foot"><a href="./">Back to the dashboard</a></p>
+    </main>
+</body>
+
+</html>
