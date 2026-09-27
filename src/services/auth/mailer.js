@@ -116,6 +116,10 @@ export function createMailer({ transport, from, appName = 'Chains', now = Date.n
  * STARTTLS is REQUIRED on a non-TLS port (`requireTLS`), so a server that does not offer it
  * fails the send instead of silently delivering sign-in codes in cleartext.
  *
+ * The one exception is a loopback host — a local mail catcher such as Mailpit or MailHog.
+ * Traffic that never leaves the machine cannot be read in transit, and MailHog offers no
+ * STARTTLS at all, so insisting would only make local development impossible.
+ *
  * @param {object} cfg
  * @param {string} cfg.host
  * @param {number} cfg.port
@@ -124,11 +128,12 @@ export function createMailer({ transport, from, appName = 'Chains', now = Date.n
  * @param {string} [cfg.pass]
  */
 export function createSmtpTransport({ host, port, secure, user, pass }) {
+  const loopback = ['localhost', '127.0.0.1', '::1'].includes(String(host).toLowerCase());
   return nodemailer.createTransport({
     host,
     port,
     secure,
-    requireTLS: !secure,
+    requireTLS: !secure && !loopback,
     auth: user ? { user, pass } : undefined,
     connectionTimeout: 10_000,
     greetingTimeout: 10_000,

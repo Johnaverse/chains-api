@@ -88,4 +88,12 @@ describe('createSmtpTransport', () => {
     expect(t.options.secure).toBe(true);
     expect(t.options.auth).toBeUndefined();
   });
+
+  it('relaxes STARTTLS for a loopback mail catcher only', () => {
+    for (const host of ['localhost', '127.0.0.1', '::1', 'LOCALHOST']) {
+      expect(createSmtpTransport({ host, port: 1025, secure: false }).options.requireTLS, host).toBe(false);
+    }
+    // A name that merely contains "localhost" is not loopback.
+    expect(createSmtpTransport({ host: 'localhost.evil.io', port: 587, secure: false }).options.requireTLS).toBe(true);
+  });
 });

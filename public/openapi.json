@@ -751,7 +751,7 @@
         "tags": [
           "Feedback"
         ],
-        "description": "Review submitted feedback reports, newest-first. Filter by kind; limit defaults to 50 (max 500).",
+        "description": "Review submitted feedback reports, newest-first. Filter by kind; limit defaults to 50 (max 500). Requires a signed-in session when accounts are configured.",
         "parameters": [
           {
             "schema": {
