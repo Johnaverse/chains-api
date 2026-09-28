@@ -324,6 +324,29 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('popstate', applyUrlState);
 });
 
+// Data conflicts, as a tile. Once an admin has triaged any conflict, the headline is the OPEN
+// ones — known noise an admin dismissed should stop inflating a number that is meant to say
+// "there is something here to look at". Until then it is the raw total, exactly as before, so a
+// deployment without accounts sees no change.
+function conflictsTile(v) {
+    const review = v?.review;
+    const reviewed = review ? review.acknowledged + review.dismissed : 0;
+    const hint = 'Disagreements between the five upstream sources found by the API validation rules. These are metadata conflicts, not service failures.';
+    if (!v) return statTile({ label: 'Data conflicts', value: '—', sub: '', tone: '', hint });
+    if (!reviewed) {
+        return statTile({
+            label: 'Data conflicts', value: fmtNum(v.totalErrors), sub: 'across 17 validation rules',
+            tone: v.totalErrors > 500 ? 'warn' : '', hint
+        });
+    }
+    return statTile({
+        label: 'Open data conflicts', value: fmtNum(review.open),
+        sub: `${fmtNum(reviewed)} reviewed by an admin`,
+        tone: review.open > 500 ? 'warn' : '',
+        hint: `${hint} Conflicts an admin acknowledged or dismissed are counted separately.`
+    });
+}
+
 // ─── account ─────────────────────────────────────────────────────────────
 // The appbar entry for signing in. Hidden until the server answers, and left hidden when it
 // answers 404 (accounts not configured) or cannot be reached — including when this
@@ -343,6 +366,9 @@ async function initAccountLink() {
     link.textContent = data.authenticated ? data.user.email : 'Sign in';
     link.title = data.authenticated ? 'Account settings' : 'Sign in with your email';
     link.hidden = false;
+    // Everyone who can sign in may triage conflicts (the sign-in allowlist is the admin list).
+    const admin = byId('adminLink');
+    if (admin && data.authenticated) admin.hidden = false;
 }
 
 // ─── theme ───────────────────────────────────────────────────────────────
@@ -1517,12 +1543,7 @@ function renderOverviewStats() {
                 : '',
             hint: 'Total value secured across all L2BEAT-classified projects, as of the last L2BEAT fetch. Point-in-time only — no history is stored.'
         }),
-        statTile({
-            label: 'Data conflicts', value: state.validate ? fmtNum(state.validate.totalErrors) : '—',
-            sub: state.validate ? 'across 17 validation rules' : '',
-            tone: !state.validate ? '' : state.validate.totalErrors > 500 ? 'warn' : '',
-            hint: 'Disagreements between the five upstream sources found by the API validation rules. These are metadata conflicts, not service failures.'
-        })
+        conflictsTile(state.validate)
     ];
     clear(wrap);
     for (const t of tiles) wrap.appendChild(t);

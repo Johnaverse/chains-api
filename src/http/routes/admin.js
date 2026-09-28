@@ -12,6 +12,7 @@ import { getAllKeywords } from '../../domain/keywords.js';
 import { loadData } from '../../services/loader.js';
 import { startRpcHealthCheck, getRpcMonitoringStatus } from '../../services/rpcHealth.js';
 import { validateChainData } from '../../services/validation.js';
+import { getConflicts } from '../../services/conflicts/index.js';
 import { getL2BeatRefreshStatus } from '../../services/l2beatRefresher.js';
 import {
   RELOAD_RATE_LIMIT_MAX,
@@ -218,7 +219,10 @@ export async function adminRoutes(fastify) {
     if (validationResults.error) {
       return sendError(reply, 503, validationResults.error);
     }
-    return validationResults;
+    // Additive: each conflict gains `id` and `reviewState`, and the report gains `review`
+    // counts, so a consumer can separate open conflicts from ones an admin has already
+    // triaged. Every existing field keeps its meaning.
+    return getConflicts().annotate(validationResults);
   });
 
   fastify.get('/keywords', async () => {

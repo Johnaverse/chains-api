@@ -1897,3 +1897,84 @@ a.tlx-row-title:hover { color: var(--accent-hover); }
 /* The appbar account link on the dashboard. */
 .appbar-account { font-size: var(--fs-300); color: var(--ink-2); text-decoration: none; white-space: nowrap; }
 .appbar-account:hover { color: var(--ink-1); }
+
+/* ── Admin: data conflicts (admin.html) ──
+   Wider than the sign-in card — evidence is JSON and chain names are long — but the same
+   controls, so the admin area reads as part of one product. */
+.admin-page { min-height: 100vh; min-height: 100dvh; }
+.admin-bar {
+    display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap;
+    padding: max(var(--sp-3), env(safe-area-inset-top)) max(var(--sp-5), env(safe-area-inset-right))
+        var(--sp-3) max(var(--sp-5), env(safe-area-inset-left));
+    border-bottom: 1px solid var(--rule); background: var(--surface-1);
+}
+.admin-brand { font-weight: 700; font-size: var(--fs-400); color: var(--ink-1); text-decoration: none; }
+.admin-crumb { color: var(--ink-3); font-size: var(--fs-300); }
+.admin-crumb::before { content: '/'; margin-right: var(--sp-3); color: var(--rule-strong); }
+.admin-spacer { flex: 1; }
+.admin-nav { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; }
+.admin-nav[hidden] { display: none; }
+.admin-who { color: var(--ink-3); font-size: var(--fs-300); overflow-wrap: anywhere; }
+/* inline-flex, not inline: min-height has no effect on an inline <a>, so the links sat higher
+   than the Sign out <button> beside them. */
+.admin-navlink {
+    display: inline-flex; align-items: center;
+    color: var(--ink-2); font: inherit; font-size: var(--fs-300); text-decoration: none;
+    background: none; border: 0; padding: 0; cursor: pointer; min-height: 44px;
+}
+.admin-navlink:hover { color: var(--ink-1); }
+.admin-main {
+    max-width: 960px; margin: 0 auto;
+    padding: var(--sp-6) max(var(--sp-5), env(safe-area-inset-right)) var(--sp-9) max(var(--sp-5), env(safe-area-inset-left));
+}
+.admin-gate { max-width: 440px; margin: var(--sp-8) auto; }
+.admin-head { margin-bottom: var(--sp-5); }
+.admin-tabs { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-4); }
+.admin-filters { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-3); margin-bottom: var(--sp-3); }
+@media (max-width: 640px) { .admin-filters { grid-template-columns: 1fr; } }
+.admin-select { appearance: auto; }
+.admin-count { color: var(--ink-3); font-size: var(--fs-200); margin-bottom: var(--sp-3); }
+.admin-resolved {
+    border: 1px solid var(--rule-strong); border-left: 3px solid var(--good);
+    border-radius: var(--r-md); background: var(--surface-1);
+    padding: var(--sp-4); margin-bottom: var(--sp-5); font-size: var(--fs-300);
+}
+.admin-resolved .conflict-actions { margin-top: var(--sp-3); }
+.conflict-list { display: flex; flex-direction: column; gap: var(--sp-3); }
+.conflict-card {
+    background: var(--surface-1); border: 1px solid var(--rule);
+    border-radius: var(--r-lg); padding: var(--sp-4) var(--sp-5);
+}
+.conflict-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
+.conflict-rule { color: var(--ink-3); font-size: var(--fs-200); }
+.conflict-title { font-size: var(--fs-400); font-weight: 600; margin-top: var(--sp-2); overflow-wrap: anywhere; }
+.conflict-message { color: var(--ink-2); font-size: var(--fs-300); margin-top: var(--sp-1); overflow-wrap: anywhere; }
+.conflict-review { font-size: var(--fs-200); color: var(--ink-3); margin-top: var(--sp-2); overflow-wrap: anywhere; }
+.conflict-note { color: var(--ink-2); font-style: italic; }
+.conflict-evidence { margin-top: var(--sp-3); font-size: var(--fs-200); }
+/* Left as display:list-item: a flex <summary> loses its disclosure triangle, and then nothing
+   says it opens. */
+.conflict-evidence summary { cursor: pointer; color: var(--ink-2); padding: var(--sp-2) 0; }
+.conflict-evidence pre {
+    margin-top: var(--sp-2); padding: var(--sp-3); overflow-x: auto;
+    background: var(--surface-sunken); border: 1px solid var(--rule); border-radius: var(--r-md);
+    font: 12px/1.5 ui-monospace, 'SF Mono', Menlo, Consolas, monospace; color: var(--ink-2);
+    white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.conflict-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-3); }
+.conflict-actions[hidden] { display: none; }
+.admin-form { display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-3); }
+.admin-note { min-height: 72px; resize: vertical; }
+/* Review state as a word first, colour second — the label carries the meaning. */
+.state-pill {
+    font-size: var(--fs-100); font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+    padding: 2px 8px; border-radius: 999px; border: 1px solid var(--rule-strong); color: var(--ink-2);
+}
+.state-open { border-color: var(--warn); color: var(--warn-text); }
+.state-acknowledged { border-color: var(--cat-1); color: var(--ink-1); }
+.state-dismissed { color: var(--ink-3); }
+.admin-activity { margin-top: var(--sp-6); font-size: var(--fs-300); }
+.admin-activity summary { cursor: pointer; font-weight: 600; padding: var(--sp-3) 0; }
+.admin-history { list-style: none; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-2); }
+.admin-history li { color: var(--ink-2); overflow-wrap: anywhere; font-size: var(--fs-200); }
+.history-when { color: var(--ink-3); font-variant-numeric: tabular-nums; }

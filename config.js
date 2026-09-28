@@ -156,6 +156,14 @@ export const SMTP_FROM = parseStringEnv('SMTP_FROM', 'Chains <no-reply@localhost
 
 export const AUTH_ENABLED = AUTH_ALLOWED_EMAILS !== '' && AUTH_APP_URL !== '' && SMTP_HOST !== '';
 
+// Admin decisions about cross-source conflicts (acknowledged / dismissed) and their audit
+// trail. Beside the data cache, like the auth store; the decisions only take effect when
+// accounts are on, since only a signed-in admin can make one.
+export const CONFLICT_REVIEWS_FILE = parseStringEnv(
+  'CONFLICT_REVIEWS_FILE',
+  join(dirname(DATA_CACHE_FILE), 'conflict-reviews.json')
+);
+
 // Proxy (optional)
 export const PROXY_URL = parseStringEnv('PROXY_URL', '');
 export const PROXY_ENABLED = PROXY_URL !== '';

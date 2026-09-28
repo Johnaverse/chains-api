@@ -52,6 +52,7 @@ import { summaryRoute } from './routes/summary.js';
 import { rootRoute } from './routes/root.js';
 import { assistantRoutes } from './routes/assistant.js';
 import { authRoutes } from './routes/auth.js';
+import { adminConflictRoutes } from './routes/adminConflicts.js';
 import { getAuth, authConfigProblems } from '../services/auth/index.js';
 import { prefetchAllPrices, startPriceRefresh } from '../../priceService.js';
 import { logger } from '../util/logger.js';
@@ -352,6 +353,7 @@ export async function buildApp(options = {}) {
   await fastify.register(summaryRoute);
   await fastify.register(assistantRoutes);
   await fastify.register(authRoutes);
+  await fastify.register(adminConflictRoutes);
   for (const problem of authConfigProblems()) logger.warn(problem);
   await fastify.register(rootRoute);
 

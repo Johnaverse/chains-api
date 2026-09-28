@@ -25,6 +25,14 @@
     const API_BASE = SAME_ORIGIN_API ? '' : 'https://chains-api.johnaverse.cc';
 
     const PASSWORD_MIN = 12;
+
+    // Where to go after signing in, e.g. `login.html?next=admin.html`. Only a bare page name in
+    // this same directory is accepted — never a path, scheme or host — so `next` cannot be
+    // turned into an open redirect to someone else's site.
+    const NEXT = (() => {
+        const n = new URLSearchParams(location.search).get('next');
+        return n && /^[a-z][a-z0-9-]*\.html$/.test(n) && n !== 'login.html' ? n : null;
+    })();
     const RESEND_COOLDOWN_MS = 30_000;
 
     const root = document.getElementById('authView');
@@ -112,11 +120,12 @@
     }
 
     function render(title, lead, body, { focus } = {}) {
-        root.replaceChildren(
+        // Filter first: replaceChildren prints a null as the literal text "null".
+        root.replaceChildren(...[
             el('h1', { class: 'auth-title', text: title }),
             lead ? el('p', { class: 'auth-lead', text: lead }) : null,
             ...[].concat(body)
-        );
+        ].filter(Boolean));
         document.title = `${title} · Chains`;
         (focus || root.querySelector('input:not([type=hidden])') || root.querySelector('button'))?.focus();
     }
@@ -151,6 +160,7 @@
         state.user = user;
         // Tell any other tab of this browser — the one waiting on the code screen finishes too.
         channel?.postMessage({ type: 'signed-in' });
+        if (NEXT) return location.replace(NEXT);
         showDone(user);
     }
 
@@ -280,6 +290,7 @@
         render('You are signed in', `Signed in as ${user.email}.`, [
             el('p', { class: 'auth-row' }, [
                 el('a', { class: 'auth-btn', href: './', text: 'Go to the dashboard' }),
+                el('a', { class: 'auth-btn auth-btn-secondary', href: 'admin.html', text: 'Admin' }),
                 button('Account settings', { secondary: true, onclick: () => showAccount() })
             ])
         ]);
@@ -468,7 +479,11 @@
         if (s.status === 0 || !s.ok) return showOffline();
         if (fragment?.kind === 'verify') { state.linkToken = fragment.token; return showConfirmLink(s.data); }
         if (fragment?.kind === 'reset') { state.resetToken = fragment.token; return showResetWithLink(); }
-        if (s.data.authenticated) { state.user = s.data.user; return showAccount(); }
+        if (s.data.authenticated) {
+            if (NEXT) return location.replace(NEXT);
+            state.user = s.data.user;
+            return showAccount();
+        }
         showStart();
     }
 

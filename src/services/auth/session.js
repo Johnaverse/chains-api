@@ -77,3 +77,23 @@ export function publicUser(user) {
     lastLoginAt: user.lastLoginAt ?? null
   };
 }
+
+/**
+ * CSRF, the other half (SameSite=Lax on the session cookie is the first). A browser always
+ * sends Origin on a cross-origin POST; one from a page we do not trust is refused. A request
+ * with no Origin is a non-browser client — curl, a script — and CSRF is not a risk there,
+ * since it has no victim cookie jar to ride on. Shared by every cookie-authenticated route.
+ */
+export function originAllowed(request, auth) {
+  const origin = request.headers.origin;
+  if (!origin) return request.headers['sec-fetch-site'] !== 'cross-site';
+  if (auth.origins.has(origin)) return true;
+  try {
+    // Parse the Host through the same scheme so default ports compare equal on both sides:
+    // URL('http://h:80').host is 'h', while a Host header may still say 'h:80'.
+    const o = new URL(origin);
+    return new URL(`${o.protocol}//${request.headers.host}`).host === o.host;
+  } catch {
+    return false;
+  }
+}

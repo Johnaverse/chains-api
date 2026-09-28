@@ -34,6 +34,10 @@ Each is consumed on **two independent paths**, which is easy to miss:
 - **Sessions:** HttpOnly / SameSite=Lax / Secure cookie; tokens stored only as SHA-256 digests in `AUTH_STORE_FILE` (atomic writes, mode 0600, refuses to start on a corrupt file). CSRF = SameSite + an Origin check on every auth POST. CORS is credentialed **only** for the dashboard origins (`corsDelegator` in `src/http/app.js`) — `CORS_ORIGIN='*'` resolves to *reflect any origin*, so never enable credentials globally.
 - **Deploy constraints:** single process (accounts in a file, codes in memory) — run one replica. Dashboard and API must share a registrable domain for the Lax cookie to be sent.
 
+**Admin — data conflicts (optional, needs accounts):** `public/admin.html` lets anyone on `AUTH_ALLOWED_EMAILS` triage the cross-source conflicts `/validate` finds (`src/services/conflicts/`, `src/http/routes/adminConflicts.js`). Acknowledge (real, being tracked), dismiss (false positive — a reason is required), or reopen; every action lands in an audit history. Conflicts are still recomputed live on every read; only decisions persist (`CONFLICT_REVIEWS_FILE`).
+- **Identity is by what disagrees, not the whole record** (`identity.js`). Some rules carry values that move on their own — rule 12's block heights (even in its message), rule 11's TVS, rule 16's healthy-URL lists — so hashing a record would drop decisions within seconds. Each conflict type declares its identity fields; a test reads `validation.js` and fails if a new rule ships without one. **Adding a validation rule? Add its entry to `IDENTITY`.** Conversely, when the disagreement changes (a source changes its value) the id changes, the old decision shows as *resolved*, and the conflict returns open.
+- **Public surfaces change additively:** `/validate` and the `validate_chains` MCP tool gain `id` + `reviewState` per conflict and `review` counts; `totalErrors` keeps its meaning; notes and reviewer emails stay admin-only. The dashboard tile shows *open* conflicts once anything has been reviewed.
+
 ## Quick Reference
 
 ```bash
@@ -80,6 +84,8 @@ src/services/                   ← background tasks
   ├─ rpcHealth.js               (RPC liveness checks)
   ├─ l2beatRefresher.js         (legacy shim → chainRefresher)
   ├─ validation.js              (17 cross-source validation rules)
+  ├─ conflicts/                 (admin triage of those conflicts: identity, decisions, audit)
+  ├─ auth/                      (accounts: sign-in challenges, passwords, sessions, mail)
   ├─ assistant.js               (LLM tool-use harness for /assistant/chat)
   ├─ assistantTools.js          (mcp-tools → OpenAI tools adapter + AJV arg validation)
   └─ loader.js                  (initial data load)
@@ -187,6 +193,7 @@ Copy `.env.example` to `.env` for local configuration. Key variables:
 | `AUTH_RATE_LIMIT_MAX` | `10` | Per-IP budget on sign-in, code and reset endpoints |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` | (empty) / `587` / `false` | Outbound mail. STARTTLS is required on non-TLS ports (loopback exempt, for Mailpit) |
 | `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | (empty) / (empty) / `Chains <no-reply@localhost>` | SMTP credentials (never logged) and the From header |
+| `CONFLICT_REVIEWS_FILE` | `.cache/conflict-reviews.json` | Admin decisions about data conflicts + their audit trail (atomic, mode 0600) |
 
 See `config.js` and `.env.example` for the full list.
 
@@ -249,7 +256,7 @@ Services: `chains-api` (port 3000) and `chains-api-mcp` (port 3001). Both have h
 | GET | `/keywords` | Indexed search keywords |
 | GET | `/stats` | Aggregate counts: totals by tag, plus `byStatus` / `activeChains` / `deprecatedChains` and RPC health |
 | GET | `/summary` | Slim dashboard projection (chains + L2BEAT headline), ETag/304 |
-| GET | `/validate` | Run 17 cross-source validation rules |
+| GET | `/validate` | Run 17 cross-source validation rules (each conflict carries `id` + `reviewState`; `review` counts) |
 | GET | `/export` | Export cached data |
 | GET | `/metrics` | Prometheus exposition (counters + gauges) |
 | GET | `/refresher` | Unified refresher cursor + queue depth |
@@ -267,6 +274,10 @@ Services: `chains-api` (port 3000) and `chains-api-mcp` (port 3001). Both have h
 | POST | `/auth/password` | Set or change the password (signs out other sessions) |
 | POST | `/auth/password/reset/start` | Email a reset link + code (always 202) |
 | POST | `/auth/password/reset/complete` | New password via code or link; revokes all sessions, signs in |
+| GET | `/admin/conflicts` | Conflict review queue: counts, per-rule breakdown, evidence, resolved decisions (session) |
+| POST | `/admin/conflicts/:id/review` | Acknowledge / dismiss (reason required) / reopen a conflict (session) |
+| POST | `/admin/conflicts/prune-resolved` | Clear decisions whose conflict no longer occurs (session) |
+| GET | `/admin/conflicts/history` | Audit trail of every decision (session) |
 
 ## Common Tasks
 
@@ -280,4 +291,4 @@ Services: `chains-api` (port 3000) and `chains-api-mcp` (port 3001). Both have h
 
 **Modify environment config:** Edit `config.js` using the existing `parseIntEnv`/`parseStringEnv`/`parseBooleanEnv` helpers. Update `.env.example` with the new variable and default.
 
-**Add a validation rule:** Add the rule to `src/services/validation.js`, increment the rule count in tests, expose a per-rule counter via `src/util/metrics.js` so `/metrics` tracks it.
+**Add a validation rule:** Add the rule to `src/services/validation.js`, increment the rule count in tests, expose a per-rule counter via `src/util/metrics.js` so `/metrics` tracks it, and give its conflict type an entry in `IDENTITY` (`src/services/conflicts/identity.js`) naming the fields that define the disagreement — leave out anything that moves on its own (heights, prices, health), or admin decisions about it will not stick. A test fails until you do.

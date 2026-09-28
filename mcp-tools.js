@@ -31,6 +31,7 @@ import { getChainUpgrades } from './src/services/upgrades.js';
 import { getForks } from './src/services/forks.js';
 import { getProviderStats } from './src/services/providerStats.js';
 import { checkChainHalt } from './src/services/chainHalt.js';
+import { getConflicts } from './src/services/conflicts/index.js';
 
 /**
  * Get the list of MCP tool definitions (schemas)
@@ -599,12 +600,14 @@ function handleGetKeywords() {
   });
 }
 
-function handleValidateChains() {
+async function handleValidateChains() {
   const validationResults = validateChainData();
   if (validationResults.error) {
     return errorResponse(validationResults.error);
   }
-  return textResponse(validationResults);
+  // Same review annotation as GET /validate, so the assistant can tell a conflict an admin
+  // dismissed as known noise from one nobody has looked at.
+  return textResponse(await getConflicts().annotate(validationResults));
 }
 
 function handleGetStats() {

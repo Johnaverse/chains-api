@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="referrer" content="no-referrer">
+    <meta name="robots" content="noindex">
+    <meta name="theme-color" content="#1d1d21">
+    <title>Data conflicts · Admin · Chains</title>
+    <meta name="description" content="Review and triage cross-source data conflicts.">
+
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" href="icon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="icon-180.png">
+    <link rel="stylesheet" href="fonts/inter.css">
+    <link rel="stylesheet" href="style.css">
+    <!-- Same-origin files only: the /ui copy runs under `script-src 'self'`. -->
+    <script src="theme-init.js"></script>
+    <script src="admin.js" defer></script>
+</head>
+
+<body class="admin-page">
+    <header class="admin-bar">
+        <a class="admin-brand" href="./">Chains</a>
+        <span class="admin-crumb">Admin</span>
+        <span class="admin-spacer"></span>
+        <nav class="admin-nav" id="adminNav" hidden>
+            <span class="admin-who" id="adminWho"></span>
+            <a class="admin-navlink" href="./">Dashboard</a>
+            <a class="admin-navlink" href="login.html">Account</a>
+            <button class="admin-navlink admin-signout" id="signOut" type="button">Sign out</button>
+        </nav>
+    </header>
+    <main class="admin-main" id="adminMain" aria-live="polite">
+        <p class="auth-muted">Loading…</p>
+        <noscript>
+            <p class="auth-muted">The admin page needs JavaScript.</p>
+        </noscript>
+    </main>
+</body>
+
+</html>
