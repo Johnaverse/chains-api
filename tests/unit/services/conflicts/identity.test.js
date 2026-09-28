@@ -107,3 +107,42 @@ describe('evidenceOf', () => {
     expect(evidenceOf(null)).toEqual({});
   });
 });
+
+// Every conflict type, both ways: a change to what DEFINES the disagreement must mint a new id,
+// while a change to presentation (display name, message wording) must not.
+describe('conflictId — every type', () => {
+  const cases = [
+    ['relation_tag_conflict', 1, { graphRelation: { kind: 'l2Of', chainId: 1 } }, (e) => { e.graphRelation = { kind: 'l2Of', chainId: 10 }; }],
+    ['relation_source_conflict', 1, { graphRelation: { kind: 'testnetOf', chainId: 1 }, chainlistData: { isTestnet: false } }, (e) => { e.chainlistData = { isTestnet: true }; }],
+    ['slip44_testnet_mismatch', 2, { isTestnet: true, tags: ['Testnet'] }, (e) => { e.tags = ['Testnet', 'L2']; }],
+    ['name_testnet_mismatch', 3, { fullName: 'Foo Testnet', tags: [] }, (e) => { e.fullName = 'Foo Devnet'; }],
+    ['sepolia_hoodie_no_l2_or_relations', 4, { fullName: 'Sepolia', tags: [], relations: [] }, (e) => { e.fullName = 'Hoodi'; }],
+    ['status_conflict', 5, { statuses: [{ source: 'chainlist', status: 'active' }] }, (e) => { e.statuses = [{ source: 'chainlist', status: 'deprecated' }]; }],
+    ['goerli_not_deprecated', 6, { status: 'active', statusInSources: [] }, (e) => { e.status = 'incubating'; }],
+    ['l2beat_missing_classification', 7, { l2BeatSlug: 'x', l2BeatStage: null, l2BeatCategory: null }, (e) => { e.l2BeatCategory = 'Optimium'; }],
+    ['l2beat_hostchain_no_relation', 8, { l2BeatHostChainId: 1, existingRelationTargets: [] }, (e) => { e.l2BeatHostChainId = 10; }],
+    ['l2beat_category_name_mismatch', 9, { fullName: 'Foo Rollup' }, (e) => { e.fullName = 'Foo Chain'; }],
+    ['l2beat_unknown_chain', 10, { l2BeatSlug: 'foo' }, (e) => { e.l2BeatSlug = 'bar'; }],
+    ['l2beat_stage_zero_high_tvs', 11, { l2BeatStage: 'Stage 0', l2BeatTvs: 1 }, (e) => { e.l2BeatStage = 'Stage 1'; }],
+    ['rpc_block_height_drift', 12, { laggingEndpoint: { url: 'a', blockHeight: 1 } }, (e) => { e.laggingEndpoint = { url: 'b', blockHeight: 1 }; }],
+    ['name_disagreement', 13, { chainsName: 'A', theGraphName: 'B' }, (e) => { e.theGraphName = 'C'; }],
+    ['native_currency_mismatch', 14, { chainsSymbol: 'A', theGraphSymbol: 'B' }, (e) => { e.chainsSymbol = 'C'; }],
+    ['slip44_native_symbol_mismatch', 15, { slip44Symbol: 'A', nativeSymbol: 'B', slip44CoinType: 1 }, (e) => { e.slip44CoinType = 2; }],
+    ['active_child_of_deprecated_parent', 17, { parentChainId: 1, relationKind: 'l2Of' }, (e) => { e.parentChainId = 5; }]
+  ];
+
+  it.each(cases)('%s: identity fields change the id; presentation does not', (type, rule, fields, mutate) => {
+    const base = { rule, type, chainId: 100, chainName: 'Some Chain', message: 'first wording', ...structuredClone(fields) };
+    const cosmetic = { ...structuredClone(base), chainName: 'Renamed Chain', message: 'second wording' };
+    expect(conflictId(cosmetic)).toBe(conflictId(base));
+
+    const changed = structuredClone(base);
+    mutate(changed);
+    expect(conflictId(changed)).not.toBe(conflictId(base));
+  });
+
+  it('rpc_url_in_one_source_only has no evidence identity — only the chain decides', () => {
+    const a = { rule: 16, type: 'rpc_url_in_one_source_only', chainId: 1, onlyInChainlistHealthy: ['x'] };
+    expect(conflictId({ ...a, chainId: 2 })).not.toBe(conflictId(a));
+  });
+});
