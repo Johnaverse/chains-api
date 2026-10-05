@@ -44,6 +44,7 @@ function createSnapshotPayload(data) {
       // signal survives a snapshot round-trip.
       slip44: data.slip44 === undefined ? {} : data.slip44,
       l2beat: data.l2beat ?? null,
+      defillama: data.defillama ?? null,
       indexed: data.indexed ?? { byChainId: {}, byName: {}, all: [] },
       lastUpdated: data.lastUpdated ?? new Date().toISOString(),
       rpcHealth: data.rpcHealth ?? {},

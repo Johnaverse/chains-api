@@ -20,6 +20,11 @@ vi.mock('../../config.js', () => ({
   SOURCE_REFRESH_INTERVAL_MS: 0
 }));
 
+// DefiLlama is supplementary metadata; keep its fetch out of the mocked-fetch call sequences below.
+vi.mock('../../src/sources/defillama.js', () => ({
+  fetchDefiLlama: vi.fn(async () => null)
+}));
+
 // Mock fetchUtil to use standard fetch
 vi.mock('../../fetchUtil.js', () => ({
   proxyFetch: vi.fn((...args) => fetch(...args)),

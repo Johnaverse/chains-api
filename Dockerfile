@@ -17,6 +17,13 @@ COPY package*.json ./
 # Install production dependencies only
 RUN npm ci --only=production
 
+# The release gate fails on HIGH/CRITICAL findings, and the base image ships both: stale
+# OpenSSL in Alpine and npm's own bundled dependencies. Nothing runs npm after `npm ci`, so
+# removing it (and patching Alpine) clears the findings instead of ignoring them.
+RUN apk upgrade --no-cache \
+ && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+           /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
+
 # Copy application files
 COPY *.js ./
 COPY src/ ./src/

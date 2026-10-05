@@ -53,6 +53,11 @@ function sourceFreshness(cache) {
       loaded: hasL2Beat,
       ageSeconds: ageSeconds(cache.l2beat?.fetchedAt),
       source: cache.l2beat?.source ?? null
+    },
+    defillama: {
+      loaded: Array.isArray(cache.defillama?.chains) && cache.defillama.chains.length > 0,
+      ageSeconds: ageSeconds(cache.defillama?.fetchedAt),
+      source: cache.defillama?.source ?? null
     }
   };
 }
@@ -137,7 +142,8 @@ export async function adminRoutes(fastify) {
         chainlist: cachedData.chainlist ? 'loaded' : 'not loaded',
         chains: cachedData.chains ? 'loaded' : 'not loaded',
         slip44: slip44Loaded(cachedData) ? 'loaded' : 'not loaded',
-        l2beat: cachedData.l2beat?.projects?.length > 0 ? 'loaded' : 'not loaded'
+        l2beat: cachedData.l2beat?.projects?.length > 0 ? 'loaded' : 'not loaded',
+        defillama: cachedData.defillama?.chains?.length > 0 ? 'loaded' : 'not loaded'
       }
     };
   });

@@ -4,6 +4,7 @@ export const cachedData = {
   chains: null,
   slip44: null,
   l2beat: null,
+  defillama: null,
   indexed: null,
   lastUpdated: null,
   rpcHealth: {},
@@ -19,6 +20,7 @@ export function applyDataToCache(data) {
   // didn't pass slip44 at all (e.g. test seeds).
   cachedData.slip44 = data.slip44 === undefined ? {} : data.slip44;
   cachedData.l2beat = data.l2beat ?? null;
+  cachedData.defillama = data.defillama ?? null;
   cachedData.indexed = data.indexed ?? null;
   cachedData.lastUpdated = data.lastUpdated ?? null;
   cachedData.rpcHealth = data.rpcHealth ?? {};
