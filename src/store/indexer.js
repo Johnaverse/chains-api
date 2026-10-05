@@ -571,10 +571,37 @@ export function indexL2BeatSource(l2beat, indexed) {
   }
 }
 
+export function indexDefiLlamaSource(defillama, indexed) {
+  if (!defillama) return;
+
+  const entries = Array.isArray(defillama.chains) ? defillama.chains : [];
+  const fresh = new Map();
+  for (const entry of entries) {
+    const chainId = Number(entry?.chainId);
+    if (Number.isSafeInteger(chainId)) fresh.set(chainId, entry);
+  }
+
+  for (const chain of Object.values(indexed.byChainId)) {
+    if (chain.defillama && !fresh.has(chain.chainId)) {
+      delete chain.defillama;
+      if (Array.isArray(chain.sources)) chain.sources = chain.sources.filter(s => s !== 'defillama');
+    }
+  }
+
+  for (const [chainId, entry] of fresh) {
+    const chain = indexed.byChainId[chainId];
+    if (!chain) continue;
+    const { chainId: _ignored, ...metadata } = entry;
+    chain.defillama = { ...metadata, dataFreshness: defillama.source, fetchedAt: defillama.fetchedAt };
+    if (!Array.isArray(chain.sources)) chain.sources = [];
+    if (!chain.sources.includes('defillama')) chain.sources.push('defillama');
+  }
+}
+
 /**
  * Index all data into a searchable structure.
  */
-export function indexData(theGraph, chainlist, chains, slip44, l2beat) {
+export function indexData(theGraph, chainlist, chains, slip44, l2beat, defillama = null) {
   const indexed = {
     byChainId: {},
     byName: {},
@@ -597,6 +624,7 @@ export function indexData(theGraph, chainlist, chains, slip44, l2beat) {
   applyDefaultStatus(indexed);
   addReverseRelations(indexed);
   indexL2BeatSource(l2beat, indexed);
+  indexDefiLlamaSource(defillama, indexed);
 
   indexed.all = Object.values(indexed.byChainId);
 

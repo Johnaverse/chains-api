@@ -55,7 +55,7 @@ External HTTP sources
         ↓
 src/transport/fetch.js          ← proxy-aware fetch wrapper
         ↓
-src/sources/{l2beat,slip44}.js  ← per-source parsers / fetchers
+src/sources/{l2beat,slip44,defillama}.js ← per-source parsers / fetchers
         ↓
 src/store/                      ← in-memory index + disk cache
   ├─ indexer.js                 (build indexed.byChainId / byName / all)
@@ -100,6 +100,7 @@ src/http/                       ← Fastify routes
 3. **Chain ID Network** — Basic chain metadata (`chains.json`)
 4. **SLIP-0044** — Coin type registry (parsed from Markdown table)
 5. **L2BEAT** — L2 classification (stage, category, stack, DA layer, TVS, activity); live API with checked-in fallback at `data/l2beat-fallback.json`
+6. **DefiLlama** — static chain metadata attached as `defillama` (website, X/Twitter, GitHub orgs, CoinGecko/CMC ids, categories, parent chain, deprecation), joined by chainId; keyless `/config` endpoint with checked-in fallback at `data/defillama-fallback.json` (regenerate with `node scripts/refresh-defillama-fallback.mjs`). Supplementary: it never degrades `/health`
 
 Source URLs are configurable via `DATA_SOURCE_*` environment variables (see `config.js`).
 

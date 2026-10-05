@@ -7,6 +7,7 @@ import {
 import { fetchData } from '../transport/fetch.js';
 import { parseSLIP44 } from '../sources/slip44.js';
 import { fetchL2Beat } from '../sources/l2beat.js';
+import { fetchDefiLlama } from '../sources/defillama.js';
 import { indexData } from '../store/indexer.js';
 import { cachedData, applyDataToCache } from '../store/cache.js';
 import {
@@ -33,7 +34,7 @@ let startupInitialized = false;
  * loaded successfully. SLIP-0044 is excluded because it only contributes
  * coin-type metadata, not chain entries — if every chain registry fails but
  * SLIP-0044 succeeds, the API would otherwise come up with an empty index.
- * L2BEAT is also excluded because it has its own static fallback.
+ * L2BEAT and DefiLlama are also excluded because they have their own static fallbacks.
  */
 function countLoadedChainSources(data) {
   let loaded = 0;
@@ -51,7 +52,8 @@ async function fetchAndBuildData() {
     fetchData(DATA_SOURCES.chainlist),
     fetchData(DATA_SOURCES.chains),
     fetchData(DATA_SOURCES.slip44, 'text'),
-    fetchL2Beat()
+    fetchL2Beat(),
+    fetchDefiLlama()
   ]);
 
   const theGraph = results[0].status === 'fulfilled' ? results[0].value : null;
@@ -59,8 +61,9 @@ async function fetchAndBuildData() {
   const chains = results[2].status === 'fulfilled' ? results[2].value : null;
   const slip44Text = results[3].status === 'fulfilled' ? results[3].value : null;
   const l2beat = results[4].status === 'fulfilled' ? results[4].value : null;
+  const defillama = results[5].status === 'fulfilled' ? results[5].value : null;
 
-  const sourceNames = ['theGraph', 'chainlist', 'chains', 'slip44', 'l2beat'];
+  const sourceNames = ['theGraph', 'chainlist', 'chains', 'slip44', 'l2beat', 'defillama'];
   results.forEach((result, i) => {
     if (result.status === 'rejected') {
       logger.error({ source: sourceNames[i], err: result.reason?.message || result.reason }, 'Failed to load source');
@@ -70,7 +73,7 @@ async function fetchAndBuildData() {
   // Only parse SLIP-44 when fetch actually returned something; otherwise keep
   // null so /sources can distinguish "fetch failed" from "fetched, empty".
   const slip44 = slip44Text === null ? null : parseSLIP44(slip44Text);
-  const indexed = indexData(theGraph, chainlist, chains, slip44, l2beat);
+  const indexed = indexData(theGraph, chainlist, chains, slip44, l2beat, defillama);
 
   return {
     data: {
@@ -79,6 +82,7 @@ async function fetchAndBuildData() {
       chains,
       slip44,
       l2beat,
+      defillama,
       indexed,
       lastUpdated: new Date().toISOString(),
       rpcHealth: {},

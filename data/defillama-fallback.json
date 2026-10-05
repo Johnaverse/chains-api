@@ -1,0 +1,6433 @@
+{
+  "fetchedAt": "2026-10-05T11:34:07.180Z",
+  "source": "https://api.llama.fi/config",
+  "chains": [
+    {
+      "chainId": 1,
+      "name": "Ethereum",
+      "aliases": [],
+      "website": "https://ethereum.foundation/",
+      "twitter": "ethereum",
+      "github": [
+        "ethereum",
+        "NethermindEth",
+        "ConsenSys",
+        "openethereum",
+        "hyperledger",
+        "ledgerwatch",
+        "sigp",
+        "chainsafe",
+        "status-im",
+        "prysmaticlabs"
+      ],
+      "symbol": "ETH",
+      "gasTokenSymbol": null,
+      "geckoId": "ethereum",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": "1027",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 8,
+      "name": "Ubiq",
+      "aliases": [],
+      "website": "https://ubiqsmart.com/",
+      "twitter": "ubiqsmart",
+      "github": [
+        "ubiq"
+      ],
+      "symbol": "UBQ",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": "588",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2023-01-01"
+    },
+    {
+      "chainId": 9,
+      "name": "Quai",
+      "aliases": [],
+      "website": "https://qu.ai/",
+      "twitter": "QuaiNetwork",
+      "github": [],
+      "symbol": "QUAI",
+      "gasTokenSymbol": null,
+      "geckoId": "quai-network",
+      "gasTokenGeckoId": "quai-network",
+      "cmcId": "22354",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 10,
+      "name": "OP Mainnet",
+      "aliases": [
+        "Optimism"
+      ],
+      "website": "https://www.optimism.io/",
+      "twitter": "Optimism",
+      "github": [
+        "ethereum-optimism"
+      ],
+      "symbol": "OP",
+      "gasTokenSymbol": null,
+      "geckoId": "optimism",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": "11840",
+      "categories": [
+        "EVM",
+        "Rollup",
+        "Superchain"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": "Ethereum"
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 19,
+      "name": "Songbird",
+      "aliases": [],
+      "website": "https://flare.network/",
+      "twitter": "FlareNetworks",
+      "github": [
+        "GateHubNet"
+      ],
+      "symbol": "SGB",
+      "gasTokenSymbol": null,
+      "geckoId": "songbird",
+      "gasTokenGeckoId": "songbird",
+      "cmcId": "12186",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 20,
+      "name": "Elastos",
+      "aliases": [],
+      "website": "https://elastos.info/",
+      "twitter": "ElastosInfo",
+      "github": [
+        "elastos"
+      ],
+      "symbol": "ELA",
+      "gasTokenSymbol": null,
+      "geckoId": "elastos",
+      "gasTokenGeckoId": "elastos",
+      "cmcId": "2492",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 25,
+      "name": "Cronos",
+      "aliases": [],
+      "website": "https://cronos.org/",
+      "twitter": "cronos_chain",
+      "github": [
+        "crypto-org-chain"
+      ],
+      "symbol": "CRO",
+      "gasTokenSymbol": null,
+      "geckoId": "crypto-com-chain",
+      "gasTokenGeckoId": "crypto-com-chain",
+      "cmcId": "3635",
+      "categories": [
+        "EVM",
+        "Cosmos"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 30,
+      "name": "Rootstock",
+      "aliases": [
+        "RSK"
+      ],
+      "website": "https://rootstock.io/",
+      "twitter": "rootstock_io",
+      "github": [
+        "rsksmart"
+      ],
+      "symbol": "RIF",
+      "gasTokenSymbol": null,
+      "geckoId": "rif-token",
+      "gasTokenGeckoId": "rootstock",
+      "cmcId": "3701",
+      "categories": [
+        "EVM",
+        "Bitcoin Sidechains"
+      ],
+      "parent": {
+        "chain": "Bitcoin",
+        "types": [
+          "gas"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 40,
+      "name": "Telos",
+      "aliases": [],
+      "website": "https://www.telos.net/",
+      "twitter": "HelloTelos",
+      "github": [
+        "telosnetwork"
+      ],
+      "symbol": "TLOS",
+      "gasTokenSymbol": null,
+      "geckoId": "telos",
+      "gasTokenGeckoId": "telos",
+      "cmcId": "4660",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 42,
+      "name": "LUKSO",
+      "aliases": [],
+      "website": "https://www.lukso.network/",
+      "twitter": "lukso_io",
+      "github": [
+        "lukso-network"
+      ],
+      "symbol": "LYX",
+      "gasTokenSymbol": null,
+      "geckoId": "lukso-token-2",
+      "gasTokenGeckoId": "lukso-token-2",
+      "cmcId": "27622",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 44,
+      "name": "Crab",
+      "aliases": [],
+      "website": null,
+      "twitter": null,
+      "github": [
+        "darwinia-network"
+      ],
+      "symbol": "CRAB",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": "9243",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-01-01"
+    },
+    {
+      "chainId": 52,
+      "name": "CSC",
+      "aliases": [],
+      "website": null,
+      "twitter": null,
+      "github": [],
+      "symbol": "CET",
+      "gasTokenSymbol": null,
+      "geckoId": "coinex-token",
+      "gasTokenGeckoId": "coinex-token",
+      "cmcId": "2941",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-09-29"
+    },
+    {
+      "chainId": 55,
+      "name": "ZYX",
+      "aliases": [],
+      "website": "https://zyx.network/",
+      "twitter": "zyx__network",
+      "github": [
+        "ZYXnetwork"
+      ],
+      "symbol": "ZYX",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": "6131",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 56,
+      "name": "BSC",
+      "aliases": [
+        "Binance"
+      ],
+      "website": "https://www.bnbchain.org/en",
+      "twitter": "BNBCHAIN",
+      "github": [
+        "bnb-chain"
+      ],
+      "symbol": "BNB",
+      "gasTokenSymbol": null,
+      "geckoId": "binancecoin",
+      "gasTokenGeckoId": "binancecoin",
+      "cmcId": "1839",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 57,
+      "name": "Syscoin",
+      "aliases": [],
+      "website": "https://syscoin.org/",
+      "twitter": "syscoin",
+      "github": [
+        "syscoin"
+      ],
+      "symbol": "SYS",
+      "gasTokenSymbol": null,
+      "geckoId": "syscoin",
+      "gasTokenGeckoId": "syscoin",
+      "cmcId": "541",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 58,
+      "name": "OntologyEVM",
+      "aliases": [],
+      "website": "https://ont.io/",
+      "twitter": "OntologyNetwork",
+      "github": [
+        "ontio"
+      ],
+      "symbol": "ONT",
+      "gasTokenSymbol": null,
+      "geckoId": "ontology",
+      "gasTokenGeckoId": "ong",
+      "cmcId": "2566",
+      "categories": [
+        "EVM"
+      ],
+      "parent": {
+        "chain": "Ontology",
+        "types": [
+          "emulator"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 60,
+      "name": "GoChain",
+      "aliases": [],
+      "website": "https://gochain.io/",
+      "twitter": "go_chain",
+      "github": [
+        "gochain"
+      ],
+      "symbol": "GO",
+      "gasTokenSymbol": null,
+      "geckoId": "gochain",
+      "gasTokenGeckoId": "gochain",
+      "cmcId": "2861",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 61,
+      "name": "EthereumClassic",
+      "aliases": [],
+      "website": "https://ethereumclassic.org/",
+      "twitter": "eth_classic",
+      "github": [
+        "ethereumclassic"
+      ],
+      "symbol": "ETC",
+      "gasTokenSymbol": null,
+      "geckoId": "ethereum-classic",
+      "gasTokenGeckoId": "ethereum-classic",
+      "cmcId": "1321",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 66,
+      "name": "OKTChain",
+      "aliases": [
+        "OKExChain"
+      ],
+      "website": "https://www.okx.com/oktc",
+      "twitter": "OKCNetwork",
+      "github": [
+        "okx"
+      ],
+      "symbol": "OKT",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": "8267",
+      "categories": [
+        "EVM",
+        "Cosmos"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 70,
+      "name": "Hoo",
+      "aliases": [],
+      "website": "https://www.hoosmartchain.com/",
+      "twitter": "HooSmartChain",
+      "github": [
+        "hoosmartchain"
+      ],
+      "symbol": "HOO",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": "7543",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2025-01-01"
+    },
+    {
+      "chainId": 81,
+      "name": "JOC",
+      "aliases": [],
+      "website": "https://www.japanopenchain.org/en/",
+      "twitter": "Japanopenchain0",
+      "github": [],
+      "symbol": "JOC",
+      "gasTokenSymbol": null,
+      "geckoId": "japan-open-chain",
+      "gasTokenGeckoId": "japan-open-chain",
+      "cmcId": "35773",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 82,
+      "name": "Meter",
+      "aliases": [],
+      "website": "https://meter.io/",
+      "twitter": "Meter_IO",
+      "github": [
+        "meterio"
+      ],
+      "symbol": "MTRG",
+      "gasTokenSymbol": null,
+      "geckoId": "meter",
+      "gasTokenGeckoId": "meter-stable",
+      "cmcId": "5919",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 87,
+      "name": "Nova Network",
+      "aliases": [],
+      "website": null,
+      "twitter": null,
+      "github": [
+        "nova-network-inc"
+      ],
+      "symbol": "SNT",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": "15399",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-08-03"
+    },
+    {
+      "chainId": 88,
+      "name": "Viction",
+      "aliases": [
+        "TomoChain"
+      ],
+      "website": "https://viction.xyz/",
+      "twitter": "BuildOnViction",
+      "github": [
+        "tomochain",
+        "BuildOnViction"
+      ],
+      "symbol": "VIC",
+      "gasTokenSymbol": null,
+      "geckoId": "tomochain",
+      "gasTokenGeckoId": "tomochain",
+      "cmcId": "2570",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 96,
+      "name": "KUB",
+      "aliases": [
+        "Bitkub"
+      ],
+      "website": "https://www.kubchain.com/",
+      "twitter": "KUBChain",
+      "github": [
+        "bitkub-chain",
+        "bitkub-blockchain"
+      ],
+      "symbol": "KUB",
+      "gasTokenSymbol": null,
+      "geckoId": "bitkub-coin",
+      "gasTokenGeckoId": "bitkub-coin",
+      "cmcId": "16093",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 100,
+      "name": "Gnosis",
+      "aliases": [
+        "xDai"
+      ],
+      "website": "https://www.gnosis.io/",
+      "twitter": "gnosischain",
+      "github": [
+        "gnosis"
+      ],
+      "symbol": "GNO",
+      "gasTokenSymbol": "xDAI",
+      "geckoId": "gnosis",
+      "gasTokenGeckoId": "xdai",
+      "cmcId": "1659",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 106,
+      "name": "Velas",
+      "aliases": [],
+      "website": "https://velas.com/en",
+      "twitter": "VelasBlockchain",
+      "github": [
+        "velas"
+      ],
+      "symbol": "VLX",
+      "gasTokenSymbol": null,
+      "geckoId": "velas",
+      "gasTokenGeckoId": "velas",
+      "cmcId": "4747",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 108,
+      "name": "ThunderCore",
+      "aliases": [],
+      "website": "https://www.thundercore.com/",
+      "twitter": "ThunderCoreLab",
+      "github": [
+        "thundercore"
+      ],
+      "symbol": "TT",
+      "gasTokenSymbol": null,
+      "geckoId": "thunder-token",
+      "gasTokenGeckoId": "thunder-token",
+      "cmcId": "3930",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-09-01"
+    },
+    {
+      "chainId": 122,
+      "name": "Fuse",
+      "aliases": [],
+      "website": "https://www.fuse.io/",
+      "twitter": "Fuse_network",
+      "github": [
+        "fuseio"
+      ],
+      "symbol": "FUSE",
+      "gasTokenSymbol": null,
+      "geckoId": "fuse-network-token",
+      "gasTokenGeckoId": "fuse-network-token",
+      "cmcId": "5634",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 128,
+      "name": "Heco",
+      "aliases": [],
+      "website": "https://hecochain.com/",
+      "twitter": "HECO_Chain",
+      "github": [],
+      "symbol": "HT",
+      "gasTokenSymbol": null,
+      "geckoId": "huobi-token",
+      "gasTokenGeckoId": "huobi-token",
+      "cmcId": "2502",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-02-12"
+    },
+    {
+      "chainId": 130,
+      "name": "Unichain",
+      "aliases": [],
+      "website": "https://www.unichain.org/",
+      "twitter": "unichain",
+      "github": [],
+      "symbol": "-",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup",
+        "Superchain"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": "Ethereum"
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 137,
+      "name": "Polygon",
+      "aliases": [],
+      "website": "https://polygon.technology/",
+      "twitter": "0xPolygon",
+      "github": [
+        "maticnetwork",
+        "0xpolygon"
+      ],
+      "symbol": "POL",
+      "gasTokenSymbol": null,
+      "geckoId": "polygon-ecosystem-token",
+      "gasTokenGeckoId": "polygon-ecosystem-token",
+      "cmcId": "28321",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 138,
+      "name": "Defi Oracle Meta",
+      "aliases": [],
+      "website": "https://info.defi-oracle.io/",
+      "twitter": null,
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 140,
+      "name": "Eteria",
+      "aliases": [],
+      "website": "https://eteria.io/",
+      "twitter": "eteriaio",
+      "github": [],
+      "symbol": "ERA",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-08-03"
+    },
+    {
+      "chainId": 143,
+      "name": "Monad",
+      "aliases": [],
+      "website": "https://www.monad.xyz/",
+      "twitter": "monad",
+      "github": [],
+      "symbol": "MON",
+      "gasTokenSymbol": null,
+      "geckoId": "monad",
+      "gasTokenGeckoId": "monad",
+      "cmcId": "30495",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 146,
+      "name": "Sonic",
+      "aliases": [],
+      "website": "https://www.soniclabs.com/",
+      "twitter": "SonicLabs",
+      "github": [],
+      "symbol": "S",
+      "gasTokenSymbol": null,
+      "geckoId": "sonic-3",
+      "gasTokenGeckoId": "sonic-3",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 148,
+      "name": "ShimmerEVM",
+      "aliases": [],
+      "website": "https://shimmer.network/",
+      "twitter": "shimmernet",
+      "github": [
+        "iotaledger"
+      ],
+      "symbol": "SMR",
+      "gasTokenSymbol": null,
+      "geckoId": "shimmer",
+      "gasTokenGeckoId": "shimmer",
+      "cmcId": "14801",
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Shimmer",
+        "types": [
+          "L2"
+        ],
+        "da": null
+      },
+      "deprecated": true,
+      "deadFrom": "2026-09-30"
+    },
+    {
+      "chainId": 169,
+      "name": "Manta",
+      "aliases": [],
+      "website": "https://manta.network/",
+      "twitter": "MantaNetwork",
+      "github": [
+        "manta-network"
+      ],
+      "symbol": "MANTA",
+      "gasTokenSymbol": null,
+      "geckoId": "manta-network",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": "13631",
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": "Celestia"
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 173,
+      "name": "ENI",
+      "aliases": [],
+      "website": "https://eni.top/",
+      "twitter": "ENI__Official",
+      "github": [],
+      "symbol": "ENI",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "egas",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 177,
+      "name": "HashKey Chain",
+      "aliases": [],
+      "website": "https://hsk.xyz/",
+      "twitter": "HashKeyHSK",
+      "github": [],
+      "symbol": "HSK",
+      "gasTokenSymbol": null,
+      "geckoId": "hashkey-ecopoints",
+      "gasTokenGeckoId": "hashkey-ecopoints",
+      "cmcId": "33849",
+      "categories": [],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 181,
+      "name": "Waterfall",
+      "aliases": [],
+      "website": "https://waterfall.network/",
+      "twitter": "waterfall_dag",
+      "github": [],
+      "symbol": "WATER",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": "32282",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 185,
+      "name": "Mint",
+      "aliases": [],
+      "website": "https://www.mintchain.io/",
+      "twitter": "Mint_Blockchain",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup",
+        "Superchain"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2"
+        ],
+        "da": "Ethereum"
+      },
+      "deprecated": true,
+      "deadFrom": "2026-04-17"
+    },
+    {
+      "chainId": 199,
+      "name": "Bittorrent",
+      "aliases": [],
+      "website": "https://bt.io/",
+      "twitter": "BitTorrent",
+      "github": [
+        "bttcprotocol"
+      ],
+      "symbol": "BTT",
+      "gasTokenSymbol": null,
+      "geckoId": "bittorrent",
+      "gasTokenGeckoId": "bittorrent",
+      "cmcId": "16086",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 200,
+      "name": "XdaiArb",
+      "aliases": [],
+      "website": null,
+      "twitter": null,
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": "xDAI",
+      "geckoId": null,
+      "gasTokenGeckoId": "xdai",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 204,
+      "name": "opBNB",
+      "aliases": [
+        "Op_Bnb"
+      ],
+      "website": null,
+      "twitter": null,
+      "github": [
+        "bnb-chain"
+      ],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "binancecoin",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "BSC",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 207,
+      "name": "VinuChain",
+      "aliases": [],
+      "website": "https://www.vinuchain.org/",
+      "twitter": "vinuchain",
+      "github": [
+        "vinuchain"
+      ],
+      "symbol": "VC",
+      "gasTokenSymbol": null,
+      "geckoId": "vinuchain",
+      "gasTokenGeckoId": "vinuchain",
+      "cmcId": "28580",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 225,
+      "name": "Lachain",
+      "aliases": [],
+      "website": "https://lachain.io/",
+      "twitter": "0xLachain",
+      "github": [
+        "LATOKEN"
+      ],
+      "symbol": "LA",
+      "gasTokenSymbol": null,
+      "geckoId": "latoken",
+      "gasTokenGeckoId": "latoken",
+      "cmcId": "2090",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 228,
+      "name": "Mind Network",
+      "aliases": [],
+      "website": "https://www.mindnetwork.xyz/",
+      "twitter": "mindnetwork_xyz",
+      "github": [
+        "mind-network"
+      ],
+      "symbol": "FHE",
+      "gasTokenSymbol": null,
+      "geckoId": "mind-network",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Arbitrum",
+        "types": [
+          "L3"
+        ],
+        "da": null
+      },
+      "deprecated": true,
+      "deadFrom": "2026-06-01"
+    },
+    {
+      "chainId": 232,
+      "name": "Lens",
+      "aliases": [],
+      "website": "https://lens.xyz/",
+      "twitter": "LC",
+      "github": [
+        "lens-protocol"
+      ],
+      "symbol": "-",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "gho",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Elastic Network"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2"
+        ],
+        "da": "Avail"
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 239,
+      "name": "TAC",
+      "aliases": [],
+      "website": "https://tac.build/",
+      "twitter": "TacBuild",
+      "github": [],
+      "symbol": "TAC",
+      "gasTokenSymbol": null,
+      "geckoId": "tac",
+      "gasTokenGeckoId": "tac",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 246,
+      "name": "EnergyWeb",
+      "aliases": [],
+      "website": "https://www.energyweb.org/",
+      "twitter": "energywebx",
+      "github": [
+        "energywebfoundation"
+      ],
+      "symbol": "EWT",
+      "gasTokenSymbol": null,
+      "geckoId": "energy-web-token",
+      "gasTokenGeckoId": "energy-web-token",
+      "cmcId": "5268",
+      "categories": [
+        "EVM",
+        "Parachain"
+      ],
+      "parent": {
+        "chain": "Polkadot",
+        "types": [
+          "parachain"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 250,
+      "name": "Fantom",
+      "aliases": [],
+      "website": "https://fantom.foundation/",
+      "twitter": "FantomFDN",
+      "github": [
+        "Fantom-foundation"
+      ],
+      "symbol": "FTM",
+      "gasTokenSymbol": null,
+      "geckoId": "fantom",
+      "gasTokenGeckoId": "fantom",
+      "cmcId": "3513",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 252,
+      "name": "Fraxtal",
+      "aliases": [],
+      "website": "https://frax.com/",
+      "twitter": "fraxfinance",
+      "github": [],
+      "symbol": "FRAX",
+      "gasTokenSymbol": null,
+      "geckoId": "frax-share",
+      "gasTokenGeckoId": "frax-share",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Superchain"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 254,
+      "name": "Swan",
+      "aliases": [],
+      "website": "https://swanchain.io/",
+      "twitter": "swan_chain",
+      "github": [
+        "swanchain"
+      ],
+      "symbol": "SWAN",
+      "gasTokenSymbol": null,
+      "geckoId": "swan-chain",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": "Ethereum"
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 255,
+      "name": "Kroma",
+      "aliases": [],
+      "website": "https://kroma.network/",
+      "twitter": "kroma_network",
+      "github": [
+        "kroma-network"
+      ],
+      "symbol": "KRO",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": "27190",
+      "categories": [
+        "EVM",
+        "Rollup",
+        "Superchain"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": "Ethereum"
+      },
+      "deprecated": true,
+      "deadFrom": "2026-01-20"
+    },
+    {
+      "chainId": 269,
+      "name": "HPB",
+      "aliases": [],
+      "website": "https://www.hpb.io/",
+      "twitter": "HPB_Global",
+      "github": [
+        "hpb-project"
+      ],
+      "symbol": "HPB",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": "2345",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-08-01"
+    },
+    {
+      "chainId": 274,
+      "name": "LaChain Network",
+      "aliases": [],
+      "website": "https://www.lachain.network/",
+      "twitter": "LaChain_Network",
+      "github": [],
+      "symbol": "LAC",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 277,
+      "name": "Prom",
+      "aliases": [],
+      "website": "https://prom.io/",
+      "twitter": "prom_io",
+      "github": [],
+      "symbol": "PROM",
+      "gasTokenSymbol": null,
+      "geckoId": "prometeus",
+      "gasTokenGeckoId": "prometeus",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 288,
+      "name": "Boba",
+      "aliases": [],
+      "website": "https://boba.network/",
+      "twitter": "bobanetwork",
+      "github": [
+        "bobanetwork"
+      ],
+      "symbol": "BOBA",
+      "gasTokenSymbol": null,
+      "geckoId": "boba-network",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": "14556",
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": "Ethereum"
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 291,
+      "name": "Orderly Network",
+      "aliases": [
+        "Orderly"
+      ],
+      "website": "https://orderly.network/",
+      "twitter": "OrderlyNetwork",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": "orderly-network",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 295,
+      "name": "Hedera",
+      "aliases": [],
+      "website": "https://hedera.com/",
+      "twitter": "hedera",
+      "github": [
+        "hashgraph"
+      ],
+      "symbol": "HBAR",
+      "gasTokenSymbol": null,
+      "geckoId": "hedera-hashgraph",
+      "gasTokenGeckoId": "hedera-hashgraph",
+      "cmcId": "4642",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 314,
+      "name": "Filecoin",
+      "aliases": [],
+      "website": "https://filecoin.io/",
+      "twitter": "Filecoin",
+      "github": [
+        "filecoin-project"
+      ],
+      "symbol": "FIL",
+      "gasTokenSymbol": null,
+      "geckoId": "filecoin",
+      "gasTokenGeckoId": "filecoin",
+      "cmcId": "2280",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 321,
+      "name": "KCC",
+      "aliases": [
+        "Kucoin"
+      ],
+      "website": "https://www.kcc.io/",
+      "twitter": "KCCOfficialTW",
+      "github": [
+        "kcc-community"
+      ],
+      "symbol": "KCS",
+      "gasTokenSymbol": null,
+      "geckoId": "kucoin-shares",
+      "gasTokenGeckoId": "kucoin-shares",
+      "cmcId": "2087",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 324,
+      "name": "ZKsync Era",
+      "aliases": [
+        "zkSync Era"
+      ],
+      "website": "https://zksync.io/",
+      "twitter": "zksync",
+      "github": [
+        "matter-labs"
+      ],
+      "symbol": "ZK",
+      "gasTokenSymbol": null,
+      "geckoId": "zksync",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": "24091",
+      "categories": [
+        "EVM",
+        "Rollup",
+        "Elastic Network"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": "Ethereum"
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 329,
+      "name": "VirBiCoin",
+      "aliases": [],
+      "website": "https://vbc.digitalregion.jp/",
+      "twitter": "VirBiCoin",
+      "github": [
+        "virbicoin"
+      ],
+      "symbol": "VBC",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 336,
+      "name": "Shiden",
+      "aliases": [],
+      "website": "https://shiden.astar.network/",
+      "twitter": "ShidenNetwork",
+      "github": [
+        "AstarNetwork"
+      ],
+      "symbol": "SDN",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": "11451",
+      "categories": [
+        "EVM",
+        "Parachain"
+      ],
+      "parent": {
+        "chain": "Kusama",
+        "types": [
+          "parachain"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 360,
+      "name": "Shape",
+      "aliases": [],
+      "website": "https://shape.network/",
+      "twitter": "shape",
+      "github": [],
+      "symbol": "SHAPE",
+      "gasTokenSymbol": null,
+      "geckoId": "shape",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup",
+        "Superchain"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": "Ethereum"
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 361,
+      "name": "Theta",
+      "aliases": [],
+      "website": "https://thetatoken.org/",
+      "twitter": "Theta_Network",
+      "github": [
+        "thetatoken"
+      ],
+      "symbol": "THETA",
+      "gasTokenSymbol": null,
+      "geckoId": "theta-token",
+      "gasTokenGeckoId": "theta-fuel",
+      "cmcId": "2416",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 369,
+      "name": "PulseChain",
+      "aliases": [
+        "Pulse"
+      ],
+      "website": "https://pulsechain.com/",
+      "twitter": "PulsechainCom",
+      "github": [],
+      "symbol": "PLS",
+      "gasTokenSymbol": null,
+      "geckoId": "pulsechain",
+      "gasTokenGeckoId": "pulsechain",
+      "cmcId": "11145",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 388,
+      "name": "Cronos zkEVM",
+      "aliases": [],
+      "website": "https://cronos.org/zkevm",
+      "twitter": "cronos_chain",
+      "github": [],
+      "symbol": "ZKCRO",
+      "gasTokenSymbol": null,
+      "geckoId": "cronos-zkevm-cro",
+      "gasTokenGeckoId": "cronos-zkevm-cro",
+      "cmcId": "33873",
+      "categories": [
+        "EVM",
+        "Rollup",
+        "Elastic Network"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 466,
+      "name": "Appchain",
+      "aliases": [],
+      "website": "https://appchain.xyz/",
+      "twitter": "onappchain",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 478,
+      "name": "Form Network",
+      "aliases": [],
+      "website": "https://form.network/",
+      "twitter": "0xForm",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup",
+        "Superchain"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": null
+      },
+      "deprecated": true,
+      "deadFrom": "2025-07-31"
+    },
+    {
+      "chainId": 480,
+      "name": "World Chain",
+      "aliases": [],
+      "website": "https://world.org/",
+      "twitter": "world_chain_",
+      "github": [],
+      "symbol": "WLD",
+      "gasTokenSymbol": null,
+      "geckoId": "worldcoin-wld",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup",
+        "Superchain"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2"
+        ],
+        "da": "Ethereum"
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 484,
+      "name": "Camp Network",
+      "aliases": [
+        "Camp"
+      ],
+      "website": "https://www.campnetwork.xyz/",
+      "twitter": "campnetworkxyz",
+      "github": [],
+      "symbol": "CAMP",
+      "gasTokenSymbol": null,
+      "geckoId": "camp-network",
+      "gasTokenGeckoId": "camp-network",
+      "cmcId": "38195",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 529,
+      "name": "Firechain",
+      "aliases": [],
+      "website": null,
+      "twitter": null,
+      "github": [],
+      "symbol": "FIRE",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 534,
+      "name": "Candle",
+      "aliases": [],
+      "website": null,
+      "twitter": null,
+      "github": [],
+      "symbol": "CNDL",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": "18327",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 570,
+      "name": "Rollux",
+      "aliases": [],
+      "website": "https://rollux.com/",
+      "twitter": "RolluxL2",
+      "github": [
+        "SYS-Labs"
+      ],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "syscoin",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup",
+        "Bitcoin Sidechains"
+      ],
+      "parent": {
+        "chain": "Syscoin",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 592,
+      "name": "Astar",
+      "aliases": [],
+      "website": "https://unstoppable.astar.network/",
+      "twitter": "AstarNetwork",
+      "github": [
+        "AstarNetwork"
+      ],
+      "symbol": "ASTR",
+      "gasTokenSymbol": null,
+      "geckoId": "astar",
+      "gasTokenGeckoId": "astar",
+      "cmcId": "12885",
+      "categories": [
+        "EVM",
+        "Parachain"
+      ],
+      "parent": {
+        "chain": "Polkadot",
+        "types": [
+          "parachain"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 648,
+      "name": "Endurance",
+      "aliases": [],
+      "website": "https://ace.fusionist.io/",
+      "twitter": "fusionistio",
+      "github": [],
+      "symbol": "ACE",
+      "gasTokenSymbol": null,
+      "geckoId": "endurance",
+      "gasTokenGeckoId": "endurance",
+      "cmcId": "28674",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 677,
+      "name": "BOT Chain",
+      "aliases": [],
+      "website": "https://www.botchain.ai/en",
+      "twitter": "BOTChain_ai",
+      "github": [],
+      "symbol": "BOT",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 690,
+      "name": "Redstone",
+      "aliases": [],
+      "website": "https://redstone.xyz/",
+      "twitter": "redstonexyz",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup",
+        "Superchain"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": null
+      },
+      "deprecated": true,
+      "deadFrom": "2026-05-18"
+    },
+    {
+      "chainId": 698,
+      "name": "Matchain",
+      "aliases": [],
+      "website": "https://www.matchain.io/",
+      "twitter": "matchain_io",
+      "github": [],
+      "symbol": "MAT",
+      "gasTokenSymbol": null,
+      "geckoId": "matchain",
+      "gasTokenGeckoId": "binancecoin",
+      "cmcId": "36397",
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "BSC",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 714,
+      "name": "Eden",
+      "aliases": [],
+      "website": "https://eden.zone/",
+      "twitter": "celestia",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "celestia",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": {
+        "chain": "Celestia",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 747,
+      "name": "Flow",
+      "aliases": [],
+      "website": "https://flow.com/",
+      "twitter": "flow_blockchain",
+      "github": [
+        "onflow"
+      ],
+      "symbol": "FLOW",
+      "gasTokenSymbol": null,
+      "geckoId": "flow",
+      "gasTokenGeckoId": "flow",
+      "cmcId": "4558",
+      "categories": [],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 757,
+      "name": "Capx Chain",
+      "aliases": [],
+      "website": "https://capx.ai/",
+      "twitter": "0xcapx",
+      "github": [],
+      "symbol": "CAPX",
+      "gasTokenSymbol": null,
+      "geckoId": "capx-ai",
+      "gasTokenGeckoId": "capx-ai",
+      "cmcId": "36557",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-09-03"
+    },
+    {
+      "chainId": 820,
+      "name": "Callisto",
+      "aliases": [],
+      "website": "https://callisto.network/",
+      "twitter": "CallistoSupport",
+      "github": [
+        "CallistoNetwork"
+      ],
+      "symbol": "CLO",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": "2757",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-07-01"
+    },
+    {
+      "chainId": 841,
+      "name": "Taraxa",
+      "aliases": [],
+      "website": "https://taraxa.io/",
+      "twitter": "taraxa_project",
+      "github": [],
+      "symbol": "TARA",
+      "gasTokenSymbol": null,
+      "geckoId": "taraxa",
+      "gasTokenGeckoId": "taraxa",
+      "cmcId": "8715",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-03-09"
+    },
+    {
+      "chainId": 888,
+      "name": "Wanchain",
+      "aliases": [],
+      "website": "https://www.wanchain.org/",
+      "twitter": "wanchain_org",
+      "github": [
+        "wanchain"
+      ],
+      "symbol": "WAN",
+      "gasTokenSymbol": null,
+      "geckoId": "wanchain",
+      "gasTokenGeckoId": "wanchain",
+      "cmcId": "2606",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 957,
+      "name": "Derive Chain",
+      "aliases": [
+        "Lyra Chain"
+      ],
+      "website": "https://www.derive.xyz/",
+      "twitter": "derivexyz",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": "derive",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup",
+        "Superchain"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": "Celestia"
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 964,
+      "name": "Bittensor EVM",
+      "aliases": [],
+      "website": "https://bittensor.com/",
+      "twitter": "opentensor",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": "bittensor",
+      "gasTokenGeckoId": "bittensor",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": {
+        "chain": "Bittensor",
+        "types": [
+          "emulator"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 988,
+      "name": "Stable",
+      "aliases": [],
+      "website": "https://www.stable.xyz/",
+      "twitter": "stable",
+      "github": [],
+      "symbol": "STABLE",
+      "gasTokenSymbol": null,
+      "geckoId": "stable-2",
+      "gasTokenGeckoId": "usdt0",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 1024,
+      "name": "CLV",
+      "aliases": [],
+      "website": "https://clv.org/",
+      "twitter": "clv_org",
+      "github": [
+        "clover-network"
+      ],
+      "symbol": "CLV",
+      "gasTokenSymbol": null,
+      "geckoId": "clover-finance",
+      "gasTokenGeckoId": "clover-finance",
+      "cmcId": "8384",
+      "categories": [
+        "EVM",
+        "Parachain"
+      ],
+      "parent": {
+        "chain": "Polkadot",
+        "types": [
+          "parachain"
+        ],
+        "da": null
+      },
+      "deprecated": true,
+      "deadFrom": "2025-11-22"
+    },
+    {
+      "chainId": 1088,
+      "name": "Metis",
+      "aliases": [],
+      "website": "https://www.metis.io/",
+      "twitter": "MetisL2",
+      "github": [
+        "MetisProtocol"
+      ],
+      "symbol": "METIS",
+      "gasTokenSymbol": null,
+      "geckoId": "metis-token",
+      "gasTokenGeckoId": "metis-token",
+      "cmcId": "9640",
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 1101,
+      "name": "Polygon zkEVM",
+      "aliases": [],
+      "website": "https://polygon.technology/",
+      "twitter": "0xPolygon",
+      "github": [
+        "maticnetwork"
+      ],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": "Ethereum"
+      },
+      "deprecated": true,
+      "deadFrom": "2026-07-01"
+    },
+    {
+      "chainId": 1110,
+      "name": "GRX Chain",
+      "aliases": [],
+      "website": "https://www.grxchain.io/",
+      "twitter": "GroveXchange",
+      "github": [],
+      "symbol": "GRX",
+      "gasTokenSymbol": null,
+      "geckoId": "grx-chain",
+      "gasTokenGeckoId": "grx-chain",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 1130,
+      "name": "DeFiChain EVM",
+      "aliases": [],
+      "website": "https://defichain.com/",
+      "twitter": "defichain",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "defichain",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 1135,
+      "name": "Lisk",
+      "aliases": [],
+      "website": "https://lisk.com/",
+      "twitter": "Lisk",
+      "github": [
+        "LiskHQ"
+      ],
+      "symbol": "LSK",
+      "gasTokenSymbol": null,
+      "geckoId": "lisk",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": "1214",
+      "categories": [
+        "EVM",
+        "Rollup",
+        "Superchain"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2"
+        ],
+        "da": "Ethereum"
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 1231,
+      "name": "Ultron",
+      "aliases": [],
+      "website": "https://ultron.foundation/",
+      "twitter": "ultron_found",
+      "github": [
+        "UltronFoundationDev"
+      ],
+      "symbol": "ULX",
+      "gasTokenSymbol": null,
+      "geckoId": "ultron",
+      "gasTokenGeckoId": "ultron",
+      "cmcId": "21524",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 1284,
+      "name": "Moonbeam",
+      "aliases": [],
+      "website": "https://moonbeam.network/",
+      "twitter": "MoonbeamNetwork",
+      "github": [
+        "moonbeam-foundation"
+      ],
+      "symbol": "GLMR",
+      "gasTokenSymbol": null,
+      "geckoId": "moonbeam",
+      "gasTokenGeckoId": "moonbeam",
+      "cmcId": "6836",
+      "categories": [
+        "EVM",
+        "Parachain"
+      ],
+      "parent": {
+        "chain": "Polkadot",
+        "types": [
+          "parachain"
+        ],
+        "da": null
+      },
+      "deprecated": true,
+      "deadFrom": "2026-07-31"
+    },
+    {
+      "chainId": 1285,
+      "name": "Moonriver",
+      "aliases": [],
+      "website": "https://moonbeam.network/networks/moonriver/",
+      "twitter": "MoonriverNW",
+      "github": [
+        "PureStake"
+      ],
+      "symbol": "MOVR",
+      "gasTokenSymbol": null,
+      "geckoId": "moonriver",
+      "gasTokenGeckoId": "moonriver",
+      "cmcId": "9285",
+      "categories": [
+        "EVM",
+        "Parachain"
+      ],
+      "parent": {
+        "chain": "Kusama",
+        "types": [
+          "parachain"
+        ],
+        "da": null
+      },
+      "deprecated": true,
+      "deadFrom": "2026-07-31"
+    },
+    {
+      "chainId": 1424,
+      "name": "Perennial",
+      "aliases": [],
+      "website": "https://perennial.finance/",
+      "twitter": "perenniallabs",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-06-30"
+    },
+    {
+      "chainId": 1514,
+      "name": "Data Network",
+      "aliases": [
+        "Story"
+      ],
+      "website": "https://www.datafdn.org/",
+      "twitter": "datafdn",
+      "github": [],
+      "symbol": "DATA",
+      "gasTokenSymbol": null,
+      "geckoId": "story-2",
+      "gasTokenGeckoId": "story-2",
+      "cmcId": "35626",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 1625,
+      "name": "Gravity by Galxe",
+      "aliases": [
+        "Gravity"
+      ],
+      "website": "https://gravity.xyz/",
+      "twitter": "GravityChain",
+      "github": [],
+      "symbol": "G",
+      "gasTokenSymbol": null,
+      "geckoId": "g-token",
+      "gasTokenGeckoId": "g-token",
+      "cmcId": "32120",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 1672,
+      "name": "Pharos",
+      "aliases": [],
+      "website": "https://www.pharos.xyz/",
+      "twitter": "pharos_network",
+      "github": [],
+      "symbol": "PROS",
+      "gasTokenSymbol": null,
+      "geckoId": "pharos-network",
+      "gasTokenGeckoId": "pharos-network",
+      "cmcId": "39682",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 1729,
+      "name": "ReyaChain",
+      "aliases": [
+        "Reya Network"
+      ],
+      "website": "https://reya.xyz/",
+      "twitter": "reya_xyz",
+      "github": [],
+      "symbol": "REYA",
+      "gasTokenSymbol": null,
+      "geckoId": "reya",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 1750,
+      "name": "MetalL2",
+      "aliases": [],
+      "website": "https://metall2.com/",
+      "twitter": "Metal_L2",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup",
+        "Superchain"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 1818,
+      "name": "Cube",
+      "aliases": [],
+      "website": null,
+      "twitter": null,
+      "github": [
+        "cube-network"
+      ],
+      "symbol": "CUBE",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": "20519",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-06-24"
+    },
+    {
+      "chainId": 1868,
+      "name": "Soneium",
+      "aliases": [],
+      "website": "https://soneium.org/",
+      "twitter": "soneium",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup",
+        "Superchain"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": "Ethereum"
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 1890,
+      "name": "LightLink",
+      "aliases": [],
+      "website": null,
+      "twitter": null,
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": "lightlink",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": "Celestia"
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 1907,
+      "name": "Bitcichain",
+      "aliases": [],
+      "website": "https://bitcichain.com/",
+      "twitter": "BitciChain",
+      "github": [],
+      "symbol": "BITCI",
+      "gasTokenSymbol": null,
+      "geckoId": "bitcicoin",
+      "gasTokenGeckoId": "bitcicoin",
+      "cmcId": "8357",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 1923,
+      "name": "Swellchain",
+      "aliases": [],
+      "website": "https://www.swellnetwork.io/",
+      "twitter": "swellnetworkio",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup",
+        "Superchain"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": "Ethereum"
+      },
+      "deprecated": true,
+      "deadFrom": "2026-06-23"
+    },
+    {
+      "chainId": 1983,
+      "name": "Krown Network",
+      "aliases": [],
+      "website": "https://krown.network/",
+      "twitter": "KrownNetwork",
+      "github": [],
+      "symbol": "KROWN",
+      "gasTokenSymbol": null,
+      "geckoId": "krown-network",
+      "gasTokenGeckoId": "krown-network",
+      "cmcId": "35141",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 1990,
+      "name": "QIE",
+      "aliases": [],
+      "website": "https://www.qie.digital/",
+      "twitter": "qieblockchain",
+      "github": [],
+      "symbol": "QIE",
+      "gasTokenSymbol": null,
+      "geckoId": "qie",
+      "gasTokenGeckoId": "qie",
+      "cmcId": "21988",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 1996,
+      "name": "Sanko",
+      "aliases": [],
+      "website": "https://sanko.xyz/",
+      "twitter": "SankoGameCorp",
+      "github": [],
+      "symbol": "DMT",
+      "gasTokenSymbol": null,
+      "geckoId": "dream-machine-token",
+      "gasTokenGeckoId": "dream-machine-token",
+      "cmcId": "25653",
+      "categories": [
+        "EVM",
+        "Arbitrum Chains"
+      ],
+      "parent": {
+        "chain": "Arbitrum",
+        "types": [
+          "L3"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 2001,
+      "name": "Milkomeda C1",
+      "aliases": [
+        "Milkomeda"
+      ],
+      "website": "https://www.milkomeda.com/",
+      "twitter": "Milkomeda_com",
+      "github": [
+        "dcSpark"
+      ],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "cardano",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": {
+        "chain": "Cardano",
+        "types": [
+          "gas"
+        ],
+        "da": null
+      },
+      "deprecated": true,
+      "deadFrom": "2026-02-12"
+    },
+    {
+      "chainId": 2002,
+      "name": "Milkomeda A1",
+      "aliases": [],
+      "website": "https://www.milkomeda.com/",
+      "twitter": "Milkomeda_com",
+      "github": [
+        "dcSpark"
+      ],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "algorand",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Algorand",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": null
+      },
+      "deprecated": true,
+      "deadFrom": "2026-02-12"
+    },
+    {
+      "chainId": 2020,
+      "name": "Ronin",
+      "aliases": [],
+      "website": "https://roninchain.com/",
+      "twitter": "Ronin_Network",
+      "github": [
+        "axieinfinity"
+      ],
+      "symbol": "RON",
+      "gasTokenSymbol": null,
+      "geckoId": "ronin",
+      "gasTokenGeckoId": "ronin",
+      "cmcId": "14101",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 2152,
+      "name": "Findora",
+      "aliases": [],
+      "website": "https://findora.org/",
+      "twitter": "Findora",
+      "github": [
+        "FindoraNetwork"
+      ],
+      "symbol": "FRA",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": "4249",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-09-03"
+    },
+    {
+      "chainId": 2288,
+      "name": "Moca",
+      "aliases": [],
+      "website": "https://moca.network/",
+      "twitter": "Moca_Network",
+      "github": [],
+      "symbol": "MOCA",
+      "gasTokenSymbol": null,
+      "geckoId": "mocaverse",
+      "gasTokenGeckoId": "mocaverse",
+      "cmcId": "31526",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 2345,
+      "name": "GOAT",
+      "aliases": [
+        "Goat"
+      ],
+      "website": "https://www.goat.network/",
+      "twitter": "GOATRollup",
+      "github": [],
+      "symbol": "GOATED",
+      "gasTokenSymbol": null,
+      "geckoId": "goat-network",
+      "gasTokenGeckoId": "bitcoin",
+      "cmcId": "38494",
+      "categories": [
+        "EVM",
+        "Bitcoin Sidechains"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 2355,
+      "name": "Silicon zkEVM",
+      "aliases": [],
+      "website": "https://silicon.network/",
+      "twitter": "0xSilicon",
+      "github": [],
+      "symbol": "-",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": "Ethereum"
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 2366,
+      "name": "KiteAI",
+      "aliases": [],
+      "website": "https://strat.trade/",
+      "twitter": "GoKiteAI",
+      "github": [],
+      "symbol": "KITE",
+      "gasTokenSymbol": null,
+      "geckoId": "kite-2",
+      "gasTokenGeckoId": "kite-2",
+      "cmcId": "38828",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 2372,
+      "name": "BESC Hyperchain",
+      "aliases": [],
+      "website": "https://besc.llc/",
+      "twitter": "BESCLLC",
+      "github": [],
+      "symbol": "BESC",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 2410,
+      "name": "K2",
+      "aliases": [],
+      "website": "https://opengdp.network/",
+      "twitter": "Karak_Network",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": "Celestia"
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 2525,
+      "name": "inEVM",
+      "aliases": [],
+      "website": "https://inevm.com/",
+      "twitter": "injective",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "injective-protocol",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": {
+        "chain": "Injective",
+        "types": [
+          "gas"
+        ],
+        "da": null
+      },
+      "deprecated": true,
+      "deadFrom": "2026-04-08"
+    },
+    {
+      "chainId": 2649,
+      "name": "AILayer",
+      "aliases": [],
+      "website": "https://anvm.io/",
+      "twitter": "AILayerXYZ",
+      "github": [],
+      "symbol": "AIL",
+      "gasTokenSymbol": null,
+      "geckoId": "ailayer-token",
+      "gasTokenGeckoId": "bitcoin",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Bitcoin Sidechains"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 2741,
+      "name": "Abstract",
+      "aliases": [],
+      "website": "https://www.abs.xyz/",
+      "twitter": "AbstractChain",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup",
+        "Elastic Network"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": "Ethereum"
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 3030,
+      "name": "BCHyper",
+      "aliases": [],
+      "website": "https://versatizecoin.com/",
+      "twitter": "versatizecoin",
+      "github": [],
+      "symbol": "VTCN",
+      "gasTokenSymbol": null,
+      "geckoId": "versatize-coin",
+      "gasTokenGeckoId": "versatize-coin",
+      "cmcId": "23619",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 3073,
+      "name": "Movement",
+      "aliases": [],
+      "website": "https://movementlabs.xyz/",
+      "twitter": "movementlabsxyz",
+      "github": [],
+      "symbol": "MOVE",
+      "gasTokenSymbol": null,
+      "geckoId": "movement",
+      "gasTokenGeckoId": "movement",
+      "cmcId": "32452",
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 3109,
+      "name": "SatoshiVM",
+      "aliases": [],
+      "website": "https://www.satoshivm.io/",
+      "twitter": "satoshivm",
+      "github": [
+        "SatoshiVM"
+      ],
+      "symbol": "SAVM",
+      "gasTokenSymbol": null,
+      "geckoId": "satoshivm",
+      "gasTokenGeckoId": "bitcoin",
+      "cmcId": "29095",
+      "categories": [
+        "EVM",
+        "Bitcoin Sidechains"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-01-09"
+    },
+    {
+      "chainId": 3282,
+      "name": "Irys",
+      "aliases": [],
+      "website": "https://irys.xyz/",
+      "twitter": "irys_xyz",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": "irys",
+      "gasTokenGeckoId": "irys",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 3338,
+      "name": "Peaq",
+      "aliases": [],
+      "website": "https://www.peaq.xyz/",
+      "twitter": "peaq",
+      "github": [],
+      "symbol": "PEAQ",
+      "gasTokenSymbol": null,
+      "geckoId": "peaq-2",
+      "gasTokenGeckoId": "peaq-2",
+      "cmcId": "14588",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 3637,
+      "name": "Botanix",
+      "aliases": [],
+      "website": "https://botanixlabs.com/",
+      "twitter": "BotanixLabs",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "bitcoin",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Bitcoin Sidechains"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-07-09"
+    },
+    {
+      "chainId": 3721,
+      "name": "Xone Chain",
+      "aliases": [],
+      "website": "https://xone.org/",
+      "twitter": "xone_chain",
+      "github": [
+        "hello-xone"
+      ],
+      "symbol": "XOC",
+      "gasTokenSymbol": null,
+      "geckoId": "xoc",
+      "gasTokenGeckoId": "xoc",
+      "cmcId": null,
+      "categories": [],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-03-16"
+    },
+    {
+      "chainId": 3776,
+      "name": "Astar zkEVM",
+      "aliases": [],
+      "website": "https://astar.network/",
+      "twitter": "AstarNetwork",
+      "github": [
+        "AstarNetwork"
+      ],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": null
+      },
+      "deprecated": true,
+      "deadFrom": "2026-02-12"
+    },
+    {
+      "chainId": 3777,
+      "name": "INRI",
+      "aliases": [],
+      "website": "https://inri.life/",
+      "twitter": "inrichain",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-08-03"
+    },
+    {
+      "chainId": 4048,
+      "name": "GANchain",
+      "aliases": [],
+      "website": "https://www.gpu.net/",
+      "twitter": "gpunet",
+      "github": [],
+      "symbol": "GPU",
+      "gasTokenSymbol": null,
+      "geckoId": "gpunet",
+      "gasTokenGeckoId": "gpunet",
+      "cmcId": "36772",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 4114,
+      "name": "Citrea",
+      "aliases": [],
+      "website": "https://citrea.xyz/",
+      "twitter": "citrea_xyz",
+      "github": [],
+      "symbol": "CTR",
+      "gasTokenSymbol": null,
+      "geckoId": "citrea",
+      "gasTokenGeckoId": "citrea-bridged-bitcoin",
+      "cmcId": "39916",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 4158,
+      "name": "CrossFi",
+      "aliases": [],
+      "website": "https://crossfi.org/",
+      "twitter": "crossfichain",
+      "github": [],
+      "symbol": "XFI",
+      "gasTokenSymbol": null,
+      "geckoId": "crossfi-2",
+      "gasTokenGeckoId": "crossfi-2",
+      "cmcId": "26202",
+      "categories": [
+        "EVM",
+        "Cosmos"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-09-09"
+    },
+    {
+      "chainId": 4217,
+      "name": "Tempo",
+      "aliases": [],
+      "website": "https://tempo.xyz/",
+      "twitter": "tempo",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 4326,
+      "name": "MegaETH",
+      "aliases": [],
+      "website": "https://www.megaeth.com/",
+      "twitter": "megaeth",
+      "github": [],
+      "symbol": "MEGA",
+      "gasTokenSymbol": null,
+      "geckoId": "megaeth",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 4337,
+      "name": "Beam",
+      "aliases": [],
+      "website": "https://onbeam.com/",
+      "twitter": "MeritCircle_IO",
+      "github": [],
+      "symbol": "BEAM",
+      "gasTokenSymbol": null,
+      "geckoId": "beam-2",
+      "gasTokenGeckoId": "beam-2",
+      "cmcId": "28298",
+      "categories": [
+        "EVM"
+      ],
+      "parent": {
+        "chain": "Avalanche",
+        "types": [
+          "subnet"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 4488,
+      "name": "Hydra Chain",
+      "aliases": [],
+      "website": null,
+      "twitter": "hydrachainorg",
+      "github": [],
+      "symbol": "HYDRA",
+      "gasTokenSymbol": null,
+      "geckoId": "hydra",
+      "gasTokenGeckoId": "hydra",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": {
+        "chain": "Hydra",
+        "types": [
+          "emulator"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 4663,
+      "name": "Robinhood Chain",
+      "aliases": [],
+      "website": "https://robinhood.com/chain",
+      "twitter": "RobinhoodCrypto",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Arbitrum Chains"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 4689,
+      "name": "IoTeX",
+      "aliases": [],
+      "website": "https://iotex.io/",
+      "twitter": "iotex_io",
+      "github": [
+        "iotexproject"
+      ],
+      "symbol": "IOTX",
+      "gasTokenSymbol": null,
+      "geckoId": "iotex",
+      "gasTokenGeckoId": "iotex",
+      "cmcId": "2777",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 5000,
+      "name": "Mantle",
+      "aliases": [],
+      "website": "https://www.mantle.xyz/",
+      "twitter": "Mantle_Official",
+      "github": [
+        "mantlenetworkio"
+      ],
+      "symbol": "MNT",
+      "gasTokenSymbol": null,
+      "geckoId": "mantle",
+      "gasTokenGeckoId": "mantle",
+      "cmcId": "27075",
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 5031,
+      "name": "Somnia",
+      "aliases": [],
+      "website": "https://somnia.network/",
+      "twitter": "Somnia_Network",
+      "github": [],
+      "symbol": "SOMI",
+      "gasTokenSymbol": null,
+      "geckoId": "somnia",
+      "gasTokenGeckoId": "somnia",
+      "cmcId": "37637",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 5042,
+      "name": "Arc",
+      "aliases": [],
+      "website": "https://www.arc.io/",
+      "twitter": "arc",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 5050,
+      "name": "Skate",
+      "aliases": [],
+      "website": "https://www.skatechain.org/",
+      "twitter": "skate_chain",
+      "github": [],
+      "symbol": "SKATE",
+      "gasTokenSymbol": null,
+      "geckoId": "skate",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": "36747",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 5112,
+      "name": "Ham",
+      "aliases": [],
+      "website": "https://ham.fun/",
+      "twitter": "HamOnWarpcast",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Superchain"
+      ],
+      "parent": {
+        "chain": "Base",
+        "types": [
+          "L3"
+        ],
+        "da": "Celestia"
+      },
+      "deprecated": true,
+      "deadFrom": "2026-06-05"
+    },
+    {
+      "chainId": 5330,
+      "name": "Superseed",
+      "aliases": [],
+      "website": "https://www.superseed.xyz/",
+      "twitter": "SuperseedXYZ",
+      "github": [
+        "superseed-xyz"
+      ],
+      "symbol": "SUPR",
+      "gasTokenSymbol": null,
+      "geckoId": "superseed",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": "36436",
+      "categories": [
+        "EVM",
+        "Rollup",
+        "Superchain"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": "Ethereum"
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 5464,
+      "name": "Saga",
+      "aliases": [],
+      "website": "https://www.saga.xyz/",
+      "twitter": "Sagaxyz__",
+      "github": [],
+      "symbol": "SAGA",
+      "gasTokenSymbol": null,
+      "geckoId": "saga-2",
+      "gasTokenGeckoId": null,
+      "cmcId": "30372",
+      "categories": [
+        "EVM",
+        "Cosmos"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-02-16"
+    },
+    {
+      "chainId": 5551,
+      "name": "Nahmii",
+      "aliases": [],
+      "website": "https://www.nahmii.io/",
+      "twitter": "Nahmii_io",
+      "github": [
+        "nahmii"
+      ],
+      "symbol": "NII",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": "4865",
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": null
+      },
+      "deprecated": true,
+      "deadFrom": "2026-06-30"
+    },
+    {
+      "chainId": 5887,
+      "name": "MANTRA",
+      "aliases": [
+        "Mantra"
+      ],
+      "website": "https://www.mantrachain.io/",
+      "twitter": "MANTRA_Chain",
+      "github": [],
+      "symbol": "MANTRA",
+      "gasTokenSymbol": null,
+      "geckoId": "mantra",
+      "gasTokenGeckoId": "mantra",
+      "cmcId": "39611",
+      "categories": [
+        "Cosmos",
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 6001,
+      "name": "BounceBit",
+      "aliases": [],
+      "website": "https://bouncebit.io/",
+      "twitter": "bounce_bit",
+      "github": [
+        "BounceBit-Labs"
+      ],
+      "symbol": "BB",
+      "gasTokenSymbol": null,
+      "geckoId": "bouncebit",
+      "gasTokenGeckoId": "bouncebit",
+      "cmcId": "30746",
+      "categories": [
+        "EVM",
+        "Bitcoin Sidechains"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-08-24"
+    },
+    {
+      "chainId": 6699,
+      "name": "OXFUN",
+      "aliases": [],
+      "website": "https://ox.fun/en",
+      "twitter": "OXFUNHQ",
+      "github": [],
+      "symbol": "OX",
+      "gasTokenSymbol": null,
+      "geckoId": "ox-fun",
+      "gasTokenGeckoId": "ox-fun",
+      "cmcId": "29530",
+      "categories": [
+        "EVM"
+      ],
+      "parent": {
+        "chain": "Base",
+        "types": [
+          "L3"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 6880,
+      "name": "MTT Network",
+      "aliases": [],
+      "website": "https://www.mtt.network/",
+      "twitter": "MTT_NETWORK",
+      "github": [],
+      "symbol": "MTT",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": null,
+      "categories": [],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 6900,
+      "name": "Nibiru",
+      "aliases": [],
+      "website": "https://nibiru.fi/",
+      "twitter": "NibiruChain",
+      "github": [],
+      "symbol": "NIBI",
+      "gasTokenSymbol": null,
+      "geckoId": "nibiru",
+      "gasTokenGeckoId": "nibiru",
+      "cmcId": "28508",
+      "categories": [],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 7000,
+      "name": "ZetaChain",
+      "aliases": [],
+      "website": "https://www.zetachain.com/",
+      "twitter": "zetablockchain",
+      "github": [
+        "zeta-chain"
+      ],
+      "symbol": "ZETA",
+      "gasTokenSymbol": null,
+      "geckoId": "zetachain",
+      "gasTokenGeckoId": "zetachain",
+      "cmcId": "21259",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 7070,
+      "name": "Planq",
+      "aliases": [],
+      "website": "https://planq.network/",
+      "twitter": "PlanqFoundation",
+      "github": [
+        "planq-network"
+      ],
+      "symbol": "PLQ",
+      "gasTokenSymbol": null,
+      "geckoId": "planq",
+      "gasTokenGeckoId": "planq",
+      "cmcId": "28804",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-06-05"
+    },
+    {
+      "chainId": 7119,
+      "name": "Sentrix",
+      "aliases": [],
+      "website": "https://sentrixchain.com/",
+      "twitter": "sentrixchain",
+      "github": [
+        "sentrix-labs"
+      ],
+      "symbol": "SRX",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-08-03"
+    },
+    {
+      "chainId": 7171,
+      "name": "Bitrock",
+      "aliases": [],
+      "website": "https://www.bit-rock.io/",
+      "twitter": "BitRockChain",
+      "github": [
+        "BitrockChain"
+      ],
+      "symbol": "BROCK",
+      "gasTokenSymbol": null,
+      "geckoId": "bitrock",
+      "gasTokenGeckoId": "bitrock",
+      "cmcId": "27606",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-02-12"
+    },
+    {
+      "chainId": 7200,
+      "name": "exSat",
+      "aliases": [],
+      "website": "https://exsat.network/",
+      "twitter": "exSatNetwork",
+      "github": [
+        "exsat-network"
+      ],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "bitcoin",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Bitcoin Sidechains"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 7332,
+      "name": "Horizen EON",
+      "aliases": [],
+      "website": "https://www.horizen.io/",
+      "twitter": "horizenglobal",
+      "github": [],
+      "symbol": "ZEN",
+      "gasTokenSymbol": null,
+      "geckoId": "zencash",
+      "gasTokenGeckoId": "zencash",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-02-12"
+    },
+    {
+      "chainId": 7560,
+      "name": "Cyber",
+      "aliases": [],
+      "website": "https://cyber.co/",
+      "twitter": "BuildOnCyber",
+      "github": [
+        "cyberconnecthq"
+      ],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": "cyberconnect",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup",
+        "Superchain"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 7887,
+      "name": "Kinto",
+      "aliases": [],
+      "website": "https://www.kinto.xyz/",
+      "twitter": "KintoXYZ",
+      "github": [
+        "KintoXYZ"
+      ],
+      "symbol": "K",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": "36142",
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": "Ethereum"
+      },
+      "deprecated": true,
+      "deadFrom": "2026-03-06"
+    },
+    {
+      "chainId": 8008,
+      "name": "Polynomial",
+      "aliases": [],
+      "website": "https://www.polynomial.fi/",
+      "twitter": "PolynomialFi",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup",
+        "Superchain"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": "Ethereum"
+      },
+      "deprecated": true,
+      "deadFrom": "2026-02-13"
+    },
+    {
+      "chainId": 8217,
+      "name": "Kaia",
+      "aliases": [
+        "Klaytn"
+      ],
+      "website": "https://kaia.io/",
+      "twitter": "kaiachain",
+      "github": [
+        "kaiachain"
+      ],
+      "symbol": "KAIA",
+      "gasTokenSymbol": null,
+      "geckoId": "kaia",
+      "gasTokenGeckoId": "kaia",
+      "cmcId": "4256",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 8333,
+      "name": "B3",
+      "aliases": [],
+      "website": "https://www.b3.fun/",
+      "twitter": "b3dotfun",
+      "github": [],
+      "symbol": "B3",
+      "gasTokenSymbol": null,
+      "geckoId": "b3",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": "35690",
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Base",
+        "types": [
+          "L3"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 8453,
+      "name": "Base",
+      "aliases": [],
+      "website": "https://www.base.org/",
+      "twitter": "base",
+      "github": [
+        "base-org"
+      ],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup",
+        "Superchain"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": "Ethereum"
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 8472,
+      "name": "MyRx",
+      "aliases": [],
+      "website": "https://myrxwallet.io/",
+      "twitter": "myrxwallet",
+      "github": [
+        "myrxwallet"
+      ],
+      "symbol": "MRT",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 8668,
+      "name": "HeLa",
+      "aliases": [],
+      "website": "https://helalabs.com/",
+      "twitter": "Hela_Network",
+      "github": [],
+      "symbol": "HELA",
+      "gasTokenSymbol": null,
+      "geckoId": "hela",
+      "gasTokenGeckoId": "hela-usd",
+      "cmcId": "2137",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 8811,
+      "name": "Haven1",
+      "aliases": [],
+      "website": "https://haven1.org/",
+      "twitter": "Haven1official",
+      "github": [],
+      "symbol": "H1",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2025-11-05"
+    },
+    {
+      "chainId": 8822,
+      "name": "IOTA EVM",
+      "aliases": [],
+      "website": "https://blog.iota.org/iotas-evm-mainnet-launch/",
+      "twitter": "iota",
+      "github": [],
+      "symbol": "IOTA",
+      "gasTokenSymbol": null,
+      "geckoId": "iota",
+      "gasTokenGeckoId": "iota",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "IOTA",
+        "types": [
+          "L2"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 9001,
+      "name": "Evmos",
+      "aliases": [],
+      "website": "https://evmos.org/",
+      "twitter": "EvmosOrg",
+      "github": [
+        "evmos"
+      ],
+      "symbol": "EVMOS",
+      "gasTokenSymbol": null,
+      "geckoId": "evmos",
+      "gasTokenGeckoId": "evmos",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Cosmos"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-05-18"
+    },
+    {
+      "chainId": 9069,
+      "name": "Apex Fusion",
+      "aliases": [],
+      "website": "https://apexfusion.org/",
+      "twitter": "ApexFusion",
+      "github": [],
+      "symbol": "AP3X",
+      "gasTokenSymbol": null,
+      "geckoId": "apex-4",
+      "gasTokenGeckoId": "apex-4",
+      "cmcId": "35955",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 9745,
+      "name": "Plasma",
+      "aliases": [],
+      "website": "https://www.plasma.to/",
+      "twitter": "Plasma",
+      "github": [
+        "PlasmaLaboratories"
+      ],
+      "symbol": "XPL",
+      "gasTokenSymbol": null,
+      "geckoId": "plasma",
+      "gasTokenGeckoId": "plasma",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 10000,
+      "name": "smartBCH",
+      "aliases": [],
+      "website": "https://smartbch.org/",
+      "twitter": "SmartBCH",
+      "github": [
+        "smartbch"
+      ],
+      "symbol": "BCH",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "bitcoin-cash",
+      "cmcId": "1831",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 10088,
+      "name": "GateLayer",
+      "aliases": [],
+      "website": "https://gatechain.io/gatelayer",
+      "twitter": "gatechain_io",
+      "github": [
+        "gatechain"
+      ],
+      "symbol": "GT",
+      "gasTokenSymbol": null,
+      "geckoId": "gatechain-token",
+      "gasTokenGeckoId": "gatechain-token",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup",
+        "Superchain"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 10507,
+      "name": "Numbers",
+      "aliases": [],
+      "website": "https://www.numbersprotocol.io/",
+      "twitter": "numbersprotocol",
+      "github": [
+        "numbersprotocol"
+      ],
+      "symbol": "NUM",
+      "gasTokenSymbol": null,
+      "geckoId": "numbers-protocol",
+      "gasTokenGeckoId": "numbers-protocol",
+      "cmcId": "13521",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 11235,
+      "name": "HAQQ",
+      "aliases": [],
+      "website": "https://haqq.network/",
+      "twitter": "The_HaqqNetwork",
+      "github": [
+        "haqq-network"
+      ],
+      "symbol": "ISLM",
+      "gasTokenSymbol": null,
+      "geckoId": "islamic-coin",
+      "gasTokenGeckoId": "islamic-coin",
+      "cmcId": "26220",
+      "categories": [
+        "EVM",
+        "Cosmos"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 11820,
+      "name": "Artela",
+      "aliases": [],
+      "website": "https://artela.network/",
+      "twitter": "Artela_Network",
+      "github": [],
+      "symbol": "ART",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Cosmos"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-06-05"
+    },
+    {
+      "chainId": 13371,
+      "name": "Immutable zkEVM",
+      "aliases": [],
+      "website": "https://www.immutable.com/",
+      "twitter": "Immutable",
+      "github": [],
+      "symbol": "IMX",
+      "gasTokenSymbol": null,
+      "geckoId": "immutable-x",
+      "gasTokenGeckoId": "immutable-x",
+      "cmcId": "10603",
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 16116,
+      "name": "DeFiVerse",
+      "aliases": [],
+      "website": "https://defi-verse.org/",
+      "twitter": "DeFiVerse_org",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "oasys",
+      "cmcId": null,
+      "categories": [],
+      "parent": {
+        "chain": "Oasys",
+        "types": [
+          "L2"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 16507,
+      "name": "Genesys",
+      "aliases": [],
+      "website": "https://genesys.network/",
+      "twitter": "GenesysChain",
+      "github": [
+        "GENESYSBLOCKCHAIN"
+      ],
+      "symbol": "GSYS",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": "27940",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-03-01"
+    },
+    {
+      "chainId": 16661,
+      "name": "0G",
+      "aliases": [],
+      "website": "https://www.0gfoundation.ai/",
+      "twitter": "0G_Foundation",
+      "github": [
+        "0gfoundation"
+      ],
+      "symbol": "0G",
+      "gasTokenSymbol": null,
+      "geckoId": "zero-gravity",
+      "gasTokenGeckoId": "zero-gravity",
+      "cmcId": "38337",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 16718,
+      "name": "AirDAO",
+      "aliases": [],
+      "website": "https://airdao.io/",
+      "twitter": null,
+      "github": [
+        "ambrosus"
+      ],
+      "symbol": "AMB",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": "2081",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-01-20"
+    },
+    {
+      "chainId": 18686,
+      "name": "Moonchain",
+      "aliases": [],
+      "website": "https://www.moonchain.com/",
+      "twitter": "Moonchain_com",
+      "github": [],
+      "symbol": "MCH",
+      "gasTokenSymbol": null,
+      "geckoId": "moonchain",
+      "gasTokenGeckoId": "mxc",
+      "cmcId": "38247",
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2"
+        ],
+        "da": null
+      },
+      "deprecated": true,
+      "deadFrom": "2026-09-01"
+    },
+    {
+      "chainId": 18888,
+      "name": "Titan",
+      "aliases": [],
+      "website": "https://titanlab.io/home",
+      "twitter": "TitanMainnet",
+      "github": [],
+      "symbol": "TKX",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-05-05"
+    },
+    {
+      "chainId": 20402,
+      "name": "MUUCHAIN",
+      "aliases": [],
+      "website": null,
+      "twitter": null,
+      "github": [],
+      "symbol": "MUU",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": "22020",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 23294,
+      "name": "Oasis Sapphire",
+      "aliases": [
+        "Sapphire"
+      ],
+      "website": "https://oasisprotocol.org/sapphire",
+      "twitter": "OasisProtocol",
+      "github": [],
+      "symbol": "ROSE",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "oasis-network",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": {
+        "chain": "Oasis",
+        "types": [
+          "gas"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 25327,
+      "name": "Everclear",
+      "aliases": [],
+      "website": "https://www.everclear.org/",
+      "twitter": "EverclearOrg",
+      "github": [],
+      "symbol": "CLEAR",
+      "gasTokenSymbol": null,
+      "geckoId": "everclear",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": "34512",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 25363,
+      "name": "Fluent",
+      "aliases": [],
+      "website": "https://www.fluent.xyz/",
+      "twitter": "fluentxyz",
+      "github": [],
+      "symbol": "BLEND",
+      "gasTokenSymbol": null,
+      "geckoId": "fluent-network",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": "39666",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 26514,
+      "name": "Horizen L3",
+      "aliases": [],
+      "website": "https://horizen.io/",
+      "twitter": "Horizen_io",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Superchain"
+      ],
+      "parent": {
+        "chain": "Base",
+        "types": [
+          "L3"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 31612,
+      "name": "Mezo",
+      "aliases": [],
+      "website": "https://mezo.org/",
+      "twitter": "MezoNetwork",
+      "github": [
+        "mezo-org"
+      ],
+      "symbol": "MEZO",
+      "gasTokenSymbol": null,
+      "geckoId": "mezo",
+      "gasTokenGeckoId": "bitcoin",
+      "cmcId": "39727",
+      "categories": [],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 32520,
+      "name": "Bitgert",
+      "aliases": [],
+      "website": "https://bitgert.com/",
+      "twitter": null,
+      "github": [],
+      "symbol": "BRISE",
+      "gasTokenSymbol": null,
+      "geckoId": "bitrise-token",
+      "gasTokenGeckoId": "bitrise-token",
+      "cmcId": "11079",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 32659,
+      "name": "Fusion",
+      "aliases": [],
+      "website": "https://www.fusion.org/en",
+      "twitter": "FUSIONProtocol",
+      "github": [
+        "fsn-dev"
+      ],
+      "symbol": "FSN",
+      "gasTokenSymbol": null,
+      "geckoId": "fsn",
+      "gasTokenGeckoId": "fsn",
+      "cmcId": "2530",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 33139,
+      "name": "ApeChain",
+      "aliases": [],
+      "website": "https://apechain.com/",
+      "twitter": "apecoin",
+      "github": [],
+      "symbol": "APE",
+      "gasTokenSymbol": null,
+      "geckoId": "apecoin",
+      "gasTokenGeckoId": "apecoin",
+      "cmcId": "18876",
+      "categories": [
+        "EVM",
+        "Arbitrum Chains"
+      ],
+      "parent": {
+        "chain": "Arbitrum",
+        "types": [
+          "L3"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 34443,
+      "name": "Mode",
+      "aliases": [],
+      "website": "https://www.mode.network/",
+      "twitter": "modenetwork",
+      "github": [
+        "mode-network"
+      ],
+      "symbol": "MODE",
+      "gasTokenSymbol": null,
+      "geckoId": "mode",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": "31016",
+      "categories": [
+        "EVM",
+        "Rollup",
+        "Superchain"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": "Ethereum"
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 35441,
+      "name": "Q Protocol",
+      "aliases": [],
+      "website": "https://q.org/",
+      "twitter": "QBlockchain",
+      "github": [],
+      "symbol": "QGOV",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": "29443",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 36900,
+      "name": "ADI",
+      "aliases": [],
+      "website": "https://www.adi.foundation/",
+      "twitter": "ADIChain_",
+      "github": [],
+      "symbol": "ADI",
+      "gasTokenSymbol": null,
+      "geckoId": "adi-token",
+      "gasTokenGeckoId": "adi-token",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 38833,
+      "name": "Igra",
+      "aliases": [],
+      "website": "https://igralabs.com/",
+      "twitter": "IgraNetwork",
+      "github": [
+        "IgraLabs"
+      ],
+      "symbol": "IGRA",
+      "gasTokenSymbol": null,
+      "geckoId": "igra",
+      "gasTokenGeckoId": "igra-bridged-kaspa",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 39797,
+      "name": "Energi",
+      "aliases": [],
+      "website": "https://energi.world/",
+      "twitter": "energi",
+      "github": [
+        "energicryptocurrency"
+      ],
+      "symbol": "NRG",
+      "gasTokenSymbol": null,
+      "geckoId": "energi",
+      "gasTokenGeckoId": "energi",
+      "cmcId": "3218",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 41455,
+      "name": "Aleph Zero EVM",
+      "aliases": [],
+      "website": "https://alephzero.org/",
+      "twitter": "Aleph__Zero",
+      "github": [],
+      "symbol": "AZERO",
+      "gasTokenSymbol": null,
+      "geckoId": "aleph-zero",
+      "gasTokenGeckoId": "aleph-zero",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 41923,
+      "name": "EDU Chain",
+      "aliases": [],
+      "website": "https://www.opencampus.xyz/",
+      "twitter": "opencampus_xyz",
+      "github": [],
+      "symbol": "EDU",
+      "gasTokenSymbol": null,
+      "geckoId": "edu-coin",
+      "gasTokenGeckoId": "edu-coin",
+      "cmcId": "24613",
+      "categories": [
+        "EVM",
+        "Arbitrum Chains"
+      ],
+      "parent": {
+        "chain": "Arbitrum",
+        "types": [
+          "L3"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 42161,
+      "name": "Arbitrum",
+      "aliases": [],
+      "website": "https://arbitrum.io/",
+      "twitter": "arbitrum",
+      "github": [
+        "OffchainLabs"
+      ],
+      "symbol": "ARB",
+      "gasTokenSymbol": null,
+      "geckoId": "arbitrum",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": "11841",
+      "categories": [
+        "EVM",
+        "Rollup",
+        "Arbitrum Chains"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": "Ethereum"
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 42170,
+      "name": "Arbitrum Nova",
+      "aliases": [],
+      "website": "https://arbitrum.io/",
+      "twitter": "arbitrum",
+      "github": [
+        "OffchainLabs"
+      ],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 42220,
+      "name": "Celo",
+      "aliases": [],
+      "website": "https://celo.org/",
+      "twitter": "Celo",
+      "github": [
+        "celo-org"
+      ],
+      "symbol": "CELO",
+      "gasTokenSymbol": null,
+      "geckoId": "celo",
+      "gasTokenGeckoId": "celo",
+      "cmcId": "5567",
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": "Eigen"
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 42262,
+      "name": "Oasis Emerald",
+      "aliases": [
+        "Oasis"
+      ],
+      "website": "https://oasisprotocol.org/",
+      "twitter": "OasisProtocol",
+      "github": [
+        "oasisprotocol"
+      ],
+      "symbol": "ROSE",
+      "gasTokenSymbol": null,
+      "geckoId": "oasis-network",
+      "gasTokenGeckoId": "oasis-network",
+      "cmcId": "7653",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 42420,
+      "name": "Asset Chain",
+      "aliases": [],
+      "website": "https://xend.finance/",
+      "twitter": "xendfinance",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": "xend-finance",
+      "gasTokenGeckoId": "xend-finance",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 42766,
+      "name": "Zkfair",
+      "aliases": [],
+      "website": "https://zkfair.io/",
+      "twitter": "ZKFCommunity",
+      "github": [],
+      "symbol": "ZKF",
+      "gasTokenSymbol": null,
+      "geckoId": "zkfair",
+      "gasTokenGeckoId": "usd-coin",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 42793,
+      "name": "Etherlink",
+      "aliases": [],
+      "website": "https://www.etherlink.com/",
+      "twitter": "etherlink",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "tezos",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 43111,
+      "name": "Hemi",
+      "aliases": [],
+      "website": "https://hemi.xyz/",
+      "twitter": "hemi_xyz",
+      "github": [],
+      "symbol": "HEMI",
+      "gasTokenSymbol": null,
+      "geckoId": "hemi",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": "38159",
+      "categories": [
+        "EVM",
+        "Bitcoin Sidechains"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 43114,
+      "name": "Avalanche",
+      "aliases": [],
+      "website": "https://www.avax.network/",
+      "twitter": "avax",
+      "github": [
+        "ava-labs"
+      ],
+      "symbol": "AVAX",
+      "gasTokenSymbol": null,
+      "geckoId": "avalanche-2",
+      "gasTokenGeckoId": "avalanche-2",
+      "cmcId": "5805",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 47763,
+      "name": "Neo X Mainnet",
+      "aliases": [],
+      "website": "https://x.neo.org/",
+      "twitter": "Neo_Blockchain",
+      "github": [],
+      "symbol": "-",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "gas",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 47805,
+      "name": "REI",
+      "aliases": [],
+      "website": "https://www.rei.network/",
+      "twitter": "GXChainGlobal",
+      "github": [
+        "REI-Network"
+      ],
+      "symbol": "REI",
+      "gasTokenSymbol": null,
+      "geckoId": "rei-network",
+      "gasTokenGeckoId": "rei-network",
+      "cmcId": "19819",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-09-01"
+    },
+    {
+      "chainId": 48900,
+      "name": "Zircuit",
+      "aliases": [],
+      "website": "https://www.zircuit.com/",
+      "twitter": "ZircuitL2",
+      "github": [],
+      "symbol": "ZRC",
+      "gasTokenSymbol": null,
+      "geckoId": "zircuit",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": "29711",
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": "Ethereum"
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 50104,
+      "name": "Sophon",
+      "aliases": [],
+      "website": "https://sophon.xyz/",
+      "twitter": "sophon",
+      "github": [
+        "sophon-org"
+      ],
+      "symbol": "SOPH",
+      "gasTokenSymbol": null,
+      "geckoId": "sophon",
+      "gasTokenGeckoId": "sophon",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup",
+        "Elastic Network"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2"
+        ],
+        "da": "Avail"
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 52014,
+      "name": "Electroneum",
+      "aliases": [],
+      "website": "https://electroneum.com/",
+      "twitter": "electroneum",
+      "github": [],
+      "symbol": "ETN",
+      "gasTokenSymbol": null,
+      "geckoId": "electroneum",
+      "gasTokenGeckoId": "electroneum",
+      "cmcId": "2137",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 53935,
+      "name": "DFK",
+      "aliases": [],
+      "website": "https://defikingdoms.com/",
+      "twitter": "dfkchain",
+      "github": [],
+      "symbol": "JEWEL",
+      "gasTokenSymbol": null,
+      "geckoId": "defi-kingdoms",
+      "gasTokenGeckoId": "defi-kingdoms",
+      "cmcId": "12319",
+      "categories": [
+        "EVM"
+      ],
+      "parent": {
+        "chain": "Avalanche",
+        "types": [
+          "subnet"
+        ],
+        "da": null
+      },
+      "deprecated": true,
+      "deadFrom": "2026-08-28"
+    },
+    {
+      "chainId": 55244,
+      "name": "Superposition",
+      "aliases": [],
+      "website": "https://superposition.so/",
+      "twitter": "Superpositionso",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Arbitrum Chains"
+      ],
+      "parent": {
+        "chain": "Arbitrum",
+        "types": [
+          "L3"
+        ],
+        "da": null
+      },
+      "deprecated": true,
+      "deadFrom": "2026-09-08"
+    },
+    {
+      "chainId": 55555,
+      "name": "REIchain",
+      "aliases": [],
+      "website": null,
+      "twitter": null,
+      "github": [
+        "reichain"
+      ],
+      "symbol": "REI",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-09-01"
+    },
+    {
+      "chainId": 57073,
+      "name": "Ink",
+      "aliases": [],
+      "website": "https://inkonchain.com/",
+      "twitter": "inkonchain",
+      "github": [
+        "inkonchain"
+      ],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup",
+        "Superchain"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2"
+        ],
+        "da": "Ethereum"
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 59144,
+      "name": "Linea",
+      "aliases": [],
+      "website": "https://linea.build/",
+      "twitter": "LineaBuild",
+      "github": [
+        "ConsenSys"
+      ],
+      "symbol": "LINEA",
+      "gasTokenSymbol": null,
+      "geckoId": "linea",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": "Ethereum"
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 60808,
+      "name": "BOB",
+      "aliases": [],
+      "website": "https://www.gobob.xyz/",
+      "twitter": "build_on_bob",
+      "github": [
+        "bob-collective"
+      ],
+      "symbol": "BOB",
+      "gasTokenSymbol": null,
+      "geckoId": "bob-build-on-bitcoin",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": "38970",
+      "categories": [
+        "EVM",
+        "Rollup",
+        "Bitcoin Sidechains",
+        "Superchain"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": "Ethereum"
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 61803,
+      "name": "Etica",
+      "aliases": [],
+      "website": "https://www.eticaprotocol.org/",
+      "twitter": "eticaprotocol",
+      "github": [],
+      "symbol": "ETI",
+      "gasTokenSymbol": null,
+      "geckoId": "etica",
+      "gasTokenGeckoId": null,
+      "cmcId": "24618",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 71394,
+      "name": "Godwoken",
+      "aliases": [],
+      "website": "https://godwoken.com/",
+      "twitter": "GodwokenRises",
+      "github": [
+        "godwokenrises"
+      ],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "nervos-network",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": {
+        "chain": "Nervos",
+        "types": [
+          "emulator",
+          "gas"
+        ],
+        "da": null
+      },
+      "deprecated": true,
+      "deadFrom": "2026-01-06"
+    },
+    {
+      "chainId": 71402,
+      "name": "GodwokenV1",
+      "aliases": [],
+      "website": "https://godwoken.com/",
+      "twitter": "GodwokenRises",
+      "github": [
+        "godwokenrises"
+      ],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "nervos-network",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": {
+        "chain": "Godwoken",
+        "types": [
+          "emulator",
+          "gas"
+        ],
+        "da": null
+      },
+      "deprecated": true,
+      "deadFrom": "2026-01-06"
+    },
+    {
+      "chainId": 72957,
+      "name": "Rayls",
+      "aliases": [],
+      "website": "https://www.rayls.com/",
+      "twitter": "RaylsLabs",
+      "github": [],
+      "symbol": "RLS",
+      "gasTokenSymbol": null,
+      "geckoId": "rayls",
+      "gasTokenGeckoId": null,
+      "cmcId": "38701",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 78887,
+      "name": "Lung",
+      "aliases": [],
+      "website": null,
+      "twitter": null,
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 80094,
+      "name": "Berachain",
+      "aliases": [],
+      "website": "https://www.berachain.com/",
+      "twitter": "berachain",
+      "github": [],
+      "symbol": "BERA",
+      "gasTokenSymbol": null,
+      "geckoId": "berachain-bera",
+      "gasTokenGeckoId": "berachain-bera",
+      "cmcId": "24647",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 81224,
+      "name": "Codex",
+      "aliases": [],
+      "website": "https://www.codex.xyz/",
+      "twitter": "CodexFX",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 81457,
+      "name": "Blast",
+      "aliases": [],
+      "website": "https://blast.io/",
+      "twitter": "Blast_L2",
+      "github": [],
+      "symbol": "BLAST",
+      "gasTokenSymbol": null,
+      "geckoId": "blast",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": "28480",
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": "Ethereum"
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 88888,
+      "name": "Chiliz",
+      "aliases": [],
+      "website": "https://www.chiliz.com/",
+      "twitter": "Chiliz",
+      "github": [],
+      "symbol": "CHZ",
+      "gasTokenSymbol": null,
+      "geckoId": "chiliz",
+      "gasTokenGeckoId": "chiliz",
+      "cmcId": "4066",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 97477,
+      "name": "Doma",
+      "aliases": [],
+      "website": "https://doma.xyz/",
+      "twitter": "domaprotocol",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 97741,
+      "name": "Pepu",
+      "aliases": [],
+      "website": "https://pepeunchained.com/",
+      "twitter": "pepe_unchained",
+      "github": [],
+      "symbol": "PEPU",
+      "gasTokenSymbol": null,
+      "geckoId": "pepe-unchained-2",
+      "gasTokenGeckoId": "pepe-unchained-2",
+      "cmcId": "36696",
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 98865,
+      "name": "Plume",
+      "aliases": [],
+      "website": "https://plume.org/",
+      "twitter": "plumenetwork",
+      "github": [
+        "plumenetwork"
+      ],
+      "symbol": "PLUME",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-02-12"
+    },
+    {
+      "chainId": 98866,
+      "name": "Plume Mainnet",
+      "aliases": [],
+      "website": "https://plume.org/",
+      "twitter": "plumenetwork",
+      "github": [
+        "plumenetwork"
+      ],
+      "symbol": "PLUME",
+      "gasTokenSymbol": null,
+      "geckoId": "plume",
+      "gasTokenGeckoId": "plume",
+      "cmcId": "35364",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 105105,
+      "name": "Stratis",
+      "aliases": [],
+      "website": "https://www.stratisplatform.com/",
+      "twitter": "stratisplatform",
+      "github": [
+        "stratisproject"
+      ],
+      "symbol": "STRAX",
+      "gasTokenSymbol": null,
+      "geckoId": "stratis",
+      "gasTokenGeckoId": "stratis",
+      "cmcId": "30168",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 111188,
+      "name": "re.al",
+      "aliases": [],
+      "website": "https://www.re.al/",
+      "twitter": "real_rwa",
+      "github": [
+        "re-al-Foundation"
+      ],
+      "symbol": "RWA",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-02-12"
+    },
+    {
+      "chainId": 153153,
+      "name": "Odyssey",
+      "aliases": [],
+      "website": "https://www.dioneprotocol.com/",
+      "twitter": "DioneProtocol",
+      "github": [
+        "DioneProtocol"
+      ],
+      "symbol": "DIONE",
+      "gasTokenSymbol": null,
+      "geckoId": "dione",
+      "gasTokenGeckoId": "dione",
+      "cmcId": "21473",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-09-02"
+    },
+    {
+      "chainId": 167000,
+      "name": "Taiko",
+      "aliases": [],
+      "website": "https://taiko.xyz/",
+      "twitter": "taikoxyz",
+      "github": [],
+      "symbol": "TAIKO",
+      "gasTokenSymbol": null,
+      "geckoId": "taiko",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": "31525",
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2"
+        ],
+        "da": "Ethereum"
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 171717,
+      "name": "W Chain",
+      "aliases": [],
+      "website": "https://w-chain.com/",
+      "twitter": "WChainNetwork",
+      "github": [],
+      "symbol": "WCO",
+      "gasTokenSymbol": null,
+      "geckoId": "wadzcoin",
+      "gasTokenGeckoId": "wadzcoin",
+      "cmcId": "35082",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 190415,
+      "name": "HPP",
+      "aliases": [],
+      "website": "https://www.hpp.io/",
+      "twitter": "aergo_io",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Arbitrum Chains",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 200901,
+      "name": "Bitlayer",
+      "aliases": [],
+      "website": "https://www.bitlayer.org/",
+      "twitter": "BitlayerLabs",
+      "github": [
+        "bitlayer-org"
+      ],
+      "symbol": "BTR",
+      "gasTokenSymbol": null,
+      "geckoId": "bitlayer-bitvm",
+      "gasTokenGeckoId": "bitcoin",
+      "cmcId": "36277",
+      "categories": [
+        "Bitcoin Sidechains",
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 256256,
+      "name": "CMP",
+      "aliases": [],
+      "website": null,
+      "twitter": null,
+      "github": [],
+      "symbol": "CMP",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": "20056",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 258432,
+      "name": "Althea",
+      "aliases": [],
+      "website": "https://www.althea.net/",
+      "twitter": "AltheaNetwork",
+      "github": [],
+      "symbol": "ALTHEA",
+      "gasTokenSymbol": null,
+      "geckoId": "althea",
+      "gasTokenGeckoId": "althea",
+      "cmcId": null,
+      "categories": [
+        "Cosmos",
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 286623,
+      "name": "ValueChain",
+      "aliases": [],
+      "website": "https://sosovalue.com/",
+      "twitter": "sodex_official",
+      "github": [],
+      "symbol": "SOSO",
+      "gasTokenSymbol": null,
+      "geckoId": "sosovalue",
+      "gasTokenGeckoId": "sosovalue",
+      "cmcId": "35818",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 322202,
+      "name": "Parex",
+      "aliases": [],
+      "website": "https://parex.network/",
+      "twitter": "zerodotnetwork",
+      "github": [],
+      "symbol": "PRX",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": "18094",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-08-12"
+    },
+    {
+      "chainId": 333999,
+      "name": "Polis",
+      "aliases": [],
+      "website": null,
+      "twitter": "PolisChain",
+      "github": [
+        "polischain"
+      ],
+      "symbol": "POLIS",
+      "gasTokenSymbol": null,
+      "geckoId": "polis",
+      "gasTokenGeckoId": "polis",
+      "cmcId": "2359",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 420420,
+      "name": "Kekchain",
+      "aliases": [],
+      "website": null,
+      "twitter": null,
+      "github": [
+        "kek-chain"
+      ],
+      "symbol": "KEK",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": "21606",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 432204,
+      "name": "Dexalot",
+      "aliases": [],
+      "website": "https://dexalot.com/",
+      "twitter": "dexalot",
+      "github": [
+        "dexalot"
+      ],
+      "symbol": "ALOT",
+      "gasTokenSymbol": null,
+      "geckoId": "dexalot",
+      "gasTokenGeckoId": "dexalot",
+      "cmcId": "18732",
+      "categories": [
+        "EVM"
+      ],
+      "parent": {
+        "chain": "Avalanche",
+        "types": [
+          "subnet"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 534352,
+      "name": "Scroll",
+      "aliases": [],
+      "website": "https://scroll.io/",
+      "twitter": "Scroll_ZKP",
+      "github": [
+        "scroll-tech"
+      ],
+      "symbol": "SCR",
+      "gasTokenSymbol": null,
+      "geckoId": "scroll",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": "Ethereum"
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 543210,
+      "name": "Zero Network",
+      "aliases": [],
+      "website": "https://zero.network/",
+      "twitter": "zerodotnetwork",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup",
+        "Elastic Network"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": "Ethereum"
+      },
+      "deprecated": true,
+      "deadFrom": "2026-08-12"
+    },
+    {
+      "chainId": 612055,
+      "name": "CROSS",
+      "aliases": [],
+      "website": "https://www.ogfcorp.com/",
+      "twitter": "CROSS_gamechain",
+      "github": [],
+      "symbol": "ONE",
+      "gasTokenSymbol": null,
+      "geckoId": "cross-2",
+      "gasTokenGeckoId": "cross-2",
+      "cmcId": "37166",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 685689,
+      "name": "Gensyn",
+      "aliases": [],
+      "website": "https://gensyn.network/",
+      "twitter": "GensynFND",
+      "github": [],
+      "symbol": "AI",
+      "gasTokenSymbol": null,
+      "geckoId": "gensyn",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 696969,
+      "name": "Native Core",
+      "aliases": [],
+      "website": "https://native.org/",
+      "twitter": "native_fi",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": null,
+      "categories": [],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 747474,
+      "name": "Katana",
+      "aliases": [],
+      "website": "https://katana.network/",
+      "twitter": "katana",
+      "github": [],
+      "symbol": "KAT",
+      "gasTokenSymbol": null,
+      "geckoId": "katana-network-token",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": "38769",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 777777,
+      "name": "WINR Chain",
+      "aliases": [
+        "WINR"
+      ],
+      "website": "https://link3.to/winrprotocol",
+      "twitter": "WINRProtocol",
+      "github": [],
+      "symbol": "WINR",
+      "gasTokenSymbol": null,
+      "geckoId": "winr-protocol",
+      "gasTokenGeckoId": "winr-protocol",
+      "cmcId": "23681",
+      "categories": [],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-05-01"
+    },
+    {
+      "chainId": 810180,
+      "name": "zkLink Nova",
+      "aliases": [
+        "zkLink"
+      ],
+      "website": "https://zk.link/",
+      "twitter": "zkLink_Official",
+      "github": [
+        "zkLinkProtocol"
+      ],
+      "symbol": "ZKL",
+      "gasTokenSymbol": null,
+      "geckoId": "zklink",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 900000,
+      "name": "Posichain",
+      "aliases": [],
+      "website": "https://www.posichain.org/",
+      "twitter": "POSIChainOrg",
+      "github": [
+        "PositionExchange"
+      ],
+      "symbol": "POSI",
+      "gasTokenSymbol": null,
+      "geckoId": "position-token",
+      "gasTokenGeckoId": "position-token",
+      "cmcId": "11234",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 1440000,
+      "name": "XRPL EVM",
+      "aliases": [],
+      "website": "https://www.xrplevm.org/",
+      "twitter": "Peersyst",
+      "github": [],
+      "symbol": "XRP",
+      "gasTokenSymbol": null,
+      "geckoId": "ripple",
+      "gasTokenGeckoId": "ripple",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Cosmos"
+      ],
+      "parent": {
+        "chain": "Ripple",
+        "types": [
+          "sidechain"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 2121217,
+      "name": "GGCHAIN",
+      "aliases": [],
+      "website": "https://gghyper.net/",
+      "twitter": "GGPAYCOIN",
+      "github": [],
+      "symbol": "GG",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": null,
+      "categories": [],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 5064014,
+      "name": "Ethereal",
+      "aliases": [],
+      "website": "https://www.ethereal.trade/",
+      "twitter": "etherealdex",
+      "github": [],
+      "symbol": "USDe",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethena-usde",
+      "cmcId": "29470",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 7225878,
+      "name": "Saakuru",
+      "aliases": [],
+      "website": "https://saakuru.com/",
+      "twitter": "saakuru_labs",
+      "github": [],
+      "symbol": "SKR",
+      "gasTokenSymbol": null,
+      "geckoId": "saakuru-labs",
+      "gasTokenGeckoId": "oasys",
+      "cmcId": "30934",
+      "categories": [],
+      "parent": {
+        "chain": "Oasys",
+        "types": [
+          "L2"
+        ],
+        "da": null
+      },
+      "deprecated": true,
+      "deadFrom": "2026-03-16"
+    },
+    {
+      "chainId": 7777777,
+      "name": "Zora",
+      "aliases": [],
+      "website": "https://zora.co/",
+      "twitter": "zora",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": "zora",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Rollup",
+        "Superchain"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": "Ethereum"
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 9999999,
+      "name": "Fluence",
+      "aliases": [],
+      "website": "https://www.fluence.network/",
+      "twitter": "fluence_project",
+      "github": [
+        "fluencelabs"
+      ],
+      "symbol": "FLT",
+      "gasTokenSymbol": null,
+      "geckoId": "fluence-2",
+      "gasTokenGeckoId": "fluence-2",
+      "cmcId": "30097",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-04-08"
+    },
+    {
+      "chainId": 20250217,
+      "name": "Xphere",
+      "aliases": [],
+      "website": "https://x-phere.com/",
+      "twitter": "Xphere_official",
+      "github": [
+        "xpherechain"
+      ],
+      "symbol": "XP",
+      "gasTokenSymbol": null,
+      "geckoId": "xphere",
+      "gasTokenGeckoId": "xphere",
+      "cmcId": "36056",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 21000000,
+      "name": "Corn",
+      "aliases": [],
+      "website": "https://usecorn.com/",
+      "twitter": "use_corn",
+      "github": [],
+      "symbol": "CORN",
+      "gasTokenSymbol": null,
+      "geckoId": "corn-3",
+      "gasTokenGeckoId": "bitcorn-3",
+      "cmcId": "36164",
+      "categories": [
+        "EVM",
+        "Bitcoin Sidechains"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-06-30"
+    },
+    {
+      "chainId": 245022934,
+      "name": "Neon",
+      "aliases": [],
+      "website": "https://neonevm.org/",
+      "twitter": "Neon_EVM",
+      "github": [
+        "neonevm"
+      ],
+      "symbol": "NEON",
+      "gasTokenSymbol": null,
+      "geckoId": "neon",
+      "gasTokenGeckoId": "neon",
+      "cmcId": "26735",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 253368190,
+      "name": "Flame",
+      "aliases": [],
+      "website": "https://www.astria.org/flame",
+      "twitter": "Flame_evm",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "celestia",
+      "cmcId": null,
+      "categories": [
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Celestia",
+        "types": [
+          "L2",
+          "gas"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 666666666,
+      "name": "Degen",
+      "aliases": [],
+      "website": "https://www.degen.tips/",
+      "twitter": "degentokenbase",
+      "github": [],
+      "symbol": "DEGEN",
+      "gasTokenSymbol": null,
+      "geckoId": "degen-base",
+      "gasTokenGeckoId": "degen-base",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Arbitrum Chains"
+      ],
+      "parent": {
+        "chain": "Base",
+        "types": [
+          "L3"
+        ],
+        "da": null
+      },
+      "deprecated": true,
+      "deadFrom": "2026-08-31"
+    },
+    {
+      "chainId": 888888888,
+      "name": "Ancient8",
+      "aliases": [],
+      "website": "https://ancient8.gg/",
+      "twitter": "Ancient8_gg",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM",
+        "Superchain"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L3"
+        ],
+        "da": "Celestia"
+      },
+      "deprecated": true,
+      "deadFrom": "2026-06-19"
+    },
+    {
+      "chainId": 994873017,
+      "name": "Lumia",
+      "aliases": [],
+      "website": "https://lumia.org/",
+      "twitter": "BuildOnLumia",
+      "github": [],
+      "symbol": "LUMIA",
+      "gasTokenSymbol": null,
+      "geckoId": "lumia",
+      "gasTokenGeckoId": "lumia",
+      "cmcId": "33439",
+      "categories": [
+        "EVM",
+        "Rollup"
+      ],
+      "parent": {
+        "chain": "Ethereum",
+        "types": [
+          "L2"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 1313161554,
+      "name": "Aurora",
+      "aliases": [],
+      "website": "https://aurora.dev/",
+      "twitter": "auroraisnear",
+      "github": [
+        "aurora-is-near"
+      ],
+      "symbol": "AURORA",
+      "gasTokenSymbol": null,
+      "geckoId": "aurora-near",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": "14803",
+      "categories": [
+        "EVM"
+      ],
+      "parent": {
+        "chain": "Near",
+        "types": [
+          "emulator",
+          "gas"
+        ],
+        "da": null
+      },
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 1380012617,
+      "name": "Rari",
+      "aliases": [],
+      "website": "https://rarichain.org/",
+      "twitter": "RariChain",
+      "github": [],
+      "symbol": "RARI",
+      "gasTokenSymbol": null,
+      "geckoId": "rarible",
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": "5877",
+      "categories": [
+        "EVM",
+        "Arbitrum Chains"
+      ],
+      "parent": {
+        "chain": "Arbitrum",
+        "types": [
+          "L3"
+        ],
+        "da": "Celestia"
+      },
+      "deprecated": true,
+      "deadFrom": "2026-06-14"
+    },
+    {
+      "chainId": 1666600000,
+      "name": "Harmony",
+      "aliases": [],
+      "website": "https://harmony.one/",
+      "twitter": "harmonyprotocol",
+      "github": [
+        "harmony-one"
+      ],
+      "symbol": "ONE",
+      "gasTokenSymbol": null,
+      "geckoId": "harmony",
+      "gasTokenGeckoId": "harmony",
+      "cmcId": "3945",
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-09-09"
+    },
+    {
+      "chainId": 11297108109,
+      "name": "Palm",
+      "aliases": [],
+      "website": null,
+      "twitter": null,
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": false,
+      "deadFrom": null
+    },
+    {
+      "chainId": 123420001114,
+      "name": "Basecamp",
+      "aliases": [],
+      "website": "https://www.campnetwork.xyz/",
+      "twitter": "campnetworkxyz",
+      "github": [],
+      "symbol": "CAMP",
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": null
+    },
+    {
+      "chainId": 836542336838601,
+      "name": "Curio",
+      "aliases": [],
+      "website": null,
+      "twitter": null,
+      "github": [
+        "CurioTeam"
+      ],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": null,
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": {
+        "chain": "SKALE",
+        "types": [
+          "skale"
+        ],
+        "da": null
+      },
+      "deprecated": true,
+      "deadFrom": "2026-06-24"
+    },
+    {
+      "chainId": 2716446429837000,
+      "name": "DChain",
+      "aliases": [],
+      "website": "https://www.dchain.foundation/",
+      "twitter": "dchain_hq",
+      "github": [],
+      "symbol": null,
+      "gasTokenSymbol": null,
+      "geckoId": null,
+      "gasTokenGeckoId": "ethereum",
+      "cmcId": null,
+      "categories": [
+        "EVM"
+      ],
+      "parent": null,
+      "deprecated": true,
+      "deadFrom": "2026-06-24"
+    }
+  ]
+}

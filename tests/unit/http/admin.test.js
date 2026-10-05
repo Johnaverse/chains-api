@@ -108,6 +108,38 @@ describe('GET /health (deepened)', () => {
     expect(body.refreshers.l2beat.lastRefreshAt).toBe(now);
   });
 
+  it('reports DefiLlama freshness without letting its absence degrade overall status', async () => {
+    const now = new Date().toISOString();
+    const base = {
+      theGraph: { networks: [] },
+      chainlist: [],
+      chains: [],
+      slip44: { 60: {} },
+      l2beat: { source: 'live', fetchedAt: now, projects: [{ slug: 'arbitrum', chainId: 42161 }] },
+      indexed: { all: [{ chainId: 1 }] },
+      lastUpdated: now
+    };
+    dataService.getRpcMonitoringStatus.mockReturnValue({ isMonitoring: false, lastUpdated: now });
+    getL2BeatRefreshStatus.mockReturnValue({
+      isRefreshing: false, lastRefreshAt: now, lastRefreshSource: 'live',
+      lastRefreshError: null, lastRefreshProjectCount: 1, intervalMs: 300000
+    });
+
+    dataService.getCachedData.mockReturnValue({
+      ...base,
+      defillama: { source: 'fallback', fetchedAt: now, chains: [{ chainId: 1 }] }
+    });
+    let body = (await app.inject({ method: 'GET', url: '/health' })).json();
+    expect(body.sources.defillama).toMatchObject({ loaded: true, source: 'fallback' });
+    expect(typeof body.sources.defillama.ageSeconds).toBe('number');
+    expect(body.status).toBe('ok');
+
+    dataService.getCachedData.mockReturnValue({ ...base, defillama: null });
+    body = (await app.inject({ method: 'GET', url: '/health' })).json();
+    expect(body.sources.defillama).toEqual({ loaded: false, ageSeconds: null, source: null });
+    expect(body.status).toBe('ok');
+  });
+
   it('returns status=down when a core source is missing', async () => {
     dataService.getCachedData.mockReturnValue({
       theGraph: null,
@@ -234,6 +266,14 @@ describe('GET /sources (extended with l2beat + slip44 null awareness)', () => {
 
     const res = await app.inject({ method: 'GET', url: '/sources' });
     expect(res.json().sources.slip44).toBe('not loaded');
+  });
+
+  it('reports defillama loaded only when it carries chains', async () => {
+    const base = { theGraph: {}, chainlist: [], chains: [], slip44: {}, l2beat: null, indexed: { all: [] }, lastUpdated: null };
+    dataService.getCachedData.mockReturnValue({ ...base, defillama: { chains: [{ chainId: 1 }] } });
+    expect((await app.inject({ method: 'GET', url: '/sources' })).json().sources.defillama).toBe('loaded');
+    dataService.getCachedData.mockReturnValue({ ...base, defillama: { chains: [] } });
+    expect((await app.inject({ method: 'GET', url: '/sources' })).json().sources.defillama).toBe('not loaded');
   });
 
   it('reports l2beat: loaded when projects array is non-empty', async () => {

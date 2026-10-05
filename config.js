@@ -82,6 +82,14 @@ export const DATA_SOURCE_L2BEAT_API = parseStringEnv(
 );
 export const L2BEAT_FETCH_TIMEOUT_MS = parseIntEnv('L2BEAT_FETCH_TIMEOUT_MS', 10000);
 
+// DefiLlama's public config (no API key). Only its chain map is kept; the
+// payload is ~8MB because it also carries every protocol, hence the longer timeout.
+export const DATA_SOURCE_DEFILLAMA_CONFIG = parseStringEnv(
+  'DATA_SOURCE_DEFILLAMA_CONFIG',
+  'https://api.llama.fi/config'
+);
+export const DEFILLAMA_FETCH_TIMEOUT_MS = parseIntEnv('DEFILLAMA_FETCH_TIMEOUT_MS', 30000);
+
 // How long L2BEAT data may go without a successful refresh before /health
 // flags it stale. L2BEAT refreshes once per full rolling sweep
 // (CHAIN_REFRESHER_TICK_MS × chain count ≈ tens of minutes for ~3k chains),
