@@ -4150,8 +4150,46 @@ function researchItem(main, item) {
         ].filter(Boolean))
     ]);
 }
+// Forum research records: who runs the board, how it relates to this chain, and whether
+// it could still be read. Shared / family boards and dead links are called out so a
+// link is never presented as "this chain's forum" when the research said otherwise.
+const FORUM_SCOPE_TEXT = {
+    project_family: 'project-wide',
+    ecosystem_shared: 'shared ecosystem board',
+    historical_network: 'historical',
+    uncertain: 'relationship uncertain'
+};
+const FORUM_ACCESS_TEXT = { inaccessible: 'unreachable when checked', archived: 'archived' };
+function forumNote(f) {
+    const bits = [];
+    if (f.relationship === 'community_run') bits.push('community-run');
+    else if (f.relationship === 'uncertain') bits.push('relationship uncertain');
+    if (FORUM_SCOPE_TEXT[f.scope] && !(f.scope === 'uncertain' && f.relationship === 'uncertain')) bits.push(FORUM_SCOPE_TEXT[f.scope]);
+    if (FORUM_ACCESS_TEXT[f.access]) bits.push(FORUM_ACCESS_TEXT[f.access]);
+    if (f.activity === 'recent_activity_observed') bits.push(f.lastActivity ? `active ${relTime(f.lastActivity)}` : 'recently active');
+    if (f.verification === 'qualified') bits.push('qualified');
+    return bits.join(' · ');
+}
+function renderForums(forums, sec) {
+    const list = el('div', { class: 'rpc-list' }, forums.map(f => {
+        const note = forumNote(f);
+        return el('div', { class: 'r-item', title: f.notes || null }, [
+            el('div', { class: 'r-main' }, [
+                el('a', { href: safeUrl(f.url), target: '_blank', rel: 'noopener', text: f.title || safeHost(f.url) || f.url }),
+                f.type ? el('span', { class: 'chip-link', text: f.type }) : null
+            ].filter(Boolean)),
+            el('div', { class: 'r-meta' }, [
+                note ? el('span', { class: 'r-note', text: note }) : null,
+                ...evidenceLinks(f)
+            ].filter(Boolean))
+        ]);
+    }));
+    sec.appendChild(detailRow('Forums', list));
+}
+// `research.hardware` (node sizing profiles) is deliberately not rendered here: it exists
+// for the assistant and MCP clients to answer setup questions, not for the drawer.
 function renderResearch(research, sec) {
-    const hasAny = research && (research.repositories?.length || research.papers?.length || research.features?.length);
+    const hasAny = research && (research.repositories?.length || research.papers?.length || research.features?.length || research.forums?.length);
     if (!hasAny) { sec.classList.add('hidden'); return; }
     // Drop everything after the title so a re-open does not stack rows.
     while (sec.children.length > 1) sec.removeChild(sec.lastChild);
@@ -4172,9 +4210,13 @@ function renderResearch(research, sec) {
         const list = el('div', { class: 'rpc-list' }, research.features.map(f => researchItem(el('span', { text: f.text }), f)));
         sec.appendChild(detailRow('Features', list));
     }
-    const when = research.checkedAt || research.updatedAt;
+    if (research.forums?.length) renderForums(research.forums, sec);
+    const when = research.checkedAt || research.forumsCheckedAt || research.updatedAt;
+    const caveats = [];
+    if (research.features?.length) caveats.push('Features are the project\u2019s own statements, not tested facts.');
+    if (research.forums?.length) caveats.push('Forum posts are user-generated and not endorsed.');
     sec.appendChild(el('div', { class: 'r-foot dim',
-        text: `Audited research${when ? `, checked ${relTime(when)}` : ''}. Features are the project\u2019s own statements, not tested facts.` }));
+        text: [`Audited research${when ? `, checked ${relTime(when)}` : ''}.`, ...caveats].join(' ') }));
     sec.classList.remove('hidden');
 }
 

@@ -80,6 +80,10 @@ vi.mock('../../dataService.js', () => ({
   })),
 }));
 
+const mockGetNodeHardware = vi.hoisted(() => vi.fn(() => null));
+const mockGetNetworkResearch = vi.hoisted(() => vi.fn(() => null));
+vi.mock('../../src/sources/networkResearch.js', () => ({ getNodeHardware: mockGetNodeHardware, getNetworkResearch: mockGetNetworkResearch }));
+
 vi.mock('../../src/services/l2beatRefresher.js', () => ({
   getL2BeatRefreshStatus: vi.fn(() => ({
     isRefreshing: false,
@@ -225,10 +229,10 @@ describe('MCP Tools - Shared Module', () => {
   });
 
   describe('getToolDefinitions', () => {
-    it('should return an array of 27 tools', () => {
+    it('should return an array of 28 tools', () => {
       const tools = getToolDefinitions();
       expect(Array.isArray(tools)).toBe(true);
-      expect(tools.length).toBe(27);
+      expect(tools.length).toBe(28);
     });
 
     it('should include all expected tool names', () => {
@@ -1115,6 +1119,154 @@ describe('MCP Tools - Shared Module', () => {
       expect(result.isError).toBe(true);
       const data = JSON.parse(result.content[0].text);
       expect(data.error).toBe('Invalid chainId');
+    });
+  });
+
+  describe('handleToolCall - get_node_requirements', () => {
+    const req = (component, metric, value, unit, extra = {}) => ({ component, metric, value, unit, qualifier: 'as_stated', source: 'https://docs.example/node', ...extra });
+    const profile = (overrides) => ({
+      id: 'p', role: 'full_node', level: 'minimum', scope: 'exact_network', client: 'geth', clientVersion: null, deployment: 'current',
+      verification: 'confirmed', notes: null, verificationNotes: 'long audit prose', evidence: ['https://docs.example/'],
+      requirements: [req('cpu', 'cores', 4, 'cores', { qualifier: 'at_least' }), req('memory', 'capacity', 16, 'GiB', { notes: 'grows' })],
+      ...overrides
+    });
+    const hardware = {
+      identityStatus: 'confirmed', checkedAt: '2026-10-10T09:27:13Z', updatedAt: '2026-10-10T16:20:12Z',
+      profiles: [
+        profile({ id: 'family-rec', scope: 'project_family', level: 'recommended', client: 'reth', clientVersion: '1.2.0' }),
+        profile({ id: 'validator-rec', role: 'validator', level: 'recommended', requirements: [req('storage', 'capacity', null, 'TB', { qualifier: 'range', min: 2, max: 4 }), req('network', 'public_ip', true, null), req('storage', 'storage_type', 'NVMe SSD', null)] }),
+        profile({ id: 'full-min' })
+      ]
+    };
+
+    beforeEach(() => {
+      vi.mocked(dataService.getChainById).mockReturnValue({ chainId: 1, name: 'Ethereum', family: 'Ethereum' });
+      mockGetNodeHardware.mockReturnValue(structuredClone(hardware));
+      mockGetNetworkResearch.mockReturnValue(null);
+      vi.mocked(clientsView.getClientsByChain).mockReturnValue(null);
+    });
+
+    it('adds the software to run: research repositories and clients observed on live endpoints', async () => {
+      mockGetNetworkResearch.mockReturnValue({
+        family: 'Ethereum',
+        repositories: [
+          { url: 'https://github.com/ethereum/go-ethereum', repo: 'ethereum/go-ethereum', kind: 'execution', kindLabel: 'Execution client', status: 'checked', audit: 'confirmed', evidence: [] },
+          { url: 'https://example.org/node.tar.gz', repo: null, kind: 'packaging', kindLabel: 'x', status: 'partial', audit: null, evidence: [] }
+        ],
+        papers: [], features: []
+      });
+      vi.mocked(clientsView.getClientsByChain).mockReturnValue({
+        chainId: 1, chainName: 'Ethereum', totalNodes: 5, unknownNodes: 1,
+        clients: [
+          { name: 'Geth', repo: 'https://github.com/ethereum/go-ethereum', language: 'Go', website: null, layer: 'execution', known: true, nodeCount: 3, versions: [{ version: '1.16.1', nodeCount: 2 }, { version: '1.15.0', nodeCount: 1 }] },
+          { name: 'Nethermind', repo: null, language: 'C#', website: null, layer: 'execution', known: true, nodeCount: 1, versions: [{ version: '1.31.0', nodeCount: 1 }] }
+        ]
+      });
+      const data = JSON.parse((await handleToolCall('get_node_requirements', { chainId: 1 })).content[0].text);
+      expect(data.software).toEqual({
+        repositories: [
+          { repo: 'ethereum/go-ethereum', url: 'https://github.com/ethereum/go-ethereum', kind: 'execution', status: 'checked' },
+          { repo: 'https://example.org/node.tar.gz', url: 'https://example.org/node.tar.gz', kind: 'packaging', status: 'partial' }
+        ],
+        observedClients: [
+          { name: 'Geth', repo: 'https://github.com/ethereum/go-ethereum', layer: 'execution', nodes: 3, versions: ['1.16.1', '1.15.0'] },
+          { name: 'Nethermind', repo: null, layer: 'execution', nodes: 1, versions: ['1.31.0'] }
+        ]
+      });
+      expect(data.note).toMatch(/observedClients is what live endpoints run/);
+      // Software is answered even when no hardware profile was kept for the chain.
+      mockGetNodeHardware.mockReturnValue(null);
+      const none = JSON.parse((await handleToolCall('get_node_requirements', { chainId: 1 })).content[0].text);
+      expect(none.profiles).toEqual([]);
+      expect(none.software.repositories).toHaveLength(2);
+    });
+
+    it('reports software as null, not empty lists, when nothing is known', async () => {
+      const data = JSON.parse((await handleToolCall('get_node_requirements', { chainId: 1 })).content[0].text);
+      expect(data.software).toBeNull();
+    });
+
+    it('orders exact-network profiles first, then role and tier, and renders each requirement in its published unit', async () => {
+      const result = await handleToolCall('get_node_requirements', { chainId: 1 });
+      expect(result.isError).toBeUndefined();
+      // Compact JSON: the assistant caps tool results by character count.
+      expect(result.content[0].text).not.toContain('\n');
+      const data = JSON.parse(result.content[0].text);
+      expect(data).toMatchObject({ chainId: 1, name: 'Ethereum', family: 'Ethereum', identityStatus: 'confirmed', totalProfiles: 3, count: 3, truncated: false });
+      expect(data.profiles.map((p) => [p.role, p.level, p.scope])).toEqual([
+        ['full_node', 'minimum', 'exact_network'],
+        ['validator', 'recommended', 'exact_network'],
+        ['full_node', 'recommended', 'project_family']
+      ]);
+      expect(data.profiles[0].requirements).toEqual(['cpu cores: at least 4 cores', 'memory capacity: 16 GiB (grows)']);
+      expect(data.profiles[1].requirements).toEqual(['storage capacity: 2–4 TB', 'network public ip: yes', 'storage storage type: NVMe SSD']);
+      expect(data.profiles[2].client).toBe('reth 1.2.0');
+      expect(data.profiles[0].sources).toEqual(['https://docs.example/', 'https://docs.example/node']);
+      expect(data.profiles[0]).not.toHaveProperty('verificationNotes');
+      expect(data.note).toMatch(/original units/);
+    });
+
+    it('filters by role and level and caps with truncated', async () => {
+      let data = JSON.parse((await handleToolCall('get_node_requirements', { chainId: 1, role: 'validator' })).content[0].text);
+      expect(data.profiles.map((p) => p.role)).toEqual(['validator']);
+      expect(data).toMatchObject({ totalProfiles: 3, totalMatched: 1, count: 1, truncated: false, availableRoles: ['full_node', 'validator'] });
+      expect(data).not.toHaveProperty('message');
+      data = JSON.parse((await handleToolCall('get_node_requirements', { chainId: 1, level: 'recommended', limit: 1 })).content[0].text);
+      expect(data).toMatchObject({ totalMatched: 2, count: 1, truncated: true });
+      expect(data.profiles[0]).toMatchObject({ role: 'validator', level: 'recommended' });
+    });
+
+    it('tells a filter that matched nothing apart from a chain with no research', async () => {
+      const data = JSON.parse((await handleToolCall('get_node_requirements', { chainId: 1, role: 'archive', level: 'minimum' })).content[0].text);
+      expect(data).toMatchObject({ totalProfiles: 3, totalMatched: 0, count: 0, truncated: false, profiles: [] });
+      expect(data.message).toBe('No archive minimum profile is documented for this chain, but 3 other profile(s) are (roles: full_node, validator) — call again without the filter.');
+    });
+
+    it('never exceeds the assistant tool-result cap: whole profiles are dropped and truncated is set', async () => {
+      const big = Array.from({ length: 40 }, (_, i) => profile({
+        id: `p${i}`, client: `client-${i}`, notes: 'x'.repeat(300),
+        requirements: Array.from({ length: 8 }, (_, j) => req('storage', `metric_${j}`, 100 + j, 'GB', { notes: 'y'.repeat(60) }))
+      }));
+      mockGetNodeHardware.mockReturnValue({ ...hardware, profiles: big });
+      const text = (await handleToolCall('get_node_requirements', { chainId: 1, limit: 50 })).content[0].text;
+      expect(text.length).toBeLessThanOrEqual(8000);
+      const data = JSON.parse(text); // intact JSON, not cut mid-value by the adapter
+      expect(data.count).toBeGreaterThan(0);
+      expect(data.count).toBeLessThan(40);
+      expect(data.profiles).toHaveLength(data.count);
+      expect(data).toMatchObject({ totalProfiles: 40, totalMatched: 40, truncated: true });
+    });
+
+    it('says plainly when the research has nothing for the chain', async () => {
+      mockGetNodeHardware.mockReturnValue(null);
+      const data = JSON.parse((await handleToolCall('get_node_requirements', { chainId: 1 })).content[0].text);
+      expect(data).toMatchObject({ chainId: 1, name: 'Ethereum', profiles: [], totalProfiles: 0, truncated: false });
+      expect(data.message).toMatch(/not proof/);
+    });
+
+    it('rejects an invalid or unknown chainId', async () => {
+      expect(JSON.parse((await handleToolCall('get_node_requirements', { chainId: 'abc' })).content[0].text).error).toBe('Invalid chainId');
+      vi.mocked(dataService.getChainById).mockReturnValue(null);
+      const result = await handleToolCall('get_node_requirements', { chainId: 999999 });
+      expect(result.isError).toBe(true);
+      expect(JSON.parse(result.content[0].text).message).toContain('No chain with chainId');
+    });
+
+    it('get_chain_by_id leaves hardware to this tool and keeps price ahead of the research block', async () => {
+      vi.mocked(dataService.getChainDetail).mockReturnValueOnce({
+        chainId: 1, name: 'Ethereum',
+        research: { family: 'Ethereum', repositories: [{ url: 'https://github.com/ethereum/go-ethereum' }], hardware: { profiles: [{}] }, updatedAt: 'x' }
+      });
+      const text = (await handleToolCall('get_chain_by_id', { chainId: 1 })).content[0].text;
+      const data = JSON.parse(text);
+      expect(data.hasNodeRequirements).toBe(true);
+      expect(data.research).toEqual({ family: 'Ethereum', repositories: [{ url: 'https://github.com/ethereum/go-ethereum' }], updatedAt: 'x' });
+      expect(text.indexOf('"price"')).toBeLessThan(text.indexOf('"research"'));
+
+      vi.mocked(dataService.getChainDetail).mockReturnValueOnce({ chainId: 1, name: 'Ethereum', research: { hardware: { profiles: [{}] }, updatedAt: 'x' } });
+      const only = JSON.parse((await handleToolCall('get_chain_by_id', { chainId: 1 })).content[0].text);
+      expect(only.hasNodeRequirements).toBe(true);
+      expect(only).not.toHaveProperty('research');
     });
   });
 
