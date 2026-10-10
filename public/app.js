@@ -4186,65 +4186,10 @@ function renderForums(forums, sec) {
     }));
     sec.appendChild(detailRow('Forums', list));
 }
-// Hardware profiles: one line per documented sizing (role × tier × client), with the
-// requirements in the publisher's own units — the research does no conversions, so a
-// "16 GB" and a "16 GiB" profile both show exactly that. A component that is absent was
-// not documented; it is never shown as zero.
-const HW_ROLE_TEXT = {
-    full_node: 'Full node', validator: 'Validator', archive: 'Archive node', rpc: 'RPC node', collator: 'Collator',
-    sequencer: 'Sequencer', prover: 'Prover', light_node: 'Light node', other: 'Operator role', unspecified: 'Node'
-};
-const HW_COMPONENT_TEXT = { cpu: 'CPU', memory: 'RAM', storage: 'disk', network: 'network', gpu: 'GPU', operating_system: 'OS', other: 'other' };
-const HW_QUALIFIER_PREFIX = { at_least: '≥ ', at_most: '≤ ', approximately: '~' };
-function hwValue(r) {
-    const unit = r.unit ? ` ${r.unit}` : '';
-    if (r.qualifier === 'range' && (r.min != null || r.max != null)) return `${r.min ?? '?'}–${r.max ?? '?'}${unit}`;
-    if (r.value == null) return null;
-    if (typeof r.value === 'boolean') return r.value ? 'yes' : 'no';
-    return `${HW_QUALIFIER_PREFIX[r.qualifier] || ''}${r.value}${unit}`;
-}
-function hwRequirement(r) {
-    const value = hwValue(r);
-    if (value == null) return null;
-    // Capacity-type metrics read naturally as "32 GB RAM"; everything else is labelled.
-    const bare = (r.component === 'memory' && r.metric === 'capacity')
-        || (r.component === 'storage' && (r.metric === 'capacity' || r.metric === 'storage_type'))
-        || (r.component === 'cpu' && (r.metric === 'cores' || r.metric === 'vcpus' || r.metric === 'threads'))
-        || (r.component === 'network' && r.metric === 'bandwidth');
-    const label = bare ? (r.component === 'memory' ? ' RAM' : '') : ` ${HW_COMPONENT_TEXT[r.component] || r.component} ${r.metric.replace(/_/g, ' ')}`;
-    const text = bare ? `${value}${label}` : `${label.trim()}: ${value}`;
-    return el('span', { class: 'hw-req', title: r.notes || null, text });
-}
-function hwNote(p) {
-    const bits = [];
-    if (p.scope === 'project_family') bits.push('project-wide, not sized for this exact network');
-    else if (p.scope === 'historical_network') bits.push('historical deployment');
-    else if (p.scope === 'uncertain') bits.push('applicability uncertain');
-    if (p.deployment === 'deprecated') bits.push('deprecated');
-    else if (p.deployment === 'historical' && p.scope !== 'historical_network') bits.push('historical');
-    if (p.verification === 'qualified') bits.push('qualified');
-    return bits.join(' · ');
-}
-function renderHardware(hardware, sec) {
-    const list = el('div', { class: 'rpc-list' }, hardware.profiles.map(p => {
-        const head = [el('span', { text: HW_ROLE_TEXT[p.role] || p.role })];
-        if (p.level && p.level !== 'unspecified') head.push(el('span', { class: 'chip-link', text: p.level }));
-        if (p.client) head.push(el('span', { class: 'dim', text: p.clientVersion ? `${p.client} ${p.clientVersion}` : p.client }));
-        const reqs = p.requirements.map(hwRequirement).filter(Boolean);
-        const note = hwNote(p);
-        // Requirement source pages count as evidence too; the profile's identity evidence first.
-        const links = evidenceLinks({ evidence: [...new Set([...(p.evidence || []), ...p.requirements.map(r => r.source).filter(Boolean)])] });
-        return el('div', { class: 'r-item', title: [p.notes, p.verificationNotes].filter(Boolean).join('\n\n') || null }, [
-            el('div', { class: 'r-main' }, head),
-            reqs.length ? el('div', { class: 'hw-reqs' }, reqs) : null,
-            el('div', { class: 'r-meta' }, [note ? el('span', { class: 'r-note', text: note }) : null, ...links].filter(Boolean))
-        ].filter(Boolean));
-    }));
-    sec.appendChild(detailRow('Node hardware', list));
-}
+// `research.hardware` (node sizing profiles) is deliberately not rendered here: it exists
+// for the assistant and MCP clients to answer setup questions, not for the drawer.
 function renderResearch(research, sec) {
-    const hasAny = research && (research.repositories?.length || research.papers?.length || research.features?.length
-        || research.forums?.length || research.hardware?.profiles?.length);
+    const hasAny = research && (research.repositories?.length || research.papers?.length || research.features?.length || research.forums?.length);
     if (!hasAny) { sec.classList.add('hidden'); return; }
     // Drop everything after the title so a re-open does not stack rows.
     while (sec.children.length > 1) sec.removeChild(sec.lastChild);
@@ -4265,12 +4210,10 @@ function renderResearch(research, sec) {
         const list = el('div', { class: 'rpc-list' }, research.features.map(f => researchItem(el('span', { text: f.text }), f)));
         sec.appendChild(detailRow('Features', list));
     }
-    if (research.hardware?.profiles?.length) renderHardware(research.hardware, sec);
     if (research.forums?.length) renderForums(research.forums, sec);
-    const when = research.checkedAt || research.hardware?.checkedAt || research.forumsCheckedAt || research.updatedAt;
+    const when = research.checkedAt || research.forumsCheckedAt || research.updatedAt;
     const caveats = [];
     if (research.features?.length) caveats.push('Features are the project\u2019s own statements, not tested facts.');
-    if (research.hardware?.profiles?.length) caveats.push('Hardware figures are published requirements in their original units, not benchmarks; a missing component was not documented.');
     if (research.forums?.length) caveats.push('Forum posts are user-generated and not endorsed.');
     sec.appendChild(el('div', { class: 'r-foot dim',
         text: [`Audited research${when ? `, checked ${relTime(when)}` : ''}.`, ...caveats].join(' ') }));

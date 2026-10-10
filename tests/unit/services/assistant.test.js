@@ -255,6 +255,14 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('get_chain_upgrades');
   });
 
+  it('routes node setup questions to get_node_requirements and forbids unit conversion', () => {
+    const prompt = buildSystemPrompt(undefined, new Date('2026-07-06T12:00:00Z'));
+    expect(prompt).toContain('get_node_requirements');
+    expect(prompt).toContain('HARDWARE REQUIREMENTS ARE QUOTED, NOT COMPUTED');
+    expect(prompt).toContain('GB is');
+    expect(prompt).toContain('project_family');
+  });
+
   it('tells the model a follow-up keeps the previous turn\'s network, ABOVE the registry-wide rule', () => {
     const prompt = buildSystemPrompt(undefined, new Date('2026-07-06T12:00:00Z'));
     expect(prompt).toContain('CARRY THE SUBJECT FORWARD');

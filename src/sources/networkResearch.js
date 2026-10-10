@@ -108,6 +108,24 @@ export function getNetworkResearch(chainId) {
   return research;
 }
 
+/**
+ * The node hardware research for one chain, or null when no profile was kept for it.
+ * Backs the `get_node_requirements` tool: the research block carries the same profiles,
+ * but a chain's full detail can run past the assistant's tool-result cap, so setup
+ * questions get their own compact lookup. A copy, like getNetworkResearch.
+ */
+export function getNodeHardware(chainId) {
+  const entry = hardware.byChainId.get(Number(chainId));
+  if (!(entry?.profiles?.length > 0)) return null;
+  return {
+    status: entry.status ?? null,
+    identityStatus: entry.identityStatus ?? null,
+    checkedAt: entry.checkedAt ?? hardware.updatedAt,
+    updatedAt: hardware.updatedAt,
+    profiles: structuredClone(entry.profiles)
+  };
+}
+
 // A correction with `replaces: null` fills a missing website only; otherwise both sides
 // must parse to the same public URL (two unparseable values are not "the same").
 function stillListsReplaced(registryInfoURL, replaces) {
