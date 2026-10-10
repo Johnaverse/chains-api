@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeEach, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -87,7 +87,8 @@ afterAll(() => {
   _setNetworkResearchForTests();
 });
 
-afterEach(() => {
+// Every test starts from the fixtures and a cold cache, so any one can run alone (-t).
+beforeEach(() => {
   useFixtures();
   cachedData.indexed = null;
   _resetGetAllChainsCacheForTests();

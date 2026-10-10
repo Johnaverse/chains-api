@@ -4167,6 +4167,10 @@ function forumNote(f) {
     if (FORUM_SCOPE_TEXT[f.scope] && !(f.scope === 'uncertain' && f.relationship === 'uncertain')) bits.push(FORUM_SCOPE_TEXT[f.scope]);
     if (FORUM_ACCESS_TEXT[f.access]) bits.push(FORUM_ACCESS_TEXT[f.access]);
     if (f.activity === 'recent_activity_observed') bits.push(f.lastActivity ? `active ${relTime(f.lastActivity)}` : 'recently active');
+    // A board can still load and be dead: say so even when access is "read".
+    else if (f.activity === 'historical_or_archived' && f.access !== 'archived') {
+        bits.push(f.lastActivity ? `historical · last active ${relTime(f.lastActivity)}` : 'historical, no recent activity');
+    }
     if (f.verification === 'qualified') bits.push('qualified');
     return bits.join(' · ');
 }
