@@ -101,6 +101,7 @@ src/http/                       ← Fastify routes
 4. **SLIP-0044** — Coin type registry (parsed from Markdown table)
 5. **L2BEAT** — L2 classification (stage, category, stack, DA layer, TVS, activity); live API with checked-in fallback at `data/l2beat-fallback.json`
 6. **DefiLlama** — static chain metadata attached as `defillama` (website, X/Twitter, GitHub orgs, CoinGecko/CMC ids, categories, parent chain, deprecation), joined by chainId; keyless `/config` endpoint with checked-in fallback at `data/defillama-fallback.json` (regenerate with `node scripts/refresh-defillama-fallback.mjs`). Supplementary: it never degrades `/health`
+7. **Network research** — static, checked-in dataset `data/network-research.json` (no fetch), converted once from the network research and verification workbook: per-chain `family`, node/client `repositories` (normalized `kind`), `papers`, sourced `features`, each with `status`/`audit`/`evidence`; only checked/partial, non-unresolved items. `src/sources/networkResearch.js` stamps `family` (free text, ~2,000 distinct labels, so the `?family=` filter on `/chains` and `get_chains` is a case-insensitive substring match) and applies the 28 website corrections to `infoURL` only while the registry still lists the replaced site (`infoURLSource: 'research'`, original in `registryInfoURL`). The full `research` block is served only by `getChainDetail` (`/chains/:id`, `get_chain_by_id`) — never on the list or search projections, which would grow by ~2MB. To update it, regenerate the JSON from a new workbook export and commit it
 
 Source URLs are configurable via `DATA_SOURCE_*` environment variables (see `config.js`).
 
@@ -210,8 +211,8 @@ Services: `chains-api` (port 3000) and `chains-api-mcp` (port 3001). Both have h
 | GET | `/` | API info |
 | GET | `/health` | Per-source freshness + per-refresher status + overall `ok`/`degraded`/`down` |
 | GET | `/sources` | Data source loaded state |
-| GET | `/chains` | All chains (optional `?tag=`) |
-| GET | `/chains/:id` | Chain by ID |
+| GET | `/chains` | All chains (optional `?tag=`, `?family=`) |
+| GET | `/chains/:id` | Chain by ID, plus its `research` block |
 | GET | `/search?q=` | Search chains |
 | GET | `/endpoints` | All endpoints |
 | GET | `/endpoints/:id` | Endpoints by chain |

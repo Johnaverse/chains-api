@@ -1,5 +1,6 @@
 import { attachStatusPages } from '../sources/statusPages.js';
 import { attachForums } from '../sources/forums.js';
+import { attachNetworkResearch } from '../sources/networkResearch.js';
 import { isKnownEolChain } from '../domain/eolChains.js';
 
 /**
@@ -616,6 +617,7 @@ export function indexData(theGraph, chainlist, chains, slip44, l2beat, defillama
   attachSlip44Info(slip44, indexed);
   attachStatusPages(indexed);
   attachForums(indexed);
+  attachNetworkResearch(indexed);
   // Status resolution order matters: curated EOL seeds (only where no source
   // stated a status) → propagate deprecated to l2Of/testnetOf dependents →
   // default the rest to 'active'.

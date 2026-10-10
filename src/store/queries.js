@@ -1,4 +1,5 @@
 import { cachedData } from './cache.js';
+import { getNetworkResearch } from '../sources/networkResearch.js';
 
 function getChainByIdRaw(chainId) {
   if (!cachedData.indexed) return null;
@@ -26,6 +27,11 @@ function transformChain(chain) {
   if (chain.nativeCurrency) transformedChain.nativeCurrency = chain.nativeCurrency;
   if (chain.explorers) transformedChain.explorers = chain.explorers;
   if (chain.infoURL) transformedChain.infoURL = chain.infoURL;
+  if (chain.infoURLSource) {
+    transformedChain.infoURLSource = chain.infoURLSource;
+    transformedChain.registryInfoURL = chain.registryInfoURL ?? null;
+  }
+  if (chain.family) transformedChain.family = chain.family;
   if (chain.sources) transformedChain.sources = chain.sources;
   if (chain.tags) transformedChain.tags = chain.tags;
   if (chain.status) transformedChain.status = chain.status;
@@ -40,6 +46,17 @@ function transformChain(chain) {
 
 export function getChainById(chainId) {
   return transformChain(getChainByIdRaw(chainId));
+}
+
+/**
+ * A chain plus its `research` block (client repositories, papers, features). Kept off
+ * getChainById because search results and the /chains list are built from that.
+ */
+export function getChainDetail(chainId) {
+  const chain = getChainById(chainId);
+  if (!chain) return null;
+  const research = getNetworkResearch(chain.chainId);
+  return research ? { ...chain, research } : chain;
 }
 
 // Memoize getAllChains() so /chains, /scaling, /stats, etc. can hit the same

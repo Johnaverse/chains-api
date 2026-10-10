@@ -1,4 +1,4 @@
-import { searchChains, getChainById, getAllChains } from '../../store/queries.js';
+import { searchChains, getChainDetail, getAllChains } from '../../store/queries.js';
 import { getPricesForChains, getPriceForChain } from '../../../priceService.js';
 import { MAX_SEARCH_QUERY_LENGTH, RATE_LIMIT_WINDOW_MS, SEARCH_RATE_LIMIT_MAX } from '../../../config.js';
 import { parseIntParam } from '../util/parseIntParam.js';
@@ -16,16 +16,23 @@ export async function chainsRoutes(fastify) {
             type: 'string',
             enum: VALID_TAGS,
             errorMessage: { enum: `Invalid tag. Allowed: ${VALID_TAGS.join(', ')}` }
-          }
+          },
+          family: { type: 'string', minLength: 1, maxLength: 100 }
         },
         additionalProperties: false
       }
     }
   }, async (request) => {
-    const { tag } = request.query;
+    const { tag, family } = request.query;
     let chains = getAllChains();
     if (tag) {
       chains = chains.filter(chain => chain.tags?.includes(tag));
+    }
+    if (family) {
+      // Family labels are free text ("OP Stack", "OP Stack / Zora", "Matchain / OP Stack"),
+      // so match a substring rather than the whole label.
+      const wanted = family.toLowerCase();
+      chains = chains.filter(chain => chain.family?.toLowerCase().includes(wanted));
     }
     const chainIds = chains.map(c => c.chainId);
     const priceMap = await getPricesForChains(chainIds);
@@ -52,7 +59,7 @@ export async function chainsRoutes(fastify) {
     }
   }, async (request, reply) => {
     const chainId = parseIntParam(request.params.id);
-    const chain = getChainById(chainId);
+    const chain = getChainDetail(chainId);
     if (!chain) return sendError(reply, 404, 'Chain not found');
     const price = await getPriceForChain(chainId);
     return { ...chain, price };

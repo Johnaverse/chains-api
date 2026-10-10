@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock dataService before importing
+// Mock dataService before importing. getChainDetail delegates to getChainById so tests
+// that stub a chain through getChainById also cover get_chain_by_id.
+const mockGetChainById = vi.hoisted(() => vi.fn(() => null));
 vi.mock('../../dataService.js', () => ({
   getCachedData: vi.fn(() => ({
     theGraph: { networks: [] },
@@ -14,7 +16,8 @@ vi.mock('../../dataService.js', () => ({
     lastUpdated: '2024-01-01T00:00:00.000Z',
   })),
   searchChains: vi.fn(() => []),
-  getChainById: vi.fn(() => null),
+  getChainById: mockGetChainById,
+  getChainDetail: vi.fn((id) => mockGetChainById(id)),
   getAllChains: vi.fn(() => []),
   getAllRelations: vi.fn(() => []),
   getRelationsById: vi.fn(() => null),
@@ -320,6 +323,23 @@ describe('MCP Tools - Shared Module', () => {
       const data = JSON.parse(result.content[0].text);
       expect(data.count).toBe(50);
       expect(data.totalMatched).toBe(130);
+    });
+
+    it('filters by a case-insensitive family substring', async () => {
+      vi.mocked(dataService.getAllChains).mockReturnValue([
+        { chainId: 8453, name: 'Base', tags: [], family: 'OP Stack-derived' },
+        { chainId: 7777777, name: 'Zora', tags: [], family: 'OP Stack / Zora' },
+        { chainId: 1, name: 'Ethereum', tags: [], family: 'Ethereum' },
+        { chainId: 2, name: 'No family', tags: [] },
+      ]);
+      const data = JSON.parse((await handleToolCall('get_chains', { family: 'op STACK' })).content[0].text);
+      expect(data.chains.map(c => c.chainId)).toEqual([8453, 7777777]);
+    });
+
+    it('get_chain_by_id returns the research block from getChainDetail', async () => {
+      vi.mocked(dataService.getChainDetail).mockReturnValueOnce({ chainId: 8453, name: 'Base', research: { family: 'OP Stack-derived' } });
+      const data = JSON.parse((await handleToolCall('get_chain_by_id', { chainId: 8453 })).content[0].text);
+      expect(data.research).toEqual({ family: 'OP Stack-derived' });
     });
 
     it('filters by lifecycle status', async () => {

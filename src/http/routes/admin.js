@@ -9,6 +9,7 @@ import {
   countChainsByTag
 } from '../../store/queries.js';
 import { getAllKeywords } from '../../domain/keywords.js';
+import { getNetworkResearchInfo } from '../../sources/networkResearch.js';
 import { loadData } from '../../services/loader.js';
 import { startRpcHealthCheck, getRpcMonitoringStatus } from '../../services/rpcHealth.js';
 import { validateChainData } from '../../services/validation.js';
@@ -58,7 +59,9 @@ function sourceFreshness(cache) {
       loaded: Array.isArray(cache.defillama?.chains) && cache.defillama.chains.length > 0,
       ageSeconds: ageSeconds(cache.defillama?.fetchedAt),
       source: cache.defillama?.source ?? null
-    }
+    },
+    // Checked-in static dataset: dated by its research run, not by a fetch.
+    research: { ...getNetworkResearchInfo(), source: 'static' }
   };
 }
 
@@ -143,7 +146,8 @@ export async function adminRoutes(fastify) {
         chains: cachedData.chains ? 'loaded' : 'not loaded',
         slip44: slip44Loaded(cachedData) ? 'loaded' : 'not loaded',
         l2beat: cachedData.l2beat?.projects?.length > 0 ? 'loaded' : 'not loaded',
-        defillama: cachedData.defillama?.chains?.length > 0 ? 'loaded' : 'not loaded'
+        defillama: cachedData.defillama?.chains?.length > 0 ? 'loaded' : 'not loaded',
+        research: getNetworkResearchInfo().loaded ? 'loaded' : 'not loaded'
       }
     };
   });
