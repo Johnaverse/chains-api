@@ -33,7 +33,7 @@ import { getChainUpgrades } from './src/services/upgrades.js';
 import { getForks } from './src/services/forks.js';
 import { getProviderStats } from './src/services/providerStats.js';
 import { checkChainHalt } from './src/services/chainHalt.js';
-import { getNodeHardware } from './src/sources/networkResearch.js';
+import { getNodeHardware, getNetworkResearch } from './src/sources/networkResearch.js';
 
 /**
  * Get the list of MCP tool definitions (schemas)
@@ -86,7 +86,7 @@ export function getToolDefinitions() {
     {
       name: 'get_node_requirements',
       description:
-        'Documented hardware and system requirements for running a node on a chain (CPU, memory, storage, bandwidth, OS, GPU), from the audited node hardware research. Use it for "what do I need to run a node / validator / RPC / archive node on X", "minimum vs recommended specs", "how much disk". Resolve the chain ID first (search_chains) if the user named the network. Returns one profile per node `role` × requirement `level` (minimum / recommended / example / unspecified) × `client`, most specific first. Each requirement is a string in the publisher’s ORIGINAL unit ("memory capacity: 16 GB", "cpu cores: at least 4 cores"): quote units exactly as given, NEVER convert GB/GiB, Mbps/MB/s, cores/vCPU/threads, and never add up or average profiles. Read `scope`: exact_network = documented for this chain; project_family = the project’s generic sizing applied to this chain, NOT verified for it — say so. Mention `deployment` historical/deprecated and `verification` qualified as caveats, and `identityStatus` qualified/unresolved when the research could not firmly tie the documentation to this chain. A component that is absent was not documented — never say zero or unnecessary. These are published requirements, not benchmarks, and storage grows over time. `truncated` true means more profiles exist: narrow with `role` or `level`. Empty `profiles` means the research found no publishable requirements for this chain, which is not proof none exist — say that and point to the project’s own node documentation.',
+        'Documented hardware and system requirements for running a node on a chain (CPU, memory, storage, bandwidth, OS, GPU), from the audited node hardware research. Use it for "what do I need to run a node / validator / RPC / archive node on X", "minimum vs recommended specs", "how much disk". Resolve the chain ID first (search_chains) if the user named the network. Returns one profile per node `role` × requirement `level` (minimum / recommended / example / unspecified) × `client`, most specific first. Each requirement is a string in the publisher’s ORIGINAL unit ("memory capacity: 16 GB", "cpu cores: at least 4 cores"): quote units exactly as given, NEVER convert GB/GiB, Mbps/MB/s, cores/vCPU/threads, and never add up or average profiles. Read `scope`: exact_network = documented for this chain; project_family = the project’s generic sizing applied to this chain, NOT verified for it — say so. Mention `deployment` historical/deprecated and `verification` qualified as caveats, and `identityStatus` qualified/unresolved when the research could not firmly tie the documentation to this chain. A component that is absent was not documented — never say zero or unnecessary. These are published requirements, not benchmarks, and storage grows over time. `truncated` true means more profiles exist: narrow with `role` or `level`. Empty `profiles` means the research found no publishable requirements for this chain, which is not proof none exist — say that and point to the project’s own node documentation. Also returns `software` (or null): `repositories` = the node/client source repositories the research tied to the chain (`kind` execution / consensus / rollup / node / packaging / sdk / contracts, `status` checked or partial), and `observedClients` = client software and versions actually seen on the chain’s live RPC endpoints (what operators run today — evidence, not a requirement, and only for chains with monitored endpoints). Combine them when asked how to set up a node: hardware from `profiles`, software from `software`, each profile’s `client` naming the software its figures were published for.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -587,6 +587,29 @@ function describeRequirement(r) {
   return `${r.component} ${String(r.metric).replace(/_/g, ' ')}: ${value}${unit}${notes}`;
 }
 
+/**
+ * What to run, next to what to run it on: the node/client repositories the research tied
+ * to the chain, and the client software actually observed on its live RPC endpoints.
+ * Null when neither has anything, so the model does not read an empty list as "no software".
+ */
+function softwareFor(chainId) {
+  const repositories = (getNetworkResearch(chainId)?.repositories ?? []).map((r) => ({
+    repo: r.repo ?? r.url,
+    url: r.url,
+    kind: r.kind,
+    status: r.status,
+  }));
+  const observedClients = (getClientsByChain(chainId)?.clients ?? []).map((c) => ({
+    name: c.name,
+    repo: c.repo ?? null,
+    layer: c.layer ?? null,
+    nodes: c.nodeCount,
+    versions: (c.versions ?? []).slice(0, 3).map((v) => v.version),
+  }));
+  if (!repositories.length && !observedClients.length) return null;
+  return { repositories, observedClients };
+}
+
 function handleGetNodeRequirements(args) {
   const { chainId, role, level } = args;
   if (!isValidChainId(chainId)) {
@@ -597,6 +620,7 @@ function handleGetNodeRequirements(args) {
     return errorResponse('Not found', `No chain with chainId ${chainId}`);
   }
   const base = { chainId: chain.chainId, name: chain.name, family: chain.family ?? null };
+  const software = softwareFor(chainId);
   const hardware = getNodeHardware(chainId);
   if (!hardware) {
     return compactResponse({
@@ -605,6 +629,7 @@ function handleGetNodeRequirements(args) {
       count: 0,
       truncated: false,
       profiles: [],
+      software,
       message: 'The node hardware research found no publishable requirements for this chain. This is not proof that none exist — point the user to the project’s own node documentation.',
     });
   }
@@ -635,7 +660,8 @@ function handleGetNodeRequirements(args) {
     count: sliced.length,
     truncated: profiles.length > sliced.length,
     profiles: sliced,
-    note: 'Requirements are quoted in each publisher’s original units — do not convert or combine them. An absent component was not documented, never zero. Published requirements, not benchmarks.',
+    software,
+    note: 'Requirements are quoted in each publisher’s original units — do not convert or combine them. An absent component was not documented, never zero. Published requirements, not benchmarks. observedClients is what live endpoints run, not a requirement.',
   });
 }
 

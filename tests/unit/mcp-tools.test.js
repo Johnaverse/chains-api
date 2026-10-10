@@ -81,7 +81,8 @@ vi.mock('../../dataService.js', () => ({
 }));
 
 const mockGetNodeHardware = vi.hoisted(() => vi.fn(() => null));
-vi.mock('../../src/sources/networkResearch.js', () => ({ getNodeHardware: mockGetNodeHardware }));
+const mockGetNetworkResearch = vi.hoisted(() => vi.fn(() => null));
+vi.mock('../../src/sources/networkResearch.js', () => ({ getNodeHardware: mockGetNodeHardware, getNetworkResearch: mockGetNetworkResearch }));
 
 vi.mock('../../src/services/l2beatRefresher.js', () => ({
   getL2BeatRefreshStatus: vi.fn(() => ({
@@ -1141,6 +1142,48 @@ describe('MCP Tools - Shared Module', () => {
     beforeEach(() => {
       vi.mocked(dataService.getChainById).mockReturnValue({ chainId: 1, name: 'Ethereum', family: 'Ethereum' });
       mockGetNodeHardware.mockReturnValue(structuredClone(hardware));
+      mockGetNetworkResearch.mockReturnValue(null);
+      vi.mocked(clientsView.getClientsByChain).mockReturnValue(null);
+    });
+
+    it('adds the software to run: research repositories and clients observed on live endpoints', async () => {
+      mockGetNetworkResearch.mockReturnValue({
+        family: 'Ethereum',
+        repositories: [
+          { url: 'https://github.com/ethereum/go-ethereum', repo: 'ethereum/go-ethereum', kind: 'execution', kindLabel: 'Execution client', status: 'checked', audit: 'confirmed', evidence: [] },
+          { url: 'https://example.org/node.tar.gz', repo: null, kind: 'packaging', kindLabel: 'x', status: 'partial', audit: null, evidence: [] }
+        ],
+        papers: [], features: []
+      });
+      vi.mocked(clientsView.getClientsByChain).mockReturnValue({
+        chainId: 1, chainName: 'Ethereum', totalNodes: 5, unknownNodes: 1,
+        clients: [
+          { name: 'Geth', repo: 'https://github.com/ethereum/go-ethereum', language: 'Go', website: null, layer: 'execution', known: true, nodeCount: 3, versions: [{ version: '1.16.1', nodeCount: 2 }, { version: '1.15.0', nodeCount: 1 }] },
+          { name: 'Nethermind', repo: null, language: 'C#', website: null, layer: 'execution', known: true, nodeCount: 1, versions: [{ version: '1.31.0', nodeCount: 1 }] }
+        ]
+      });
+      const data = JSON.parse((await handleToolCall('get_node_requirements', { chainId: 1 })).content[0].text);
+      expect(data.software).toEqual({
+        repositories: [
+          { repo: 'ethereum/go-ethereum', url: 'https://github.com/ethereum/go-ethereum', kind: 'execution', status: 'checked' },
+          { repo: 'https://example.org/node.tar.gz', url: 'https://example.org/node.tar.gz', kind: 'packaging', status: 'partial' }
+        ],
+        observedClients: [
+          { name: 'Geth', repo: 'https://github.com/ethereum/go-ethereum', layer: 'execution', nodes: 3, versions: ['1.16.1', '1.15.0'] },
+          { name: 'Nethermind', repo: null, layer: 'execution', nodes: 1, versions: ['1.31.0'] }
+        ]
+      });
+      expect(data.note).toMatch(/observedClients is what live endpoints run/);
+      // Software is answered even when no hardware profile was kept for the chain.
+      mockGetNodeHardware.mockReturnValue(null);
+      const none = JSON.parse((await handleToolCall('get_node_requirements', { chainId: 1 })).content[0].text);
+      expect(none.profiles).toEqual([]);
+      expect(none.software.repositories).toHaveLength(2);
+    });
+
+    it('reports software as null, not empty lists, when nothing is known', async () => {
+      const data = JSON.parse((await handleToolCall('get_node_requirements', { chainId: 1 })).content[0].text);
+      expect(data.software).toBeNull();
     });
 
     it('orders exact-network profiles first, then role and tier, and renders each requirement in its published unit', async () => {
