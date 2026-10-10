@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import {
   loadNetworkResearch,
   loadForumResearch,
+  loadNodeHardware,
   getNetworkResearch,
   getNetworkResearchInfo,
   attachNetworkResearch,
@@ -44,13 +45,38 @@ const FORUMS = {
   ]
 };
 
+const profile = {
+  id: 'full-minimum', role: 'full_node', level: 'minimum', scope: 'exact_network', client: 'Base Reth', clientVersion: null,
+  deployment: 'current', verification: 'confirmed', notes: null, verificationNotes: 'Values match.',
+  evidence: ['https://docs.base.org/'],
+  requirements: [
+    { component: 'cpu', metric: 'cores', value: 8, unit: 'cores', qualifier: 'at_least', source: 'https://docs.base.org/node' },
+    { component: 'memory', metric: 'capacity', value: 16, unit: 'GiB', qualifier: 'as_stated', source: 'https://docs.base.org/node' },
+    { component: 'storage', metric: 'capacity', value: null, min: 2, max: 4, unit: 'TB', qualifier: 'range', notes: 'grows', source: 'https://docs.base.org/node' }
+  ]
+};
+
+const HARDWARE = {
+  updatedAt: '2026-10-10T16:20:12.747009+00:00',
+  networks: [
+    { chainId: 8453, status: 'documented', identityStatus: 'confirmed', checkedAt: '2026-10-10T09:27:13.772253+00:00', profiles: [profile] },
+    { chainId: 5151, status: 'partial', identityStatus: 'qualified', checkedAt: null, profiles: [{ ...profile, scope: 'project_family', verification: 'qualified' }] },
+    { chainId: 777, status: 'partial', identityStatus: 'unresolved', checkedAt: null, profiles: [] },
+    { chainId: 8453, profiles: [{ ...profile, id: 'duplicate ignored' }] }
+  ]
+};
+
 let dir;
 const write = (name, content) => {
   const path = join(dir, name);
   writeFileSync(path, content);
   return path;
 };
-const useFixtures = () => _setNetworkResearchForTests(write('dataset.json', JSON.stringify(DATASET)), write('forums.json', JSON.stringify(FORUMS)));
+const useFixtures = () => _setNetworkResearchForTests(
+  write('dataset.json', JSON.stringify(DATASET)),
+  write('forums.json', JSON.stringify(FORUMS)),
+  write('hardware.json', JSON.stringify(HARDWARE))
+);
 
 beforeAll(() => {
   dir = mkdtempSync(join(tmpdir(), 'research-'));
@@ -99,6 +125,24 @@ describe('loadNetworkResearch', () => {
         expect(f.access).not.toBe('repurposed');
       }
     }
+
+    const hardware = loadNodeHardware();
+    expect(hardware.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(hardware.byChainId.size).toBeGreaterThan(700);
+    const ethereum = hardware.byChainId.get(1);
+    expect(ethereum.identityStatus).toBe('confirmed');
+    const minimum = ethereum.profiles.find(p => p.role === 'full_node' && p.level === 'minimum');
+    // Units stay exactly as published: ethereum.org says 16 GB and 25 MBit/s, so that is what is served.
+    expect(minimum.requirements).toContainEqual(expect.objectContaining({ component: 'memory', metric: 'capacity', value: 16, unit: 'GB' }));
+    expect(minimum.requirements).toContainEqual(expect.objectContaining({ component: 'network', metric: 'bandwidth', value: 25, unit: 'MBit/s', qualifier: 'at_least' }));
+    for (const entry of hardware.byChainId.values()) {
+      expect(entry.profiles.length).toBeGreaterThan(0);
+      for (const p of entry.profiles) {
+        expect(['confirmed', 'qualified']).toContain(p.verification);
+        expect(p.requirements.length).toBeGreaterThan(0);
+        for (const r of p.requirements) expect(r.value != null || r.min != null || r.max != null).toBe(true);
+      }
+    }
   });
 });
 
@@ -114,12 +158,14 @@ describe('getNetworkResearch / getNetworkResearchInfo', () => {
       features: [],
       forums: [{ ...forum, url: 'https://github.com/base/web/discussions', access: 'archived' }],
       forumsCheckedAt: '2026-10-10T15:00:00.000Z',
+      hardware: { identityStatus: 'confirmed', checkedAt: '2026-10-10T09:27:13.772253+00:00', profiles: [profile] },
       updatedAt: '2026-10-10T07:58:00.646Z'
     });
     expect(getNetworkResearch(424242)).toBeNull();
     expect(getNetworkResearchInfo()).toEqual({
       loaded: true, updatedAt: '2026-10-10T07:58:00.646Z', networks: 4,
-      forumNetworks: 3, forumsUpdatedAt: '2026-10-10T15:51:28.230185+00:00'
+      forumNetworks: 3, forumsUpdatedAt: '2026-10-10T15:51:28.230185+00:00',
+      hardwareNetworks: 3, hardwareUpdatedAt: '2026-10-10T16:20:12.747009+00:00'
     });
   });
 
@@ -127,7 +173,18 @@ describe('getNetworkResearch / getNetworkResearchInfo', () => {
     expect(getNetworkResearch(4242)).toEqual({ forums: [forum], forumsCheckedAt: '2026-10-10T15:07:54.328Z', updatedAt: '2026-10-10T07:58:00.646Z' });
   });
 
-  it('returns null when the research lists no repositories, papers, features or forums', () => {
+  it('returns a hardware-only block, dated by the dataset when the network has no check date', () => {
+    expect(getNetworkResearch(5151)).toEqual({
+      hardware: {
+        identityStatus: 'qualified',
+        checkedAt: '2026-10-10T16:20:12.747009+00:00',
+        profiles: [{ ...profile, scope: 'project_family', verification: 'qualified' }]
+      },
+      updatedAt: '2026-10-10T07:58:00.646Z'
+    });
+  });
+
+  it('returns null when the research lists no repositories, papers, features, forums or hardware', () => {
     expect(getNetworkResearch(7)).toBeNull();
     expect(getNetworkResearch(327)).toBeNull();
     expect(getNetworkResearch(777)).toBeNull();
@@ -136,14 +193,19 @@ describe('getNetworkResearch / getNetworkResearchInfo', () => {
   it('returns a copy, so callers cannot mutate the datasets', () => {
     getNetworkResearch(8453).repositories.push({ url: 'https://evil.example' });
     getNetworkResearch(4242).forums[0].url = 'https://evil.example';
+    getNetworkResearch(5151).hardware.profiles[0].requirements[0].value = 999;
     expect(getNetworkResearch(8453).repositories).toEqual([repo]);
     expect(getNetworkResearch(4242).forums).toEqual([forum]);
+    expect(getNetworkResearch(5151).hardware.profiles[0].requirements[0].value).toBe(8);
   });
 
   it('reports not loaded when the datasets are empty', () => {
-    _setNetworkResearchForTests(join(dir, 'missing.json'), join(dir, 'missing.json'));
-    expect(getNetworkResearchInfo()).toEqual({ loaded: false, updatedAt: null, networks: 0, forumNetworks: 0, forumsUpdatedAt: null });
+    _setNetworkResearchForTests(join(dir, 'missing.json'), join(dir, 'missing.json'), join(dir, 'missing.json'));
+    expect(getNetworkResearchInfo()).toEqual({
+      loaded: false, updatedAt: null, networks: 0, forumNetworks: 0, forumsUpdatedAt: null, hardwareNetworks: 0, hardwareUpdatedAt: null
+    });
     expect(getNetworkResearch(8453)).toBeNull();
+    expect(getNetworkResearch(5151)).toBeNull();
   });
 });
 
@@ -166,11 +228,12 @@ describe('attachNetworkResearch', () => {
     expect('family' in idx.byChainId[327]).toBe(false);
   });
 
-  it('marks a chain covered only by the forum research, without stamping a forumUrl', () => {
-    const idx = indexed([{ chainId: 4242, forumUrl: 'https://forum.arbitrum.foundation' }, { chainId: 777 }]);
+  it('marks a chain covered only by the forum or hardware research, without stamping anything else', () => {
+    const idx = indexed([{ chainId: 4242, forumUrl: 'https://forum.arbitrum.foundation' }, { chainId: 777 }, { chainId: 5151 }]);
     attachNetworkResearch(idx);
     expect(idx.byChainId[4242]).toEqual({ chainId: 4242, forumUrl: 'https://forum.arbitrum.foundation', sources: ['chains', 'research'] });
-    // Listed in the forum export with nothing kept: still researched, nothing else.
+    expect(idx.byChainId[5151]).toEqual({ chainId: 5151, sources: ['chains', 'research'] });
+    // Listed in the exports with nothing kept: still researched, nothing else.
     expect(idx.byChainId[777].sources).toEqual(['chains', 'research']);
   });
 
@@ -239,7 +302,10 @@ describe('queries — research reaches the API projections', () => {
 
   it('getChainDetail adds the research block when there is one', () => {
     load();
-    expect(getChainDetail(8453).research).toMatchObject({ family: 'OP Stack-derived', repositories: [repo], forums: [expect.objectContaining({ access: 'archived' })] });
+    expect(getChainDetail(8453).research).toMatchObject({
+      family: 'OP Stack-derived', repositories: [repo], forums: [expect.objectContaining({ access: 'archived' })],
+      hardware: { identityStatus: 'confirmed', profiles: [expect.objectContaining({ role: 'full_node' })] }
+    });
     expect(getChainDetail(999)).toEqual(getChainById(999));
     expect(getChainDetail(424242)).toBeNull();
   });

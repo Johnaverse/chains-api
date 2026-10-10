@@ -1,7 +1,7 @@
 {
   "source": "Forum links for 3,088 Johnaverse networks",
-  "updatedAt": "2026-10-10T15:51:28.230185+00:00",
-  "importedAt": "2026-10-10T15:57:29.712Z",
+  "updatedAt": "2026-10-10T16:20:12.747009+00:00",
+  "importedAt": "2026-10-10T20:58:14.104Z",
   "networks": [
     {
       "chainId": 1,
@@ -526,21 +526,6 @@
       "status": "found",
       "checkedAt": "2026-10-10T13:28:13.137163Z",
       "forums": [
-        {
-          "url": "https://crab.subsquare.io/",
-          "title": "Crab SubSquare Governance",
-          "type": "governance",
-          "relationship": "official",
-          "scope": "exact_network",
-          "access": "inaccessible",
-          "activity": "unknown",
-          "lastActivity": null,
-          "verification": "qualified",
-          "notes": "Darwinia project announcement explicitly links Crab SubSquare and describes governance discussions. Following the official link failed; current availability and activity remain unverified.",
-          "evidence": [
-            "https://medium.com/ringdao/crab-network-integrates-with-subsquare-governance-platform-b0810ca16abf"
-          ]
-        },
         {
           "url": "https://github.com/orgs/darwinia-network/discussions",
           "title": "Darwinia GitHub Discussions",
@@ -1976,8 +1961,8 @@
           "access": "read",
           "activity": "unknown",
           "lastActivity": null,
-          "verification": "confirmed",
-          "notes": "The official Cronos POS repository enables Discussions. This cross-family FAQ discussion explicitly covers Cronos zkEVM Testnet chain ID 240 and has public replies; it is not being assigned merely because of the shared CRO brand.",
+          "verification": "qualified",
+          "notes": "The official Cronos POS repository enables Discussions. This cross-family FAQ discussion explicitly covers Cronos zkEVM Testnet chain ID 240 and has public replies; it is not being assigned merely because of the shared CRO brand. Additional review: Cronos documentation now explicitly reports that Cronos zkEVM is being sunset and requests bridging out before full decommissioning. The readable shared FAQ remains a family resource; it does not establish continuing support for this exact testnet/mainnet deployment. Sunset underway is not proof decommissioning has completed.",
           "evidence": [
             "https://github.com/crypto-org-chain/chain-main",
             "https://github.com/crypto-org-chain/chain-main/discussions/442"
@@ -2148,7 +2133,7 @@
           "activity": "unknown",
           "lastActivity": null,
           "verification": "qualified",
-          "notes": "Official Cronos project developer discussion covers the zkEVM family. Its current FAQ lists successor testnet 240, not deprecated 282. A primary Cronos reset announcement explicitly connects old chain 282 to replacement 240; retained only as a shared family venue, with no historical 282-specific discussion verified.",
+          "notes": "Official Cronos project developer discussion covers the zkEVM family. Its current FAQ lists successor testnet 240, not deprecated 282. A primary Cronos reset announcement explicitly connects old chain 282 to replacement 240; retained only as a shared family venue, with no historical 282-specific discussion verified. Additional review: Cronos documentation now explicitly reports that Cronos zkEVM is being sunset and requests bridging out before full decommissioning. The readable shared FAQ remains a family resource; it does not establish continuing support for this exact testnet/mainnet deployment. Sunset underway is not proof decommissioning has completed.",
           "evidence": [
             "https://github.com/crypto-org-chain/chain-main",
             "https://blog.cronos.com/p/cronos-zkevm-testnet-to-be-reset"
@@ -2897,8 +2882,8 @@
           "access": "read",
           "activity": "unknown",
           "lastActivity": null,
-          "verification": "confirmed",
-          "notes": "The official Cronos POS repository enables Discussions. This cross-family FAQ discussion explicitly covers Cronos zkEVM Mainnet chain ID 388 and has public replies; it is not being assigned merely because of the shared CRO brand.",
+          "verification": "qualified",
+          "notes": "The official Cronos POS repository enables Discussions. This cross-family FAQ discussion explicitly covers Cronos zkEVM Mainnet chain ID 388 and has public replies; it is not being assigned merely because of the shared CRO brand. Additional review: Cronos documentation now explicitly reports that Cronos zkEVM is being sunset and requests bridging out before full decommissioning. The readable shared FAQ remains a family resource; it does not establish continuing support for this exact testnet/mainnet deployment. Sunset underway is not proof decommissioning has completed.",
           "evidence": [
             "https://github.com/crypto-org-chain/chain-main",
             "https://github.com/crypto-org-chain/chain-main/discussions/442"
@@ -3180,8 +3165,8 @@
           "access": "read",
           "activity": "unknown",
           "lastActivity": null,
-          "verification": "confirmed",
-          "notes": "Primary-linked project-family subreddit. Destination is readable but restricted and displays no posts; no current activity or chain-488-specific support is claimed.",
+          "verification": "qualified",
+          "notes": "Primary-linked project-family subreddit. Destination is readable but restricted and displays no posts; no current activity or chain-488-specific support is claimed. Additional review: The visible subreddit explicitly says it has no posts yet and only approved users can contribute. A configured, project-linked venue exists, but actual discussion activity has not been observed.",
           "evidence": [
             "https://blackfort.com/"
           ]
@@ -3933,13 +3918,13 @@
           "url": "https://www.reddit.com/r/Taraxa_Project/",
           "title": "Taraxa Project Reddit community",
           "type": "community",
-          "relationship": "official",
+          "relationship": "uncertain",
           "scope": "project_family",
           "access": "read",
           "activity": "unknown",
           "lastActivity": null,
-          "verification": "confirmed",
-          "notes": "Primary-linked shared Taraxa community; no separate mainnet/testnet board established.",
+          "verification": "qualified",
+          "notes": "Primary-linked shared Taraxa community; no separate mainnet/testnet board established. Additional review: Official Taraxa publication links the subreddit and the destination contains Taraxa discussions. This establishes endorsement and project-family relevance, but neither the backlink nor community posts establish who operates/moderates it. Restricted posting is visible.",
           "evidence": [
             "https://medium.com/taraxa-project/taraxa-weekly-tech-update-ffd7b6767cfb",
             "https://www.reddit.com/r/Taraxa_Project/",
@@ -3957,13 +3942,13 @@
           "url": "https://www.reddit.com/r/Taraxa_Project/",
           "title": "Taraxa Project Reddit community",
           "type": "community",
-          "relationship": "official",
+          "relationship": "uncertain",
           "scope": "project_family",
           "access": "read",
           "activity": "unknown",
           "lastActivity": null,
-          "verification": "confirmed",
-          "notes": "Primary-linked shared Taraxa community; no separate mainnet/testnet board established.",
+          "verification": "qualified",
+          "notes": "Primary-linked shared Taraxa community; no separate mainnet/testnet board established. Additional review: Official Taraxa publication links the subreddit and the destination contains Taraxa discussions. This establishes endorsement and project-family relevance, but neither the backlink nor community posts establish who operates/moderates it. Restricted posting is visible.",
           "evidence": [
             "https://medium.com/taraxa-project/taraxa-weekly-tech-update-ffd7b6767cfb",
             "https://www.reddit.com/r/Taraxa_Project/",
@@ -4094,13 +4079,13 @@
           "url": "https://www.reddit.com/r/Zano/",
           "title": "Zano Reddit community",
           "type": "community",
-          "relationship": "official",
+          "relationship": "uncertain",
           "scope": "project_family",
           "access": "read",
           "activity": "unknown",
           "lastActivity": null,
           "verification": "qualified",
-          "notes": "Primary-linked shared community with explicit ZEL discussion. Does not independently validate inventory chain 935.",
+          "notes": "Primary-linked shared community with explicit ZEL discussion. Does not independently validate inventory chain 935. Additional review: A project-listed subreddit does not by itself establish project operation. Retain the Zano family association and the separate uncertainty about exact Zano Execution Layer deployment applicability.",
           "evidence": [
             "https://docs.zano.org/docs/build/overview/",
             "https://www.reddit.com/r/Zano/",
@@ -4802,7 +4787,7 @@
           "activity": "unknown",
           "lastActivity": null,
           "verification": "qualified",
-          "notes": "Project-family board. No populated conversation or recent activity was verified.",
+          "notes": "Project-family board. No populated conversation or recent activity was verified. Additional review: The live destination explicitly says there are no discussions here yet. Keep qualified status: configured GitHub Discussions exists, but no populated discussion activity is demonstrated.",
           "evidence": [
             "https://cuckoo.network/docs/cuckoo-chain/full-node",
             "https://github.com/orgs/cuckoo-network/discussions"
@@ -4825,7 +4810,7 @@
           "activity": "unknown",
           "lastActivity": null,
           "verification": "qualified",
-          "notes": "Project-family board. No populated conversation or recent activity was verified.",
+          "notes": "Project-family board. No populated conversation or recent activity was verified. Additional review: The live destination explicitly says there are no discussions here yet. Keep qualified status: configured GitHub Discussions exists, but no populated discussion activity is demonstrated.",
           "evidence": [
             "https://cuckoo.network/docs/cuckoo-chain/full-node",
             "https://github.com/orgs/cuckoo-network/discussions"
@@ -5417,13 +5402,13 @@
           "url": "https://bitcointalk.org/index.php?topic=3444373.0",
           "title": "Atheios Bitcointalk Announcement",
           "type": "community",
-          "relationship": "official",
+          "relationship": "uncertain",
           "scope": "project_family",
           "access": "inaccessible",
           "activity": "unknown",
           "lastActivity": null,
           "verification": "qualified",
-          "notes": "Officially linked announcement discussion; page failed with decoding error, so current content and activity remain unverified.",
+          "notes": "Officially linked announcement discussion; page failed with decoding error, so current content and activity remain unverified. Additional review: Atheios documentation endorses a BCT announcement, but the topic could not be read in this pass (tool Unicode decoding failure); thread authorship/project operation cannot be established solely from the backlink.",
           "evidence": [
             "https://atheios.readthedocs.io/en/latest/resources/"
           ]
@@ -5532,11 +5517,11 @@
           "type": "community",
           "relationship": "official",
           "scope": "project_family",
-          "access": "read",
+          "access": "inaccessible",
           "activity": "unknown",
           "lastActivity": null,
           "verification": "qualified",
-          "notes": "Verified Anytype product-family forum; no EVM-chain-specific category or exact deployment-ID bridge was found.",
+          "notes": "Verified Anytype product-family forum; no EVM-chain-specific category or exact deployment-ID bridge was found. Additional review: Fresh public fetch failed with UnexpectedStatusCode. Anytype's naming-system repository establishes use of an EVM chain, while its general software-community forum is not demonstrated as dedicated to chain 1701; no claim of site death is made.",
           "evidence": [
             "https://github.com/anyproto/anytype-ts",
             "https://github.com/anyproto/any-ns"
@@ -6012,13 +5997,13 @@
           "url": "https://bitcointalk.org/index.php?topic=5560698",
           "title": "Parallax announcement on Bitcointalk",
           "type": "community",
-          "relationship": "official",
+          "relationship": "community_run",
           "scope": "exact_network",
           "access": "read",
           "activity": "unknown",
           "lastActivity": null,
-          "verification": "confirmed",
-          "notes": "Readable project announcement discussion. Current activity was not established.",
+          "verification": "qualified",
+          "notes": "Readable project announcement discussion. Current activity was not established. Additional review: Parallax's primary site describes community-driven development with no foundation, governing body or privileged contributors. The BitcoinTalk announcement is linked as a community resource; endorsement does not make BitcoinTalk project-operated.",
           "evidence": [
             "https://parallaxprotocol.org/en",
             "https://parallaxprotocol.org/en/introduction/parallax-for-developers"
@@ -6028,13 +6013,13 @@
           "url": "https://github.com/ParallaxProtocol/parallax/discussions",
           "title": "Parallax GitHub Discussions",
           "type": "developer",
-          "relationship": "official",
+          "relationship": "community_run",
           "scope": "exact_network",
           "access": "inaccessible",
           "activity": "unknown",
           "lastActivity": null,
           "verification": "qualified",
-          "notes": "Discussion root could not be retrieved, but an exact project discussion was readable. No recent activity claim.",
+          "notes": "Discussion root could not be retrieved, but an exact project discussion was readable. No recent activity claim. Additional review: Parallax describes open community-driven development and no central governing body. Retain this project repository discussion resource with community-run relationship and the existing access limitation.",
           "evidence": [
             "https://parallaxprotocol.org/en",
             "https://github.com/ParallaxProtocol/parallax",
@@ -6247,7 +6232,7 @@
           "activity": "unknown",
           "lastActivity": null,
           "verification": "qualified",
-          "notes": "Read-only shell shows zero proposals and inconsistent availability labels. Discussion functionality is documented, but current usable discussions and activity remain unverified.",
+          "notes": "Read-only shell shows zero proposals and inconsistent availability labels. Discussion functionality is documented, but current usable discussions and activity remain unverified. Additional review: Official testnet guide and app match Olympia, but the app displays zero proposals. Keep qualified: the intended governance/discussion service is documented without an observed populated discussion.",
           "evidence": [
             "https://atleta.network/",
             "https://medium.com/@Atleta_Network/how-to-try-governance-in-atleta-olympia-e097ffd0d2ce"
@@ -6268,9 +6253,9 @@
           "scope": "project_family",
           "access": "read",
           "activity": "recent_activity_observed",
-          "lastActivity": "2026-07-02",
+          "lastActivity": null,
           "verification": "confirmed",
-          "notes": "Shared Dogelon/Rufus project-family community. July 2, 2026 dated daily-update title observed; this does not certify current Rufus chain operation.",
+          "notes": "Shared Dogelon/Rufus project-family community. July 2, 2026 dated daily-update title observed; this does not certify current Rufus chain operation. Additional review: A Daily Dogelon topic title contains September 25, 2026; that title date is not a verified posting or reply timestamp. The original July 2, 2026 value likewise came from a topic title, so the exact latest activity date is unknown and is cleared. The readable subreddit remains a project-family venue for Rufus, not a dedicated chain board.",
           "evidence": [
             "https://dogelonmars.com/media/",
             "https://docs.dogelonmars.com/connect-to-rufus",
@@ -6717,7 +6702,7 @@
           "activity": "unknown",
           "lastActivity": null,
           "verification": "qualified",
-          "notes": "Officially linked subreddit is readable and restricted to approved contributors; it displays a moderator-adoption notice. Current official operation is not established.",
+          "notes": "Officially linked subreddit is readable and restricted to approved contributors; it displays a moderator-adoption notice. Current official operation is not established. Additional review: The destination advertises that the subreddit is available for adoption. The old project-site endorsement remains historical evidence, but present moderation/operation is not assured; L2 Beta relevance remains family-only and qualified.",
           "evidence": [
             "https://old.quarkchain.io/community/"
           ]
@@ -7048,7 +7033,7 @@
           "activity": "unknown",
           "lastActivity": null,
           "verification": "qualified",
-          "notes": "Officially linked subreddit on a community-moderated platform. Historical deployment applicability is unconfirmed. The board was empty and restricted when checked; this is not evidence of an active support channel.",
+          "notes": "Officially linked subreddit on a community-moderated platform. Historical deployment applicability is unconfirmed. The board was empty and restricted when checked; this is not evidence of an active support channel. Additional review: The visible subreddit explicitly says it has no posts yet and only approved users can contribute. A configured, project-linked venue exists, but actual discussion activity has not been observed.",
           "evidence": [
             "https://blackfort.exchange/",
             "https://www.reddit.com/r/BlackFortOfficial/"
@@ -7093,8 +7078,8 @@
           "access": "read",
           "activity": "unknown",
           "lastActivity": null,
-          "verification": "confirmed",
-          "notes": "Officially linked subreddit on a community-moderated platform. The board was empty and restricted when checked; this is not evidence of an active support channel.",
+          "verification": "qualified",
+          "notes": "Officially linked subreddit on a community-moderated platform. The board was empty and restricted when checked; this is not evidence of an active support channel. Additional review: The visible subreddit explicitly says it has no posts yet and only approved users can contribute. A configured, project-linked venue exists, but actual discussion activity has not been observed.",
           "evidence": [
             "https://blackfort.exchange/",
             "https://www.reddit.com/r/BlackFortOfficial/"
@@ -7178,7 +7163,7 @@
           "activity": "unknown",
           "lastActivity": null,
           "verification": "qualified",
-          "notes": "Officially linked subreddit on a community-moderated platform. Historical deployment applicability is unconfirmed. The board was empty and restricted when checked; this is not evidence of an active support channel.",
+          "notes": "Officially linked subreddit on a community-moderated platform. Historical deployment applicability is unconfirmed. The board was empty and restricted when checked; this is not evidence of an active support channel. Additional review: The visible subreddit explicitly says it has no posts yet and only approved users can contribute. A configured, project-linked venue exists, but actual discussion activity has not been observed.",
           "evidence": [
             "https://blackfort.exchange/",
             "https://www.reddit.com/r/BlackFortOfficial/"
@@ -7356,13 +7341,13 @@
           "url": "https://forum.bnbchain.org/c/l2-network-for-bnb-smart-chain/30",
           "title": "opBNB discussions in Build N Build Forum",
           "type": "developer",
-          "relationship": "official",
+          "relationship": "community_run",
           "scope": "project_family",
           "access": "read",
           "activity": "unknown",
           "lastActivity": "2025-04-28",
           "verification": "confirmed",
-          "notes": "Dedicated opBNB category covers roadmap, node issues and application feedback. Shared opBNB family scope; not an unrelated parent-chain inheritance.",
+          "notes": "Dedicated opBNB category covers roadmap, node issues and application feedback. Shared opBNB family scope; not an unrelated parent-chain inheritance. Additional review: BNB's primary site calls Build N Build a public, community-driven developer forum. The opBNB category is endorsed and applicable at project-family level; that does not establish project operation. This corrects the inconsistency with the other BNB forum records.",
           "evidence": [
             "https://opbnb.bnbchain.org/en",
             "https://forum.bnbchain.org/"
@@ -7580,13 +7565,13 @@
           "url": "https://forum.dfinity.org/t/upcoming-emc-edgematrix-computing-sns-decentralization-sale/20194",
           "title": "EMC SNS decentralization proposal on DFINITY Forum",
           "type": "governance",
-          "relationship": "official",
+          "relationship": "uncertain",
           "scope": "ecosystem_shared",
           "access": "inaccessible",
           "activity": "unknown",
           "lastActivity": null,
           "verification": "qualified",
-          "notes": "Historical EMC-specific proposal thread on a shared ecosystem forum, explicitly linked by the project. Destination returned HTTP 403, so current contents and activity could not be independently read.",
+          "notes": "Historical EMC-specific proposal thread on a shared ecosystem forum, explicitly linked by the project. Destination returned HTTP 403, so current contents and activity could not be independently read. Additional review: EMC's publication links a discussion on the DFINITY ecosystem forum. This establishes an ecosystem-shared venue, not EMC ownership; the topic returned 403, so current functionality and authorship remain qualified.",
           "evidence": [
             "https://medium.com/@EdgeMatrixChain/emc-icp-ama-technical-discussion-and-views-from-icp-official-ic-community-a099af9f2bb3"
           ]
@@ -8101,7 +8086,7 @@
           "activity": "unknown",
           "lastActivity": null,
           "verification": "qualified",
-          "notes": "Board categories available; no public topics observed. Testnet-family scope; exact historical testnet generation not independently established.",
+          "notes": "Board categories available; no public topics observed. Testnet-family scope; exact historical testnet generation not independently established. Additional review: The captured destination has the empty Welcome to discussions screen, not populated conversations. Keep qualified status and unknown activity; repository ownership does not supply testnet-specific discussion evidence.",
           "evidence": [
             "https://github.com/alpenlabs/alpen",
             "https://www.alpen.org/blog/glock-is-here",
@@ -8178,13 +8163,13 @@
           "url": "https://www.reddit.com/r/lorenzoprotocol/",
           "title": "Lorenzo Protocol Reddit",
           "type": "community",
-          "relationship": "official",
+          "relationship": "uncertain",
           "scope": "project_family",
           "access": "read",
           "activity": "unknown",
           "lastActivity": null,
-          "verification": "confirmed",
-          "notes": "Official docs community links identify subreddit.",
+          "verification": "qualified",
+          "notes": "Official docs community links identify subreddit. Additional review: Official documentation lists this Reddit venue and the readable destination includes Lorenzo-branded and community posts. Operator/moderator ownership is not independently established by these facts. Restricted posting is visible.",
           "evidence": [
             "https://lorenzo-protocol.gitbook.io/docs"
           ]
@@ -8223,12 +8208,12 @@
           "title": "Base Web GitHub Discussions",
           "type": "developer",
           "relationship": "official",
-          "scope": "historical_network",
+          "scope": "project_family",
           "access": "archived",
           "activity": "historical_or_archived",
           "lastActivity": null,
           "verification": "confirmed",
-          "notes": "Repository archived March 17, 2026; historical board retained.",
+          "notes": "Repository archived March 17, 2026; historical board retained. Additional review: GitHub explicitly says the repository was archived on 2026-03-17; this is an archived Base project venue, not evidence that Base chain 8453 is a historical network. Archived access and activity flags are retained.",
           "evidence": [
             "https://blog.base.org/open-sourcing-bases-contracts-and-frontend"
           ]
@@ -8303,13 +8288,13 @@
           "url": "https://www.reddit.com/r/Iota/",
           "title": "IOTA Reddit",
           "type": "community",
-          "relationship": "official",
+          "relationship": "uncertain",
           "scope": "project_family",
           "access": "read",
           "activity": "unknown",
           "lastActivity": null,
-          "verification": "confirmed",
-          "notes": "Officially linked ecosystem subreddit; project-family scope.",
+          "verification": "qualified",
+          "notes": "Officially linked ecosystem subreddit; project-family scope. Additional review: The IOTA project links this public discussion community, but endorsement and an account named IOTA-official do not independently establish control of the subreddit. Kept as IOTA-family scope, not an EVM-specific forum.",
           "evidence": [
             "https://www.iota.org/connect/building-together"
           ]
@@ -8580,13 +8565,13 @@
           "url": "https://www.reddit.com/r/Zano/",
           "title": "Zano Reddit community",
           "type": "community",
-          "relationship": "official",
+          "relationship": "uncertain",
           "scope": "project_family",
           "access": "read",
           "activity": "unknown",
           "lastActivity": null,
-          "verification": "confirmed",
-          "notes": "Primary-linked shared Zano community with explicit Execution Layer discussion; primary documentation identifies ZEL testnet9350.",
+          "verification": "qualified",
+          "notes": "Primary-linked shared Zano community with explicit Execution Layer discussion; primary documentation identifies ZEL testnet9350. Official project endorsement is verified; operation by the project is not established.",
           "evidence": [
             "https://docs.zano.org/docs/build/overview/",
             "https://www.reddit.com/r/Zano/",
@@ -9070,15 +9055,16 @@
           "url": "https://forum.irisnet.org/",
           "title": "IRISnet Forum",
           "type": "governance",
-          "relationship": "uncertain",
+          "relationship": "official",
           "scope": "project_family",
           "access": "read",
           "activity": "unknown",
           "lastActivity": "2026-02-11",
           "verification": "qualified",
-          "notes": "The destination is a genuine IRISnet governance and IRIS Hub discussion board. A third-party historical README mirror includes its backlink; current independent primary ownership linkage was not verified.",
+          "notes": "Readable IRISnet governance board. The project-authored September 2019 governance guide explicitly links this forum for proposal ideas. Retained as a qualified shared project-family venue for IRIShub Testnet16688; dedicated testnet coverage and current testnet support are not established.",
           "evidence": [
-            "https://github.com/irisnet/irishub"
+            "https://github.com/irisnet/irishub",
+            "https://medium.com/irisnet-blog/faq-tips-on-how-to-vote-via-rainbow-6837e62d3d32"
           ]
         }
       ]
@@ -13828,9 +13814,9 @@
           "scope": "project_family",
           "access": "read",
           "activity": "recent_activity_observed",
-          "lastActivity": "2026-10-06",
+          "lastActivity": null,
           "verification": "qualified",
-          "notes": "Readable project-family subreddit with monthly discussion threads. No dedicated board or current deployment-specific support for testnet 323432 established; retained only as a qualified family resource.",
+          "notes": "Readable project-family subreddit with monthly discussion threads. No dedicated board or current deployment-specific support for testnet 323432 established; retained only as a qualified family resource. Recent relative ages are visible, but no exact latest activity timestamp was verified.",
           "evidence": [
             "https://faq.worldmobiletoken.com/docs",
             "https://worldmobilegroup.com/the-chain"
@@ -14740,8 +14726,8 @@
           "access": "read",
           "activity": "unknown",
           "lastActivity": null,
-          "verification": "confirmed",
-          "notes": "Official Arc House project-family community board, including Arc testnet builders. This is Circle’s Arc, not another project using the ARC ticker.",
+          "verification": "qualified",
+          "notes": "Official Arc House project-family community board, including Arc testnet builders. This is Circle’s Arc, not another project using the ARC ticker. The forum interface is visible, but individual post titles, replies and current activity could not be verified.",
           "evidence": [
             "https://www.arc.io/",
             "https://community.arc.io/public/forum/boards/member-lounge-la1"

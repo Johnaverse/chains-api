@@ -142,6 +142,8 @@ describe('GET /health (deepened)', () => {
     expect(body.sources.research.networks).toBeGreaterThan(2000);
     expect(body.sources.research.forumNetworks).toBeGreaterThan(500);
     expect(body.sources.research.forumsUpdatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(body.sources.research.hardwareNetworks).toBeGreaterThan(700);
+    expect(body.sources.research.hardwareUpdatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
   it('returns status=down when a core source is missing', async () => {
