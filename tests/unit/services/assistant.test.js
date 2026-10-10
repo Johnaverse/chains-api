@@ -261,6 +261,9 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('HARDWARE REQUIREMENTS ARE QUOTED, NOT COMPUTED');
     expect(prompt).toContain('GB is');
     expect(prompt).toContain('project_family');
+    // Generic profiles exist (Ethereum's are client-less): the model must not invent a client.
+    expect(prompt).toContain('never invent a client name');
+    expect(prompt).toContain('identityStatus unresolved');
   });
 
   it('tells the model a follow-up keeps the previous turn\'s network, ABOVE the registry-wide rule', () => {

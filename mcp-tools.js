@@ -34,6 +34,7 @@ import { getForks } from './src/services/forks.js';
 import { getProviderStats } from './src/services/providerStats.js';
 import { checkChainHalt } from './src/services/chainHalt.js';
 import { getNodeHardware, getNetworkResearch } from './src/sources/networkResearch.js';
+import { ASSISTANT_TOOL_RESULT_MAX_CHARS } from './config.js';
 
 /**
  * Get the list of MCP tool definitions (schemas)
@@ -71,7 +72,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_chain_by_id',
-      description: 'Get detailed information about a specific blockchain chain by its chain ID. Includes a `price` object for the chain’s NATIVE currency (null when unmapped): `{usd, vol24h, marketCap, asOf, stale}`. `vol24h` is that ASSET’s 24-hour trading volume in USD — market activity, NOT chain throughput — so an L2 settling in ETH reports ETH’s volume, not its own; name the asset when quoting it. When `stale` is true the quote stopped moving at `asOf` (over a day ago): `vol24h` and `marketCap` are null and `usd` is the last known price, to be quoted as of `asOf` rather than as current. A null field is unknown, never zero. When researched, a `research` object lists the chain’s node/client `repositories` (each with a `kind` such as execution, consensus, rollup or node), whitepaper/document `papers` and short sourced `features`; every item carries a `status` (checked = fully verified, partial = evidence has gaps) and its `evidence` URLs — say when an item is only partially verified, and treat features as the project’s own claims, not tested facts. `research.forums` lists discussion boards the forum research tied to the chain, each with `relationship` (official / community_run / uncertain), `scope` (exact_network, project_family = the project’s shared board, ecosystem_shared, historical_network) and `access` (read / inaccessible / archived when checked) — name the scope and say when a board was unreachable or archived; the chain’s `forumUrl` is the separately curated registry entry. Node hardware / setup requirements are NOT in this response: when `hasNodeRequirements` is true, call get_node_requirements for them.',
+      description: 'Get detailed information about a specific blockchain chain by its chain ID. Includes a `price` object for the chain’s NATIVE currency (null when unmapped): `{usd, vol24h, marketCap, asOf, stale}`. `vol24h` is that ASSET’s 24-hour trading volume in USD — market activity, NOT chain throughput — so an L2 settling in ETH reports ETH’s volume, not its own; name the asset when quoting it. When `stale` is true the quote stopped moving at `asOf` (over a day ago): `vol24h` and `marketCap` are null and `usd` is the last known price, to be quoted as of `asOf` rather than as current. A null field is unknown, never zero. When researched, a `research` object lists the chain’s node/client `repositories` (each with a `kind` such as execution, consensus, rollup or node), whitepaper/document `papers` and short sourced `features`; every item carries a `status` (checked = fully verified, partial = evidence has gaps) and its `evidence` URLs — say when an item is only partially verified, and treat features as the project’s own claims, not tested facts. `research.forums` lists discussion boards the forum research tied to the chain, each with `relationship` (official / community_run / uncertain), `scope` (exact_network, project_family = the project’s shared board, ecosystem_shared, historical_network, uncertain = the board’s relationship to this chain could not be established) and `access` (read / inaccessible / archived when checked) — name the scope and say when a board was unreachable or archived; the chain’s `forumUrl` is the separately curated registry entry. Node hardware / setup requirements are NOT in this response: when `hasNodeRequirements` is true, call get_node_requirements for them.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -86,7 +87,7 @@ export function getToolDefinitions() {
     {
       name: 'get_node_requirements',
       description:
-        'Documented hardware and system requirements for running a node on a chain (CPU, memory, storage, bandwidth, OS, GPU), from the audited node hardware research. Use it for "what do I need to run a node / validator / RPC / archive node on X", "minimum vs recommended specs", "how much disk". Resolve the chain ID first (search_chains) if the user named the network. Returns one profile per node `role` × requirement `level` (minimum / recommended / example / unspecified) × `client`, most specific first. Each requirement is a string in the publisher’s ORIGINAL unit ("memory capacity: 16 GB", "cpu cores: at least 4 cores"): quote units exactly as given, NEVER convert GB/GiB, Mbps/MB/s, cores/vCPU/threads, and never add up or average profiles. Read `scope`: exact_network = documented for this chain; project_family = the project’s generic sizing applied to this chain, NOT verified for it — say so. Mention `deployment` historical/deprecated and `verification` qualified as caveats, and `identityStatus` qualified/unresolved when the research could not firmly tie the documentation to this chain. A component that is absent was not documented — never say zero or unnecessary. These are published requirements, not benchmarks, and storage grows over time. `truncated` true means more profiles exist: narrow with `role` or `level`. Empty `profiles` means the research found no publishable requirements for this chain, which is not proof none exist — say that and point to the project’s own node documentation. Also returns `software` (or null): `repositories` = the node/client source repositories the research tied to the chain (`kind` execution / consensus / rollup / node / packaging / sdk / contracts, `status` checked or partial), and `observedClients` = client software and versions actually seen on the chain’s live RPC endpoints (what operators run today — evidence, not a requirement, and only for chains with monitored endpoints). Combine them when asked how to set up a node: hardware from `profiles`, software from `software`, each profile’s `client` naming the software its figures were published for.',
+        'Documented hardware and system requirements for running a node on a chain (CPU, memory, storage, bandwidth, OS, GPU), from the audited node hardware research. Use it for "what do I need to run a node / validator / RPC / archive node on X", "minimum vs recommended specs", "how much disk". Resolve the chain ID first (search_chains) if the user named the network. Returns one profile per node `role` × requirement `level` (minimum / recommended / example / unspecified) × `client`, most specific first. `client` is the software the figures were published for; when it is null the profile is generic for the chain — say "generic" rather than naming a client. Each requirement is a string in the publisher’s ORIGINAL unit ("memory capacity: 16 GB", "cpu cores: at least 4 cores"): quote units exactly as given, NEVER convert GB/GiB, Mbps/MB/s, cores/vCPU/threads, and never add up or average profiles. ALWAYS read and relay two caveats. (1) `identityStatus` is how firmly the research tied the documentation to THIS chain: confirmed = established; qualified = the project is right but the exact deployment or version has limits; unresolved = the documentation could not be matched to this chain — present unresolved figures as "documentation found for the project, not confirmed to apply to chain N". (2) each profile’s `scope`: exact_network = documented for this chain; project_family = the project’s generic sizing applied to this chain, NOT verified for it; historical_network = a past deployment, read the notes before use; uncertain = applicability could not be established, do not present it as verified sizing. Also mention `deployment` historical/deprecated and `verification` qualified. A component that is absent was not documented — never say zero or unnecessary. These are published requirements, not benchmarks, and storage grows over time. `totalProfiles` is everything the research kept for the chain, `totalMatched` what survived your role/level filter, `count` what fits in this response; `truncated` true means more matched profiles exist — narrow with `role` or `level` to see them. When `totalProfiles` is 0 the research found no publishable requirements for this chain, which is not proof none exist — say that and point to the project’s own node documentation; when `totalMatched` is 0 but `totalProfiles` is not, the chain has requirements for OTHER roles or tiers — say which roles exist (`availableRoles`) rather than that none are documented. Also returns `software` (or null): `repositories` = the node/client source repositories the research tied to the chain (`kind` execution / consensus / rollup / node / packaging / sdk / contracts, `status` checked or partial), and `observedClients` = client software and versions actually seen on the chain’s live RPC endpoints (what operators run today — evidence, not a requirement, and only for chains with monitored endpoints). Combine them when asked how to set up a node: hardware from `profiles`, software from `software`, each profile’s `client` naming the software its figures were published for.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -641,7 +642,7 @@ function handleGetNodeRequirements(args) {
     || rank(ROLE_ORDER, a.role) - rank(ROLE_ORDER, b.role)
     || rank(LEVEL_ORDER, a.level) - rank(LEVEL_ORDER, b.level));
   const limit = Math.max(1, Math.min(Number(args.limit) || NODE_REQUIREMENTS_DEFAULT_LIMIT, NODE_REQUIREMENTS_MAX_LIMIT));
-  const sliced = profiles.slice(0, limit).map((p) => ({
+  const candidates = profiles.slice(0, limit).map((p) => ({
     role: p.role,
     level: p.level,
     scope: p.scope,
@@ -652,17 +653,37 @@ function handleGetNodeRequirements(args) {
     notes: p.notes,
     sources: [...new Set([...(p.evidence ?? []), ...p.requirements.map((r) => r.source).filter(Boolean)])].slice(0, 3),
   }));
-  return compactResponse({
+  const envelope = {
     ...base,
     identityStatus: hardware.identityStatus,
     checkedAt: hardware.checkedAt,
     totalProfiles: hardware.profiles.length,
-    count: sliced.length,
-    truncated: profiles.length > sliced.length,
-    profiles: sliced,
+    totalMatched: profiles.length,
+    availableRoles: [...new Set(hardware.profiles.map((p) => p.role))].sort((a, b) => rank(ROLE_ORDER, a) - rank(ROLE_ORDER, b)),
     software,
     note: 'Requirements are quoted in each publisher’s original units — do not convert or combine them. An absent component was not documented, never zero. Published requirements, not benchmarks. observedClients is what live endpoints run, not a requirement.',
-  });
+  };
+  if (profiles.length === 0) {
+    envelope.message = `No ${[role, level].filter(Boolean).join(' ')} profile is documented for this chain, but ${hardware.profiles.length} other profile(s) are (roles: ${envelope.availableRoles.join(', ')}) — call again without the filter.`;
+  }
+  // The assistant cuts tool results at ASSISTANT_TOOL_RESULT_MAX_CHARS — mid-value, leaving
+  // malformed JSON — so the budget is enforced here, by whole profiles, and `truncated`
+  // tells the model to narrow by role/level for the rest.
+  const sliced = fitWithinBudget(envelope, candidates, ASSISTANT_TOOL_RESULT_MAX_CHARS);
+  return compactResponse({ ...envelope, count: sliced.length, truncated: profiles.length > sliced.length, profiles: sliced });
+}
+
+/** The longest prefix of `items` whose serialized response stays within `budget` characters. */
+function fitWithinBudget(envelope, items, budget) {
+  const kept = [];
+  for (const item of items) {
+    kept.push(item);
+    if (JSON.stringify({ ...envelope, count: kept.length, truncated: true, profiles: kept }).length > budget) {
+      kept.pop();
+      break;
+    }
+  }
+  return kept;
 }
 
 function handleSearchChains(args) {

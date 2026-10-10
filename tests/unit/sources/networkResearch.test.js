@@ -163,25 +163,33 @@ describe('getNetworkResearch / getNetworkResearchInfo', () => {
     });
     expect(getNetworkResearch(424242)).toBeNull();
     expect(getNetworkResearchInfo()).toEqual({
-      loaded: true, updatedAt: '2026-10-10T07:58:00.646Z', networks: 4,
-      forumNetworks: 3, forumsUpdatedAt: '2026-10-10T15:51:28.230185+00:00',
-      hardwareNetworks: 3, hardwareUpdatedAt: '2026-10-10T16:20:12.747009+00:00'
+      loaded: true,
+      researchLoaded: true, updatedAt: '2026-10-10T07:58:00.646Z', networks: 4,
+      forumsLoaded: true, forumNetworks: 3, forumsUpdatedAt: '2026-10-10T15:51:28.230185+00:00',
+      hardwareLoaded: true, hardwareNetworks: 3, hardwareUpdatedAt: '2026-10-10T16:20:12.747009+00:00'
     });
   });
 
-  it('returns a forums-only block for a chain the network research did not cover', () => {
-    expect(getNetworkResearch(4242)).toEqual({ forums: [forum], forumsCheckedAt: '2026-10-10T15:07:54.328Z', updatedAt: '2026-10-10T07:58:00.646Z' });
+  it('returns a forums-only block for a chain the network research did not cover, dated by the forum dataset', () => {
+    expect(getNetworkResearch(4242)).toEqual({ forums: [forum], forumsCheckedAt: '2026-10-10T15:07:54.328Z', updatedAt: '2026-10-10T15:51:28.230185+00:00' });
   });
 
-  it('returns a hardware-only block, dated by the dataset when the network has no check date', () => {
+  it('returns a hardware-only block, dated by the hardware dataset when the network has no check date', () => {
     expect(getNetworkResearch(5151)).toEqual({
       hardware: {
         identityStatus: 'qualified',
         checkedAt: '2026-10-10T16:20:12.747009+00:00',
         profiles: [{ ...profile, scope: 'project_family', verification: 'qualified' }]
       },
-      updatedAt: '2026-10-10T07:58:00.646Z'
+      updatedAt: '2026-10-10T16:20:12.747009+00:00'
     });
+  });
+
+  it('reports research as not loaded when any one dataset is missing, with the flag naming which', () => {
+    _setNetworkResearchForTests(write('dataset.json', JSON.stringify(DATASET)), join(dir, 'missing.json'), write('hardware.json', JSON.stringify(HARDWARE)));
+    expect(getNetworkResearchInfo()).toMatchObject({ loaded: false, researchLoaded: true, forumsLoaded: false, hardwareLoaded: true, forumNetworks: 0 });
+    _setNetworkResearchForTests(write('dataset.json', JSON.stringify(DATASET)), write('forums.json', JSON.stringify(FORUMS)), join(dir, 'missing.json'));
+    expect(getNetworkResearchInfo()).toMatchObject({ loaded: false, hardwareLoaded: false, hardwareNetworks: 0 });
   });
 
   it('returns null when the research lists no repositories, papers, features, forums or hardware', () => {
@@ -202,7 +210,10 @@ describe('getNetworkResearch / getNetworkResearchInfo', () => {
   it('reports not loaded when the datasets are empty', () => {
     _setNetworkResearchForTests(join(dir, 'missing.json'), join(dir, 'missing.json'), join(dir, 'missing.json'));
     expect(getNetworkResearchInfo()).toEqual({
-      loaded: false, updatedAt: null, networks: 0, forumNetworks: 0, forumsUpdatedAt: null, hardwareNetworks: 0, hardwareUpdatedAt: null
+      loaded: false,
+      researchLoaded: false, updatedAt: null, networks: 0,
+      forumsLoaded: false, forumNetworks: 0, forumsUpdatedAt: null,
+      hardwareLoaded: false, hardwareNetworks: 0, hardwareUpdatedAt: null
     });
     expect(getNetworkResearch(8453)).toBeNull();
     expect(getNetworkResearch(5151)).toBeNull();

@@ -1209,10 +1209,32 @@ describe('MCP Tools - Shared Module', () => {
     it('filters by role and level and caps with truncated', async () => {
       let data = JSON.parse((await handleToolCall('get_node_requirements', { chainId: 1, role: 'validator' })).content[0].text);
       expect(data.profiles.map((p) => p.role)).toEqual(['validator']);
-      expect(data).toMatchObject({ totalProfiles: 3, count: 1, truncated: false });
+      expect(data).toMatchObject({ totalProfiles: 3, totalMatched: 1, count: 1, truncated: false, availableRoles: ['full_node', 'validator'] });
+      expect(data).not.toHaveProperty('message');
       data = JSON.parse((await handleToolCall('get_node_requirements', { chainId: 1, level: 'recommended', limit: 1 })).content[0].text);
-      expect(data).toMatchObject({ count: 1, truncated: true });
+      expect(data).toMatchObject({ totalMatched: 2, count: 1, truncated: true });
       expect(data.profiles[0]).toMatchObject({ role: 'validator', level: 'recommended' });
+    });
+
+    it('tells a filter that matched nothing apart from a chain with no research', async () => {
+      const data = JSON.parse((await handleToolCall('get_node_requirements', { chainId: 1, role: 'archive', level: 'minimum' })).content[0].text);
+      expect(data).toMatchObject({ totalProfiles: 3, totalMatched: 0, count: 0, truncated: false, profiles: [] });
+      expect(data.message).toBe('No archive minimum profile is documented for this chain, but 3 other profile(s) are (roles: full_node, validator) — call again without the filter.');
+    });
+
+    it('never exceeds the assistant tool-result cap: whole profiles are dropped and truncated is set', async () => {
+      const big = Array.from({ length: 40 }, (_, i) => profile({
+        id: `p${i}`, client: `client-${i}`, notes: 'x'.repeat(300),
+        requirements: Array.from({ length: 8 }, (_, j) => req('storage', `metric_${j}`, 100 + j, 'GB', { notes: 'y'.repeat(60) }))
+      }));
+      mockGetNodeHardware.mockReturnValue({ ...hardware, profiles: big });
+      const text = (await handleToolCall('get_node_requirements', { chainId: 1, limit: 50 })).content[0].text;
+      expect(text.length).toBeLessThanOrEqual(8000);
+      const data = JSON.parse(text); // intact JSON, not cut mid-value by the adapter
+      expect(data.count).toBeGreaterThan(0);
+      expect(data.count).toBeLessThan(40);
+      expect(data.profiles).toHaveLength(data.count);
+      expect(data).toMatchObject({ totalProfiles: 40, totalMatched: 40, truncated: true });
     });
 
     it('says plainly when the research has nothing for the chain', async () => {

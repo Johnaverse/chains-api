@@ -57,14 +57,24 @@ export function _setNetworkResearchForTests(path, forumsPath, hardwarePath) {
   hardware = loadNodeHardware(hardwarePath);
 }
 
-/** Dataset dates and sizes, for /health and /sources. */
+/**
+ * Dataset dates and sizes, for /health and /sources. `loaded` is true only when all three
+ * checked-in files loaded: a missing or malformed forum or hardware file is a packaging
+ * bug that must show, not disappear behind the network research being fine.
+ */
 export function getNetworkResearchInfo() {
+  const researchLoaded = dataset.byChainId.size > 0;
+  const forumsLoaded = forums.byChainId.size > 0;
+  const hardwareLoaded = hardware.byChainId.size > 0;
   return {
-    loaded: dataset.byChainId.size > 0,
+    loaded: researchLoaded && forumsLoaded && hardwareLoaded,
+    researchLoaded,
     updatedAt: dataset.updatedAt,
     networks: dataset.byChainId.size,
+    forumsLoaded,
     forumNetworks: forums.byChainId.size,
     forumsUpdatedAt: forums.updatedAt,
+    hardwareLoaded,
     hardwareNetworks: hardware.byChainId.size,
     hardwareUpdatedAt: hardware.updatedAt
   };
@@ -104,7 +114,9 @@ export function getNetworkResearch(chainId) {
       profiles: structuredClone(hardwareEntry.profiles)
     };
   }
-  research.updatedAt = dataset.updatedAt;
+  // The block's date is the date of the dataset that produced its items — never the
+  // network research's date for a chain it does not cover.
+  research.updatedAt = hasResearch ? dataset.updatedAt : hasForums ? forums.updatedAt : hardware.updatedAt;
   return research;
 }
 
