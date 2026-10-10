@@ -17,6 +17,7 @@ vi.mock('../../../src/sources/defillama.js', () => ({ fetchDefiLlama: vi.fn(asyn
 const { readSnapshotFromDisk } = await import('../../../src/store/snapshot.js');
 const { cachedData } = await import('../../../src/store/cache.js');
 const { initializeDataOnStartup } = await import('../../../src/services/loader.js');
+const { getAllChains, filterChainsByFamily, getChainById } = await import('../../../src/store/queries.js');
 
 describe('initializeDataOnStartup — stale snapshot', () => {
   afterEach(() => { cachedData.indexed = null; });
@@ -24,15 +25,20 @@ describe('initializeDataOnStartup — stale snapshot', () => {
   it('re-stamps the research dataset on a snapshot indexed without it', async () => {
     const base = { chainId: 8453, name: 'Base', infoURL: 'https://base.org', sources: ['chains'] };
     const thai = { chainId: 7, name: 'ThaiChain', infoURL: 'https://thaichain.io', sources: ['chains'] };
-    readSnapshotFromDisk.mockResolvedValue({
+    // A real snapshot is JSON on disk, so `all` and `byChainId` come back as separate copies.
+    readSnapshotFromDisk.mockResolvedValue(JSON.parse(JSON.stringify({
       theGraph: { networks: [] }, chainlist: [], chains: [], slip44: { 60: {} }, l2beat: null, defillama: null,
       indexed: { byChainId: { 8453: base, 7: thai }, byName: {}, all: [base, thai] },
       lastUpdated: '2026-10-01T00:00:00.000Z'
-    });
+    })));
 
     await initializeDataOnStartup();
 
-    expect(cachedData.indexed.byChainId[8453]).toMatchObject({ family: 'OP Stack-derived', sources: ['chains', 'research'] });
-    expect(cachedData.indexed.byChainId[7]).toMatchObject({ infoURL: 'https://thaichain.org/', infoURLSource: 'research' });
+    expect(getChainById(8453)).toMatchObject({ family: 'OP Stack-derived', sources: ['chains', 'research'] });
+    expect(getChainById(7)).toMatchObject({ infoURL: 'https://thaichain.org/', infoURLSource: 'research' });
+    // The list projections read indexed.all, not byChainId.
+    expect(filterChainsByFamily(getAllChains(), 'op stack').map(c => c.chainId)).toEqual([8453]);
+    expect(getAllChains().find(c => c.chainId === 7).infoURL).toBe('https://thaichain.org/');
+    expect(cachedData.indexed.all).toContain(cachedData.indexed.byChainId[8453]);
   });
 });
