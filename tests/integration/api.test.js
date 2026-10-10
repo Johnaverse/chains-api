@@ -24,6 +24,8 @@ const mocks = vi.hoisted(() => ({
   getCachedData: vi.fn(),
   searchChains: vi.fn(),
   getChainById: vi.fn(),
+  getChainDetail: vi.fn(),
+  filterChainsByFamily: vi.fn((chains, family) => (family ? chains.filter((c) => c.family?.toLowerCase().includes(String(family).toLowerCase())) : chains)),
   getAllChains: vi.fn(),
   getAllRelations: vi.fn(),
   getRelationsById: vi.fn(),
@@ -50,6 +52,8 @@ vi.mock('../../src/store/cache.js', () => ({
 vi.mock('../../src/store/queries.js', () => ({
   searchChains: mocks.searchChains,
   getChainById: mocks.getChainById,
+  getChainDetail: mocks.getChainDetail,
+  filterChainsByFamily: mocks.filterChainsByFamily,
   getAllChains: mocks.getAllChains,
   getEndpointsById: mocks.getEndpointsById,
   getAllEndpoints: mocks.getAllEndpoints,
@@ -192,9 +196,10 @@ function installMockDefaults() {
     if (id === 1) return { chainId: 1, name: 'Ethereum Mainnet', tags: ['L1'], sources: ['chains'] };
     return null;
   });
+  mocks.getChainDetail.mockImplementation((id) => mocks.getChainById(id));
   mocks.getAllChains.mockReturnValue([
-    { chainId: 1, name: 'Ethereum Mainnet', tags: ['L1'] },
-    { chainId: 137, name: 'Polygon', tags: ['L2'] },
+    { chainId: 1, name: 'Ethereum Mainnet', tags: ['L1'], family: 'Ethereum' },
+    { chainId: 137, name: 'Polygon', tags: ['L2'], family: 'Polygon PoS' },
     { chainId: 11155111, name: 'Sepolia', tags: ['Testnet'] }
   ]);
   mocks.getAllRelations.mockReturnValue({
@@ -465,6 +470,17 @@ describe('API Endpoints', () => {
       expect(data.count).toBe(3);
     });
 
+    it('filters chains by a case-insensitive family substring', async () => {
+      const response = await app.inject({ method: 'GET', url: '/chains?family=POLYGON%20p' });
+      expect(response.statusCode).toBe(200);
+      const data = JSON.parse(response.payload);
+      expect(data.chains.map(c => c.chainId)).toEqual([137]);
+    });
+
+    it('rejects an overlong family', async () => {
+      expect((await app.inject({ method: 'GET', url: `/chains?family=${'x'.repeat(101)}` })).statusCode).toBe(400);
+    });
+
     it('should filter chains by L2 tag', async () => {
       const response = await app.inject({
         method: 'GET',
@@ -530,6 +546,13 @@ describe('API Endpoints', () => {
       const data = JSON.parse(response.payload);
       expect(data).toHaveProperty('chainId', 1);
       expect(data).toHaveProperty('name', 'Ethereum Mainnet');
+    });
+
+    it('serves the research block from getChainDetail', async () => {
+      mocks.getChainDetail.mockImplementationOnce((id) => ({ ...mocks.getChainById(id), research: { family: 'Ethereum' } }));
+      const data = JSON.parse((await app.inject({ method: 'GET', url: '/chains/1' })).payload);
+      expect(data.research).toEqual({ family: 'Ethereum' });
+      expect(mocks.getChainDetail).toHaveBeenCalledWith(1);
     });
 
     it('should return 404 for non-existent chain', async () => {

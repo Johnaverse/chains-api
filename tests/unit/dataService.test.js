@@ -25,6 +25,14 @@ vi.mock('../../src/sources/defillama.js', () => ({
   fetchDefiLlama: vi.fn(async () => null)
 }));
 
+// The checked-in research dataset would stamp real chain ids (1, 137, …) with 'research';
+// these tests pin the source lists the five fetched sources produce.
+vi.mock('../../src/sources/networkResearch.js', () => ({
+  attachNetworkResearch: vi.fn(),
+  getNetworkResearch: vi.fn(() => null),
+  getNetworkResearchInfo: vi.fn(() => ({ loaded: false, updatedAt: null, networks: 0 }))
+}));
+
 // Mock fetchUtil to use standard fetch
 vi.mock('../../fetchUtil.js', () => ({
   proxyFetch: vi.fn((...args) => fetch(...args)),

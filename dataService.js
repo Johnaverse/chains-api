@@ -17,6 +17,8 @@ export { getCachedData } from './src/store/cache.js';
 export {
   searchChains,
   getChainById,
+  getChainDetail,
+  filterChainsByFamily,
   getAllChains,
   countChainsByTag,
   getEndpointsById,

@@ -39,7 +39,7 @@ const NEWS_BASE = 'https://chains-news.johnaverse.cc';
 const ALL_SOURCES = ['chains', 'chainlist', 'theGraph', 'slip44', 'l2beat'];
 const SOURCE_LABELS = {
     chains: 'Chain ID Network', chainlist: 'Chainlist', theGraph: 'The Graph',
-    slip44: 'SLIP-0044', l2beat: 'L2BEAT'
+    slip44: 'SLIP-0044', l2beat: 'L2BEAT', defillama: 'DefiLlama', research: 'Network research'
 };
 
 // ── One network taxonomy, used everywhere ──
@@ -1885,12 +1885,14 @@ function renderFreshness() {
         const label = SOURCE_LABELS[key] || key;
         const ok = s.loaded;
         const extra = s.source ? ` · ${s.source}` : '';
+        // A static dataset reports the date of its research run instead of a fetch age.
+        const age = s.ageSeconds == null && s.updatedAt ? relTime(s.updatedAt) : fmtAge(s.ageSeconds);
         list.appendChild(el('div', { class: 'kv-row' }, [
             el('span', { class: `dot ${ok ? 'dot-ok' : 'dot-bad'}` }),
             el('span', { class: 'kv-key', text: label }),
             el('span', {
                 class: 'kv-val',
-                text: `${ok ? fmtAge(s.ageSeconds) : 'not loaded'}${extra}`
+                text: `${ok ? age : 'not loaded'}${extra}`
             })
         ]));
     }
@@ -4000,6 +4002,11 @@ function openChainDetail(chainId, opts = {}) {
     }
     body.appendChild(infoSec);
 
+    // ── research (clients, papers, features) — filled by loadChainDetail, hidden until then ──
+    const researchSec = drawerSection('Research');
+    researchSec.classList.add('hidden');
+    body.appendChild(researchSec);
+
     // ── live RPC ──
     const rpcSec = drawerSection('RPC endpoints');
     const headCell = el('span', { class: 'mono', text: '…' });
@@ -4029,20 +4036,25 @@ function openChainDetail(chainId, opts = {}) {
     document.documentElement.classList.add('drawer-open');
     byId('closeDrawer')?.focus();
 
-    loadChainDetail(chainId, extraBox);
+    loadChainDetail(chainId, extraBox, researchSec);
     loadForumNews(chainId, forumBox, forumSec);
     loadLiveRpc(chainId, rpcBox, headCell);
     loadLiveClients(chainId, clientBox);
 }
 
-// /summary is slim, so currency/explorers/website need the full chain record.
-async function loadChainDetail(chainId, box) {
+// /summary is slim, so currency/explorers/website — and the research block, which only
+// /chains/:id carries — need the full chain record.
+async function loadChainDetail(chainId, box, researchSec) {
     let d = state.byId.get(chainId) || {};
-    if (!d.nativeCurrency && !d.explorers && !d.infoURL) {
-        try { d = await api(`/chains/${chainId}`); } catch { /* render what we have */ }
-    }
+    try { d = { ...d, ...(await api(`/chains/${chainId}`)) }; } catch { /* render what we have */ }
     if (openChainId !== chainId) return;
     clear(box);
+    if (d.family) {
+        box.appendChild(detailRow('Family', el('span', {
+            title: 'Technology family from the network research dataset',
+            text: d.family
+        })));
+    }
     if (d.nativeCurrency) {
         const cur = `${d.nativeCurrency.name || d.nativeCurrency.symbol} (${d.nativeCurrency.symbol})`;
         box.appendChild(detailRow('Native currency', el('span', { text: cur })));
@@ -4092,8 +4104,18 @@ async function loadChainDetail(chainId, box) {
             el('a', { href: safeUrl(x.url), target: '_blank', rel: 'noopener', text: x.name || safeHost(x.url) }))));
     }
     if (d.infoURL) {
-        box.appendChild(detailRow('Website',
-            el('a', { href: safeUrl(d.infoURL), target: '_blank', rel: 'noopener', text: safeHost(d.infoURL) || d.infoURL })));
+        const site = [el('a', { href: safeUrl(d.infoURL), target: '_blank', rel: 'noopener', text: safeHost(d.infoURL) || d.infoURL })];
+        // The research moved this chain off the registry's site: say so, and keep the old one visible.
+        if (d.infoURLSource === 'research') {
+            site.push(el('span', {
+                class: 'r-note',
+                title: d.registryInfoURL
+                    ? `Corrected by network research. The registry lists ${d.registryInfoURL}.`
+                    : 'Added by network research; the registry lists no website.',
+                text: d.registryInfoURL ? `corrected · was ${safeHost(d.registryInfoURL) || d.registryInfoURL}` : 'from research'
+            }));
+        }
+        box.appendChild(detailRow('Website', site));
     }
     if (d.forumUrl) {
         box.appendChild(detailRow('Forum',
@@ -4101,6 +4123,59 @@ async function loadChainDetail(chainId, box) {
     }
     if (d.slip44 != null) box.appendChild(detailRow('SLIP-44', el('span', { class: 'mono', text: String(d.slip44) })));
     if (d.statusReason) box.appendChild(detailRow('Status note', el('span', { class: 'dim', text: d.statusReason })));
+    if (researchSec) renderResearch(d.research, researchSec);
+}
+
+// `status` is the evidence grade (checked = fully verified, partial = gaps), `audit` the
+// item-level audit outcome. Features are the project's own statements, so the section says
+// that rather than presenting them as tested facts.
+const RESEARCH_STATUS_TEXT = { checked: 'verified', partial: 'partial evidence' };
+function researchNote(item) {
+    const bits = [];
+    if (RESEARCH_STATUS_TEXT[item.status]) bits.push(RESEARCH_STATUS_TEXT[item.status]);
+    if (item.audit === 'corrected') bits.push('corrected in audit');
+    return bits.join(' · ');
+}
+function evidenceLinks(item) {
+    return (item.evidence || []).slice(0, 3).map((u, i) =>
+        el('a', { class: 'chip-link', href: safeUrl(u), target: '_blank', rel: 'noopener', title: u, text: `source${i ? ` ${i + 1}` : ''}` }));
+}
+function researchItem(main, item) {
+    const note = researchNote(item);
+    return el('div', { class: 'r-item' }, [
+        el('div', { class: 'r-main' }, [].concat(main)),
+        el('div', { class: 'r-meta' }, [
+            note ? el('span', { class: 'r-note', text: note }) : null,
+            ...evidenceLinks(item)
+        ].filter(Boolean))
+    ]);
+}
+function renderResearch(research, sec) {
+    const hasAny = research && (research.repositories?.length || research.papers?.length || research.features?.length);
+    if (!hasAny) { sec.classList.add('hidden'); return; }
+    // Drop everything after the title so a re-open does not stack rows.
+    while (sec.children.length > 1) sec.removeChild(sec.lastChild);
+
+    if (research.repositories?.length) {
+        const list = el('div', { class: 'rpc-list' }, research.repositories.map(r => researchItem([
+            el('a', { href: safeUrl(r.url), target: '_blank', rel: 'noopener', class: 'code', text: r.repo || safeHost(r.url) || r.url }),
+            el('span', { class: 'chip-link', title: r.kindLabel || r.kind, text: r.kind })
+        ], r)));
+        sec.appendChild(detailRow('Node software', list));
+    }
+    if (research.papers?.length) {
+        const list = el('div', { class: 'rpc-list' }, research.papers.map(p => researchItem(
+            el('a', { href: safeUrl(p.url), target: '_blank', rel: 'noopener', text: p.title || safeHost(p.url) || p.url }), p)));
+        sec.appendChild(detailRow('Papers', list));
+    }
+    if (research.features?.length) {
+        const list = el('div', { class: 'rpc-list' }, research.features.map(f => researchItem(el('span', { text: f.text }), f)));
+        sec.appendChild(detailRow('Features', list));
+    }
+    const when = research.checkedAt || research.updatedAt;
+    sec.appendChild(el('div', { class: 'r-foot dim',
+        text: `Audited research${when ? `, checked ${relTime(when)}` : ''}. Features are the project\u2019s own statements, not tested facts.` }));
+    sec.classList.remove('hidden');
 }
 
 async function loadForumNews(chainId, box, section) {

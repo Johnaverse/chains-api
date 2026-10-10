@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { DATA_SOURCE_L2BEAT_API, L2BEAT_FETCH_TIMEOUT_MS } from '../../config.js';
 import { proxyFetch } from '../../fetchUtil.js';
 import { logger } from '../util/logger.js';
+import { readStaticJson } from '../util/staticJson.js';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const FALLBACK_PATH = join(__dir, '..', '..', 'data', 'l2beat-fallback.json');
@@ -18,19 +19,13 @@ const CHAIN_MAP_PATH = join(__dir, '..', '..', 'data', 'l2beat-chain-map.json');
 const SLUG_TO_CHAIN_ID = loadChainMap();
 
 function loadChainMap() {
-  try {
-    const parsed = JSON.parse(readFileSync(CHAIN_MAP_PATH, 'utf8'));
-    const entries = Object.entries(parsed?.map ?? {});
-    const map = new Map();
-    for (const [slug, chainId] of entries) {
-      const id = Number(chainId);
-      if (slug && Number.isSafeInteger(id)) map.set(slug, id);
-    }
-    return map;
-  } catch (err) {
-    logger.warn({ err: err.message }, 'L2BEAT chain map unavailable; live projects will lack chainId');
-    return new Map();
+  const parsed = readStaticJson(CHAIN_MAP_PATH, 'L2BEAT chain map (live projects will lack chainId)');
+  const map = new Map();
+  for (const [slug, chainId] of Object.entries(parsed?.map ?? {})) {
+    const id = Number(chainId);
+    if (slug && Number.isSafeInteger(id)) map.set(slug, id);
   }
+  return map;
 }
 
 /**

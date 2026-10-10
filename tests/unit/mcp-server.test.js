@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock dataService before importing
+// Mock dataService before importing. getChainDetail delegates to getChainById so tests
+// that stub a chain through getChainById also cover get_chain_by_id.
+const mockGetChainById = vi.hoisted(() => vi.fn(() => null));
 vi.mock('../../dataService.js', () => ({
   loadData: vi.fn().mockResolvedValue(undefined),
   initializeDataOnStartup: vi.fn().mockResolvedValue(undefined),
@@ -16,7 +18,9 @@ vi.mock('../../dataService.js', () => ({
     lastUpdated: new Date().toISOString(),
   })),
   searchChains: vi.fn(() => []),
-  getChainById: vi.fn(() => null),
+  getChainById: mockGetChainById,
+  getChainDetail: vi.fn((id) => mockGetChainById(id)),
+  filterChainsByFamily: vi.fn((chains, family) => (family ? chains.filter((c) => c.family?.toLowerCase().includes(String(family).toLowerCase())) : chains)),
   getAllChains: vi.fn(() => []),
   getAllRelations: vi.fn(() => []),
   getRelationsById: vi.fn(() => null),

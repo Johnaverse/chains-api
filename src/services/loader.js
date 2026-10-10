@@ -10,6 +10,7 @@ import { fetchL2Beat } from '../sources/l2beat.js';
 import { fetchDefiLlama } from '../sources/defillama.js';
 import { indexData } from '../store/indexer.js';
 import { cachedData, applyDataToCache } from '../store/cache.js';
+import { attachNetworkResearch } from '../sources/networkResearch.js';
 import {
   readSnapshotFromDisk,
   writeSnapshotToDiskAtomic,
@@ -197,6 +198,13 @@ export async function initializeDataOnStartup(options = {}) {
 
     if (snapshotData) {
       applyDataToCache(snapshotData);
+      // The snapshot was indexed by whatever version wrote it; the research dataset ships
+      // with this build, so re-stamp it (idempotent) rather than serve a family-less index
+      // until the background refresh lands. JSON serialisation split `all` from `byChainId`
+      // into separate copies, so rebuild `all` the way indexData does or the list endpoints
+      // (which read `all`) would miss the stamp.
+      attachNetworkResearch(cachedData.indexed);
+      cachedData.indexed.all = Object.values(cachedData.indexed.byChainId);
       await overlayDiskRpcHealth();
       startupInitialized = true;
       logger.info({ path: DATA_CACHE_PATH, totalChains: cachedData.indexed.all.length }, 'Loaded cached snapshot');

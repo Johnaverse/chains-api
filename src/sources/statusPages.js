@@ -1,7 +1,7 @@
-import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { logger } from '../util/logger.js';
+import { readStaticJson } from '../util/staticJson.js';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const REGISTRY_PATH = join(__dir, '..', '..', 'data', 'status-pages.json');
@@ -17,20 +17,15 @@ const REGISTRY_PATH = join(__dir, '..', '..', 'data', 'status-pages.json');
  * PR. Loaded once at module init; the file ships with the image.
  */
 function loadRegistry() {
-  try {
-    const parsed = JSON.parse(readFileSync(REGISTRY_PATH, 'utf8'));
-    const pages = Array.isArray(parsed?.statusPages) ? parsed.statusPages : [];
-    const coins = Array.isArray(parsed?.coins) ? parsed.coins : [];
-    return {
-      statusPages: pages.filter(p => p && typeof p.url === 'string' && Array.isArray(p.chainIds)),
-      // coins: symbol-keyed entries for networks not represented as a chainId
-      // in our data (non-EVM L1s, protocols) — e.g. Solana, Sui, Aave.
-      coins: coins.filter(c => c && typeof c.url === 'string' && typeof c.symbol === 'string')
-    };
-  } catch (err) {
-    logger.warn({ err: err.message }, 'Status-page registry unavailable');
-    return { statusPages: [], coins: [] };
-  }
+  const parsed = readStaticJson(REGISTRY_PATH, 'Status-page registry');
+  const pages = Array.isArray(parsed?.statusPages) ? parsed.statusPages : [];
+  const coins = Array.isArray(parsed?.coins) ? parsed.coins : [];
+  return {
+    statusPages: pages.filter(p => p && typeof p.url === 'string' && Array.isArray(p.chainIds)),
+    // coins: symbol-keyed entries for networks not represented as a chainId
+    // in our data (non-EVM L1s, protocols) — e.g. Solana, Sui, Aave.
+    coins: coins.filter(c => c && typeof c.url === 'string' && typeof c.symbol === 'string')
+  };
 }
 
 const { statusPages: STATUS_PAGES, coins: COIN_PAGES } = loadRegistry();

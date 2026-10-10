@@ -2,6 +2,8 @@ import {
   getCachedData,
   searchChains,
   getChainById,
+  getChainDetail,
+  filterChainsByFamily,
   getAllChains,
   getAllRelations,
   getRelationsById,
@@ -55,6 +57,10 @@ export function getToolDefinitions() {
             description: 'Optional lifecycle status filter (e.g. "deprecated" for retired chains, "active" for live ones)',
             enum: ['active', 'incubating', 'deprecated', 'unknown'],
           },
+          family: {
+            type: 'string',
+            description: 'Optional technology family filter: a case-insensitive substring of each chain’s free-text `family` label, so "OP Stack" matches "OP Stack", "OP Stack / Zora" and "Matchain / OP Stack" (other examples: "SKALE", "Polygon", "Arbitrum Orbit")',
+          },
           limit: {
             type: 'number',
             description: 'Max chains to return (default 50, max 200)',
@@ -64,7 +70,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_chain_by_id',
-      description: 'Get detailed information about a specific blockchain chain by its chain ID. Includes a `price` object for the chain’s NATIVE currency (null when unmapped): `{usd, vol24h, marketCap, asOf, stale}`. `vol24h` is that ASSET’s 24-hour trading volume in USD — market activity, NOT chain throughput — so an L2 settling in ETH reports ETH’s volume, not its own; name the asset when quoting it. When `stale` is true the quote stopped moving at `asOf` (over a day ago): `vol24h` and `marketCap` are null and `usd` is the last known price, to be quoted as of `asOf` rather than as current. A null field is unknown, never zero.',
+      description: 'Get detailed information about a specific blockchain chain by its chain ID. Includes a `price` object for the chain’s NATIVE currency (null when unmapped): `{usd, vol24h, marketCap, asOf, stale}`. `vol24h` is that ASSET’s 24-hour trading volume in USD — market activity, NOT chain throughput — so an L2 settling in ETH reports ETH’s volume, not its own; name the asset when quoting it. When `stale` is true the quote stopped moving at `asOf` (over a day ago): `vol24h` and `marketCap` are null and `usd` is the last known price, to be quoted as of `asOf` rather than as current. A null field is unknown, never zero. When researched, a `research` object lists the chain’s node/client `repositories` (each with a `kind` such as execution, consensus, rollup or node), whitepaper/document `papers` and short sourced `features`; every item carries a `status` (checked = fully verified, partial = evidence has gaps) and its `evidence` URLs — say when an item is only partially verified, and treat features as the project’s own claims, not tested facts.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -477,6 +483,7 @@ async function handleGetChains(args) {
   if (args.status) {
     chains = chains.filter((chain) => (chain.status || 'unknown') === args.status);
   }
+  chains = filterChainsByFamily(chains, args.family);
   // The registry has ~3000 chains; returning them all (with a price lookup
   // each) is a huge payload that overflows an LLM's context and makes it lose
   // the true total. Cap the list, report totalMatched so callers still get the
@@ -502,7 +509,7 @@ async function handleGetChainById(args) {
   if (!isValidChainId(chainId)) {
     return errorResponse('Invalid chain ID');
   }
-  const chain = getChainById(chainId);
+  const chain = getChainDetail(chainId);
   if (!chain) {
     return errorResponse('Chain not found');
   }

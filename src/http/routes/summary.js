@@ -44,6 +44,8 @@ function slimChain(chain) {
   );
   if (aliases.length) slim.aliases = aliases;
   if (Array.isArray(chain.tags) && chain.tags.length) slim.tags = chain.tags;
+  // Technology family from the research dataset; the drawer shows it without a detail fetch.
+  if (chain.family) slim.family = chain.family;
   if (Array.isArray(chain.relations) && chain.relations.length) {
     slim.relations = chain.relations
       .filter(r => r.chainId != null)

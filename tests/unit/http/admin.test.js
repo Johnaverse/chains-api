@@ -138,6 +138,8 @@ describe('GET /health (deepened)', () => {
     body = (await app.inject({ method: 'GET', url: '/health' })).json();
     expect(body.sources.defillama).toEqual({ loaded: false, ageSeconds: null, source: null });
     expect(body.status).toBe('ok');
+    expect(body.sources.research).toMatchObject({ loaded: true, source: 'static' });
+    expect(body.sources.research.networks).toBeGreaterThan(2000);
   });
 
   it('returns status=down when a core source is missing', async () => {
@@ -274,6 +276,12 @@ describe('GET /sources (extended with l2beat + slip44 null awareness)', () => {
     expect((await app.inject({ method: 'GET', url: '/sources' })).json().sources.defillama).toBe('loaded');
     dataService.getCachedData.mockReturnValue({ ...base, defillama: { chains: [] } });
     expect((await app.inject({ method: 'GET', url: '/sources' })).json().sources.defillama).toBe('not loaded');
+  });
+
+  it('reports the checked-in research dataset as loaded', async () => {
+    const base = { theGraph: {}, chainlist: [], chains: [], slip44: {}, l2beat: null, indexed: { all: [] }, lastUpdated: null };
+    dataService.getCachedData.mockReturnValue(base);
+    expect((await app.inject({ method: 'GET', url: '/sources' })).json().sources.research).toBe('loaded');
   });
 
   it('reports l2beat: loaded when projects array is non-empty', async () => {

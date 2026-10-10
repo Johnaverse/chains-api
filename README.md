@@ -510,6 +510,7 @@ Get all indexed chains.
 
 **Query Parameters:**
 - `tag` (optional): Filter chains by tag (e.g., `Testnet`, `L2`, `Beacon`)
+- `family` (optional): Filter by technology family from the research dataset. Labels are free text (`OP Stack / Zora`, `Matchain / OP Stack`), so this is a case-insensitive substring match: `?family=op stack` finds every OP Stack chain
 
 **Example:** `GET /chains?tag=Testnet`
 
@@ -552,7 +553,7 @@ Get all indexed chains.
 **Note:** Chain info no longer includes `rpc` or `relations` fields. Use `/endpoints/:id` for RPC endpoints and `/relations/:id` for chain relations.
 
 ### `GET /chains/:id`
-Get a specific chain by its chain ID.
+Get a specific chain by its chain ID. Unlike the list, the single-chain response also carries the chain's `research` block when the research dataset covers it (see below).
 
 **Example:** `GET /chains/80002` (Amoy)
 
@@ -851,13 +852,25 @@ Each chain object returned from `/chains` and `/chains/:id` contains:
 - `aliases`: Alternative names array (if available from The Graph)
 - `nativeCurrency`: Native currency information
 - `explorers`: Array of block explorers
-- `infoURL`: Information URL
+- `infoURL`: Information URL. Where the research dataset moved a chain to a different website (or filled a missing one), this is the corrected one, with `infoURLSource: "research"` and the registry's original kept in `registryInfoURL`
+- `family`: Technology family (e.g. `OP Stack-derived`), from the research dataset
 - `sources`: Array of data sources that provided this chain's data
 - `status`: Chain status - defaults to `"active"` when not present in any data source
 - `tags`: Array of tags (e.g., "Testnet", "L2", "Beacon")
 - `bridges`: Array of bridge URLs (if available from chainlist or chains.json `parent.bridges` field)
 
 **Note:** Chain objects no longer include `rpc` or `relations` fields. Use `/endpoints/:id` for RPC endpoints and `/relations/:id` for relations.
+
+#### `research` (from `/chains/:id` only)
+
+A static, audited research dataset (`data/network-research.json`, ~3,000 chains), converted from the network research and verification workbook. Only items whose evidence was checked or partial, and whose audit was not unresolved, are included; the block is omitted when nothing was found for the chain (`family` is still set on the chain itself).
+
+- `family`, `coverage` (`checked` / `partial` / `not_found` / `inaccessible`), `auditStatus` (`confirmed` / `qualified` / `corrected` / `unresolved` / `no_populated_claims_to_audit`), `checkedAt`, `updatedAt` (dataset date)
+- `repositories[]`: node/client source — `url`, `repo` (`owner/name` for GitHub), `kind` (`node`, `execution`, `consensus`, `rollup`, `packaging`, `sdk`, `contracts`, `other`), `kindLabel` (original wording), `status`, `audit`, `evidence[]`
+- `papers[]`: whitepapers and documents — `url`, `title`, `status`, `audit`, `evidence[]`
+- `features[]`: short sourced statements — `text`, `status`, `audit`, `evidence[]`. These are project statements, not tested facts
+
+`status` is `checked` (fully verified) or `partial` (evidence gaps or uncertain applicability). `audit` is the item-level audit result: `confirmed`, `qualified` (family/historical/source caveats remain), `corrected` or null.
 
 ### Endpoints Object (from `/endpoints` endpoints)
 
