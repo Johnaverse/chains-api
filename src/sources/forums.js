@@ -1,20 +1,14 @@
-import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { logger } from '../util/logger.js';
+import { readStaticJson } from '../util/staticJson.js';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const REGISTRY_PATH = join(__dir, '..', '..', 'data', 'forums.json');
 
 function loadRegistry() {
-  try {
-    const parsed = JSON.parse(readFileSync(REGISTRY_PATH, 'utf8'));
-    const forums = Array.isArray(parsed?.forums) ? parsed.forums : [];
-    return forums.filter(f => f && typeof f.url === 'string' && Array.isArray(f.chainIds));
-  } catch (err) {
-    logger.warn({ err: err.message }, 'Forum registry unavailable');
-    return [];
-  }
+  const parsed = readStaticJson(REGISTRY_PATH, 'Forum registry');
+  const forums = Array.isArray(parsed?.forums) ? parsed.forums : [];
+  return forums.filter(f => f && typeof f.url === 'string' && Array.isArray(f.chainIds));
 }
 
 const FORUMS = loadRegistry();

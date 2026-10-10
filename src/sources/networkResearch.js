@@ -1,7 +1,6 @@
-import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { logger } from '../util/logger.js';
+import { readStaticJson } from '../util/staticJson.js';
 import { safeExternalUrl } from '../util/publicHost.js';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
@@ -13,18 +12,13 @@ const DATASET_PATH = join(__dir, '..', '..', 'data', 'network-research.json');
 // checked or partial, and whose audit was not unresolved, were kept. Never fetched: an
 // unreadable file just means no research is attached.
 export function loadNetworkResearch(path = DATASET_PATH) {
-  try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8'));
-    const byChainId = new Map();
-    for (const entry of Array.isArray(parsed?.networks) ? parsed.networks : []) {
-      const chainId = Number(entry?.chainId);
-      if (Number.isSafeInteger(chainId) && !byChainId.has(chainId)) byChainId.set(chainId, entry);
-    }
-    return { updatedAt: parsed?.updatedAt ?? null, byChainId };
-  } catch (err) {
-    logger.warn({ err: err.message }, 'Network research dataset unavailable');
-    return { updatedAt: null, byChainId: new Map() };
+  const parsed = readStaticJson(path, 'Network research dataset');
+  const byChainId = new Map();
+  for (const entry of Array.isArray(parsed?.networks) ? parsed.networks : []) {
+    const chainId = Number(entry?.chainId);
+    if (Number.isSafeInteger(chainId) && !byChainId.has(chainId)) byChainId.set(chainId, entry);
   }
+  return { updatedAt: parsed?.updatedAt ?? null, byChainId };
 }
 
 let dataset = loadNetworkResearch();

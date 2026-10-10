@@ -11,6 +11,7 @@ function seed(overrides = {}) {
       all: [
         {
           chainId: 1,
+          family: 'Ethereum',
           name: 'Ethereum Mainnet',
           shortName: 'eth',
           tags: ['Beacon'],
@@ -74,6 +75,7 @@ describe('GET /summary', () => {
     expect(eth.rpcCount).toBe(2);
     // Relations are slimmed to kind+chainId; entries without a chainId drop.
     expect(eth.relations).toEqual([{ kind: 'parentOf', chainId: 10 }]);
+    expect(eth.family).toBe('Ethereum');
     // Heavy fields are not shipped.
     expect(eth.explorers).toBeUndefined();
     expect(eth.theGraph).toBeUndefined();

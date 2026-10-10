@@ -1192,6 +1192,12 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .chip-link:hover { text-decoration: underline; }
 
 .rpc-list { display: flex; flex-direction: column; gap: 5px; width: 100%; }
+/* Research drawer section: one item per row, its evidence grade and source links beneath. */
+.r-item { display: flex; flex-direction: column; gap: 2px; width: 100%; font-size: var(--fs-200); }
+.r-main { display: flex; flex-wrap: wrap; gap: 5px var(--sp-2); align-items: center; }
+.r-meta { display: flex; flex-wrap: wrap; gap: 5px var(--sp-2); align-items: center; }
+.r-note { font-size: var(--fs-100); color: var(--ink-3); }
+.r-foot { font-size: var(--fs-100); margin-top: var(--sp-2); }
 .rpc-row { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-200); width: 100%; }
 .rpc-host { font-family: var(--font-mono); font-size: var(--fs-100); overflow: hidden; text-overflow: ellipsis; }
 .rpc-meta { margin-left: auto; color: var(--ink-3); font-size: var(--fs-100); flex-shrink: 0; }
