@@ -1,7 +1,7 @@
 {
   "source": "Network research and verification workbook",
   "updatedAt": "2026-10-10T07:58:00.646Z",
-  "importedAt": "2026-10-10T08:21:57.960Z",
+  "importedAt": "2026-10-10T08:40:55.096Z",
   "networks": [
     {
       "chainId": 1,
@@ -252,10 +252,7 @@
     {
       "chainId": 6,
       "family": "Ethereum Classic",
-      "websiteCorrection": {
-        "website": "https://ethereumclassic.org/",
-        "replaces": "https://ethereumclassic.org/development/testnets"
-      },
+      "websiteCorrection": null,
       "coverage": "partial",
       "auditStatus": "qualified",
       "checkedAt": "2026-10-10T07:46:47.113Z",
@@ -368,10 +365,7 @@
     {
       "chainId": 9,
       "family": "Quai",
-      "websiteCorrection": {
-        "website": "https://www.qu.ai/",
-        "replaces": "https://qu.ai/"
-      },
+      "websiteCorrection": null,
       "coverage": "partial",
       "auditStatus": "qualified",
       "checkedAt": "2026-10-10T07:46:47.051Z",
@@ -583,10 +577,7 @@
     {
       "chainId": 13,
       "family": "Diode",
-      "websiteCorrection": {
-        "website": "https://diode.io/",
-        "replaces": "https://diode.io/staging"
-      },
+      "websiteCorrection": null,
       "coverage": "partial",
       "auditStatus": "qualified",
       "checkedAt": "2026-10-10T07:48:00.397Z",
@@ -668,10 +659,7 @@
     {
       "chainId": 15,
       "family": "Diode",
-      "websiteCorrection": {
-        "website": "https://diode.io/",
-        "replaces": "https://diode.io/prenet"
-      },
+      "websiteCorrection": null,
       "coverage": "partial",
       "auditStatus": "qualified",
       "checkedAt": "2026-10-10T07:48:00.397Z",
@@ -764,10 +752,7 @@
     {
       "chainId": 18,
       "family": "ThunderCore",
-      "websiteCorrection": {
-        "website": "https://www.thundercore.com/",
-        "replaces": "https://thundercore.com/"
-      },
+      "websiteCorrection": null,
       "coverage": "partial",
       "auditStatus": "qualified",
       "checkedAt": "2026-10-10T07:48:00.459Z",
@@ -1044,10 +1029,7 @@
     {
       "chainId": 26,
       "family": "GenesisL1",
-      "websiteCorrection": {
-        "website": "https://genesisl1.com/",
-        "replaces": "https://www.genesisl1.com/"
-      },
+      "websiteCorrection": null,
       "coverage": "partial",
       "auditStatus": "qualified",
       "checkedAt": "2026-10-10T07:48:00.620Z",
@@ -1131,10 +1113,7 @@
     {
       "chainId": 29,
       "family": "GenesisL1",
-      "websiteCorrection": {
-        "website": "https://genesisl1.com/",
-        "replaces": "https://www.genesisl1.com/"
-      },
+      "websiteCorrection": null,
       "coverage": "partial",
       "auditStatus": "qualified",
       "checkedAt": "2026-10-10T07:48:00.651Z",
@@ -2049,10 +2028,7 @@
     {
       "chainId": 56,
       "family": "BSC",
-      "websiteCorrection": {
-        "website": "https://www.bnbchain.org/",
-        "replaces": "https://www.bnbchain.org/en"
-      },
+      "websiteCorrection": null,
       "coverage": "partial",
       "auditStatus": "qualified",
       "checkedAt": "2026-10-10T07:50:19.265Z",
@@ -3330,10 +3306,7 @@
     {
       "chainId": 100,
       "family": "Ethereum-derived PoS",
-      "websiteCorrection": {
-        "website": "https://www.gnosischain.com/",
-        "replaces": "https://docs.gnosischain.com/"
-      },
+      "websiteCorrection": null,
       "coverage": "partial",
       "auditStatus": "qualified",
       "checkedAt": "2026-10-10T07:50:19.468Z",
@@ -44231,10 +44204,7 @@
     {
       "chainId": 42220,
       "family": "Celo OP Stack L2",
-      "websiteCorrection": {
-        "website": "https://celo.org/",
-        "replaces": "https://docs.celo.org/"
-      },
+      "websiteCorrection": null,
       "coverage": "partial",
       "auditStatus": "qualified",
       "checkedAt": "2026-10-10T07:50:19.541Z",
@@ -44636,10 +44606,7 @@
     {
       "chainId": 43114,
       "family": "Avalanche",
-      "websiteCorrection": {
-        "website": "https://avax.network/",
-        "replaces": "https://www.avax.network/"
-      },
+      "websiteCorrection": null,
       "coverage": "partial",
       "auditStatus": "qualified",
       "checkedAt": "2026-10-10T07:50:19.332Z",

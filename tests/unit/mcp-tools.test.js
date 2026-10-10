@@ -18,6 +18,7 @@ vi.mock('../../dataService.js', () => ({
   searchChains: vi.fn(() => []),
   getChainById: mockGetChainById,
   getChainDetail: vi.fn((id) => mockGetChainById(id)),
+  filterChainsByFamily: vi.fn((chains, family) => (family ? chains.filter((c) => c.family?.toLowerCase().includes(String(family).toLowerCase())) : chains)),
   getAllChains: vi.fn(() => []),
   getAllRelations: vi.fn(() => []),
   getRelationsById: vi.fn(() => null),

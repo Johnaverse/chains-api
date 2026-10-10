@@ -39,7 +39,7 @@ const NEWS_BASE = 'https://chains-news.johnaverse.cc';
 const ALL_SOURCES = ['chains', 'chainlist', 'theGraph', 'slip44', 'l2beat'];
 const SOURCE_LABELS = {
     chains: 'Chain ID Network', chainlist: 'Chainlist', theGraph: 'The Graph',
-    slip44: 'SLIP-0044', l2beat: 'L2BEAT'
+    slip44: 'SLIP-0044', l2beat: 'L2BEAT', defillama: 'DefiLlama', research: 'Network research'
 };
 
 // ── One network taxonomy, used everywhere ──
@@ -1885,12 +1885,14 @@ function renderFreshness() {
         const label = SOURCE_LABELS[key] || key;
         const ok = s.loaded;
         const extra = s.source ? ` · ${s.source}` : '';
+        // A static dataset reports the date of its research run instead of a fetch age.
+        const age = s.ageSeconds == null && s.updatedAt ? relTime(s.updatedAt) : fmtAge(s.ageSeconds);
         list.appendChild(el('div', { class: 'kv-row' }, [
             el('span', { class: `dot ${ok ? 'dot-ok' : 'dot-bad'}` }),
             el('span', { class: 'kv-key', text: label }),
             el('span', {
                 class: 'kv-val',
-                text: `${ok ? fmtAge(s.ageSeconds) : 'not loaded'}${extra}`
+                text: `${ok ? age : 'not loaded'}${extra}`
             })
         ]));
     }

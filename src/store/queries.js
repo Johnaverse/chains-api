@@ -49,6 +49,16 @@ export function getChainById(chainId) {
 }
 
 /**
+ * Family labels are free text ("OP Stack", "OP Stack / Zora", "Matchain / OP Stack"), so
+ * the filter is a case-insensitive substring match. Shared by /chains and get_chains.
+ */
+export function filterChainsByFamily(chains, family) {
+  if (!family) return chains;
+  const wanted = String(family).toLowerCase();
+  return chains.filter(chain => chain.family?.toLowerCase().includes(wanted));
+}
+
+/**
  * A chain plus its `research` block (client repositories, papers, features). Kept off
  * getChainById because search results and the /chains list are built from that.
  */

@@ -39,19 +39,28 @@ export function getNetworkResearchInfo() {
   return { loaded: dataset.byChainId.size > 0, updatedAt: dataset.updatedAt, networks: dataset.byChainId.size };
 }
 
+const hasItems = entry => entry.repositories?.length > 0 || entry.papers?.length > 0 || entry.features?.length > 0;
+
 /**
- * The research block for one chain, or null. Served on single-chain lookups only, so the
- * /chains list (and its in-memory projection) doesn't carry ~1.5MB of repositories,
- * papers and features.
+ * The research block for one chain, or null when the research found nothing to list for
+ * it (family alone is stamped on the chain itself). Served on single-chain lookups only,
+ * so the /chains list (and its in-memory projection) doesn't carry ~2MB of repositories,
+ * papers and features. A copy: callers may mutate it without touching the dataset.
  */
 export function getNetworkResearch(chainId) {
   const entry = dataset.byChainId.get(Number(chainId));
-  if (!entry) return null;
-  const { chainId: _ignored, websiteCorrection: _website, ...research } = entry;
+  if (!entry || !hasItems(entry)) return null;
+  const { chainId: _ignored, websiteCorrection: _website, ...research } = structuredClone(entry);
   return { ...research, updatedAt: dataset.updatedAt };
 }
 
-const sameUrl = (a, b) => (safeExternalUrl(a)?.href ?? null) === (safeExternalUrl(b)?.href ?? null);
+// A correction with `replaces: null` fills a missing website only; otherwise both sides
+// must parse to the same public URL (two unparseable values are not "the same").
+function stillListsReplaced(registryInfoURL, replaces) {
+  if (replaces == null) return registryInfoURL == null;
+  const current = safeExternalUrl(registryInfoURL)?.href;
+  return current != null && current === safeExternalUrl(replaces)?.href;
+}
 
 /**
  * Indexer pass: stamp each researched chain with its `family`, and replace `infoURL` where
@@ -68,7 +77,7 @@ export function attachNetworkResearch(indexed) {
     if (entry.family) chain.family = entry.family;
     const correction = entry.websiteCorrection;
     const registryInfoURL = chain.infoURL ?? null;
-    if (correction?.website && sameUrl(registryInfoURL, correction.replaces)) {
+    if (correction?.website && stillListsReplaced(registryInfoURL, correction.replaces)) {
       chain.registryInfoURL = registryInfoURL;
       chain.infoURL = correction.website;
       chain.infoURLSource = 'research';

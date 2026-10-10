@@ -88,6 +88,18 @@ describe('getNetworkResearch / getNetworkResearchInfo', () => {
     expect(getNetworkResearchInfo()).toEqual({ loaded: true, updatedAt: '2026-10-10T07:58:00.646Z', networks: 3 });
   });
 
+  it('returns null when the research lists no repositories, papers or features', () => {
+    _setNetworkResearchForTests(write('d.json', JSON.stringify(DATASET)));
+    expect(getNetworkResearch(7)).toBeNull();
+    expect(getNetworkResearch(327)).toBeNull();
+  });
+
+  it('returns a copy, so callers cannot mutate the dataset', () => {
+    _setNetworkResearchForTests(write('d.json', JSON.stringify(DATASET)));
+    getNetworkResearch(8453).repositories.push({ url: 'https://evil.example' });
+    expect(getNetworkResearch(8453).repositories).toEqual([repo]);
+  });
+
   it('reports not loaded when the dataset is empty', () => {
     _setNetworkResearchForTests(join(dir, 'missing.json'));
     expect(getNetworkResearchInfo()).toEqual({ loaded: false, updatedAt: null, networks: 0 });
@@ -120,6 +132,15 @@ describe('attachNetworkResearch', () => {
     attachNetworkResearch(idx);
     expect(idx.byChainId[7]).toMatchObject({ infoURL: 'https://thaichain.org/', registryInfoURL: 'https://thaichain.io', infoURLSource: 'research' });
     expect(idx.byChainId[327]).toMatchObject({ infoURL: 'https://onyx.org/', registryInfoURL: null, infoURLSource: 'research' });
+  });
+
+  it('never treats two unparseable websites as the same, nor a null `replaces` as matching a malformed one', () => {
+    _setNetworkResearchForTests(write('d.json', JSON.stringify(DATASET)));
+    const idx = indexed([{ chainId: 7, infoURL: 'thaichain.io' }, { chainId: 327, infoURL: 'onyx.org' }]);
+    attachNetworkResearch(idx);
+    expect(idx.byChainId[7].infoURL).toBe('thaichain.io');
+    expect(idx.byChainId[327].infoURL).toBe('onyx.org');
+    expect(idx.byChainId[327].infoURLSource).toBeUndefined();
   });
 
   it('keeps an infoURL the registry has since changed', () => {

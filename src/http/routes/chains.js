@@ -1,4 +1,4 @@
-import { searchChains, getChainDetail, getAllChains } from '../../store/queries.js';
+import { searchChains, getChainDetail, getAllChains, filterChainsByFamily } from '../../store/queries.js';
 import { getPricesForChains, getPriceForChain } from '../../../priceService.js';
 import { MAX_SEARCH_QUERY_LENGTH, RATE_LIMIT_WINDOW_MS, SEARCH_RATE_LIMIT_MAX } from '../../../config.js';
 import { parseIntParam } from '../util/parseIntParam.js';
@@ -28,12 +28,7 @@ export async function chainsRoutes(fastify) {
     if (tag) {
       chains = chains.filter(chain => chain.tags?.includes(tag));
     }
-    if (family) {
-      // Family labels are free text ("OP Stack", "OP Stack / Zora", "Matchain / OP Stack"),
-      // so match a substring rather than the whole label.
-      const wanted = family.toLowerCase();
-      chains = chains.filter(chain => chain.family?.toLowerCase().includes(wanted));
-    }
+    chains = filterChainsByFamily(chains, family);
     const chainIds = chains.map(c => c.chainId);
     const priceMap = await getPricesForChains(chainIds);
     const enriched = chains.map(chain => ({

@@ -18,6 +18,7 @@ export {
   searchChains,
   getChainById,
   getChainDetail,
+  filterChainsByFamily,
   getAllChains,
   countChainsByTag,
   getEndpointsById,

@@ -852,7 +852,7 @@ Each chain object returned from `/chains` and `/chains/:id` contains:
 - `aliases`: Alternative names array (if available from The Graph)
 - `nativeCurrency`: Native currency information
 - `explorers`: Array of block explorers
-- `infoURL`: Information URL. Where the research dataset corrected the registry's website, this is the corrected one, with `infoURLSource: "research"` and the registry's original kept in `registryInfoURL`
+- `infoURL`: Information URL. Where the research dataset moved a chain to a different website (or filled a missing one), this is the corrected one, with `infoURLSource: "research"` and the registry's original kept in `registryInfoURL`
 - `family`: Technology family (e.g. `OP Stack-derived`), from the research dataset
 - `sources`: Array of data sources that provided this chain's data
 - `status`: Chain status - defaults to `"active"` when not present in any data source
@@ -863,7 +863,7 @@ Each chain object returned from `/chains` and `/chains/:id` contains:
 
 #### `research` (from `/chains/:id` only)
 
-A static, audited research dataset (`data/network-research.json`, ~3,000 chains), converted from the network research and verification workbook. Only items whose evidence was checked or partial, and whose audit was not unresolved, are included.
+A static, audited research dataset (`data/network-research.json`, ~3,000 chains), converted from the network research and verification workbook. Only items whose evidence was checked or partial, and whose audit was not unresolved, are included; the block is omitted when nothing was found for the chain (`family` is still set on the chain itself).
 
 - `family`, `coverage` (`checked` / `partial` / `not_found` / `inaccessible`), `auditStatus` (`confirmed` / `qualified` / `corrected` / `unresolved` / `no_populated_claims_to_audit`), `checkedAt`, `updatedAt` (dataset date)
 - `repositories[]`: node/client source — `url`, `repo` (`owner/name` for GitHub), `kind` (`node`, `execution`, `consensus`, `rollup`, `packaging`, `sdk`, `contracts`, `other`), `kindLabel` (original wording), `status`, `audit`, `evidence[]`

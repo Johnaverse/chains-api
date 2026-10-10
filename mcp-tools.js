@@ -3,6 +3,7 @@ import {
   searchChains,
   getChainById,
   getChainDetail,
+  filterChainsByFamily,
   getAllChains,
   getAllRelations,
   getRelationsById,
@@ -482,10 +483,7 @@ async function handleGetChains(args) {
   if (args.status) {
     chains = chains.filter((chain) => (chain.status || 'unknown') === args.status);
   }
-  if (args.family) {
-    const wanted = String(args.family).toLowerCase();
-    chains = chains.filter((chain) => chain.family?.toLowerCase().includes(wanted));
-  }
+  chains = filterChainsByFamily(chains, args.family);
   // The registry has ~3000 chains; returning them all (with a price lookup
   // each) is a huge payload that overflows an LLM's context and makes it lose
   // the true total. Cap the list, report totalMatched so callers still get the
