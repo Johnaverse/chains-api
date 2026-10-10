@@ -863,12 +863,13 @@ Each chain object returned from `/chains` and `/chains/:id` contains:
 
 #### `research` (from `/chains/:id` only)
 
-A static, audited research dataset (`data/network-research.json`, ~3,000 chains), converted from the network research and verification workbook. Only items whose evidence was checked or partial, and whose audit was not unresolved, are included; the block is omitted when nothing was found for the chain (`family` is still set on the chain itself).
+A static, audited research dataset (`data/network-research.json`, ~3,000 chains), converted from the network research and verification workbook, plus the forum research (`data/forum-research.json`). Only items whose evidence was checked or partial, and whose audit was not unresolved, are included; the block is omitted when nothing was found for the chain (`family` is still set on the chain itself).
 
 - `family`, `coverage` (`checked` / `partial` / `not_found` / `inaccessible`), `auditStatus` (`confirmed` / `qualified` / `corrected` / `unresolved` / `no_populated_claims_to_audit`), `checkedAt`, `updatedAt` (dataset date)
 - `repositories[]`: node/client source — `url`, `repo` (`owner/name` for GitHub), `kind` (`node`, `execution`, `consensus`, `rollup`, `packaging`, `sdk`, `contracts`, `other`), `kindLabel` (original wording), `status`, `audit`, `evidence[]`
 - `papers[]`: whitepapers and documents — `url`, `title`, `status`, `audit`, `evidence[]`
 - `features[]`: short sourced statements — `text`, `status`, `audit`, `evidence[]`. These are project statements, not tested facts
+- `forums[]`: discussion boards the forum research tied to the chain (from `data/forum-research.json`, ~600 chains) — `url`, `title`, `type` (`governance` / `community` / `developer` / `research` / `general`), `relationship` (`official` / `community_run` / `uncertain`), `scope` (`exact_network`, `project_family` = the project's shared board, `ecosystem_shared`, `historical_network`, `uncertain`), `access` (`read` / `inaccessible` / `archived` at research time), `activity` (`recent_activity_observed` / `historical_or_archived` / `unknown`), `lastActivity`, `verification` (`confirmed` / `qualified`), `notes`, `evidence[]`; plus `forumsCheckedAt`. Only confirmed or qualified records are included. This is research, not the polled registry: the chain's `forumUrl` still comes from the curated `data/forums.json`, which is what `chains-forum-news` reads
 
 `status` is `checked` (fully verified) or `partial` (evidence gaps or uncertain applicability). `audit` is the item-level audit result: `confirmed`, `qualified` (family/historical/source caveats remain), `corrected` or null.
 

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   loadNetworkResearch,
+  loadForumResearch,
   getNetworkResearch,
   getNetworkResearchInfo,
   attachNetworkResearch,
@@ -27,12 +28,29 @@ const DATASET = {
   ]
 };
 
+const forum = {
+  url: 'https://forum.arbitrum.foundation/', title: 'Arbitrum DAO Governance Forum', type: 'governance', relationship: 'official',
+  scope: 'project_family', access: 'read', activity: 'recent_activity_observed', lastActivity: '2026-10-09',
+  verification: 'confirmed', notes: 'Official docs link it.', evidence: ['https://docs.arbitrum.io/']
+};
+
+const FORUMS = {
+  updatedAt: '2026-10-10T15:51:28.230185+00:00',
+  networks: [
+    { chainId: 4242, status: 'found', checkedAt: '2026-10-10T15:07:54.328Z', forums: [forum] },
+    { chainId: 8453, status: 'found', checkedAt: '2026-10-10T15:00:00.000Z', forums: [{ ...forum, url: 'https://github.com/base/web/discussions', access: 'archived' }] },
+    { chainId: 777, status: 'partial', checkedAt: null, forums: [] },
+    { chainId: 4242, forums: [{ ...forum, title: 'duplicate ignored' }] }
+  ]
+};
+
 let dir;
 const write = (name, content) => {
   const path = join(dir, name);
   writeFileSync(path, content);
   return path;
 };
+const useFixtures = () => _setNetworkResearchForTests(write('dataset.json', JSON.stringify(DATASET)), write('forums.json', JSON.stringify(FORUMS)));
 
 beforeAll(() => {
   dir = mkdtempSync(join(tmpdir(), 'research-'));
@@ -44,7 +62,7 @@ afterAll(() => {
 });
 
 afterEach(() => {
-  _setNetworkResearchForTests(write('dataset.json', JSON.stringify(DATASET)));
+  useFixtures();
   cachedData.indexed = null;
   _resetGetAllChainsCacheForTests();
 });
@@ -64,17 +82,28 @@ describe('loadNetworkResearch', () => {
     expect(loadNetworkResearch(write('shape.json', JSON.stringify({ networks: 'x' }))).byChainId.size).toBe(0);
   });
 
-  it('loads the checked-in dataset', () => {
+  it('loads the checked-in datasets', () => {
     const { updatedAt, byChainId } = loadNetworkResearch();
     expect(updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(byChainId.size).toBeGreaterThan(2000);
     expect(byChainId.get(1).family).toBe('Ethereum');
+
+    const forums = loadForumResearch();
+    expect(forums.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(forums.byChainId.size).toBeGreaterThan(500);
+    expect(forums.byChainId.get(1).forums.map(f => f.url)).toContain('https://ethereum-magicians.org/');
+    // Every kept record was independently confirmed or qualified, and still a forum.
+    for (const entry of forums.byChainId.values()) {
+      for (const f of entry.forums) {
+        expect(['confirmed', 'qualified']).toContain(f.verification);
+        expect(f.access).not.toBe('repurposed');
+      }
+    }
   });
 });
 
 describe('getNetworkResearch / getNetworkResearchInfo', () => {
   it('returns the research block without chainId or websiteCorrection, dated by the dataset', () => {
-    _setNetworkResearchForTests(write('d.json', JSON.stringify(DATASET)));
     expect(getNetworkResearch('8453')).toEqual({
       family: 'OP Stack-derived',
       coverage: 'partial',
@@ -83,27 +112,38 @@ describe('getNetworkResearch / getNetworkResearchInfo', () => {
       repositories: [repo],
       papers: [],
       features: [],
+      forums: [{ ...forum, url: 'https://github.com/base/web/discussions', access: 'archived' }],
+      forumsCheckedAt: '2026-10-10T15:00:00.000Z',
       updatedAt: '2026-10-10T07:58:00.646Z'
     });
     expect(getNetworkResearch(424242)).toBeNull();
-    expect(getNetworkResearchInfo()).toEqual({ loaded: true, updatedAt: '2026-10-10T07:58:00.646Z', networks: 4 });
+    expect(getNetworkResearchInfo()).toEqual({
+      loaded: true, updatedAt: '2026-10-10T07:58:00.646Z', networks: 4,
+      forumNetworks: 3, forumsUpdatedAt: '2026-10-10T15:51:28.230185+00:00'
+    });
   });
 
-  it('returns null when the research lists no repositories, papers or features', () => {
-    _setNetworkResearchForTests(write('d.json', JSON.stringify(DATASET)));
+  it('returns a forums-only block for a chain the network research did not cover', () => {
+    expect(getNetworkResearch(4242)).toEqual({ forums: [forum], forumsCheckedAt: '2026-10-10T15:07:54.328Z', updatedAt: '2026-10-10T07:58:00.646Z' });
+  });
+
+  it('returns null when the research lists no repositories, papers, features or forums', () => {
     expect(getNetworkResearch(7)).toBeNull();
     expect(getNetworkResearch(327)).toBeNull();
+    expect(getNetworkResearch(777)).toBeNull();
   });
 
-  it('returns a copy, so callers cannot mutate the dataset', () => {
-    _setNetworkResearchForTests(write('d.json', JSON.stringify(DATASET)));
+  it('returns a copy, so callers cannot mutate the datasets', () => {
     getNetworkResearch(8453).repositories.push({ url: 'https://evil.example' });
+    getNetworkResearch(4242).forums[0].url = 'https://evil.example';
     expect(getNetworkResearch(8453).repositories).toEqual([repo]);
+    expect(getNetworkResearch(4242).forums).toEqual([forum]);
   });
 
-  it('reports not loaded when the dataset is empty', () => {
-    _setNetworkResearchForTests(join(dir, 'missing.json'));
-    expect(getNetworkResearchInfo()).toEqual({ loaded: false, updatedAt: null, networks: 0 });
+  it('reports not loaded when the datasets are empty', () => {
+    _setNetworkResearchForTests(join(dir, 'missing.json'), join(dir, 'missing.json'));
+    expect(getNetworkResearchInfo()).toEqual({ loaded: false, updatedAt: null, networks: 0, forumNetworks: 0, forumsUpdatedAt: null });
+    expect(getNetworkResearch(8453)).toBeNull();
   });
 });
 
@@ -111,7 +151,7 @@ describe('attachNetworkResearch', () => {
   const indexed = chains => ({ byChainId: Object.fromEntries(chains.map(c => [c.chainId, { sources: ['chains'], ...c }])) });
 
   it('stamps family and the research source; leaves unknown chains alone', () => {
-    _setNetworkResearchForTests(write('d.json', JSON.stringify(DATASET)));
+    useFixtures();
     const idx = indexed([{ chainId: 8453, infoURL: 'https://base.org' }, { chainId: 1 }]);
     attachNetworkResearch(idx);
     expect(idx.byChainId[8453]).toMatchObject({ family: 'OP Stack-derived', sources: ['chains', 'research'], infoURL: 'https://base.org' });
@@ -120,15 +160,22 @@ describe('attachNetworkResearch', () => {
   });
 
   it('creates sources when missing and skips a null family', () => {
-    _setNetworkResearchForTests(write('d.json', JSON.stringify(DATASET)));
     const idx = { byChainId: { 327: { chainId: 327, infoURL: 'https://other.example' } } };
     attachNetworkResearch(idx);
     expect(idx.byChainId[327].sources).toEqual(['research']);
     expect('family' in idx.byChainId[327]).toBe(false);
   });
 
+  it('marks a chain covered only by the forum research, without stamping a forumUrl', () => {
+    const idx = indexed([{ chainId: 4242, forumUrl: 'https://forum.arbitrum.foundation' }, { chainId: 777 }]);
+    attachNetworkResearch(idx);
+    expect(idx.byChainId[4242]).toEqual({ chainId: 4242, forumUrl: 'https://forum.arbitrum.foundation', sources: ['chains', 'research'] });
+    // Listed in the forum export with nothing kept: still researched, nothing else.
+    expect(idx.byChainId[777].sources).toEqual(['chains', 'research']);
+  });
+
   it('replaces infoURL while the registry still lists the replaced website (normalised)', () => {
-    _setNetworkResearchForTests(write('d.json', JSON.stringify(DATASET)));
+    useFixtures();
     const idx = indexed([{ chainId: 7, infoURL: 'https://thaichain.io' }, { chainId: 327 }]);
     attachNetworkResearch(idx);
     expect(idx.byChainId[7]).toMatchObject({ infoURL: 'https://thaichain.org/', registryInfoURL: 'https://thaichain.io', infoURLSource: 'research' });
@@ -136,7 +183,7 @@ describe('attachNetworkResearch', () => {
   });
 
   it('never treats two unparseable websites as the same, nor a null `replaces` as matching a malformed one', () => {
-    _setNetworkResearchForTests(write('d.json', JSON.stringify(DATASET)));
+    useFixtures();
     const idx = indexed([{ chainId: 7, infoURL: 'thaichain.io' }, { chainId: 327, infoURL: 'onyx.org' }, { chainId: 99, infoURL: 'junk' }]);
     attachNetworkResearch(idx);
     expect(idx.byChainId[7].infoURL).toBe('thaichain.io');
@@ -146,7 +193,7 @@ describe('attachNetworkResearch', () => {
   });
 
   it('keeps an infoURL the registry has since changed', () => {
-    _setNetworkResearchForTests(write('d.json', JSON.stringify(DATASET)));
+    useFixtures();
     const idx = indexed([{ chainId: 7, infoURL: 'https://thaichain.network' }, { chainId: 327, infoURL: 'https://onyx.example' }]);
     attachNetworkResearch(idx);
     expect(idx.byChainId[7].infoURL).toBe('https://thaichain.network');
@@ -155,7 +202,7 @@ describe('attachNetworkResearch', () => {
   });
 
   it('is idempotent', () => {
-    _setNetworkResearchForTests(write('d.json', JSON.stringify(DATASET)));
+    useFixtures();
     const idx = indexed([{ chainId: 7, infoURL: 'https://thaichain.io' }, { chainId: 327 }]);
     attachNetworkResearch(idx);
     const once = structuredClone(idx);
@@ -171,7 +218,7 @@ describe('attachNetworkResearch', () => {
 
 describe('queries — research reaches the API projections', () => {
   const load = () => {
-    _setNetworkResearchForTests(write('d.json', JSON.stringify(DATASET)));
+    useFixtures();
     cachedData.indexed = indexData(null, null, [
       { chainId: 8453, name: 'Base', infoURL: 'https://base.org' },
       { chainId: 7, name: 'ThaiChain', infoURL: 'https://thaichain.io' },
@@ -192,8 +239,21 @@ describe('queries — research reaches the API projections', () => {
 
   it('getChainDetail adds the research block when there is one', () => {
     load();
-    expect(getChainDetail(8453).research).toMatchObject({ family: 'OP Stack-derived', repositories: [repo] });
+    expect(getChainDetail(8453).research).toMatchObject({ family: 'OP Stack-derived', repositories: [repo], forums: [expect.objectContaining({ access: 'archived' })] });
     expect(getChainDetail(999)).toEqual(getChainById(999));
     expect(getChainDetail(424242)).toBeNull();
+  });
+
+  it('forum research never becomes the chain forumUrl that chains-forum-news polls', () => {
+    load();
+    cachedData.indexed = indexData(null, null, [{ chainId: 4242, name: 'Unregistered' }], null);
+    _resetGetAllChainsCacheForTests();
+    expect(getChainById(4242).forumUrl).toBeUndefined();
+    expect(getChainDetail(4242).research.forums).toEqual([forum]);
+    expect(getAllChains().some(c => 'research' in c)).toBe(false);
+    // Base: the curated registry's forum stays the forumUrl; the research board is separate.
+    load();
+    expect(getChainById(8453).forumUrl).toBe('https://gov.optimism.io');
+    expect(getChainDetail(8453).research.forums.map(f => f.url)).toEqual(['https://github.com/base/web/discussions']);
   });
 });
