@@ -21,6 +21,7 @@ const DATASET = {
     { chainId: 8453, family: 'OP Stack-derived', websiteCorrection: null, coverage: 'partial', auditStatus: 'qualified', checkedAt: '2026-10-10T07:50:19Z', repositories: [repo], papers: [], features: [] },
     { chainId: 7, family: 'ThaiChain', websiteCorrection: { website: 'https://thaichain.org/', replaces: 'https://thaichain.io/' }, repositories: [], papers: [], features: [] },
     { chainId: 327, family: null, websiteCorrection: { website: 'https://onyx.org/', replaces: null }, repositories: [], papers: [], features: [] },
+    { chainId: 99, family: null, websiteCorrection: { website: 'https://fixed.example/', replaces: 'junk' }, repositories: [], papers: [], features: [] },
     { chainId: 8453, family: 'duplicate ignored', repositories: [], papers: [], features: [] },
     { chainId: 'nope' }
   ]
@@ -52,7 +53,7 @@ describe('loadNetworkResearch', () => {
   it('indexes networks by chainId, first entry wins, invalid ids skipped', () => {
     const { updatedAt, byChainId } = loadNetworkResearch(write('a.json', JSON.stringify(DATASET)));
     expect(updatedAt).toBe('2026-10-10T07:58:00.646Z');
-    expect([...byChainId.keys()]).toEqual([8453, 7, 327]);
+    expect([...byChainId.keys()]).toEqual([8453, 7, 327, 99]);
     expect(byChainId.get(8453).family).toBe('OP Stack-derived');
   });
 
@@ -85,7 +86,7 @@ describe('getNetworkResearch / getNetworkResearchInfo', () => {
       updatedAt: '2026-10-10T07:58:00.646Z'
     });
     expect(getNetworkResearch(424242)).toBeNull();
-    expect(getNetworkResearchInfo()).toEqual({ loaded: true, updatedAt: '2026-10-10T07:58:00.646Z', networks: 3 });
+    expect(getNetworkResearchInfo()).toEqual({ loaded: true, updatedAt: '2026-10-10T07:58:00.646Z', networks: 4 });
   });
 
   it('returns null when the research lists no repositories, papers or features', () => {
@@ -136,11 +137,12 @@ describe('attachNetworkResearch', () => {
 
   it('never treats two unparseable websites as the same, nor a null `replaces` as matching a malformed one', () => {
     _setNetworkResearchForTests(write('d.json', JSON.stringify(DATASET)));
-    const idx = indexed([{ chainId: 7, infoURL: 'thaichain.io' }, { chainId: 327, infoURL: 'onyx.org' }]);
+    const idx = indexed([{ chainId: 7, infoURL: 'thaichain.io' }, { chainId: 327, infoURL: 'onyx.org' }, { chainId: 99, infoURL: 'junk' }]);
     attachNetworkResearch(idx);
     expect(idx.byChainId[7].infoURL).toBe('thaichain.io');
     expect(idx.byChainId[327].infoURL).toBe('onyx.org');
     expect(idx.byChainId[327].infoURLSource).toBeUndefined();
+    expect(idx.byChainId[99].infoURL).toBe('junk');
   });
 
   it('keeps an infoURL the registry has since changed', () => {
