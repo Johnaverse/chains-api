@@ -3,6 +3,7 @@ import { getRpcMonitoringStatus } from '../../services/rpcHealth.js';
 import { validateChainData } from '../../services/validation.js';
 import { getL2BeatRefreshStatus } from '../../services/l2beatRefresher.js';
 import { renderMetrics } from '../../util/metrics.js';
+import { getLastIncidentSentinelSummary } from '../../services/incidentSentinel.js';
 
 /**
  * GET /metrics — Prometheus exposition format. Scrape this endpoint to
@@ -46,8 +47,10 @@ export async function metricsRoute(fastify) {
     const rpcStatus = getRpcMonitoringStatus();
     const l2beatStatus = getL2BeatRefreshStatus();
     const validationSummary = cachedValidationSummary();
+    // Read-only: never runs the sentinel, so a scrape cannot block on the incident feed.
+    const incidentSummary = getLastIncidentSentinelSummary();
 
-    const body = renderMetrics({ cache, rpcStatus, l2beatStatus, validationSummary });
+    const body = renderMetrics({ cache, rpcStatus, l2beatStatus, validationSummary, incidentSummary });
     reply.header('Content-Type', 'text/plain; version=0.0.4');
     return body;
   });

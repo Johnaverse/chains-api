@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { getLiveIncidents, getLiveEvents, _resetLiveIncidentsCacheForTests } from '../../../src/sources/liveIncidents.js';
+import { getLiveIncidents, getLiveEvents, peekLiveEvents, _resetLiveIncidentsCacheForTests } from '../../../src/sources/liveIncidents.js';
 import { proxyFetch } from '../../../fetchUtil.js';
 
 vi.mock('../../../fetchUtil.js', () => ({
@@ -225,5 +225,72 @@ describe('enrichment passthrough (the fork join key)', () => {
     const [event] = await getLiveEvents();
 
     expect(event.enrichment.fork).toEqual({ name: null, activationAt: null, activationBlock: null, state: null });
+  });
+});
+
+// The in-flight guard is what stops concurrent callers from multiplying upstream requests:
+// the MCP tools, the assistant and the sentinel route all share this cache, so without it a
+// burst arriving at TTL expiry fanned out one-to-one onto the third-party feed.
+describe('refresh de-duplication', () => {
+  beforeEach(() => {
+    _resetLiveIncidentsCacheForTests();
+    proxyFetch.mockReset();
+  });
+
+  it('issues ONE upstream fetch for concurrent callers while a refresh is in flight', async () => {
+    let release;
+    proxyFetch.mockImplementation(() => new Promise((resolve) => { release = resolve; }));
+
+    const callers = Promise.all(Array.from({ length: 5 }, () => getLiveEvents()));
+    // Every caller has entered before the fetch settles — this is the window that matters.
+    expect(proxyFetch).toHaveBeenCalledTimes(1);
+
+    release(okResponse([feedEvent()]));
+    const results = await callers;
+
+    expect(proxyFetch).toHaveBeenCalledTimes(1);
+    for (const events of results) expect(events).toHaveLength(1);
+  });
+
+  it('does not pin later callers to a failed refresh', async () => {
+    // Cleared in `finally`: a rejected fetch must not be handed to every caller that follows.
+    proxyFetch.mockRejectedValueOnce(new Error('feed down'));
+    const failed = await Promise.allSettled([getLiveEvents(), getLiveEvents()]);
+    expect(failed.every((r) => r.status === 'rejected')).toBe(true);
+    expect(proxyFetch).toHaveBeenCalledTimes(1);
+
+    proxyFetch.mockResolvedValueOnce(okResponse([feedEvent()]));
+    await expect(getLiveEvents()).resolves.toHaveLength(1);
+    expect(proxyFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('serves the fresh cache afterwards without refetching', async () => {
+    proxyFetch.mockResolvedValue(okResponse([feedEvent()]));
+    await getLiveEvents();
+    await getLiveEvents();
+    expect(proxyFetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('peekLiveEvents', () => {
+  beforeEach(() => {
+    _resetLiveIncidentsCacheForTests();
+    proxyFetch.mockReset();
+  });
+
+  it('returns null before the feed has ever loaded, and never fetches to fill it', () => {
+    expect(peekLiveEvents()).toBeNull();
+    expect(proxyFetch).not.toHaveBeenCalled();
+  });
+
+  it('returns what is cached, with the time it was fetched', async () => {
+    proxyFetch.mockResolvedValue(okResponse([feedEvent()]));
+    await getLiveEvents();
+    proxyFetch.mockClear();
+
+    const snapshot = peekLiveEvents();
+    expect(snapshot.events).toHaveLength(1);
+    expect(Number.isNaN(Date.parse(snapshot.fetchedAt))).toBe(false);
+    expect(proxyFetch).not.toHaveBeenCalled();
   });
 });
