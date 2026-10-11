@@ -197,9 +197,9 @@ export async function initializeDataOnStartup(options = {}) {
 
   startupInitializationPromise = (async () => {
     const snapshotData = await readSnapshotFromDisk();
-    // Before any applyDataToCache, so known 401 endpoints are stripped from the first index served.
+    // Before any applyDataToCache, so known 401/403 endpoints are stripped from the first index served.
     const privateRpcCount = await loadPrivateRpcsFromDisk();
-    if (privateRpcCount > 0) logger.info({ privateRpcCount }, 'Loaded private (HTTP 401) RPC list');
+    if (privateRpcCount > 0) logger.info({ privateRpcCount }, 'Loaded private (HTTP 401/403) RPC list');
 
     if (snapshotData) {
       applyDataToCache(snapshotData);

@@ -5,9 +5,9 @@ import { DATA_CACHE_ENABLED, DATA_CACHE_FILE } from '../../config.js';
 import { logger } from '../util/logger.js';
 
 /**
- * RPC endpoints that answered HTTP 401 (authentication required).
+ * RPC endpoints that answered HTTP 401 or 403 (authentication required / forbidden).
  *
- * A 401 means the URL is a keyed/private endpoint, not a public RPC, so the
+ * Either means the URL is a keyed, allowlisted or otherwise non-public endpoint, so the
  * registry listing it is wrong for our purposes: it is dropped from every
  * chain's served `rpc` list and from rpcHealth, and the refresher never probes
  * it again. The set survives source re-fetches (the indexer rebuilds `rpc` from

@@ -27,7 +27,7 @@ export function applyDataToCache(data) {
   cachedData.lastUpdated = data.lastUpdated ?? null;
   cachedData.rpcHealth = data.rpcHealth ?? {};
   cachedData.lastRpcCheck = data.lastRpcCheck ?? null;
-  // Endpoints known to require auth (HTTP 401) stay dropped across re-fetches.
+  // Endpoints known to require auth (HTTP 401/403) stay dropped across re-fetches.
   stripPrivateRpcs(cachedData.indexed, cachedData.rpcHealth);
 }
 

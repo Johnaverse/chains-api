@@ -58,7 +58,7 @@ const METRIC_HELP = {
   chains_api_source_fetch_total: 'Number of source fetch attempts by source and outcome',
   chains_api_refresh_total: 'Number of background refresh runs by refresher and outcome',
   chains_api_rpc_check_total: 'Number of RPC endpoint health checks by outcome',
-  chains_api_rpc_private_dropped_total: 'Number of RPC endpoints dropped as private (HTTP 401)',
+  chains_api_rpc_private_dropped_total: 'Number of RPC endpoints dropped as non-public (HTTP 401/403)',
   chains_api_assistant_requests_total: 'Number of assistant chat requests by outcome (ok, degraded)',
   chains_api_assistant_tool_calls_total: 'Number of assistant tool executions by tool and outcome',
   chains_api_assistant_llm_calls_total: 'Number of LLM round-trips made by the assistant by outcome',
