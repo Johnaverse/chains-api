@@ -78,13 +78,6 @@
       "chainIds": [100]
     },
     {
-      "id": "nuls",
-      "name": "NULS Community Forum",
-      "url": "https://forum.nuls.io",
-      "software": "discourse",
-      "chainIds": [119]
-    },
-    {
       "id": "fuse",
       "name": "Fuse Community Forum",
       "url": "https://forum.fuse.io",
@@ -139,13 +132,6 @@
       "url": "https://gov.near.org",
       "software": "discourse",
       "chainIds": [397]
-    },
-    {
-      "id": "pundi-aifx",
-      "name": "Pundi AIFX Community Forum",
-      "url": "https://forum.pundi.ai",
-      "software": "discourse",
-      "chainIds": [530]
     },
     {
       "id": "flow",
@@ -209,21 +195,6 @@
       "url": "https://forum.lisk.com",
       "software": "discourse",
       "chainIds": [1135]
-    },
-    {
-      "id": "moonbeam",
-      "name": "Moonbeam / Moonriver Forum",
-      "url": "https://forum.moonbeam.network",
-      "software": "discourse",
-      "chainIds": [1284, 1285]
-    },
-    {
-      "id": "sei",
-      "name": "Sei Network Governance (Commonwealth)",
-      "url": "https://common.xyz/sei-network",
-      "software": "commonwealth",
-      "communityId": "sei-network",
-      "chainIds": [1329]
     },
     {
       "id": "reya",
@@ -382,13 +353,6 @@
       "chainIds": [42220]
     },
     {
-      "id": "avalanche",
-      "name": "Avalanche Community Forum",
-      "url": "https://forum.avax.network",
-      "software": "discourse",
-      "chainIds": [43114]
-    },
-    {
       "id": "linea",
       "name": "Linea Community Forum",
       "url": "https://community.linea.build",
@@ -415,6 +379,363 @@
       "url": "https://forum.scroll.io",
       "software": "discourse",
       "chainIds": [534352]
+    },
+    {
+      "id": "diode",
+      "name": "Diode Forum",
+      "url": "https://forum.diode.io",
+      "software": "discourse",
+      "chainIds": [13, 15]
+    },
+    {
+      "id": "rootstock-research",
+      "name": "Rootstock Research & Innovation Forum",
+      "url": "https://research.rsk.dev",
+      "software": "discourse",
+      "chainIds": [30, 31]
+    },
+    {
+      "id": "lightchain",
+      "name": "Lightchain Forum",
+      "url": "https://forum.lightchain.ai",
+      "software": "discourse",
+      "chainIds": [504, 8200, 9200]
+    },
+    {
+      "id": "astar-subsquare",
+      "name": "Astar Governance (Subsquare)",
+      "url": "https://astar.subsquare.io",
+      "software": "subsquare",
+      "chainIds": [592]
+    },
+    {
+      "id": "acala-subsquare",
+      "name": "Acala Governance (Subsquare)",
+      "url": "https://acala.subsquare.io",
+      "software": "subsquare",
+      "chainIds": [595, 597, 787]
+    },
+    {
+      "id": "karura-subsquare",
+      "name": "Karura Governance (Subsquare)",
+      "url": "https://karura.subsquare.io",
+      "software": "subsquare",
+      "chainIds": [596, 686]
+    },
+    {
+      "id": "kaia-gov",
+      "name": "Kaia Governance Forum",
+      "url": "https://govforum.kaia.io",
+      "software": "discourse",
+      "chainIds": [1001, 8217]
+    },
+    {
+      "id": "datafdn",
+      "name": "The Data Foundation Forum",
+      "url": "https://forum.datafdn.org",
+      "software": "discourse",
+      "chainIds": [1315, 1514]
+    },
+    {
+      "id": "quip-research",
+      "name": "Quip Network Research",
+      "url": "https://research.quip.network",
+      "software": "discourse",
+      "chainIds": [20033]
+    },
+    {
+      "id": "arbitrum-research",
+      "name": "Arbitrum Research",
+      "url": "https://research.arbitrum.io",
+      "software": "discourse",
+      "chainIds": [42161, 42170, 421614]
+    },
+    {
+      "id": "vechain",
+      "name": "VeChain Forum",
+      "url": "https://vechain.discourse.group",
+      "software": "discourse",
+      "chainIds": [100009, 100010]
+    },
+    {
+      "id": "heima-subsquare",
+      "name": "Heima Governance (Subsquare)",
+      "url": "https://heima.subsquare.io",
+      "software": "subsquare",
+      "chainIds": [212013]
+    },
+    {
+      "id": "hydration-subsquare",
+      "name": "Hydration Governance (Subsquare)",
+      "url": "https://hydration.subsquare.io",
+      "software": "subsquare",
+      "chainIds": [222222]
+    },
+    {
+      "id": "fluence-gov",
+      "name": "Fluence DAO Forum",
+      "url": "https://gov.fluence.network",
+      "software": "discourse",
+      "chainIds": [9999999, 52164803, 123420000220]
+    },
+    {
+      "id": "skale",
+      "name": "SKALE Network Forum",
+      "url": "https://forum.skale.network",
+      "software": "discourse",
+      "chainIds": [37084624, 324705682, 344106930, 476158412, 503129905, 974399131, 1020352220, 1187947933, 1350216234, 1351057110, 1444673419, 1482601649, 1517929550, 1564830818, 2046399126]
+    },
+    {
+      "id": "uniswap",
+      "name": "Uniswap Governance",
+      "url": "https://gov.uniswap.org",
+      "software": "discourse",
+      "chainIds": [130, 1301]
+    },
+    {
+      "id": "onyx",
+      "name": "Onyx Community",
+      "url": "https://community.onyx.org",
+      "software": "discourse",
+      "chainIds": [327, 80888]
+    },
+    {
+      "id": "status",
+      "name": "Status Forum",
+      "url": "https://discuss.status.app",
+      "software": "discourse",
+      "chainIds": [373, 374, 1660990954]
+    },
+    {
+      "id": "fluid",
+      "name": "Fluid Governance",
+      "url": "https://gov.fluid.io",
+      "software": "discourse",
+      "chainIds": [634]
+    },
+    {
+      "id": "diadata",
+      "name": "DIA Forum",
+      "url": "https://forum.diadata.org",
+      "software": "discourse",
+      "chainIds": [1050]
+    },
+    {
+      "id": "intuition",
+      "name": "Intuition Forum",
+      "url": "https://atlas.discourse.group",
+      "software": "discourse",
+      "chainIds": [1155, 13579]
+    },
+    {
+      "id": "gravity",
+      "name": "Gravity Governance Forum",
+      "url": "https://forum.gravity.xyz",
+      "software": "discourse",
+      "chainIds": [1625, 13505, 127001, 7771625]
+    },
+    {
+      "id": "telcoin",
+      "name": "Telcoin Association Forum",
+      "url": "https://forum.telcoin.org",
+      "software": "discourse",
+      "chainIds": [2017]
+    },
+    {
+      "id": "ztx",
+      "name": "ZTX Forum",
+      "url": "https://ztx.discourse.group",
+      "software": "discourse",
+      "chainIds": [2787]
+    },
+    {
+      "id": "algorand",
+      "name": "Algorand Forum",
+      "url": "https://forum.algorand.co",
+      "software": "discourse",
+      "chainIds": [4160]
+    },
+    {
+      "id": "dual",
+      "name": "Dual Community Forum",
+      "url": "https://forum.dual.org",
+      "software": "discourse",
+      "chainIds": [6301]
+    },
+    {
+      "id": "mizuhiki",
+      "name": "MIZUHIKI: The Japan Chain",
+      "url": "https://forum.mizuhiki.io",
+      "software": "discourse",
+      "chainIds": [6497, 6498]
+    },
+    {
+      "id": "b3",
+      "name": "B3 Forum",
+      "url": "https://forum.b3.fun",
+      "software": "discourse",
+      "chainIds": [8333]
+    },
+    {
+      "id": "polkadot",
+      "name": "Polkadot Forum",
+      "url": "https://forum.polkadot.network",
+      "software": "discourse",
+      "chainIds": [19527, 420420417, 420420418, 420420419, 420420421, 420420422]
+    },
+    {
+      "id": "tezos-agora",
+      "name": "Tezos Agora Forum",
+      "url": "https://forum.tezosagora.org",
+      "software": "discourse",
+      "chainIds": [42793, 127823]
+    },
+    {
+      "id": "rei",
+      "name": "REI Network Forum",
+      "url": "https://forum.rei.network",
+      "software": "discourse",
+      "chainIds": [47805]
+    },
+    {
+      "id": "cosmos",
+      "name": "Cosmos Hub Forum",
+      "url": "https://forum.cosmos.network",
+      "software": "discourse",
+      "chainIds": [50024, 50025]
+    },
+    {
+      "id": "aavegotchi",
+      "name": "AavegotchiDAO Forum",
+      "url": "https://dao.aavegotchi.com",
+      "software": "discourse",
+      "chainIds": [63157]
+    },
+    {
+      "id": "nervos",
+      "name": "Nervos Talk",
+      "url": "https://talk.nervos.org",
+      "software": "discourse",
+      "chainIds": [71393, 71401, 71402, 868455272153094]
+    },
+    {
+      "id": "berachain",
+      "name": "Berachain Forum (BeraHub)",
+      "url": "https://forum.berachain.com",
+      "software": "discourse",
+      "chainIds": [80069, 80084, 80085, 80094]
+    },
+    {
+      "id": "thegraph",
+      "name": "The Graph Forum",
+      "url": "https://forum.thegraph.com",
+      "software": "discourse",
+      "chainIds": [80451]
+    },
+    {
+      "id": "forta",
+      "name": "Forta Network Forum",
+      "url": "https://gov.forta.network",
+      "software": "discourse",
+      "chainIds": [80931]
+    },
+    {
+      "id": "watr",
+      "name": "Watr Community Forum",
+      "url": "https://community.watr.org",
+      "software": "discourse",
+      "chainIds": [92870]
+    },
+    {
+      "id": "creditcoin",
+      "name": "Creditcoin: Community Forum",
+      "url": "https://community.creditcoin.org",
+      "software": "discourse",
+      "chainIds": [102030, 102031, 102032]
+    },
+    {
+      "id": "fuel",
+      "name": "Fuel Network Forum",
+      "url": "https://forum.fuel.network",
+      "software": "discourse",
+      "chainIds": [129514]
+    },
+    {
+      "id": "hpp",
+      "name": "House Party Protocol Forum",
+      "url": "https://forum.hpp.io",
+      "software": "discourse",
+      "chainIds": [181228, 190415]
+    },
+    {
+      "id": "latticex",
+      "name": "LatticeX Forum",
+      "url": "https://forum.latticex.foundation",
+      "software": "discourse",
+      "chainIds": [201018, 201030, 210425, 2203181, 2206132, 20250407]
+    },
+    {
+      "id": "althea",
+      "name": "Althea Forum",
+      "url": "https://forum.althea.net",
+      "software": "discourse",
+      "chainIds": [258432]
+    },
+    {
+      "id": "dfinity",
+      "name": "Internet Computer Developer Forum",
+      "url": "https://forum.dfinity.org",
+      "software": "discourse",
+      "chainIds": [355110, 355113]
+    },
+    {
+      "id": "aztec",
+      "name": "Aztec Forum",
+      "url": "https://forum.aztec.network",
+      "software": "discourse",
+      "chainIds": [677868]
+    },
+    {
+      "id": "xmtp",
+      "name": "XMTP Improvement Forum",
+      "url": "https://improve.xmtp.org",
+      "software": "discourse",
+      "chainIds": [24132016, 241320161]
+    },
+    {
+      "id": "flashbots",
+      "name": "The Flashbots Collective",
+      "url": "https://collective.flashbots.net",
+      "software": "discourse",
+      "chainIds": [33626250]
+    },
+    {
+      "id": "trondao",
+      "name": "TRON DAO Forum",
+      "url": "https://forum.trondao.org",
+      "software": "discourse",
+      "chainIds": [728126428, 2494104990, 3448148188]
+    },
+    {
+      "id": "aurora",
+      "name": "Aurora Forum",
+      "url": "https://forum.aurora.dev",
+      "software": "discourse",
+      "chainIds": [1313161554, 1313161555, 1313161556]
+    },
+    {
+      "id": "rari",
+      "name": "RARI Foundation",
+      "url": "https://forum.rari.foundation",
+      "software": "discourse",
+      "chainIds": [1380012617, 1918988905]
+    },
+    {
+      "id": "harmony",
+      "name": "Harmony Community Forum",
+      "url": "https://talk.harmony.one",
+      "software": "discourse",
+      "chainIds": [1666600000, 1666600001, 1666600002, 1666600003, 1666700000, 1666700001, 1666900000, 1666900001]
     }
   ]
 }
