@@ -415,6 +415,111 @@
       "url": "https://forum.scroll.io",
       "software": "discourse",
       "chainIds": [534352]
+    },
+    {
+      "id": "diode",
+      "name": "Diode Forum",
+      "url": "https://forum.diode.io",
+      "software": "discourse",
+      "chainIds": [13, 15]
+    },
+    {
+      "id": "rootstock-research",
+      "name": "Rootstock Research & Innovation Forum",
+      "url": "https://research.rsk.dev",
+      "software": "discourse",
+      "chainIds": [30, 31]
+    },
+    {
+      "id": "lightchain",
+      "name": "Lightchain Forum",
+      "url": "https://forum.lightchain.ai",
+      "software": "discourse",
+      "chainIds": [504, 8200, 9200]
+    },
+    {
+      "id": "astar-subsquare",
+      "name": "Astar Governance (Subsquare)",
+      "url": "https://astar.subsquare.io",
+      "software": "subsquare",
+      "chainIds": [592]
+    },
+    {
+      "id": "acala-subsquare",
+      "name": "Acala Governance (Subsquare)",
+      "url": "https://acala.subsquare.io",
+      "software": "subsquare",
+      "chainIds": [595, 597, 787]
+    },
+    {
+      "id": "karura-subsquare",
+      "name": "Karura Governance (Subsquare)",
+      "url": "https://karura.subsquare.io",
+      "software": "subsquare",
+      "chainIds": [596, 686]
+    },
+    {
+      "id": "kaia-gov",
+      "name": "Kaia Governance Forum",
+      "url": "https://govforum.kaia.io",
+      "software": "discourse",
+      "chainIds": [1001, 8217]
+    },
+    {
+      "id": "datafdn",
+      "name": "The Data Foundation Forum",
+      "url": "https://forum.datafdn.org",
+      "software": "discourse",
+      "chainIds": [1315, 1514]
+    },
+    {
+      "id": "quip-research",
+      "name": "Quip Network Research",
+      "url": "https://research.quip.network",
+      "software": "discourse",
+      "chainIds": [20033]
+    },
+    {
+      "id": "arbitrum-research",
+      "name": "Arbitrum Research",
+      "url": "https://research.arbitrum.io",
+      "software": "discourse",
+      "chainIds": [42161, 42170, 421614]
+    },
+    {
+      "id": "vechain",
+      "name": "VeChain Forum",
+      "url": "https://vechain.discourse.group",
+      "software": "discourse",
+      "chainIds": [100009, 100010]
+    },
+    {
+      "id": "heima-subsquare",
+      "name": "Heima Governance (Subsquare)",
+      "url": "https://heima.subsquare.io",
+      "software": "subsquare",
+      "chainIds": [212013]
+    },
+    {
+      "id": "hydration-subsquare",
+      "name": "Hydration Governance (Subsquare)",
+      "url": "https://hydration.subsquare.io",
+      "software": "subsquare",
+      "chainIds": [222222]
+    },
+    {
+      "id": "fluence-gov",
+      "name": "Fluence DAO Forum",
+      "url": "https://gov.fluence.network",
+      "software": "discourse",
+      "chainIds": [9999999, 52164803, 123420000220]
+    },
+    {
+      "id": "skale",
+      "name": "SKALE Network Forum",
+      "url": "https://forum.skale.network",
+      "software": "discourse",
+      "chainIds": [37084624, 324705682, 344106930, 476158412, 503129905, 974399131, 1020352220, 1187947933, 1350216234, 1351057110, 1444673419, 1482601649, 1517929550, 1564830818, 2046399126]
     }
   ]
 }
