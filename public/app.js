@@ -4226,15 +4226,30 @@ function channelNote(c) {
     if (c.verification === 'qualified') bits.push('qualified');
     return bits.join(' \u00b7 ');
 }
+// The research titles X and Telegram routes generically ("Algorand x" eight times over, one
+// per language account), so the handle is what tells the rows apart.
+const HANDLE_HOSTS = { x: ['x.com', 'twitter.com'], telegram: ['t.me', 'telegram.me'] };
+function channelHandle(c) {
+    const hosts = HANDLE_HOSTS[c.platform];
+    if (!hosts) return null;
+    try {
+        const u = new URL(c.url);
+        if (!hosts.includes(u.hostname.replace(/^www\./, ''))) return null;
+        const first = u.pathname.split('/').find(Boolean);
+        return first && /^[A-Za-z0-9_]{2,64}$/.test(first) ? `@${first}` : null;
+    } catch { return null; }
+}
 function channelItem(c) {
     const href = channelHref(c.url);
     const label = c.url.startsWith('mailto:') ? c.url.slice(7) : (c.title || safeHost(c.url) || c.url);
+    const handle = channelHandle(c);
     const note = channelNote(c);
     return el('div', { class: 'r-item', title: c.notes || null }, [
         el('div', { class: 'r-main' }, [
             el('span', { class: 'chip-link', text: CHANNEL_PLATFORM_TEXT[c.platform] || c.platform }),
-            href ? el('a', { href, target: '_blank', rel: 'noopener', text: label }) : el('span', { text: label })
-        ]),
+            href ? el('a', { href, target: '_blank', rel: 'noopener', text: label }) : el('span', { text: label }),
+            handle ? el('span', { class: 'r-note', text: handle }) : null
+        ].filter(Boolean)),
         el('div', { class: 'r-meta' }, [
             note ? el('span', { class: 'r-note', text: note }) : null,
             ...evidenceLinks(c)
@@ -4255,6 +4270,10 @@ function renderChannels(channels, sec) {
                 const open = extra.classList.toggle('hidden') === false;
                 toggle.setAttribute('aria-expanded', String(open));
                 toggle.textContent = open ? 'Show less' : moreText;
+                // Collapsing 38 rows from the bottom of the list would leave a phone reader far
+                // below the drawer's content (iOS Safari has no scroll anchoring): bring the
+                // button back into view.
+                if (!open) toggle.scrollIntoView({ block: 'nearest' });
             }
         });
     }
