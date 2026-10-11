@@ -281,8 +281,12 @@
     <section id="view-graph" class="view" role="tabpanel" aria-labelledby="tab-graph" tabindex="0">
         <div id="graph-canvas"></div>
 
-        <div class="graph-overlay">
-            <div class="panel graph-controls">
+        <div class="graph-overlay" id="graphOverlay">
+            <!-- Phone only (CSS): the stacked panels cover the whole canvas, so they start
+                 collapsed behind this toggle. -->
+            <button class="btn graph-panels-toggle" type="button" id="graphPanelsToggle"
+                    aria-expanded="false" aria-controls="graphControls graphLegend">Filters &amp; legend</button>
+            <div class="panel graph-controls" id="graphControls">
                 <div class="graph-controls-title">Show</div>
                 <div class="chip-row" id="graphFilterChips" role="group" aria-label="Filter node types"></div>
 
@@ -315,7 +319,7 @@
                 <div class="graph-stat-label">relationships</div>
             </div>
 
-            <div class="panel graph-legend">
+            <div class="panel graph-legend" id="graphLegend">
                 <div class="legend-section">
                     <div class="legend-title">Node colour — type</div>
                     <div class="chart-legend" id="graphLegendColor"></div>

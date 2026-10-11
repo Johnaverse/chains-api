@@ -60,6 +60,13 @@ describe('rpcUtil - jsonRpcCall', () => {
       .rejects.toThrow('HTTP 500');
   });
 
+  it('exposes the HTTP status on the thrown error', async () => {
+    vi.mocked(proxyFetch).mockResolvedValue({ ok: false, status: 401 });
+
+    await expect(jsonRpcCall('https://rpc.example.com', 'eth_blockNumber'))
+      .rejects.toMatchObject({ message: 'HTTP 401', status: 401 });
+  });
+
   it('should throw on JSON-RPC error with message', async () => {
     vi.mocked(proxyFetch).mockResolvedValue({
       ok: true,

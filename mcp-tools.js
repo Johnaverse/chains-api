@@ -661,7 +661,7 @@ function handleGetNodeRequirements(args) {
     totalMatched: profiles.length,
     availableRoles: [...new Set(hardware.profiles.map((p) => p.role))].sort((a, b) => rank(ROLE_ORDER, a) - rank(ROLE_ORDER, b)),
     software,
-    note: 'Requirements are quoted in each publisher’s original units — do not convert or combine them. An absent component was not documented, never zero. Published requirements, not benchmarks. observedClients is what live endpoints run, not a requirement.',
+    note: 'Requirements are quoted in each publisher’s original units — never convert units or do arithmetic across profiles (no sums or averages). A profile that omits a component may take it, verbatim, from a sibling with the same client and scope (another tier of the same role, or the full node for an archive node) — say which profile it came from. A component no profile documents was not documented, never zero. Published requirements, not benchmarks. observedClients is what live endpoints run, not a requirement.',
   };
   if (profiles.length === 0) {
     envelope.message = `No ${[role, level].filter(Boolean).join(' ')} profile is documented for this chain, but ${hardware.profiles.length} other profile(s) are (roles: ${envelope.availableRoles.join(', ')}) — call again without the filter.`;

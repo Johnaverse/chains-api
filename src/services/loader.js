@@ -17,6 +17,7 @@ import {
   DATA_CACHE_PATH
 } from '../store/snapshot.js';
 import { loadAllRpcHealthFromDisk } from '../store/rpcHealthStore.js';
+import { loadPrivateRpcsFromDisk, stripPrivateRpcs } from '../store/privateRpcStore.js';
 import { logger } from '../util/logger.js';
 
 const DATA_SOURCES = {
@@ -177,6 +178,7 @@ async function overlayDiskRpcHealth() {
   const { byChainId, lastCheckedAt } = await loadAllRpcHealthFromDisk();
   if (Object.keys(byChainId).length === 0) return;
   cachedData.rpcHealth = byChainId;
+  stripPrivateRpcs(null, cachedData.rpcHealth);
   if (lastCheckedAt) cachedData.lastRpcCheck = lastCheckedAt;
   logger.info({ chains: Object.keys(byChainId).length }, 'Loaded cached RPC-health state');
 }
@@ -195,6 +197,9 @@ export async function initializeDataOnStartup(options = {}) {
 
   startupInitializationPromise = (async () => {
     const snapshotData = await readSnapshotFromDisk();
+    // Before any applyDataToCache, so known 401 endpoints are stripped from the first index served.
+    const privateRpcCount = await loadPrivateRpcsFromDisk();
+    if (privateRpcCount > 0) logger.info({ privateRpcCount }, 'Loaded private (HTTP 401) RPC list');
 
     if (snapshotData) {
       applyDataToCache(snapshotData);
