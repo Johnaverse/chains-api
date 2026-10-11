@@ -266,6 +266,16 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('identityStatus unresolved');
   });
 
+  it('combines partial hardware profiles with same-client siblings instead of answering thin', () => {
+    const prompt = buildSystemPrompt(undefined, new Date('2026-07-06T12:00:00Z'));
+    // Base's recommended full-node profile is memory-only; CPU/storage live on the minimum one.
+    expect(prompt).toContain('PARTIAL PROFILES ARE COMBINED');
+    expect(prompt).toContain('chainId only (no role or level filter)');
+    expect(prompt).toContain('the full node when asked about an archive node');
+    expect(prompt).toContain('say which');
+    expect(prompt).toContain('Never borrow across different clients or scopes');
+  });
+
   it('tells the model a follow-up keeps the previous turn\'s network, ABOVE the registry-wide rule', () => {
     const prompt = buildSystemPrompt(undefined, new Date('2026-07-06T12:00:00Z'));
     expect(prompt).toContain('CARRY THE SUBJECT FORWARD');
