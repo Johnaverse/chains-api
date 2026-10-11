@@ -266,6 +266,15 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('identityStatus unresolved');
   });
 
+  it('makes hardware answers cite the profile sources as bare, clickable URLs', () => {
+    const prompt = buildSystemPrompt(undefined, new Date('2026-07-06T12:00:00Z'));
+    expect(prompt).toContain('end every hardware answer with a line "Source:"');
+    expect(prompt).toContain('including any profile you borrowed a component from');
+    // The dashboard links bare http(s) URLs only: backticks render as code, [text](url) as text.
+    expect(prompt).toContain('each as a bare URL (no backticks, no [text](url), no trailing punctuation)');
+    expect(prompt).toContain('source links stay bare, see 4e');
+  });
+
   it('combines partial hardware profiles with same-client siblings instead of answering thin', () => {
     const prompt = buildSystemPrompt(undefined, new Date('2026-07-06T12:00:00Z'));
     // Base's recommended full-node profile is memory-only; CPU/storage live on the minimum one.

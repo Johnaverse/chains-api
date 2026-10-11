@@ -4843,18 +4843,23 @@ function appendInlineMd(target, text) {
             strong.textContent = m[2];
             target.appendChild(strong);
         } else {
+            // A sentence ending in a URL ("see https://docs.x.org/node.") would otherwise link
+            // the full stop too and 404; trailing punctuation goes back to the text.
+            const url = m[3].replace(/[.,;:!?'"]+$/, '');
+            const tail = m[3].slice(url.length);
             // Same protocol rule as every other link on the page; a non-http(s) match stays text.
-            const href = safeUrl(m[3]);
+            const href = safeUrl(url);
             if (href) {
                 const a = document.createElement('a');
                 a.href = href;
                 a.target = '_blank';
                 a.rel = 'noopener';
-                a.textContent = m[3];
+                a.textContent = url;
                 target.appendChild(a);
             } else {
-                target.appendChild(document.createTextNode(m[3]));
+                target.appendChild(document.createTextNode(url));
             }
+            if (tail) target.appendChild(document.createTextNode(tail));
         }
         last = m.index + m[0].length;
     }
