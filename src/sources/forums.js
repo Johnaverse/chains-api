@@ -37,13 +37,18 @@ export function getForumByChainId(chainId) {
 }
 
 /**
- * Indexer pass: stamp each known chain with a `forumUrl` field.
+ * Indexer pass: make every chain's `forumUrl` match this build's registry — stamped where
+ * the registry lists the chain, removed where it no longer does. Removal matters for the
+ * stale-first boot, which serves a snapshot indexed by an older build: without it a board
+ * dropped from data/forums.json would stay on /chains until a source refresh succeeds.
  * Idempotent — safe to call on every index rebuild.
  */
 export function attachForums(indexed) {
   if (!indexed?.byChainId) return;
-  for (const [chainId, url] of BY_CHAIN_ID) {
-    const chain = indexed.byChainId[chainId];
-    if (chain) chain.forumUrl = url;
+  for (const [chainId, chain] of Object.entries(indexed.byChainId)) {
+    if (!chain || typeof chain !== 'object') continue;
+    const url = BY_CHAIN_ID.get(Number(chainId));
+    if (url) chain.forumUrl = url;
+    else delete chain.forumUrl;
   }
 }
