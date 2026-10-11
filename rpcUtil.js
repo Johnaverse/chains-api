@@ -27,7 +27,9 @@ export async function jsonRpcCall(url, method, { params = [], timeoutMs = 10000 
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      const httpError = new Error(`HTTP ${response.status}`);
+      httpError.status = response.status;
+      throw httpError;
     }
 
     const body = await response.json();

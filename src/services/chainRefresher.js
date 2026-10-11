@@ -34,6 +34,7 @@ import { cachedData } from '../store/cache.js';
 import { indexL2BeatSource } from '../store/indexer.js';
 import { fetchL2Beat } from '../sources/l2beat.js';
 import { persistChainRpcHealth, rpcStateChanged } from '../store/rpcHealthStore.js';
+import { isPrivateRpc, markPrivateRpcs } from '../store/privateRpcStore.js';
 
 const SWEEP_TICK_MS = Number(process.env.CHAIN_REFRESHER_TICK_MS) || 1000;
 
@@ -116,6 +117,8 @@ async function checkRpcEndpoint(url) {
     result.ok = Boolean(result.clientVersion) && result.blockHeight !== null;
   } catch (error) {
     result.error = error.message;
+    // 401 = the endpoint wants credentials: a keyed/private RPC, not a public one.
+    if (error.status === 401) result.authRequired = true;
   }
   return result;
 }
@@ -143,8 +146,11 @@ export async function processChainRpc(chainId) {
   // Non-public hosts are dropped for the same reason they are refused in checkRpcEndpoint —
   // and dropped HERE too so they never consume one of the MAX_ENDPOINTS_PER_CHAIN slots that a
   // reachable endpoint could have used.
+  //
+  // Endpoints that once answered HTTP 401 are private (see privateRpcStore) and are
+  // never probed again.
   const urls = Array.from(new Set(normalized))
-    .filter(u => !u.includes('${') && safeExternalUrl(u) !== null)
+    .filter(u => !u.includes('${') && safeExternalUrl(u) !== null && !isPrivateRpc(u))
     .slice(0, MAX_ENDPOINTS_PER_CHAIN);
   if (urls.length === 0) return;
 
@@ -159,9 +165,22 @@ export async function processChainRpc(chainId) {
     return;
   }
 
+  const privateUrls = results.filter(r => r.authRequired).map(r => r.url);
+  if (privateUrls.length > 0) {
+    markPrivateRpcs(privateUrls);
+    const dropped = new Set(privateUrls);
+    chain.rpc = (chain.rpc || []).filter(entry => !dropped.has(normalizeRpcUrl(entry)));
+    // A snapshot-loaded index holds `all` as a separate copy of the chain.
+    const listed = cachedData.indexed.all?.find(c => c.chainId === chain.chainId);
+    if (listed && listed !== chain) listed.rpc = chain.rpc;
+    logger.info({ chainId, urls: privateUrls }, 'Dropped RPC endpoints requiring auth (HTTP 401)');
+    incCounter('chains_api_rpc_private_dropped_total', {}, privateUrls.length);
+  }
+  const publicResults = results.filter(r => !r.authRequired);
+
   if (!cachedData.rpcHealth) cachedData.rpcHealth = {};
   const previous = cachedData.rpcHealth[chainId];
-  cachedData.rpcHealth[chainId] = results;
+  cachedData.rpcHealth[chainId] = publicResults;
   chain.lastTested = new Date().toISOString();
   // Freshness signal for /clients and /rpc-monitor. Stamped per chain as
   // results are written — not at sweep end — because a full sweep can abort
@@ -172,8 +191,8 @@ export async function processChainRpc(chainId) {
   // Live, incremental persistence: write only this chain's state, and only
   // when an endpoint's up/down status actually changed (not on every block
   // advance). Fire-and-forget; the store logs its own failures.
-  if (rpcStateChanged(previous, results)) {
-    persistChainRpcHealth(chainId, results).catch(() => {});
+  if (rpcStateChanged(previous, publicResults)) {
+    persistChainRpcHealth(chainId, publicResults).catch(() => {});
   }
 
   incCounter('chains_api_rpc_check_total', { outcome: 'completed' }, results.length);

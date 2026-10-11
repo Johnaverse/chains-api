@@ -33,6 +33,7 @@ import { fetchL2Beat } from '../../../src/sources/l2beat.js';
 import { jsonRpcCall } from '../../../rpcUtil.js';
 import { persistChainRpcHealth } from '../../../src/store/rpcHealthStore.js';
 import { applyDataToCache, cachedData } from '../../../src/store/cache.js';
+import { isPrivateRpc, _resetPrivateRpcsForTests } from '../../../src/store/privateRpcStore.js';
 import {
   processChainRpc,
   processL2BeatBatch,
@@ -66,6 +67,7 @@ function seedCacheWith(chains) {
 describe('chainRefresher', () => {
   beforeEach(() => {
     _resetChainRefresherForTests();
+    _resetPrivateRpcsForTests();
     applyDataToCache({});
     fetchL2Beat.mockReset();
     jsonRpcCall.mockReset();
@@ -103,6 +105,44 @@ describe('chainRefresher', () => {
       // Two calls: clientVersion + blockNumber, for the one endpoint that survived.
       expect(jsonRpcCall).toHaveBeenCalledTimes(2);
       for (const [url] of jsonRpcCall.mock.calls) expect(url).toBe('https://rpc-public.example');
+    });
+
+    it('drops an endpoint that answers HTTP 401 and never probes it again', async () => {
+      // A 401 is a keyed/private endpoint: listing it as a public RPC is wrong, and probing it
+      // on every sweep is wasted fan-out.
+      seedCacheWith([seedChain(1, ['https://rpc-public.example', { url: 'https://rpc-keyed.example' }])]);
+      const unauthorized = Object.assign(new Error('HTTP 401'), { status: 401 });
+      jsonRpcCall.mockImplementation(async (url, method) => {
+        if (url === 'https://rpc-keyed.example') throw unauthorized;
+        return method === 'web3_clientVersion' ? 'Geth/v1.0' : '0x10';
+      });
+
+      await processChainRpc(1);
+
+      expect(isPrivateRpc('https://rpc-keyed.example')).toBe(true);
+      expect(cachedData.indexed.byChainId[1].rpc).toEqual(['https://rpc-public.example']);
+      expect(cachedData.rpcHealth[1].map(r => r.url)).toEqual(['https://rpc-public.example']);
+
+      jsonRpcCall.mockClear();
+      await processChainRpc(1);
+      for (const [url] of jsonRpcCall.mock.calls) expect(url).toBe('https://rpc-public.example');
+
+      // A source re-fetch rebuilds rpc from the registries; the private URL stays dropped.
+      seedCacheWith([seedChain(1, ['https://rpc-public.example', 'https://rpc-keyed.example'])]);
+      expect(cachedData.indexed.byChainId[1].rpc).toEqual(['https://rpc-public.example']);
+    });
+
+    it('keeps an endpoint that fails with a non-401 status', async () => {
+      // 403/429/5xx are often geo blocks, rate limits or outages — not proof it is private.
+      seedCacheWith([seedChain(1, ['https://rpc-flaky.example'])]);
+      jsonRpcCall.mockRejectedValue(Object.assign(new Error('HTTP 403'), { status: 403 }));
+
+      await processChainRpc(1);
+
+      expect(isPrivateRpc('https://rpc-flaky.example')).toBe(false);
+      expect(cachedData.rpcHealth[1]).toHaveLength(1);
+      expect(cachedData.rpcHealth[1][0].ok).toBe(false);
+      expect(cachedData.indexed.byChainId[1].rpc).toEqual(['https://rpc-flaky.example']);
     });
 
     it('writes per-endpoint results and stamps chain.lastTested', async () => {
