@@ -34,7 +34,7 @@ import { cachedData } from '../store/cache.js';
 import { indexL2BeatSource } from '../store/indexer.js';
 import { fetchL2Beat } from '../sources/l2beat.js';
 import { persistChainRpcHealth, rpcStateChanged } from '../store/rpcHealthStore.js';
-import { isPrivateRpc, markPrivateRpcs } from '../store/privateRpcStore.js';
+import { isPrivateRpc, markPrivateRpcs, stripPrivateRpcs } from '../store/privateRpcStore.js';
 
 const SWEEP_TICK_MS = Number(process.env.CHAIN_REFRESHER_TICK_MS) || 1000;
 
@@ -129,7 +129,8 @@ async function checkRpcEndpoint(url) {
  * /chains/:id surfaces freshness without a separate accessor.
  */
 export async function processChainRpc(chainId) {
-  if (!cachedData.indexed?.byChainId?.[chainId]) return;
+  // Own keys only: chainId can arrive from a request path, and '__proto__' must not resolve.
+  if (!cachedData.indexed?.byChainId || !Object.hasOwn(cachedData.indexed.byChainId, chainId)) return;
   const chain = cachedData.indexed.byChainId[chainId];
 
   const dataVersion = cachedData.lastUpdated;
@@ -159,23 +160,23 @@ export async function processChainRpc(chainId) {
   rpcState.isMonitoring = false;
   rpcState.endpointsCheckedThisSweep += results.length;
 
+  // A 401 is a fact about the URL, not about this data version, so record it before the
+  // race guard: a refresh landing mid-probe must not cost us the finding.
+  const privateUrls = results.filter(r => r.authRequired).map(r => r.url);
+  const newlyPrivate = privateUrls.length > 0 ? markPrivateRpcs(privateUrls) : 0;
+  if (newlyPrivate > 0) {
+    logger.info({ chainId, urls: privateUrls }, 'Dropped RPC endpoints requiring auth (HTTP 401)');
+    incCounter('chains_api_rpc_private_dropped_total', {}, newlyPrivate);
+  }
+
   // Race guard: a concurrent loadData() may have replaced the cache.
   if (cachedData.lastUpdated !== dataVersion) {
     logger.warn({ chainId }, 'Chain RPC check skipped: data changed during run');
     return;
   }
 
-  const privateUrls = results.filter(r => r.authRequired).map(r => r.url);
-  if (privateUrls.length > 0) {
-    markPrivateRpcs(privateUrls);
-    const dropped = new Set(privateUrls);
-    chain.rpc = (chain.rpc || []).filter(entry => !dropped.has(normalizeRpcUrl(entry)));
-    // A snapshot-loaded index holds `all` as a separate copy of the chain.
-    const listed = cachedData.indexed.all?.find(c => c.chainId === chain.chainId);
-    if (listed && listed !== chain) listed.rpc = chain.rpc;
-    logger.info({ chainId, urls: privateUrls }, 'Dropped RPC endpoints requiring auth (HTTP 401)');
-    incCounter('chains_api_rpc_private_dropped_total', {}, privateUrls.length);
-  }
+  // The same URL can be listed under several chains: apply the decision everywhere.
+  if (privateUrls.length > 0) stripPrivateRpcs(cachedData.indexed, cachedData.rpcHealth);
   const publicResults = results.filter(r => !r.authRequired);
 
   if (!cachedData.rpcHealth) cachedData.rpcHealth = {};

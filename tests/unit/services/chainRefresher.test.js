@@ -132,6 +132,36 @@ describe('chainRefresher', () => {
       expect(cachedData.indexed.byChainId[1].rpc).toEqual(['https://rpc-public.example']);
     });
 
+    it('applies a 401 to every chain listing the same URL', async () => {
+      seedCacheWith([
+        seedChain(1, ['https://rpc-keyed.example', 'https://rpc-a.example']),
+        seedChain(2, ['https://rpc-keyed.example'])
+      ]);
+      cachedData.rpcHealth = { 2: [{ url: 'https://rpc-keyed.example', ok: false }] };
+      jsonRpcCall.mockImplementation(async (url, method) => {
+        if (url === 'https://rpc-keyed.example') throw Object.assign(new Error('HTTP 401'), { status: 401 });
+        return method === 'web3_clientVersion' ? 'Geth/v1.0' : '0x10';
+      });
+
+      await processChainRpc(1);
+
+      // Chain 2 now has no probe-able URL, so it would never clean itself up.
+      expect(cachedData.indexed.byChainId[2].rpc).toEqual([]);
+      expect(cachedData.rpcHealth[2]).toEqual([]);
+    });
+
+    it('records a 401 even when a data refresh lands mid-probe', async () => {
+      seedCacheWith([seedChain(1, ['https://rpc-keyed.example'])]);
+      jsonRpcCall.mockImplementation(async () => {
+        cachedData.lastUpdated = '2026-05-06T00:00:00.000Z';
+        throw Object.assign(new Error('HTTP 401'), { status: 401 });
+      });
+
+      await processChainRpc(1);
+
+      expect(isPrivateRpc('https://rpc-keyed.example')).toBe(true);
+    });
+
     it('keeps an endpoint that fails with a non-401 status', async () => {
       // 403/429/5xx are often geo blocks, rate limits or outages — not proof it is private.
       seedCacheWith([seedChain(1, ['https://rpc-flaky.example'])]);

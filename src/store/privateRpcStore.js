@@ -1,5 +1,6 @@
 import { mkdir, writeFile, rename, readFile, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { DATA_CACHE_ENABLED, DATA_CACHE_FILE } from '../../config.js';
 import { logger } from '../util/logger.js';
 
@@ -39,7 +40,7 @@ export function markPrivateRpcs(urls) {
       added++;
     }
   }
-  if (added > 0) persistPrivateRpcs().catch(() => {});
+  if (added > 0) persistPrivateRpcs();
   return added;
 }
 
@@ -67,9 +68,28 @@ export function stripPrivateRpcs(indexed, rpcHealth) {
   }
 }
 
-async function persistPrivateRpcs() {
+// One writer at a time: a mark that lands mid-write queues exactly one more pass, which
+// snapshots the set when it starts — so the last write always holds every URL marked.
+let persistInFlight = null;
+let persistQueued = false;
+
+function persistPrivateRpcs() {
+  if (persistInFlight) {
+    persistQueued = true;
+    return persistInFlight;
+  }
+  persistInFlight = (async () => {
+    do {
+      persistQueued = false;
+      await writePrivateRpcs();
+    } while (persistQueued);
+  })().finally(() => { persistInFlight = null; });
+  return persistInFlight;
+}
+
+async function writePrivateRpcs() {
   if (!DATA_CACHE_ENABLED) return;
-  const tmp = `${PRIVATE_RPC_FILE}.tmp-${process.pid}-${Date.now()}`;
+  const tmp = `${PRIVATE_RPC_FILE}.tmp-${process.pid}-${randomUUID()}`;
   try {
     await mkdir(dirname(PRIVATE_RPC_FILE), { recursive: true });
     await writeFile(tmp, JSON.stringify({ urls: [...privateUrls].sort() }), 'utf8');
