@@ -6,6 +6,7 @@ import {
   loadNetworkResearch,
   loadForumResearch,
   loadNodeHardware,
+  loadChannelResearch,
   getNetworkResearch,
   getNetworkResearchInfo,
   attachNetworkResearch,
@@ -66,6 +67,22 @@ const HARDWARE = {
   ]
 };
 
+const channel = {
+  platform: 'discord', url: 'https://discord.gg/buildonbase', title: 'Base Discord', mode: 'discussion', audience: ['community', 'developers'],
+  relationship: 'officially_endorsed', scope: 'project_family', access: 'public_preview_read', invitation: 'verified_preview',
+  verification: 'confirmed', notes: 'Base docs link it.', evidence: ['https://docs.base.org/']
+};
+
+const CHANNELS = {
+  updatedAt: '2026-10-11T05:34:45.013198+00:00',
+  networks: [
+    { chainId: 8453, status: 'found', identityStatus: 'confirmed', checkedAt: '2026-10-11T03:30:31.487Z', channels: [channel] },
+    { chainId: 6262, status: 'partial', identityStatus: 'qualified', checkedAt: null, channels: [{ ...channel, platform: 'email', url: 'mailto:info@example.org' }] },
+    { chainId: 777, status: 'not_found', checkedAt: null, channels: [] },
+    { chainId: 8453, channels: [{ ...channel, title: 'duplicate ignored' }] }
+  ]
+};
+
 let dir;
 const write = (name, content) => {
   const path = join(dir, name);
@@ -75,7 +92,8 @@ const write = (name, content) => {
 const useFixtures = () => _setNetworkResearchForTests(
   write('dataset.json', JSON.stringify(DATASET)),
   write('forums.json', JSON.stringify(FORUMS)),
-  write('hardware.json', JSON.stringify(HARDWARE))
+  write('hardware.json', JSON.stringify(HARDWARE)),
+  write('channels.json', JSON.stringify(CHANNELS))
 );
 
 beforeAll(() => {
@@ -143,6 +161,20 @@ describe('loadNetworkResearch', () => {
         for (const r of p.requirements) expect(r.value != null || r.min != null || r.max != null).toBe(true);
       }
     }
+
+    const channels = loadChannelResearch();
+    expect(channels.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(channels.byChainId.size).toBeGreaterThan(1000);
+    expect(channels.byChainId.get(1).channels.length).toBeGreaterThan(0);
+    for (const entry of channels.byChainId.values()) {
+      expect(entry.channels.length).toBeGreaterThan(0);
+      for (const c of entry.channels) {
+        expect(['confirmed', 'qualified']).toContain(c.verification);
+        expect(c.access).not.toBe('repurposed');
+        // Only web links and mail addresses: nothing the dashboard could turn into a script URL.
+        expect(c.url).toMatch(/^(https?:\/\/|mailto:)/);
+      }
+    }
   });
 });
 
@@ -158,6 +190,8 @@ describe('getNetworkResearch / getNetworkResearchInfo', () => {
       features: [],
       forums: [{ ...forum, url: 'https://github.com/base/web/discussions', access: 'archived' }],
       forumsCheckedAt: '2026-10-10T15:00:00.000Z',
+      channels: [channel],
+      channelsCheckedAt: '2026-10-11T03:30:31.487Z',
       hardware: { identityStatus: 'confirmed', checkedAt: '2026-10-10T09:27:13.772253+00:00', profiles: [profile] },
       updatedAt: '2026-10-10T07:58:00.646Z'
     });
@@ -166,7 +200,8 @@ describe('getNetworkResearch / getNetworkResearchInfo', () => {
       loaded: true,
       researchLoaded: true, updatedAt: '2026-10-10T07:58:00.646Z', networks: 4,
       forumsLoaded: true, forumNetworks: 3, forumsUpdatedAt: '2026-10-10T15:51:28.230185+00:00',
-      hardwareLoaded: true, hardwareNetworks: 3, hardwareUpdatedAt: '2026-10-10T16:20:12.747009+00:00'
+      hardwareLoaded: true, hardwareNetworks: 3, hardwareUpdatedAt: '2026-10-10T16:20:12.747009+00:00',
+      channelsLoaded: true, channelNetworks: 3, channelsUpdatedAt: '2026-10-11T05:34:45.013198+00:00'
     });
   });
 
@@ -185,14 +220,24 @@ describe('getNetworkResearch / getNetworkResearchInfo', () => {
     });
   });
 
+  it('returns a channels-only block, dated by the channel dataset when the network has no check date', () => {
+    expect(getNetworkResearch(6262)).toEqual({
+      channels: [{ ...channel, platform: 'email', url: 'mailto:info@example.org' }],
+      channelsCheckedAt: '2026-10-11T05:34:45.013198+00:00',
+      updatedAt: '2026-10-11T05:34:45.013198+00:00'
+    });
+  });
+
   it('reports research as not loaded when any one dataset is missing, with the flag naming which', () => {
     _setNetworkResearchForTests(write('dataset.json', JSON.stringify(DATASET)), join(dir, 'missing.json'), write('hardware.json', JSON.stringify(HARDWARE)));
     expect(getNetworkResearchInfo()).toMatchObject({ loaded: false, researchLoaded: true, forumsLoaded: false, hardwareLoaded: true, forumNetworks: 0 });
     _setNetworkResearchForTests(write('dataset.json', JSON.stringify(DATASET)), write('forums.json', JSON.stringify(FORUMS)), join(dir, 'missing.json'));
     expect(getNetworkResearchInfo()).toMatchObject({ loaded: false, hardwareLoaded: false, hardwareNetworks: 0 });
+    _setNetworkResearchForTests(write('dataset.json', JSON.stringify(DATASET)), write('forums.json', JSON.stringify(FORUMS)), write('hardware.json', JSON.stringify(HARDWARE)), join(dir, 'missing.json'));
+    expect(getNetworkResearchInfo()).toMatchObject({ loaded: false, hardwareLoaded: true, channelsLoaded: false, channelNetworks: 0 });
   });
 
-  it('returns null when the research lists no repositories, papers, features, forums or hardware', () => {
+  it('returns null when the research lists no repositories, papers, features, forums, hardware or channels', () => {
     expect(getNetworkResearch(7)).toBeNull();
     expect(getNetworkResearch(327)).toBeNull();
     expect(getNetworkResearch(777)).toBeNull();
@@ -202,18 +247,21 @@ describe('getNetworkResearch / getNetworkResearchInfo', () => {
     getNetworkResearch(8453).repositories.push({ url: 'https://evil.example' });
     getNetworkResearch(4242).forums[0].url = 'https://evil.example';
     getNetworkResearch(5151).hardware.profiles[0].requirements[0].value = 999;
+    getNetworkResearch(6262).channels[0].evidence.push('https://evil.example');
     expect(getNetworkResearch(8453).repositories).toEqual([repo]);
     expect(getNetworkResearch(4242).forums).toEqual([forum]);
     expect(getNetworkResearch(5151).hardware.profiles[0].requirements[0].value).toBe(8);
+    expect(getNetworkResearch(6262).channels[0].evidence).toEqual(['https://docs.base.org/']);
   });
 
   it('reports not loaded when the datasets are empty', () => {
-    _setNetworkResearchForTests(join(dir, 'missing.json'), join(dir, 'missing.json'), join(dir, 'missing.json'));
+    _setNetworkResearchForTests(join(dir, 'missing.json'), join(dir, 'missing.json'), join(dir, 'missing.json'), join(dir, 'missing.json'));
     expect(getNetworkResearchInfo()).toEqual({
       loaded: false,
       researchLoaded: false, updatedAt: null, networks: 0,
       forumsLoaded: false, forumNetworks: 0, forumsUpdatedAt: null,
-      hardwareLoaded: false, hardwareNetworks: 0, hardwareUpdatedAt: null
+      hardwareLoaded: false, hardwareNetworks: 0, hardwareUpdatedAt: null,
+      channelsLoaded: false, channelNetworks: 0, channelsUpdatedAt: null
     });
     expect(getNetworkResearch(8453)).toBeNull();
     expect(getNetworkResearch(5151)).toBeNull();
@@ -239,9 +287,10 @@ describe('attachNetworkResearch', () => {
     expect('family' in idx.byChainId[327]).toBe(false);
   });
 
-  it('marks a chain covered only by the forum or hardware research, without stamping anything else', () => {
-    const idx = indexed([{ chainId: 4242, forumUrl: 'https://forum.arbitrum.foundation' }, { chainId: 777 }, { chainId: 5151 }]);
+  it('marks a chain covered only by the forum, hardware or channel research, without stamping anything else', () => {
+    const idx = indexed([{ chainId: 4242, forumUrl: 'https://forum.arbitrum.foundation' }, { chainId: 777 }, { chainId: 5151 }, { chainId: 6262 }]);
     attachNetworkResearch(idx);
+    expect(idx.byChainId[6262]).toEqual({ chainId: 6262, sources: ['chains', 'research'] });
     expect(idx.byChainId[4242]).toEqual({ chainId: 4242, forumUrl: 'https://forum.arbitrum.foundation', sources: ['chains', 'research'] });
     expect(idx.byChainId[5151]).toEqual({ chainId: 5151, sources: ['chains', 'research'] });
     // Listed in the exports with nothing kept: still researched, nothing else.
@@ -314,7 +363,7 @@ describe('queries — research reaches the API projections', () => {
   it('getChainDetail adds the research block when there is one', () => {
     load();
     expect(getChainDetail(8453).research).toMatchObject({
-      family: 'OP Stack-derived', repositories: [repo], forums: [expect.objectContaining({ access: 'archived' })],
+      family: 'OP Stack-derived', repositories: [repo], forums: [expect.objectContaining({ access: 'archived' })], channels: [channel],
       hardware: { identityStatus: 'confirmed', profiles: [expect.objectContaining({ role: 'full_node' })] }
     });
     expect(getChainDetail(999)).toEqual(getChainById(999));

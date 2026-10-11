@@ -7,6 +7,7 @@ const __dir = dirname(fileURLToPath(import.meta.url));
 const DATASET_PATH = join(__dir, '..', '..', 'data', 'network-research.json');
 const FORUMS_PATH = join(__dir, '..', '..', 'data', 'forum-research.json');
 const HARDWARE_PATH = join(__dir, '..', '..', 'data', 'node-hardware.json');
+const CHANNELS_PATH = join(__dir, '..', '..', 'data', 'channel-research.json');
 
 function indexByChainId(parsed) {
   const byChainId = new Map();
@@ -46,28 +47,42 @@ export function loadNodeHardware(path = HARDWARE_PATH) {
   return indexByChainId(readStaticJson(path, 'Node hardware dataset'));
 }
 
+// Communication channel research, converted from the network communication channels
+// export into data/channel-research.json: per chain, the public Discord / Telegram / X /
+// email / other routes a primary project source links, each with its relationship
+// (official_operated / officially_endorsed / community_run / uncertain), scope, access and
+// invitation state at research time. Only confirmed or qualified records were kept, and
+// repurposed destinations dropped. Nothing here was joined or contacted, and nothing is
+// ever fetched: it is a discovery list, not proof a channel is active or answered.
+export function loadChannelResearch(path = CHANNELS_PATH) {
+  return indexByChainId(readStaticJson(path, 'Channel research dataset'));
+}
+
 let dataset = loadNetworkResearch();
 let forums = loadForumResearch();
 let hardware = loadNodeHardware();
+let channels = loadChannelResearch();
 
 /** Test-only: swap the datasets (pass paths, or nothing to reload the checked-in files). */
-export function _setNetworkResearchForTests(path, forumsPath, hardwarePath) {
+export function _setNetworkResearchForTests(path, forumsPath, hardwarePath, channelsPath) {
   dataset = loadNetworkResearch(path);
   forums = loadForumResearch(forumsPath);
   hardware = loadNodeHardware(hardwarePath);
+  channels = loadChannelResearch(channelsPath);
 }
 
 /**
- * Dataset dates and sizes, for /health and /sources. `loaded` is true only when all three
- * checked-in files loaded: a missing or malformed forum or hardware file is a packaging
- * bug that must show, not disappear behind the network research being fine.
+ * Dataset dates and sizes, for /health and /sources. `loaded` is true only when all four
+ * checked-in files loaded: a missing or malformed forum, hardware or channel file is a
+ * packaging bug that must show, not disappear behind the network research being fine.
  */
 export function getNetworkResearchInfo() {
   const researchLoaded = dataset.byChainId.size > 0;
   const forumsLoaded = forums.byChainId.size > 0;
   const hardwareLoaded = hardware.byChainId.size > 0;
+  const channelsLoaded = channels.byChainId.size > 0;
   return {
-    loaded: researchLoaded && forumsLoaded && hardwareLoaded,
+    loaded: researchLoaded && forumsLoaded && hardwareLoaded && channelsLoaded,
     researchLoaded,
     updatedAt: dataset.updatedAt,
     networks: dataset.byChainId.size,
@@ -76,7 +91,10 @@ export function getNetworkResearchInfo() {
     forumsUpdatedAt: forums.updatedAt,
     hardwareLoaded,
     hardwareNetworks: hardware.byChainId.size,
-    hardwareUpdatedAt: hardware.updatedAt
+    hardwareUpdatedAt: hardware.updatedAt,
+    channelsLoaded,
+    channelNetworks: channels.byChainId.size,
+    channelsUpdatedAt: channels.updatedAt
   };
 }
 
@@ -86,7 +104,7 @@ const hasItems = entry => entry.repositories?.length > 0 || entry.papers?.length
  * The research block for one chain, or null when the research found nothing to list for
  * it (family alone is stamped on the chain itself). Served on single-chain lookups only,
  * so the /chains list (and its in-memory projection) doesn't carry several MB of
- * repositories, papers, features, forums and hardware profiles. A copy: callers may
+ * repositories, papers, features, forums, channels and hardware profiles. A copy: callers may
  * mutate it without touching the datasets.
  */
 export function getNetworkResearch(chainId) {
@@ -94,10 +112,12 @@ export function getNetworkResearch(chainId) {
   const entry = dataset.byChainId.get(id);
   const forumEntry = forums.byChainId.get(id);
   const hardwareEntry = hardware.byChainId.get(id);
+  const channelEntry = channels.byChainId.get(id);
   const hasResearch = entry != null && hasItems(entry);
   const hasForums = forumEntry?.forums?.length > 0;
   const hasHardware = hardwareEntry?.profiles?.length > 0;
-  if (!hasResearch && !hasForums && !hasHardware) return null;
+  const hasChannels = channelEntry?.channels?.length > 0;
+  if (!hasResearch && !hasForums && !hasHardware && !hasChannels) return null;
   const research = {};
   if (hasResearch) {
     const { chainId: _ignored, websiteCorrection: _website, ...rest } = structuredClone(entry);
@@ -106,6 +126,10 @@ export function getNetworkResearch(chainId) {
   if (hasForums) {
     research.forums = structuredClone(forumEntry.forums);
     research.forumsCheckedAt = forumEntry.checkedAt ?? forums.updatedAt;
+  }
+  if (hasChannels) {
+    research.channels = structuredClone(channelEntry.channels);
+    research.channelsCheckedAt = channelEntry.checkedAt ?? channels.updatedAt;
   }
   if (hasHardware) {
     research.hardware = {
@@ -116,7 +140,10 @@ export function getNetworkResearch(chainId) {
   }
   // The block's date is the date of the dataset that produced its items — never the
   // network research's date for a chain it does not cover.
-  research.updatedAt = hasResearch ? dataset.updatedAt : hasForums ? forums.updatedAt : hardware.updatedAt;
+  research.updatedAt = hasResearch ? dataset.updatedAt
+    : hasForums ? forums.updatedAt
+      : hasHardware ? hardware.updatedAt
+        : channels.updatedAt;
   return research;
 }
 
@@ -174,7 +201,7 @@ export function attachNetworkResearch(indexed) {
     }
     markResearched(chain);
   }
-  for (const keys of [forums.byChainId.keys(), hardware.byChainId.keys()]) {
+  for (const keys of [forums.byChainId.keys(), hardware.byChainId.keys(), channels.byChainId.keys()]) {
     for (const chainId of keys) {
       const chain = indexed.byChainId[chainId];
       if (chain) markResearched(chain);

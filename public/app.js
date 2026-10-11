@@ -4195,10 +4195,68 @@ function renderForums(forums, sec) {
     }));
     sec.appendChild(detailRow('Forums', list));
 }
+// Channel research: public chat / social / contact routes a project source links. Nobody
+// joined them, so the note says how each relates to this chain and what could be read —
+// a project-wide Telegram is never shown as if it were this deployment's help desk.
+const CHANNEL_PLATFORM_TEXT = {
+    discord: 'Discord', telegram: 'Telegram', x: 'X', email: 'email', slack: 'Slack', gitter: 'Gitter',
+    matrix: 'Matrix', wechat: 'WeChat', contact_form: 'contact form', other: 'other'
+};
+const CHANNEL_ACCESS_TEXT = {
+    inaccessible: 'unreachable when checked', login_required: 'login required', invite_unverified: 'invite not verified'
+};
+const CHANNELS_SHOWN = 8;
+// Web links, plus mail addresses for the email routes. Anything else gets no href.
+function channelHref(url) {
+    try {
+        const u = new URL(url);
+        if (u.protocol === 'mailto:') return u.pathname.includes('@') ? u.href : null;
+    } catch { return null; }
+    return safeUrl(url);
+}
+function channelNote(c) {
+    const bits = [];
+    if (c.mode && c.mode !== 'unknown') bits.push(c.mode);
+    if (c.relationship === 'official_operated') bits.push('official');
+    else if (c.relationship === 'community_run') bits.push('community-run');
+    else if (c.relationship === 'uncertain') bits.push('relationship uncertain');
+    if (FORUM_SCOPE_TEXT[c.scope] && !(c.scope === 'uncertain' && c.relationship === 'uncertain')) bits.push(FORUM_SCOPE_TEXT[c.scope]);
+    if (CHANNEL_ACCESS_TEXT[c.access]) bits.push(CHANNEL_ACCESS_TEXT[c.access]);
+    if (c.language) bits.push(c.language);
+    if (c.verification === 'qualified') bits.push('qualified');
+    return bits.join(' \u00b7 ');
+}
+function channelItem(c) {
+    const href = channelHref(c.url);
+    const label = c.url.startsWith('mailto:') ? c.url.slice(7) : (c.title || safeHost(c.url) || c.url);
+    const note = channelNote(c);
+    return el('div', { class: 'r-item', title: c.notes || null }, [
+        el('div', { class: 'r-main' }, [
+            el('span', { class: 'chip-link', text: CHANNEL_PLATFORM_TEXT[c.platform] || c.platform }),
+            href ? el('a', { href, target: '_blank', rel: 'noopener', text: label }) : el('span', { text: label })
+        ]),
+        el('div', { class: 'r-meta' }, [
+            note ? el('span', { class: 'r-note', text: note }) : null,
+            ...evidenceLinks(c)
+        ].filter(Boolean))
+    ]);
+}
+function renderChannels(channels, sec) {
+    const shown = channels.slice(0, CHANNELS_SHOWN).map(channelItem);
+    const rest = channels.slice(CHANNELS_SHOWN);
+    const list = el('div', { class: 'rpc-list' }, [
+        ...shown,
+        rest.length ? el('details', { class: 'r-more' }, [
+            el('summary', { text: `Show ${rest.length} more` }),
+            el('div', { class: 'rpc-list' }, rest.map(channelItem))
+        ]) : null
+    ].filter(Boolean));
+    sec.appendChild(detailRow('Channels', list));
+}
 // `research.hardware` (node sizing profiles) is deliberately not rendered here: it exists
 // for the assistant and MCP clients to answer setup questions, not for the drawer.
 function renderResearch(research, sec) {
-    const hasAny = research && (research.repositories?.length || research.papers?.length || research.features?.length || research.forums?.length);
+    const hasAny = research && (research.repositories?.length || research.papers?.length || research.features?.length || research.forums?.length || research.channels?.length);
     if (!hasAny) { sec.classList.add('hidden'); return; }
     // Drop everything after the title so a re-open does not stack rows.
     while (sec.children.length > 1) sec.removeChild(sec.lastChild);
@@ -4220,10 +4278,12 @@ function renderResearch(research, sec) {
         sec.appendChild(detailRow('Features', list));
     }
     if (research.forums?.length) renderForums(research.forums, sec);
-    const when = research.checkedAt || research.forumsCheckedAt || research.updatedAt;
+    if (research.channels?.length) renderChannels(research.channels, sec);
+    const when = research.checkedAt || research.forumsCheckedAt || research.channelsCheckedAt || research.updatedAt;
     const caveats = [];
     if (research.features?.length) caveats.push('Features are the project\u2019s own statements, not tested facts.');
     if (research.forums?.length) caveats.push('Forum posts are user-generated and not endorsed.');
+    if (research.channels?.length) caveats.push('Channels are linked by the project; none were joined, so activity and replies are unknown.');
     sec.appendChild(el('div', { class: 'r-foot dim',
         text: [`Audited research${when ? `, checked ${relTime(when)}` : ''}.`, ...caveats].join(' ') }));
     sec.classList.remove('hidden');

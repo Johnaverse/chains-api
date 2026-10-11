@@ -1255,6 +1255,24 @@ describe('MCP Tools - Shared Module', () => {
       expect(JSON.parse(result.content[0].text).message).toContain('No chain with chainId');
     });
 
+    it('get_chain_by_id sends a capped, compact channel list with the full count', async () => {
+      const channel = i => ({
+        platform: 'telegram', title: `Group ${i}`, url: `https://t.me/g${i}`, mode: 'discussion', audience: ['community'],
+        relationship: 'officially_endorsed', scope: 'project_family', access: 'invite_unverified', invitation: 'official_link_unverified',
+        verification: 'qualified', notes: 'long boilerplate', evidence: ['https://example.org/']
+      });
+      vi.mocked(dataService.getChainDetail).mockReturnValueOnce({
+        chainId: 1, name: 'Ethereum', research: { channels: Array.from({ length: 20 }, (_, i) => channel(i)), channelsCheckedAt: 'y', updatedAt: 'x' }
+      });
+      const data = JSON.parse((await handleToolCall('get_chain_by_id', { chainId: 1 })).content[0].text);
+      expect(data.research.channelsTotal).toBe(20);
+      expect(data.research.channels).toHaveLength(12);
+      expect(data.research.channels[0]).toEqual({
+        platform: 'telegram', title: 'Group 0', url: 'https://t.me/g0', mode: 'discussion',
+        relationship: 'officially_endorsed', scope: 'project_family', access: 'invite_unverified', verification: 'qualified'
+      });
+    });
+
     it('get_chain_by_id leaves hardware to this tool and keeps price ahead of the research block', async () => {
       vi.mocked(dataService.getChainDetail).mockReturnValueOnce({
         chainId: 1, name: 'Ethereum',

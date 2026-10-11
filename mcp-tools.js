@@ -72,7 +72,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_chain_by_id',
-      description: 'Get detailed information about a specific blockchain chain by its chain ID. Includes a `price` object for the chain’s NATIVE currency (null when unmapped): `{usd, vol24h, marketCap, asOf, stale}`. `vol24h` is that ASSET’s 24-hour trading volume in USD — market activity, NOT chain throughput — so an L2 settling in ETH reports ETH’s volume, not its own; name the asset when quoting it. When `stale` is true the quote stopped moving at `asOf` (over a day ago): `vol24h` and `marketCap` are null and `usd` is the last known price, to be quoted as of `asOf` rather than as current. A null field is unknown, never zero. When researched, a `research` object lists the chain’s node/client `repositories` (each with a `kind` such as execution, consensus, rollup or node), whitepaper/document `papers` and short sourced `features`; every item carries a `status` (checked = fully verified, partial = evidence has gaps) and its `evidence` URLs — say when an item is only partially verified, and treat features as the project’s own claims, not tested facts. `research.forums` lists discussion boards the forum research tied to the chain, each with `relationship` (official / community_run / uncertain), `scope` (exact_network, project_family = the project’s shared board, ecosystem_shared, historical_network, uncertain = the board’s relationship to this chain could not be established) and `access` (read / inaccessible / archived when checked) — name the scope and say when a board was unreachable or archived; the chain’s `forumUrl` is the separately curated registry entry. Node hardware / setup requirements are NOT in this response: when `hasNodeRequirements` is true, call get_node_requirements for them.',
+      description: 'Get detailed information about a specific blockchain chain by its chain ID. Includes a `price` object for the chain’s NATIVE currency (null when unmapped): `{usd, vol24h, marketCap, asOf, stale}`. `vol24h` is that ASSET’s 24-hour trading volume in USD — market activity, NOT chain throughput — so an L2 settling in ETH reports ETH’s volume, not its own; name the asset when quoting it. When `stale` is true the quote stopped moving at `asOf` (over a day ago): `vol24h` and `marketCap` are null and `usd` is the last known price, to be quoted as of `asOf` rather than as current. A null field is unknown, never zero. When researched, a `research` object lists the chain’s node/client `repositories` (each with a `kind` such as execution, consensus, rollup or node), whitepaper/document `papers` and short sourced `features`; every item carries a `status` (checked = fully verified, partial = evidence has gaps) and its `evidence` URLs — say when an item is only partially verified, and treat features as the project’s own claims, not tested facts. `research.forums` lists discussion boards the forum research tied to the chain, each with `relationship` (official / community_run / uncertain), `scope` (exact_network, project_family = the project’s shared board, ecosystem_shared, historical_network, uncertain = the board’s relationship to this chain could not be established) and `access` (read / inaccessible / archived when checked) — name the scope and say when a board was unreachable or archived; the chain’s `forumUrl` is the separately curated registry entry. `research.channels` lists public community / developer / support routes a primary project source links (`platform` discord / telegram / x / email / slack / gitter / matrix / wechat / contact_form / other), at most 12, most specific first, with `channelsTotal` the full count: `relationship` official_operated / officially_endorsed (linked by the project, not necessarily run by it) / community_run / uncertain; `scope` as for forums; `access` = what the research could read without joining (public_preview_read, invite_unverified = invite link not validated, inaccessible, login_required, not_checked). Nobody joined or contacted these, so never promise a channel is active or that the team answers there, and name the scope when a route is project-wide or shared. Node hardware / setup requirements are NOT in this response: when `hasNodeRequirements` is true, call get_node_requirements for them.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -543,6 +543,13 @@ async function handleGetChains(args) {
   });
 }
 
+// Channel research can list dozens of routes per chain (Ethereum: 28), each with notes and
+// evidence — far past the tool-result cap. The model gets the identifying fields of the
+// first few, already ordered most specific (exact network, official) first.
+const CHAIN_CHANNELS_LIMIT = 12;
+const compactChannel = ({ platform, title, url, mode, relationship, scope, access, verification }) =>
+  ({ platform, title, url, mode, relationship, scope, access, verification });
+
 async function handleGetChainById(args) {
   const { chainId } = args;
   if (!isValidChainId(chainId)) {
@@ -558,6 +565,10 @@ async function handleGetChainById(args) {
   // get_node_requirements, which the model is told to call when hasNodeRequirements is set.
   const { research, ...rest } = chain;
   const { hardware, ...slimResearch } = research ?? {};
+  if (slimResearch.channels?.length > 0) {
+    slimResearch.channelsTotal = slimResearch.channels.length;
+    slimResearch.channels = slimResearch.channels.slice(0, CHAIN_CHANNELS_LIMIT).map(compactChannel);
+  }
   const payload = { ...rest, price, hasNodeRequirements: hardware?.profiles?.length > 0 };
   if (research && Object.keys(slimResearch).some((key) => key !== 'updatedAt')) payload.research = slimResearch;
   return textResponse(payload);
