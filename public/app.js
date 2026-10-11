@@ -4244,13 +4244,21 @@ function channelItem(c) {
 function renderChannels(channels, sec) {
     const shown = channels.slice(0, CHANNELS_SHOWN).map(channelItem);
     const rest = channels.slice(CHANNELS_SHOWN);
-    const list = el('div', { class: 'rpc-list' }, [
-        ...shown,
-        rest.length ? el('details', { class: 'r-more' }, [
-            el('summary', { text: `Show ${rest.length} more` }),
-            el('div', { class: 'rpc-list' }, rest.map(channelItem))
-        ]) : null
-    ].filter(Boolean));
+    let extra = null;
+    let toggle = null;
+    if (rest.length) {
+        extra = el('div', { class: 'rpc-list hidden' }, rest.map(channelItem));
+        const moreText = `Show ${rest.length} more`;
+        toggle = el('button', {
+            class: 'btn r-more', type: 'button', 'aria-expanded': 'false', text: moreText,
+            onclick: () => {
+                const open = extra.classList.toggle('hidden') === false;
+                toggle.setAttribute('aria-expanded', String(open));
+                toggle.textContent = open ? 'Show less' : moreText;
+            }
+        });
+    }
+    const list = el('div', { class: 'rpc-list' }, [...shown, extra, toggle].filter(Boolean));
     sec.appendChild(detailRow('Channels', list));
 }
 // `research.hardware` (node sizing profiles) is deliberately not rendered here: it exists
