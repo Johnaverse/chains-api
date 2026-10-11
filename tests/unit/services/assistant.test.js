@@ -268,11 +268,12 @@ describe('buildSystemPrompt', () => {
 
   it('makes hardware answers cite the profile sources as bare, clickable URLs', () => {
     const prompt = buildSystemPrompt(undefined, new Date('2026-07-06T12:00:00Z'));
-    expect(prompt).toContain('end every hardware answer with a line "Source:"');
-    expect(prompt).toContain('including any profile you borrowed a component from');
+    // One URL per profile keeps "cite every quoted profile" satisfiable under the cap of 3.
+    expect(prompt).toContain('End every hardware answer with "Source:" and one `sources` URL per profile you quoted');
+    expect(prompt).toContain('borrowed ones (4f) included, at most 3');
     // The dashboard links bare http(s) URLs only: backticks render as code, [text](url) as text.
-    expect(prompt).toContain('each as a bare URL (no backticks, no [text](url), no trailing punctuation)');
-    expect(prompt).toContain('source links stay bare, see 4e');
+    expect(prompt).toContain('bare URLs (no backticks or');
+    expect(prompt).toContain('source links stay bare, 4e');
   });
 
   it('combines partial hardware profiles with same-client siblings instead of answering thin', () => {
