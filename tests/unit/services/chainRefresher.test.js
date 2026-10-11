@@ -153,13 +153,19 @@ describe('chainRefresher', () => {
     it('records a 401 even when a data refresh lands mid-probe', async () => {
       seedCacheWith([seedChain(1, ['https://rpc-keyed.example'])]);
       jsonRpcCall.mockImplementation(async () => {
-        cachedData.lastUpdated = '2026-05-06T00:00:00.000Z';
+        // The refresh swaps in a rebuilt index that still lists the URL.
+        applyDataToCache({
+          indexed: { byChainId: { 1: seedChain(1, ['https://rpc-keyed.example']) }, byName: {}, all: [] },
+          lastUpdated: '2026-05-06T00:00:00.000Z'
+        });
         throw Object.assign(new Error('HTTP 401'), { status: 401 });
       });
 
       await processChainRpc(1);
 
       expect(isPrivateRpc('https://rpc-keyed.example')).toBe(true);
+      // Later probes skip the URL, so the replacement cache must be cleaned now or never.
+      expect(cachedData.indexed.byChainId[1].rpc).toEqual([]);
     });
 
     it('keeps an endpoint that fails with a non-401 status', async () => {
