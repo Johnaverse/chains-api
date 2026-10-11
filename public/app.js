@@ -4227,16 +4227,22 @@ function channelNote(c) {
     return bits.join(' \u00b7 ');
 }
 // The research titles X and Telegram routes generically ("Algorand x" eight times over, one
-// per language account), so the handle is what tells the rows apart.
-const HANDLE_HOSTS = { x: ['x.com', 'twitter.com'], telegram: ['t.me', 'telegram.me'] };
+// per language account), so the handle is what tells the rows apart. Only a direct profile
+// URL (one path segment) has one: invite links (t.me/+…, t.me/joinchat/…), previews
+// (t.me/s/…), topics and X routes (x.com/i/…, x.com/intent/…) get no label rather than a
+// misleading "@joinchat" or "@i".
+const HANDLE_HOSTS = { x: ['x.com', 'twitter.com', 'mobile.twitter.com'], telegram: ['t.me', 'telegram.me'] };
+const NOT_HANDLES = new Set(['i', 'intent', 'home', 'share', 'search', 'explore', 'hashtag', 'login', 'settings', 's', 'c', 'joinchat', 'addstickers', 'proxy']);
 function channelHandle(c) {
     const hosts = HANDLE_HOSTS[c.platform];
     if (!hosts) return null;
     try {
         const u = new URL(c.url);
         if (!hosts.includes(u.hostname.replace(/^www\./, ''))) return null;
-        const first = u.pathname.split('/').find(Boolean);
-        return first && /^[A-Za-z0-9_]{2,64}$/.test(first) ? `@${first}` : null;
+        const segments = u.pathname.split('/').filter(Boolean);
+        if (segments.length !== 1) return null;
+        const [name] = segments;
+        return /^[A-Za-z0-9_]{2,64}$/.test(name) && !NOT_HANDLES.has(name.toLowerCase()) ? `@${name}` : null;
     } catch { return null; }
 }
 function channelItem(c) {
