@@ -1204,6 +1204,7 @@ describe('MCP Tools - Shared Module', () => {
       expect(data.profiles[0].sources).toEqual(['https://docs.example/', 'https://docs.example/node']);
       expect(data.profiles[0]).not.toHaveProperty('verificationNotes');
       expect(data.note).toMatch(/original units/);
+      expect(data.note).toContain('Cite one `sources` URL (the publisher’s documentation) per quoted profile.');
       // Must agree with the assistant's rule 4f: inheritance allowed, arithmetic not.
       expect(data.note).not.toMatch(/combine them/);
       expect(data.note).toMatch(/same client and scope/);
