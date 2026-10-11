@@ -36,6 +36,9 @@ import { fetchL2Beat } from '../sources/l2beat.js';
 import { persistChainRpcHealth, rpcStateChanged } from '../store/rpcHealthStore.js';
 import { isPrivateRpc, markPrivateRpcs, stripPrivateRpcs } from '../store/privateRpcStore.js';
 
+// HTTP statuses that mark an RPC endpoint as non-public (see privateRpcStore).
+const PRIVATE_RPC_STATUSES = new Set([401, 403]);
+
 const SWEEP_TICK_MS = Number(process.env.CHAIN_REFRESHER_TICK_MS) || 1000;
 
 let queue = [];
@@ -117,8 +120,9 @@ async function checkRpcEndpoint(url) {
     result.ok = Boolean(result.clientVersion) && result.blockHeight !== null;
   } catch (error) {
     result.error = error.message;
-    // 401 = the endpoint wants credentials: a keyed/private RPC, not a public one.
-    if (error.status === 401) result.authRequired = true;
+    // 401/403 = the endpoint wants credentials or refuses us: not a public RPC. Rate limits
+    // (429) and outages (5xx) are transient and stay listed.
+    if (PRIVATE_RPC_STATUSES.has(error.status)) result.authRequired = true;
   }
   return result;
 }
@@ -148,7 +152,7 @@ export async function processChainRpc(chainId) {
   // and dropped HERE too so they never consume one of the MAX_ENDPOINTS_PER_CHAIN slots that a
   // reachable endpoint could have used.
   //
-  // Endpoints that once answered HTTP 401 are private (see privateRpcStore) and are
+  // Endpoints that once answered HTTP 401/403 are private (see privateRpcStore) and are
   // never probed again.
   const urls = Array.from(new Set(normalized))
     .filter(u => !u.includes('${') && safeExternalUrl(u) !== null && !isPrivateRpc(u))
@@ -160,12 +164,12 @@ export async function processChainRpc(chainId) {
   rpcState.isMonitoring = false;
   rpcState.endpointsCheckedThisSweep += results.length;
 
-  // A 401 is a fact about the URL, not about this data version, so record and apply it
+  // A 401/403 is a fact about the URL, not about this data version, so record and apply it
   // before the race guard: a refresh landing mid-probe must not cost us the finding.
   const privateUrls = results.filter(r => r.authRequired).map(r => r.url);
   const newlyPrivate = privateUrls.length > 0 ? markPrivateRpcs(privateUrls) : 0;
   if (newlyPrivate > 0) {
-    logger.info({ chainId, urls: privateUrls }, 'Dropped RPC endpoints requiring auth (HTTP 401)');
+    logger.info({ chainId, urls: privateUrls }, 'Dropped non-public RPC endpoints (HTTP 401/403)');
     incCounter('chains_api_rpc_private_dropped_total', {}, newlyPrivate);
   }
   // Strip from whatever cache is live now — the refreshed one too, if a reload landed

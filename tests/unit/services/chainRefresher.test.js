@@ -168,10 +168,21 @@ describe('chainRefresher', () => {
       expect(cachedData.indexed.byChainId[1].rpc).toEqual([]);
     });
 
-    it('keeps an endpoint that fails with a non-401 status', async () => {
-      // 403/429/5xx are often geo blocks, rate limits or outages — not proof it is private.
-      seedCacheWith([seedChain(1, ['https://rpc-flaky.example'])]);
+    it('drops an endpoint that answers HTTP 403', async () => {
+      seedCacheWith([seedChain(1, ['https://rpc-forbidden.example'])]);
       jsonRpcCall.mockRejectedValue(Object.assign(new Error('HTTP 403'), { status: 403 }));
+
+      await processChainRpc(1);
+
+      expect(isPrivateRpc('https://rpc-forbidden.example')).toBe(true);
+      expect(cachedData.indexed.byChainId[1].rpc).toEqual([]);
+      expect(cachedData.rpcHealth[1]).toEqual([]);
+    });
+
+    it.each([429, 500, 503])('keeps an endpoint that fails with HTTP %i', async (status) => {
+      // Rate limits and outages are transient — not proof the endpoint is private.
+      seedCacheWith([seedChain(1, ['https://rpc-flaky.example'])]);
+      jsonRpcCall.mockRejectedValue(Object.assign(new Error(`HTTP ${status}`), { status }));
 
       await processChainRpc(1);
 
