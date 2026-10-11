@@ -11,6 +11,7 @@ import { fetchDefiLlama } from '../sources/defillama.js';
 import { indexData } from '../store/indexer.js';
 import { cachedData, applyDataToCache } from '../store/cache.js';
 import { attachNetworkResearch } from '../sources/networkResearch.js';
+import { attachForums } from '../sources/forums.js';
 import {
   readSnapshotFromDisk,
   writeSnapshotToDiskAtomic,
@@ -209,6 +210,8 @@ export async function initializeDataOnStartup(options = {}) {
       // into separate copies, so rebuild `all` the way indexData does or the list endpoints
       // (which read `all`) would miss the stamp.
       attachNetworkResearch(cachedData.indexed);
+      // Same for the forum registry: the snapshot carries the old build's forumUrl values.
+      attachForums(cachedData.indexed);
       cachedData.indexed.all = Object.values(cachedData.indexed.byChainId);
       await overlayDiskRpcHealth();
       startupInitialized = true;

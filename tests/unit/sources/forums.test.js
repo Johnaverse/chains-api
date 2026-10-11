@@ -59,6 +59,19 @@ describe('attachForums', () => {
     expect(indexed.byChainId[99999].forumUrl).toBeUndefined();
   });
 
+  it('removes a forumUrl the registry no longer lists (stale snapshot) and keeps listed ones current', () => {
+    const indexed = {
+      byChainId: {
+        1: { chainId: 1, forumUrl: 'https://old.example' },
+        99999: { chainId: 99999, forumUrl: 'https://dropped.example' },
+        5: null
+      }
+    };
+    attachForums(indexed);
+    expect(indexed.byChainId[1].forumUrl).toBe('https://ethereum-magicians.org');
+    expect('forumUrl' in indexed.byChainId[99999]).toBe(false);
+  });
+
   it('is a no-op when indexed has no byChainId', () => {
     expect(() => attachForums({})).not.toThrow();
     expect(() => attachForums(null)).not.toThrow();

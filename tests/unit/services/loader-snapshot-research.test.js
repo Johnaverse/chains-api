@@ -22,9 +22,10 @@ const { getAllChains, filterChainsByFamily, getChainById } = await import('../..
 describe('initializeDataOnStartup — stale snapshot', () => {
   afterEach(() => { cachedData.indexed = null; });
 
-  it('re-stamps the research dataset on a snapshot indexed without it', async () => {
-    const base = { chainId: 8453, name: 'Base', infoURL: 'https://base.org', sources: ['chains'] };
-    const thai = { chainId: 7, name: 'ThaiChain', infoURL: 'https://thaichain.io', sources: ['chains'] };
+  it('re-stamps the research dataset and the forum registry on a snapshot indexed by an older build', async () => {
+    // forumUrl values as an older build's registry stamped them: one since changed, one since removed.
+    const base = { chainId: 8453, name: 'Base', infoURL: 'https://base.org', sources: ['chains'], forumUrl: 'https://old-forum.example' };
+    const thai = { chainId: 7, name: 'ThaiChain', infoURL: 'https://thaichain.io', sources: ['chains'], forumUrl: 'https://dropped-forum.example' };
     // A real snapshot is JSON on disk, so `all` and `byChainId` come back as separate copies.
     readSnapshotFromDisk.mockResolvedValue(JSON.parse(JSON.stringify({
       theGraph: { networks: [] }, chainlist: [], chains: [], slip44: { 60: {} }, l2beat: null, defillama: null,
@@ -40,5 +41,9 @@ describe('initializeDataOnStartup — stale snapshot', () => {
     expect(filterChainsByFamily(getAllChains(), 'op stack').map(c => c.chainId)).toEqual([8453]);
     expect(getAllChains().find(c => c.chainId === 7).infoURL).toBe('https://thaichain.org/');
     expect(cachedData.indexed.all).toContain(cachedData.indexed.byChainId[8453]);
+    // The forum registry is reconciled too: current URL stamped, removed one gone, on the list as well.
+    expect(getChainById(8453).forumUrl).toBe('https://gov.optimism.io');
+    expect(getChainById(7).forumUrl).toBeUndefined();
+    expect(getAllChains().find(c => c.chainId === 7).forumUrl).toBeUndefined();
   });
 });
