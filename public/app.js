@@ -320,8 +320,30 @@ document.addEventListener('DOMContentLoaded', () => {
     // small request, and having it already resolved means switching to Providers paints the
     // board immediately instead of after a round-trip.
     loadProviderStats();
+    initAccountLink();
     window.addEventListener('popstate', applyUrlState);
 });
+
+// ─── account ─────────────────────────────────────────────────────────────
+// The appbar entry for signing in. Hidden until the server answers, and left hidden when it
+// answers 404 (accounts not configured) or cannot be reached — including when this
+// dashboard's origin is not one the API grants credentialed CORS to. A sign-in link that
+// leads to "not enabled" is worse than no link.
+async function initAccountLink() {
+    const link = byId('accountLink');
+    if (!link) return;
+    let data;
+    try {
+        const res = await fetch(`${API_BASE}/auth/session`, { credentials: 'include' });
+        if (!res.ok) return;
+        data = await res.json();
+    } catch {
+        return;
+    }
+    link.textContent = data.authenticated ? data.user.email : 'Sign in';
+    link.title = data.authenticated ? 'Account settings' : 'Sign in with your email';
+    link.hidden = false;
+}
 
 // ─── theme ───────────────────────────────────────────────────────────────
 // Charts read their colours from CSS custom properties at render time, so a

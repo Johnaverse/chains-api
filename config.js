@@ -1,6 +1,8 @@
 // Environment configuration with validation
 // All configurable constants are centralized here
 
+import { dirname, join } from 'node:path';
+
 function parseIntEnv(name, defaultValue) {
   const raw = process.env[name];
   if (raw === undefined || raw === '') return defaultValue;
@@ -121,6 +123,46 @@ export const DATA_CACHE_FILE = parseStringEnv('DATA_CACHE_FILE', '.cache/chains-
 
 // CORS
 export const CORS_ORIGIN = parseStringEnv('CORS_ORIGIN', '*');
+
+// Accounts: email sign-in (magic link + code), optional salted password, password reset.
+//
+// Closed by default, in the spirit of SERVICE-CONTRACT §10: until all three of the allowlist,
+// the app URL and an SMTP host are set, no /auth route is registered at all and every
+// endpoint answers 404. There is no half-configured mode that could email a sign-in link
+// pointing nowhere, or accept sign-ups from anyone.
+//
+// Comma-separated. `alice@example.com` allows one address; `@example.com` allows a domain.
+// Only these can ever receive mail from the sign-in form, which also means an attacker cannot
+// use it to send our mail to arbitrary inboxes.
+export const AUTH_ALLOWED_EMAILS = parseStringEnv('AUTH_ALLOWED_EMAILS', '');
+// Base URL of the dashboard the links in sign-in emails open, e.g.
+// https://www.johnaverse.cc/chains-api/ — links go to `${AUTH_APP_URL}login.html#…`.
+export const AUTH_APP_URL = parseStringEnv('AUTH_APP_URL', '');
+// Extra browser origins allowed to make credentialed auth calls (comma-separated). The
+// origin of AUTH_APP_URL is always allowed; this is for a second dashboard host.
+export const AUTH_ALLOWED_ORIGINS = parseStringEnv('AUTH_ALLOWED_ORIGINS', '');
+// Accounts and hashed session tokens. Defaults beside the data cache, like feedback.jsonl.
+export const AUTH_STORE_FILE = parseStringEnv(
+  'AUTH_STORE_FILE',
+  join(dirname(DATA_CACHE_FILE), 'auth.json')
+);
+export const AUTH_SESSION_TTL_DAYS = parseIntEnv('AUTH_SESSION_TTL_DAYS', 30);
+// Off only for plain-http local development; browsers drop Secure cookies over http.
+export const AUTH_COOKIE_SECURE = parseBooleanEnv('AUTH_COOKIE_SECURE', true);
+// Per-IP budget on the sign-in, code and reset endpoints, per RATE_LIMIT_WINDOW_MS.
+export const AUTH_RATE_LIMIT_MAX = parseIntEnv('AUTH_RATE_LIMIT_MAX', 10);
+
+// Outbound mail for sign-in and reset. Port 587 uses STARTTLS, which is REQUIRED — a server
+// that does not offer it fails the send rather than carrying codes in cleartext. Set
+// SMTP_SECURE=true for implicit TLS on 465. SMTP_PASS is never logged.
+export const SMTP_HOST = parseStringEnv('SMTP_HOST', '');
+export const SMTP_PORT = parseIntEnv('SMTP_PORT', 587);
+export const SMTP_SECURE = parseBooleanEnv('SMTP_SECURE', false);
+export const SMTP_USER = parseStringEnv('SMTP_USER', '');
+export const SMTP_PASS = parseStringEnv('SMTP_PASS', '');
+export const SMTP_FROM = parseStringEnv('SMTP_FROM', 'Chains <no-reply@localhost>');
+
+export const AUTH_ENABLED = AUTH_ALLOWED_EMAILS !== '' && AUTH_APP_URL !== '' && SMTP_HOST !== '';
 
 // Proxy (optional)
 export const PROXY_URL = parseStringEnv('PROXY_URL', '');

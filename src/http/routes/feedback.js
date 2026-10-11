@@ -1,5 +1,25 @@
 import { FEEDBACK_RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS } from '../../../config.js';
 import { addFeedback, listFeedback } from '../../services/feedback.js';
+import { getAuth } from '../../services/auth/index.js';
+import { readSession } from '../../services/auth/session.js';
+import { sendError } from '../util/sendError.js';
+
+/**
+ * Reviewing reports is the owner's job, and reports are free text readers typed — until now
+ * anyone on the internet could read every one of them. With accounts configured, reading
+ * requires a signed-in session. Without accounts the endpoint behaves exactly as before, so
+ * turning this on is an operator's deliberate choice, never a surprise on upgrade.
+ *
+ * Submitting stays anonymous either way: a reader flagging a wrong link should not need an
+ * account.
+ */
+async function requireReviewer(request, reply) {
+  const auth = getAuth();
+  if (!auth.enabled) return;
+  if (!(await readSession(request, auth))) {
+    return sendError(reply, 401, 'Sign in to review feedback.');
+  }
+}
 
 /**
  * The wrong-info feedback loop. The dashboard correlates three live feeds by
@@ -84,8 +104,9 @@ export async function feedbackRoutes(fastify) {
   });
 
   fastify.get('/feedback', {
+    preHandler: requireReviewer,
     schema: {
-      description: 'Review submitted feedback reports, newest-first. Filter by kind; limit defaults to 50 (max 500).',
+      description: 'Review submitted feedback reports, newest-first. Filter by kind; limit defaults to 50 (max 500). Requires a signed-in session when accounts are configured.',
       querystring: {
         type: 'object',
         additionalProperties: false,
