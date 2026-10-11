@@ -1122,6 +1122,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .graph-controls + .graph-controls { margin-top: var(--sp-3); }
 .graph-legend { position: absolute; bottom: var(--sp-5); left: var(--sp-5); padding: var(--sp-3) var(--sp-4); max-width: 320px; }
 .graph-stats { position: absolute; top: var(--sp-4); right: var(--sp-5); padding: var(--sp-3) var(--sp-4); text-align: right; }
+.graph-panels-toggle { display: none; }
 .graph-stat-value { font-size: var(--fs-500); font-weight: 600; font-variant-numeric: tabular-nums; }
 .graph-stat-label { font-size: var(--fs-100); color: var(--ink-3); }
 
@@ -1439,6 +1440,16 @@ button, input, textarea, select { font: inherit; color: inherit; }
     }
     .graph-overlay { overflow-y: auto; }
     .graph-stats { text-align: left; }
+    /* Stacked, the panels fill the screen and hide the graph: collapse them behind a
+       toggle (closed by default) and keep only the compact counts visible. */
+    .graph-panels-toggle { display: inline-flex; margin: var(--sp-3) var(--sp-3) 0; }
+    .graph-overlay:not(.is-panels-open) .graph-controls,
+    .graph-overlay:not(.is-panels-open) .graph-legend { display: none; }
+    .graph-overlay:not(.is-panels-open) { overflow-y: visible; }
+    .graph-overlay:not(.is-panels-open) .graph-stats {
+        display: flex; gap: var(--sp-3); align-items: baseline; padding: var(--sp-2) var(--sp-3);
+    }
+    .graph-overlay:not(.is-panels-open) .graph-stat-value { font-size: var(--fs-300); margin-top: 0; }
 }
 
 @media (max-width: 560px) {

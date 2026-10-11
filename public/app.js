@@ -2279,6 +2279,15 @@ function initGraphControls() {
         renderGraphLegend();
     });
 
+    // Phone layout only (the toggle is hidden by CSS on wider screens): open/close the
+    // stacked filter + legend panels so the canvas behind them is reachable.
+    const panelsToggle = byId('graphPanelsToggle');
+    panelsToggle?.addEventListener('click', () => {
+        const open = byId('graphOverlay').classList.toggle('is-panels-open');
+        panelsToggle.setAttribute('aria-expanded', String(open));
+        panelsToggle.textContent = open ? 'Hide filters & legend' : 'Filters & legend';
+    });
+
     byId('graphReset')?.addEventListener('click', () => {
         if (myGraph) myGraph.cameraPosition({ x: 0, y: 0, z: 900 }, { x: 0, y: 0, z: 0 }, 800);
     });
