@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   forkKey, forkScopes, normalizeForkName, resolveForkActivation, forkPhase,
-  bestActivation, bestState, buildForks, FORK_PHASE
+  bestActivation, bestState, buildForks, FORK_PHASE, forkIdentity, scopeName, sourceRank
 } from '../../../src/domain/forks.js';
 
 const NOW = Date.parse('2026-08-14T12:00:00Z');
@@ -55,7 +55,7 @@ describe('fork identity', () => {
     // affectedChains is the only network identity that survives for non-EVM chains — 171 live
     // events have no chainId, and every Stellar one has empty networkSlugs too.
     expect(forkScopes({ enrichment: { affectedChains: ['Stellar Mainnet', 'Stellar Testnet'] } }))
-      .toEqual(['stellar mainnet', 'stellar testnet']);
+      .toEqual(['stellar', 'stellar testnet']);
   });
 
   it('falls back to chainId, then to a single unscoped bucket', () => {
@@ -186,7 +186,7 @@ describe('assembling forks from events', () => {
 
     expect(out).toHaveLength(2);
     const testnet = out.find(f => f.network === 'stellar testnet');
-    const mainnet = out.find(f => f.network === 'stellar mainnet');
+    const mainnet = out.find(f => f.network === 'stellar');
     expect(testnet.activationAt).toBe('2026-08-27T17:00:00.000Z');
     expect(mainnet.activationAt).toBe('2026-09-16T17:00:00.000Z');
     // And the cross-provider join still fires: QuickNode's combined window contributes to both.
@@ -252,5 +252,78 @@ describe('assembling forks from events', () => {
     expect(forkOut.activationAt).toBe('2026-08-28T03:00:00.000Z');
     expect(forkOut.state).toBe('rescheduled');
     expect(forkOut.phase).toBe(FORK_PHASE.UPCOMING);
+  });
+});
+
+describe('forks across status, forum and news feeds', () => {
+  // A mention from chains-forum-news or chains-news, in the shape src/sources/forkFeeds.js builds.
+  const mention = (id, feed, f, { affectedChains = [], weight = null, page = id, kind, publishedAt = '2026-09-28T00:00:00Z' } = {}) => ({
+    id, feed, title: `t-${id}`, publishedAt, updatedAt: publishedAt, weight,
+    statusPage: { id: page, kind: kind ?? feed }, chains: [],
+    enrichment: { affectedChains, fork: fork(f) }
+  });
+
+  it('treats "Glamsterdam", "the Glamsterdam upgrade" and "Glamsterdam hard fork" as one name', () => {
+    expect(forkIdentity('the Glamsterdam upgrade')).toBe('glamsterdam');
+    expect(forkIdentity('Glamsterdam hard fork')).toBe('glamsterdam');
+    expect(forkIdentity('Protocol 28')).toBe('protocol 28');
+    // A name that is only the generic word stays itself rather than vanishing.
+    expect(forkIdentity('Upgrade')).toBe('upgrade');
+  });
+
+  it('drops only the mainnet qualifier from a scope', () => {
+    expect(scopeName('Ethereum Mainnet')).toBe(scopeName('Ethereum'));
+    expect(scopeName('Ethereum Sepolia')).toBe('ethereum sepolia');
+  });
+
+  it('scopes by the network that forks, not by what the post is about', () => {
+    // Arbitrum's governance post adjusts Arbitrum for Ethereum's fork.
+    const post = mention('arb', 'forum', { name: 'Glamsterdam', network: 'Ethereum' }, { affectedChains: ['Arbitrum One', 'Arbitrum Nova'] });
+    expect(forkScopes(post)).toEqual(['ethereum']);
+  });
+
+  it('keeps an unnamed fork that only states an exact time', () => {
+    expect(forkKey(fork({ activationAt: '2026-10-06T13:53:36Z' }), 'ethereum sepolia'))
+      .toBe('at:ethereum sepolia:2026-10-06T13:53:36.000Z');
+  });
+
+  it('merges the unnamed provider notice into the named announcement at the same instant', async () => {
+    // Live case: Alchemy never names the Sepolia fork; the EF post names it and states the same second.
+    const out = await buildForks([
+      { ...event('alchemy', { fork: fork({ activationAt: '2026-10-06T13:53:36Z', state: 'scheduled' }), affectedChains: ['Ethereum Sepolia'], page: 'alchemy' }), feed: 'status' },
+      mention('ef', 'news', { name: 'Glamsterdam', network: 'Ethereum Sepolia', activationAt: '2026-10-06T13:53:36Z', state: 'scheduled' }, { weight: 'primary', page: 'ethereum-foundation' })
+    ], { now: Date.parse('2026-10-01T00:00:00Z') });
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ name: 'Glamsterdam', network: 'ethereum sepolia', activationAt: '2026-10-06T13:53:36.000Z', phase: FORK_PHASE.UPCOMING });
+    expect(out[0].sources.sort()).toEqual(['alchemy', 'ethereum-foundation']);
+    expect(out[0].feeds.sort()).toEqual(['news', 'status']);
+  });
+
+  it('never folds an unnamed fork when two named forks share its instant', async () => {
+    const at = '2026-10-06T13:53:36Z';
+    const out = await buildForks([
+      { ...event('p', { fork: fork({ activationAt: at }), affectedChains: ['X'] }), feed: 'status' },
+      mention('a', 'forum', { name: 'Alpha', network: 'X', activationAt: at }),
+      mention('b', 'forum', { name: 'Beta', network: 'X', activationAt: at })
+    ], { now: NOW });
+    expect(out).toHaveLength(3);
+  });
+
+  it('does not let a secondary outlet override the network\'s own date', async () => {
+    const out = await buildForks([
+      mention('ef', 'news', { name: 'Glamsterdam', network: 'Ethereum', activationAt: '2099-12-03T00:00:00Z' }, { weight: 'primary', publishedAt: '2026-10-01T00:00:00Z' }),
+      // Newer, but a report of someone else's plan.
+      mention('wire', 'news', { name: 'Glamsterdam', network: 'Ethereum', activationAt: '2099-12-10T00:00:00Z' }, { weight: 'secondary', publishedAt: '2026-10-05T00:00:00Z' })
+    ], { now: NOW });
+    expect(out).toHaveLength(1);
+    expect(out[0].activationAt).toBe('2099-12-03T00:00:00.000Z');
+  });
+
+  it('ranks sources: network and primary first, provider windows next, secondary news last', () => {
+    expect(sourceRank({ feed: 'status', statusPage: { kind: 'chain' } })).toBe(0);
+    expect(sourceRank({ feed: 'forum' })).toBe(0);
+    expect(sourceRank({ feed: 'news', weight: 'primary' })).toBe(0);
+    expect(sourceRank({ feed: 'status', statusPage: { kind: 'rpc-provider' } })).toBe(1);
+    expect(sourceRank({ feed: 'news', weight: 'secondary' })).toBe(2);
   });
 });

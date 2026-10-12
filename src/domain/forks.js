@@ -62,12 +62,33 @@ export const FORK_PHASE = Object.freeze({
  */
 export function forkKey(fork, scope) {
   if (!fork || !scope) return null;
-  const name = normalizeForkName(fork.name);
+  const name = forkIdentity(fork.name);
   if (name) return `name:${name}@${scope}`;
   if (Number.isSafeInteger(fork.activationBlock) && fork.activationBlock > 0) {
     return `block:${scope}:${fork.activationBlock}`;
   }
+  // Marked, unnamed, no height — but an exact stated instant. Alchemy's "Ethereum Sepolia
+  // Hard Fork Upgrade" gives only "October 6, 2026 at 13:53:36 UTC", and dropping it left the
+  // Sepolia fork out entirely. Two sources stating the same second for the same network are
+  // describing the same activation, exactly as with a shared height.
+  const at = Date.parse(fork.activationAt ?? '');
+  if (Number.isFinite(at)) return `at:${scope}:${new Date(at).toISOString()}`;
   return null;
+}
+
+/**
+ * The fork's name as a grouping identity: normalized, and without the generic words sources
+ * append — the EF says "Glamsterdam", CoinDesk "the Glamsterdam upgrade", a provider
+ * "Glamsterdam hard fork". Digits are kept ("Protocol 28" ≠ "Protocol 29").
+ */
+export function forkIdentity(name) {
+  const cleaned = normalizeForkName(name);
+  if (!cleaned) return null;
+  const stripped = cleaned
+    .replace(/^the /, '')
+    .replace(/ (network upgrade|protocol upgrade|hard ?fork|upgrade|fork)$/, '')
+    .trim();
+  return stripped || cleaned;
 }
 
 /**
@@ -85,8 +106,13 @@ export function forkKey(fork, scope) {
  * chainId is the fallback where the name was not extracted.
  */
 export function forkScopes(event) {
+  // The network that forks, when the source said — which is not always what the post is ABOUT:
+  // Arbitrum's "Update L1-Pricing Parameters for Ethereum Glamsterdam" is about Arbitrum One,
+  // but the fork is Ethereum's, and scoping it by the post's chains invented an Arbitrum fork.
+  const forkNetwork = scopeName(event?.enrichment?.fork?.network);
+  if (forkNetwork) return [forkNetwork];
   const named = (event?.enrichment?.affectedChains ?? [])
-    .map(name => normalizeForkName(name))
+    .map(name => scopeName(name))
     .filter(Boolean);
   if (named.length) return [...new Set(named)];
   const chainIds = (event?.chains ?? []).map(c => c.chainId).filter(id => Number.isFinite(id));
@@ -94,6 +120,17 @@ export function forkScopes(event) {
   // No network identity at all. Still groupable by codename, which is better than discarding
   // the fork — it just cannot be split per network.
   return ['unscoped'];
+}
+
+/**
+ * A network name as a scope. "Mainnet" is dropped because sources disagree on writing it — the
+ * EF says "Ethereum", a provider "Ethereum Mainnet" — and an unqualified name means mainnet;
+ * every other qualifier stays, since Sepolia and mainnet activate on different dates.
+ */
+export function scopeName(name) {
+  const cleaned = normalizeForkName(name);
+  if (!cleaned) return null;
+  return cleaned.replace(/ main ?net$/, '').trim() || cleaned;
 }
 
 /**
@@ -169,6 +206,11 @@ export function bestActivation(candidates = []) {
     .sort((a, b) => {
       const byEvidence = FORK_ACTIVATION_EVIDENCE.indexOf(a.evidence) - FORK_ACTIVATION_EVIDENCE.indexOf(b.evidence);
       if (byEvidence !== 0) return byEvidence;
+      // Then who said it: a secondary outlet repeating a date must not override the network's
+      // own announcement or a provider's window. Recency only breaks ties within one rank,
+      // which is what a reschedule from the same kind of source looks like.
+      const byRank = (a.rank ?? 0) - (b.rank ?? 0);
+      if (byRank !== 0) return byRank;
       return (b.observedAt ?? 0) - (a.observedAt ?? 0);
     });
   return ranked[0] ?? null;
@@ -184,6 +226,40 @@ export function bestState(statements = []) {
   const withState = statements.filter(s => s?.state);
   if (withState.some(s => s.state === 'cancelled')) return 'cancelled';
   return withState.sort((a, b) => (b.observedAt ?? 0) - (a.observedAt ?? 0))[0]?.state ?? null;
+}
+
+/**
+ * Lower is stronger: the network's own status page, a forum (where client teams and the
+ * network post), and a primary outlet (the project's own blog) rank alike; a provider's window
+ * is a provider's reading; secondary news is a report of someone else's announcement.
+ */
+export function sourceRank(event) {
+  const feed = event?.feed ?? 'status';
+  if (feed === 'news') return event.weight === 'primary' ? 0 : 2;
+  if (feed === 'status') return event.statusPage?.kind === 'rpc-provider' ? 1 : 0;
+  return 0;
+}
+
+/**
+ * Merge a group keyed by height or instant into the NAMED group on the same network with the
+ * same activation. Alchemy never names the Sepolia fork; the EF post names it Glamsterdam and
+ * states the same 13:53:36 UTC — one fork, which would otherwise be listed twice. Only an exact
+ * match folds, and only into a single candidate: two named forks at one instant stay apart.
+ */
+function foldUnnamed(byKey) {
+  const named = [...byKey].filter(([key]) => key.startsWith('name:'));
+  for (const [key, members] of [...byKey]) {
+    if (key.startsWith('name:')) continue;
+    const { scope } = members[0];
+    const block = members.map(m => m.fork.activationBlock).find(b => Number.isSafeInteger(b) && b > 0) ?? null;
+    const at = members.map(m => Date.parse(m.fork.activationAt ?? '')).find(Number.isFinite) ?? null;
+    const targets = named.filter(([, nm]) => nm[0].scope === scope && nm.some(m =>
+      (block !== null && m.fork.activationBlock === block)
+      || (at !== null && Date.parse(m.fork.activationAt ?? '') === at)));
+    if (targets.length !== 1) continue;
+    targets[0][1].push(...members);
+    byKey.delete(key);
+  }
 }
 
 /**
@@ -224,6 +300,8 @@ export async function buildForks(events = [], { tipFor = null, now = Date.now(),
     }
   }
 
+  foldUnnamed(byKey);
+
   const forks = [];
   for (const [key, members] of byKey) {
     const chainIds = [...new Set(members.flatMap(m => m.chainIds))];
@@ -246,6 +324,7 @@ export async function buildForks(events = [], { tipFor = null, now = Date.now(),
 
     const candidates = members.map(m => ({
       ...resolveForkActivation(m.fork, tip),
+      rank: sourceRank(m.event),
       observedAt: Date.parse(m.event.updatedAt ?? m.event.publishedAt ?? '') || 0
     }));
     const activation = bestActivation(candidates);
@@ -256,6 +335,7 @@ export async function buildForks(events = [], { tipFor = null, now = Date.now(),
 
     const named = members.map(m => m.fork.name).find(Boolean) ?? null;
     const sources = [...new Set(members.map(m => m.event.statusPage?.id).filter(Boolean))];
+    const feeds = [...new Set(members.map(m => m.event.feed ?? 'status'))];
     forks.push({
       key,
       name: named,
@@ -273,6 +353,9 @@ export async function buildForks(events = [], { tipFor = null, now = Date.now(),
       // Which status pages reported it — the point of the exercise. More than one means the
       // cross-provider join actually fired.
       sources,
+      // Which KINDS of source: status pages, forums, news. A fork only news reported is a
+      // claim to attribute, not a schedule the network published.
+      feeds,
       events: members
         .map(m => m.event)
         .sort((a, b) => (Date.parse(a.publishedAt ?? '') || 0) - (Date.parse(b.publishedAt ?? '') || 0))

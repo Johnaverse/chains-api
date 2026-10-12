@@ -13,6 +13,8 @@ Chains API is a Node.js service that aggregates blockchain chain data from five 
 | `chains-status-news` | Chain + RPC-provider status pages → incidents, scheduled maintenance | `LIVE_INCIDENTS_URL` |
 | `chains-forum-news` | Official community/governance forums, keyed by chain ID | `FORUM_NEWS_URL` |
 
+Forks are the one view built from **all three** feeds: `src/sources/forkFeeds.js` fetches each with `?fork=true` (falling back to an unfiltered fetch where a deployment rejects the param), and every service's enrichment carries the same `fork = {name, network, activationAt, activationBlock, state}` object that `src/domain/forks.js` groups on.
+
 The wire contract shared by all three services — addressing, health/readiness, versioning, collection envelopes, error shape, WebSocket framing, timestamps, auth — is specified in [`docs/SERVICE-CONTRACT.md`](docs/SERVICE-CONTRACT.md). Read it before changing any cross-service payload.
 
 Both are **independent git repos**, so they are often checked out next to this one in the same working tree (`chains-status-news/`, `chains-forum-news/`) — useful for cross-checking a feed's payload against a consumer here. They are versioned and released separately from this project, and the paths in this document, in `package.json`, and in `.github/workflows/` are all relative to *this* project's root.

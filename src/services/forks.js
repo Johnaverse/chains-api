@@ -1,4 +1,4 @@
-import { getLiveEvents, getLiveEventsFetchedAt } from '../sources/liveIncidents.js';
+import { getForkMentions } from '../sources/forkFeeds.js';
 import { getExplorerTip } from '../sources/blockscout.js';
 import { buildForks, FORK_PHASE } from '../domain/forks.js';
 import { logger } from '../util/logger.js';
@@ -11,11 +11,6 @@ import { logger } from '../util/logger.js';
  * rules be tested without a network, and it is also why the explorer stays optional — a fork
  * whose activation is stated needs no lookup at all.
  */
-
-async function liveEvents() {
-  const events = await getLiveEvents();
-  return { events, fetchedAt: getLiveEventsFetchedAt() };
-}
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
@@ -40,7 +35,7 @@ async function tipFor(chainId) {
 }
 
 /**
- * Forks assembled from the live status feed.
+ * Forks assembled from every feed that mentions them: status pages, forums and news.
  *
  * @param {object} [opts]
  * @param {number} [opts.chainId] only forks touching this chain
@@ -49,8 +44,8 @@ async function tipFor(chainId) {
  * @param {number} [opts.limit]
  */
 export async function getForks({ chainId, phase, scheduledOnly = false, limit = DEFAULT_LIMIT } = {}) {
-  const { events, fetchedAt } = await liveEvents();
-  const forks = (await buildForks(events, { tipFor })).map(present);
+  const { mentions, fetchedAt, feeds } = await getForkMentions();
+  const forks = (await buildForks(mentions, { tipFor })).map(present);
 
   let filtered = forks;
   if (chainId != null) filtered = filtered.filter((f) => f.chains.includes(Number(chainId)));
@@ -73,6 +68,9 @@ export async function getForks({ chainId, phase, scheduledOnly = false, limit = 
     // is down, so stamping "now" would present hours-old forks as freshly fetched — and this
     // is the one field a consumer would use to notice.
     fetchedAt,
+    // Per feed, whether it answered. A fork list missing the news feed silently loses every
+    // fork only a blog announced, so the gap has to be visible.
+    feeds,
     totalMatched: filtered.length,
     count: sliced.length,
     truncated: filtered.length > sliced.length,
@@ -103,11 +101,15 @@ function present(fork) {
     // internal identifier in front of a reader who was told this field names the network.
     network: publicNetwork(fork.network),
     events: fork.events.map((e) => ({
+      feed: e.feed ?? 'status',
       title: e.title,
       url: e.url,
       publishedAt: e.publishedAt,
       status: e.status,
-      provider: e.statusPage?.id ?? null
+      provider: e.statusPage?.id ?? null,
+      // What THIS source claimed. The fork's activationAt is the strongest claim; sources can
+      // disagree, and a reader checking a date needs to see who said what.
+      activationAt: e.enrichment?.fork?.activationAt ?? null
     }))
   };
 }
