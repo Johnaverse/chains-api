@@ -1263,6 +1263,11 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .chat-bubble-body li { margin: 2px 0; }
 .chat-bubble-body code { background: var(--surface-3); border-radius: var(--r-xs); padding: 1px 4px; font-family: var(--font-mono); font-size: var(--fs-200); }
 .chat-bubble-body a { word-break: break-word; }
+.chat-table-wrap { overflow-x: auto; margin: 0 0 var(--sp-2); }
+.chat-table-wrap:last-child { margin-bottom: 0; }
+.chat-bubble-body table { border-collapse: collapse; font-size: var(--fs-200); }
+.chat-bubble-body th, .chat-bubble-body td { padding: 4px 8px; border: 1px solid var(--rule); text-align: left; vertical-align: top; }
+.chat-bubble-body th { background: var(--surface-3); font-weight: 600; }
 
 /* Provenance footer: which tools produced the answer, so a claim is
    traceable to an endpoint rather than to the model's memory. */
