@@ -1241,6 +1241,28 @@ describe('MCP Tools - Shared Module', () => {
       expect(data).toMatchObject({ totalProfiles: 40, totalMatched: 40, truncated: true });
     });
 
+    it('passes an unsized extra component through, with its condition, snapshot and shared dependencies once', async () => {
+      const l1 = { component: 'L1 execution RPC and beacon endpoints', requiredWhen: 'Running the rollup node.', hosting: 'Hosted endpoints are fine.', sizing: 'not_established' };
+      mockGetNodeHardware.mockReturnValue({
+        ...hardware,
+        profiles: [
+          profile({ id: 'archive-min', role: 'archive', client: null, dependencies: [l1] }),
+          profile({
+            id: 'l2geth', role: 'archive', level: 'unspecified', client: 'Legacy Geth (l2geth)', requirements: [],
+            requiredWhen: 'Serving pre-Bedrock historical state locally', sizing: 'not_established', dependencies: [l1],
+            snapshotArtifact: { file: 'mainnet-legacy-archival.tar.zst', type: 'compressed_snapshot_download', sizes: [{ value: 2.9, unit: 'TB' }, { value: 2.9, unit: 'TiB' }], publishedAt: '2023-06-14 08:13' }
+          })
+        ]
+      });
+      const data = JSON.parse((await handleToolCall('get_node_requirements', { chainId: 10 })).content[0].text);
+      const legacy = data.profiles.find((p) => p.client === 'Legacy Geth (l2geth)');
+      expect(legacy).toMatchObject({ requiredWhen: 'Serving pre-Bedrock historical state locally', sizing: 'not_established', requirements: [] });
+      expect(legacy.snapshot).toBe('mainnet-legacy-archival.tar.zst, compressed snapshot download: 2.9 TB / 2.9 TiB (2023-06-14 08:13)');
+      expect(data.profiles[0]).not.toHaveProperty('requiredWhen');
+      expect(data.dependencies).toEqual([{ component: l1.component, requiredWhen: l1.requiredWhen, hosting: l1.hosting }]);
+      expect(data.note).toMatch(/never lend it another client’s numbers/);
+    });
+
     it('says plainly when the research has nothing for the chain', async () => {
       mockGetNodeHardware.mockReturnValue(null);
       const data = JSON.parse((await handleToolCall('get_node_requirements', { chainId: 1 })).content[0].text);

@@ -599,6 +599,29 @@ function describeRequirement(r) {
   return `${r.component} ${String(r.metric).replace(/_/g, ' ')}: ${value}${unit}${notes}`;
 }
 
+/** "mainnet-legacy-archival.tar.zst, compressed snapshot download: 2.9 TB / 2.9 TiB (2023-06-14 08:13)". */
+function describeSnapshot(a) {
+  const sizes = [...new Set((a.sizes ?? []).map((s) => `${s.value}${s.unit ? ` ${s.unit}` : ''}`))].join(' / ');
+  const kind = a.type ? `, ${a.type.replace(/_/g, ' ')}` : '';
+  return `${a.file ?? 'snapshot'}${kind}${sizes ? `: ${sizes}` : ''}${a.publishedAt ? ` (${a.publishedAt})` : ''}`;
+}
+
+/** The returned profiles' other services, once each: OP repeats the same two on every profile. */
+function dependenciesOf(profiles) {
+  const byName = new Map();
+  for (const d of profiles.flatMap((p) => p.dependencies ?? [])) {
+    if (byName.has(d.component)) continue;
+    byName.set(d.component, {
+      component: d.component,
+      ...(d.requiredWhen && { requiredWhen: d.requiredWhen }),
+      ...(d.clientOptions?.length && { clientOptions: d.clientOptions }),
+      ...(d.hosting && { hosting: d.hosting }),
+      ...(d.requirements?.length && { requirements: d.requirements.map(describeRequirement) }),
+    });
+  }
+  return [...byName.values()];
+}
+
 /**
  * What to run, next to what to run it on: the node/client repositories the research tied
  * to the chain, and the client software actually observed on its live RPC endpoints.
@@ -660,10 +683,14 @@ function handleGetNodeRequirements(args) {
     client: p.clientVersion ? `${p.client} ${p.clientVersion}` : p.client,
     deployment: p.deployment,
     verification: p.verification,
+    ...(p.requiredWhen && { requiredWhen: p.requiredWhen }),
+    ...(p.sizing && { sizing: p.sizing }),
     requirements: p.requirements.map(describeRequirement),
+    ...(p.snapshotArtifact && { snapshot: describeSnapshot(p.snapshotArtifact) }),
     notes: p.notes,
     sources: [...new Set([...(p.evidence ?? []), ...p.requirements.map((r) => r.source).filter(Boolean)])].slice(0, 3),
   }));
+  const dependencies = dependenciesOf(profiles.slice(0, limit));
   const envelope = {
     ...base,
     identityStatus: hardware.identityStatus,
@@ -672,7 +699,8 @@ function handleGetNodeRequirements(args) {
     totalMatched: profiles.length,
     availableRoles: [...new Set(hardware.profiles.map((p) => p.role))].sort((a, b) => rank(ROLE_ORDER, a) - rank(ROLE_ORDER, b)),
     software,
-    note: 'Requirements are quoted in each publisher’s original units — never convert units or do arithmetic across profiles (no sums or averages). A profile that omits a component may take it, verbatim, from a sibling with the same client and scope (another tier of the same role, or the full node for an archive node) — say which profile it came from. A component no profile documents was not documented, never zero. Published requirements, not benchmarks. Cite one `sources` URL (the publisher’s documentation) per quoted profile. observedClients is what live endpoints run, not a requirement.',
+    ...(dependencies.length && { dependencies }),
+    note: 'Requirements are quoted in each publisher’s original units — never convert units or do arithmetic across profiles (no sums or averages). A profile that omits a component may take it, verbatim, from a sibling with the same client and scope (another tier of the same role, or the full node for an archive node) — say which profile it came from. A component no profile documents was not documented, never zero. Published requirements, not benchmarks. Cite one `sources` URL (the publisher’s documentation) per quoted profile. observedClients is what live endpoints run, not a requirement. A profile with `requiredWhen` is an extra component to run alongside the node in that case (e.g. a legacy client for pre-upgrade history): always mention it for that role; `sizing: not_established` means its hardware is undocumented — say so, and never lend it another client’s numbers. `snapshot` is a download’s size, not a disk requirement. `dependencies` are other services the node needs, hosted or self-run.',
   };
   if (profiles.length === 0) {
     envelope.message = `No ${[role, level].filter(Boolean).join(' ')} profile is documented for this chain, but ${hardware.profiles.length} other profile(s) are (roles: ${envelope.availableRoles.join(', ')}) — call again without the filter.`;

@@ -157,10 +157,13 @@ describe('loadNetworkResearch', () => {
       expect(entry.profiles.length).toBeGreaterThan(0);
       for (const p of entry.profiles) {
         expect(['confirmed', 'qualified']).toContain(p.verification);
-        expect(p.requirements.length).toBeGreaterThan(0);
+        // An unsized profile is kept only as a declared extra component (e.g. OP's l2geth).
+        if (p.requirements.length === 0) expect(p.requiredWhen ?? p.sizing).toBeTruthy();
         for (const r of p.requirements) expect(r.value != null || r.min != null || r.max != null).toBe(true);
       }
     }
+    const l2geth = hardware.byChainId.get(10).profiles.find(p => /l2geth/.test(p.client ?? ''));
+    expect(l2geth).toMatchObject({ role: 'archive', sizing: 'not_established', historicalStateEra: 'pre-Bedrock' });
 
     const channels = loadChannelResearch();
     expect(channels.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
