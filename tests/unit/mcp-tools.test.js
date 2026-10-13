@@ -1259,8 +1259,28 @@ describe('MCP Tools - Shared Module', () => {
       expect(legacy).toMatchObject({ requiredWhen: 'Serving pre-Bedrock historical state locally', sizing: 'not_established', requirements: [] });
       expect(legacy.snapshot).toBe('mainnet-legacy-archival.tar.zst, compressed snapshot download: 2.9 TB / 2.9 TiB (2023-06-14 08:13)');
       expect(data.profiles[0]).not.toHaveProperty('requiredWhen');
-      expect(data.dependencies).toEqual([{ component: l1.component, requiredWhen: l1.requiredWhen, hosting: l1.hosting }]);
+      expect(data.dependencies).toEqual([{ component: l1.component, requiredWhen: l1.requiredWhen, hosting: l1.hosting, sizing: 'not_established' }]);
       expect(data.note).toMatch(/never lend it another client’s numbers/);
+    });
+
+    it('lists only the dependencies of profiles that fit the budget, each condition kept', async () => {
+      const dep = (requiredWhen) => ({ component: 'L1 RPC', requiredWhen, selfHosted: false, sizing: 'not_established' });
+      mockGetNodeHardware.mockReturnValue({
+        ...hardware,
+        profiles: [
+          profile({ id: 'a', dependencies: [dep('Syncing'), dep('Proving')] }),
+          // Too big for the cap: dropped whole, and its dependency with it.
+          profile({ id: 'b', client: 'big', notes: 'x'.repeat(9000), dependencies: [{ component: 'Blob archive', sizing: 'not_established' }] })
+        ]
+      });
+      const text = (await handleToolCall('get_node_requirements', { chainId: 1 })).content[0].text;
+      expect(text.length).toBeLessThanOrEqual(8000);
+      const data = JSON.parse(text);
+      expect(data).toMatchObject({ count: 1, truncated: true });
+      expect(data.dependencies).toEqual([
+        { component: 'L1 RPC', requiredWhen: 'Syncing', selfHosted: false, sizing: 'not_established' },
+        { component: 'L1 RPC', requiredWhen: 'Proving', selfHosted: false, sizing: 'not_established' }
+      ]);
     });
 
     it('says what the research checked when it found no profile, and keeps unresolved profiles last', async () => {
