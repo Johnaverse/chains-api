@@ -4802,9 +4802,19 @@ function appendChatThinking() {
 // from XSS, and CodeQL flagged the sink (js/xss, high). createTextNode cannot execute anything,
 // so the bug class is removed rather than guarded: there is no HTML string left to get wrong.
 //
-// Supports: `code`, **bold**, bullet lists, bare http(s) URLs, paragraphs.
+// Supports: `code`, **bold**, bullet lists, | tables |, bare http(s) URLs, paragraphs.
 function renderAssistantMarkdown(text, target) {
     for (const block of String(text).split(/\n{2,}/)) {
+        // A table can share its block with a lead-in line ("Hardware:\n| … |"): each run of
+        // table lines renders as a table, the lines around it as paragraphs.
+        const segments = splitTableRuns(block.split('\n'));
+        if (segments.some(s => s.table)) {
+            for (const s of segments) {
+                if (s.table) target.appendChild(buildMdTable(s.lines));
+                else renderAssistantMarkdown(s.lines.join('\n'), target);
+            }
+            continue;
+        }
         const lines = block.split('\n');
         const isList = lines.every(line => /^\s*[-*] /.test(line) || line.trim() === '');
         if (isList && lines.some(line => line.trim())) {
@@ -4824,6 +4834,74 @@ function renderAssistantMarkdown(text, target) {
         });
         target.appendChild(p);
     }
+}
+
+const MD_TABLE_ROW = /^\s*\|.*\|\s*$/;
+const MD_TABLE_RULE = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
+
+// Lines → [{table, lines}]: a table is a header row, a |---| rule, then its rows. Anything
+// else — including pipes in prose with no rule under them — stays text.
+function splitTableRuns(lines) {
+    const out = [];
+    const text = [];
+    const flush = () => { if (text.length) out.push({ table: false, lines: text.splice(0) }); };
+    for (let i = 0; i < lines.length; i++) {
+        if (MD_TABLE_ROW.test(lines[i]) && MD_TABLE_RULE.test(lines[i + 1] ?? '')) {
+            let end = i + 2;
+            while (end < lines.length && MD_TABLE_ROW.test(lines[end])) end++;
+            flush();
+            out.push({ table: true, lines: lines.slice(i, end) });
+            i = end - 1;
+        } else {
+            text.push(lines[i]);
+        }
+    }
+    flush();
+    return out;
+}
+
+// "| a | `b|c` |" → ["a", "`b|c`"]: split on pipes outside code spans, honour \|.
+function splitMdRow(line) {
+    const cells = [];
+    let cell = '';
+    let inCode = false;
+    const s = line.trim().replace(/^\|/, '').replace(/\|$/, '');
+    for (let i = 0; i < s.length; i++) {
+        const ch = s[i];
+        if (ch === '\\' && s[i + 1] === '|') { cell += '|'; i++; continue; }
+        if (ch === '`') inCode = !inCode;
+        if (ch === '|' && !inCode) { cells.push(cell.trim()); cell = ''; continue; }
+        cell += ch;
+    }
+    cells.push(cell.trim());
+    return cells;
+}
+
+// DOM nodes only, like the rest of the renderer; cells go through appendInlineMd so code, bold
+// and links work inside them. Wrapped so a wide table scrolls inside the bubble, not the page.
+function buildMdTable(lines) {
+    const header = splitMdRow(lines[0]);
+    const align = splitMdRow(lines[1]).map(c => (c.endsWith(':') ? (c.startsWith(':') ? 'center' : 'right') : null));
+    const row = (cells, tag) => {
+        const tr = document.createElement('tr');
+        header.forEach((_, i) => {
+            const td = document.createElement(tag);
+            if (align[i]) td.style.textAlign = align[i];
+            appendInlineMd(td, cells[i] ?? '');
+            tr.appendChild(td);
+        });
+        return tr;
+    };
+    const table = document.createElement('table');
+    const thead = document.createElement('thead');
+    thead.appendChild(row(header, 'th'));
+    const tbody = document.createElement('tbody');
+    for (const line of lines.slice(2)) tbody.appendChild(row(splitMdRow(line), 'td'));
+    table.append(thead, tbody);
+    const wrap = document.createElement('div');
+    wrap.className = 'chat-table-wrap';
+    wrap.appendChild(table);
+    return wrap;
 }
 
 // One pass over the alternatives, so a span produced by one rule is never rescanned by another —
