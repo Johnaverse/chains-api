@@ -1263,11 +1263,28 @@ describe('MCP Tools - Shared Module', () => {
       expect(data.note).toMatch(/never lend it another client’s numbers/);
     });
 
+    it('says what the research checked when it found no profile, and keeps unresolved profiles last', async () => {
+      mockGetNodeHardware.mockReturnValue({
+        status: 'inaccessible', identityStatus: 'qualified', checkedAt: '2026-10-10T09:26:03Z', profiles: [],
+        notes: 'Primary node guide returned 403.', sources: [{ url: 'https://docs.example/node', access: 'inaccessible', notes: '403' }]
+      });
+      let data = JSON.parse((await handleToolCall('get_node_requirements', { chainId: 1 })).content[0].text);
+      expect(data).toMatchObject({ researchStatus: 'inaccessible', totalProfiles: 0, profiles: [], researchNotes: 'Primary node guide returned 403.' });
+      expect(data.sourcesChecked).toEqual([{ url: 'https://docs.example/node', access: 'inaccessible', notes: '403' }]);
+      expect(data.message).toMatch(/could not be read/);
+
+      mockGetNodeHardware.mockReturnValue({ ...hardware, profiles: [profile({ id: 'old', verification: 'unresolved' }), ...hardware.profiles] });
+      data = JSON.parse((await handleToolCall('get_node_requirements', { chainId: 1 })).content[0].text);
+      expect(data.profiles.map((p) => p.verification)).toEqual(['confirmed', 'confirmed', 'confirmed', 'unresolved']);
+      expect(data.note).toMatch(/`unresolved` \(sorted last\)/);
+    });
+
     it('says plainly when the research has nothing for the chain', async () => {
       mockGetNodeHardware.mockReturnValue(null);
       const data = JSON.parse((await handleToolCall('get_node_requirements', { chainId: 1 })).content[0].text);
       expect(data).toMatchObject({ chainId: 1, name: 'Ethereum', profiles: [], totalProfiles: 0, truncated: false });
-      expect(data.message).toMatch(/not proof/);
+      expect(data.message).toMatch(/not covered by the node hardware research/);
+      expect(data).not.toHaveProperty('researchStatus');
     });
 
     it('rejects an invalid or unknown chainId', async () => {

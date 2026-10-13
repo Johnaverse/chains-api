@@ -665,14 +665,32 @@ function handleGetNodeRequirements(args) {
       truncated: false,
       profiles: [],
       software,
-      message: 'The node hardware research found no publishable requirements for this chain. This is not proof that none exist — point the user to the project’s own node documentation.',
+      message: 'This chain is not covered by the node hardware research. That is not proof that no requirements exist — point the user to the project’s own node documentation.',
+    });
+  }
+  if (hardware.profiles.length === 0) {
+    return compactResponse({
+      ...base,
+      researchStatus: hardware.status,
+      identityStatus: hardware.identityStatus,
+      checkedAt: hardware.checkedAt,
+      totalProfiles: 0,
+      count: 0,
+      truncated: false,
+      profiles: [],
+      software,
+      researchNotes: hardware.notes,
+      sourcesChecked: (hardware.sources ?? []).slice(0, 5).map((s) => ({ url: s.url, access: s.access ?? null, notes: s.notes ?? null })),
+      message: `The node hardware research checked this chain and found no publishable requirements (${hardware.status === 'inaccessible' ? 'its documentation could not be read' : 'none documented'}); researchNotes says why and sourcesChecked where it looked. This is not proof that none exist — point the user to the project’s own node documentation.`,
     });
   }
   let profiles = hardware.profiles;
   if (role) profiles = profiles.filter((p) => p.role === role);
   if (level) profiles = profiles.filter((p) => p.level === level);
   profiles = [...profiles].sort((a, b) =>
-    rank(SCOPE_ORDER, a.scope) - rank(SCOPE_ORDER, b.scope)
+    // Unresolved last: its source or applicability was never settled.
+    (a.verification === 'unresolved') - (b.verification === 'unresolved')
+    || rank(SCOPE_ORDER, a.scope) - rank(SCOPE_ORDER, b.scope)
     || rank(ROLE_ORDER, a.role) - rank(ROLE_ORDER, b.role)
     || rank(LEVEL_ORDER, a.level) - rank(LEVEL_ORDER, b.level));
   const limit = Math.max(1, Math.min(Number(args.limit) || NODE_REQUIREMENTS_DEFAULT_LIMIT, NODE_REQUIREMENTS_MAX_LIMIT));
@@ -700,7 +718,7 @@ function handleGetNodeRequirements(args) {
     availableRoles: [...new Set(hardware.profiles.map((p) => p.role))].sort((a, b) => rank(ROLE_ORDER, a) - rank(ROLE_ORDER, b)),
     software,
     ...(dependencies.length && { dependencies }),
-    note: 'Requirements are quoted in each publisher’s original units — never convert units or do arithmetic across profiles (no sums or averages). A profile that omits a component may take it, verbatim, from a sibling with the same client and scope (another tier of the same role, or the full node for an archive node) — say which profile it came from. A component no profile documents was not documented, never zero. Published requirements, not benchmarks. Cite one `sources` URL (the publisher’s documentation) per quoted profile. observedClients is what live endpoints run, not a requirement. A profile with `requiredWhen` is an extra component to run alongside the node in that case (e.g. a legacy client for pre-upgrade history): always mention it for that role; `sizing: not_established` means its hardware is undocumented — say so, and never lend it another client’s numbers. `snapshot` is a download’s size, not a disk requirement. `dependencies` are other services the node needs, hosted or self-run.',
+    note: 'Requirements are quoted in each publisher’s original units — never convert units or do arithmetic across profiles (no sums or averages). A profile that omits a component may take it, verbatim, from a sibling with the same client and scope (another tier of the same role, or the full node for an archive node) — say which profile it came from. A component no profile documents was not documented, never zero. Published requirements, not benchmarks. Cite one `sources` URL (the publisher’s documentation) per quoted profile. observedClients is what live endpoints run, not a requirement. A profile with `requiredWhen` is an extra component to run alongside the node in that case (e.g. a legacy client for pre-upgrade history): always mention it for that role; `sizing: not_established` means its hardware is undocumented — say so, and never lend it another client’s numbers. `snapshot` is a download’s size, not a disk requirement. `dependencies` are other services the node needs, hosted or self-run. verification `unresolved` (sorted last) means the research could not settle the source or its applicability, often because the page could not be re-read: use it only when no confirmed/qualified profile covers the question, and say it is unverified.',
   };
   if (profiles.length === 0) {
     envelope.message = `No ${[role, level].filter(Boolean).join(' ')} profile is documented for this chain, but ${hardware.profiles.length} other profile(s) are (roles: ${envelope.availableRoles.join(', ')}) — call again without the filter.`;

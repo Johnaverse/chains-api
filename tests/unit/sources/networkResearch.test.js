@@ -146,22 +146,27 @@ describe('loadNetworkResearch', () => {
 
     const hardware = loadNodeHardware();
     expect(hardware.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-    expect(hardware.byChainId.size).toBeGreaterThan(700);
+    // The full list: every researched network, also those with nothing publishable.
+    expect(hardware.byChainId.size).toBeGreaterThan(3000);
     const ethereum = hardware.byChainId.get(1);
     expect(ethereum.identityStatus).toBe('confirmed');
     const minimum = ethereum.profiles.find(p => p.role === 'full_node' && p.level === 'minimum');
     // Units stay exactly as published: ethereum.org says 16 GB and 25 MBit/s, so that is what is served.
     expect(minimum.requirements).toContainEqual(expect.objectContaining({ component: 'memory', metric: 'capacity', value: 16, unit: 'GB' }));
     expect(minimum.requirements).toContainEqual(expect.objectContaining({ component: 'network', metric: 'bandwidth', value: 25, unit: 'MBit/s', qualifier: 'at_least' }));
+    const verifications = new Set();
     for (const entry of hardware.byChainId.values()) {
-      expect(entry.profiles.length).toBeGreaterThan(0);
+      if (entry.profiles.length === 0) expect(['not_found', 'inaccessible', 'partial']).toContain(entry.status);
       for (const p of entry.profiles) {
-        expect(['confirmed', 'qualified']).toContain(p.verification);
+        verifications.add(p.verification);
+        expect(['confirmed', 'qualified', 'unresolved']).toContain(p.verification);
         // An unsized profile is kept only as a declared extra component (e.g. OP's l2geth).
         if (p.requirements.length === 0) expect(p.requiredWhen ?? p.sizing).toBeTruthy();
         for (const r of p.requirements) expect(r.value != null || r.min != null || r.max != null).toBe(true);
       }
     }
+    expect(verifications.has('unresolved')).toBe(true);
+    expect(hardware.byChainId.get(2)).toMatchObject({ status: 'not_found', profiles: [] });
     const l2geth = hardware.byChainId.get(10).profiles.find(p => /l2geth/.test(p.client ?? ''));
     expect(l2geth).toMatchObject({ role: 'archive', sizing: 'not_established', historicalStateEra: 'pre-Bedrock' });
 
