@@ -41,8 +41,10 @@ export function loadForumResearch(path = FORUMS_PATH) {
 // data/node-hardware.json: per chain, documented sizing profiles (a node role at a
 // requirement tier, for a client/version, exact-network or project-family scope), each
 // a list of requirements in the publisher's own units — the research does no unit
-// conversions, and an omitted component means "nothing documented", never zero. Only
-// confirmed or qualified profiles were kept.
+// conversions, and an omitted component means "nothing documented", never zero. The full
+// list: every inventory network the research checked — those with no profile keep its
+// `status` (not_found / inaccessible), notes and the sources it read — and every profile,
+// unresolved ones included (get_node_requirements sorts them last and labels them).
 export function loadNodeHardware(path = HARDWARE_PATH) {
   return indexByChainId(readStaticJson(path, 'Node hardware dataset'));
 }
@@ -148,20 +150,23 @@ export function getNetworkResearch(chainId) {
 }
 
 /**
- * The node hardware research for one chain, or null when no profile was kept for it.
+ * The node hardware research for one chain — possibly with no profile, when the research
+ * looked and found nothing publishable — or null when the chain was never researched.
  * Backs the `get_node_requirements` tool: the research block carries the same profiles,
  * but a chain's full detail can run past the assistant's tool-result cap, so setup
  * questions get their own compact lookup. A copy, like getNetworkResearch.
  */
 export function getNodeHardware(chainId) {
   const entry = hardware.byChainId.get(Number(chainId));
-  if (!(entry?.profiles?.length > 0)) return null;
+  if (!entry) return null;
   return {
     status: entry.status ?? null,
     identityStatus: entry.identityStatus ?? null,
     checkedAt: entry.checkedAt ?? hardware.updatedAt,
     updatedAt: hardware.updatedAt,
-    profiles: structuredClone(entry.profiles)
+    notes: entry.notes ?? null,
+    sources: structuredClone(entry.sources ?? []),
+    profiles: structuredClone(entry.profiles ?? [])
   };
 }
 

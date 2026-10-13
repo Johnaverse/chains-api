@@ -599,6 +599,33 @@ function describeRequirement(r) {
   return `${r.component} ${String(r.metric).replace(/_/g, ' ')}: ${value}${unit}${notes}`;
 }
 
+/** "mainnet-legacy-archival.tar.zst, compressed snapshot download: 2.9 TB / 2.9 TiB (2023-06-14 08:13)". */
+function describeSnapshot(a) {
+  const sizes = [...new Set((a.sizes ?? []).map((s) => `${s.value}${s.unit ? ` ${s.unit}` : ''}`))].join(' / ');
+  const kind = a.type ? `, ${a.type.replace(/_/g, ' ')}` : '';
+  return `${a.file ?? 'snapshot'}${kind}${sizes ? `: ${sizes}` : ''}${a.publishedAt ? ` (${a.publishedAt})` : ''}`;
+}
+
+/** The returned profiles' other services, once each (OP repeats the same two on every profile). */
+function dependenciesOf(profiles) {
+  const byKey = new Map();
+  for (const d of profiles.flatMap((p) => p.dependencies ?? [])) {
+    // Same service, different condition: both stay, or a profile's condition is lost.
+    const key = `${d.component}\u0000${d.requiredWhen ?? ''}`;
+    if (byKey.has(key)) continue;
+    byKey.set(key, {
+      component: d.component,
+      ...(d.requiredWhen && { requiredWhen: d.requiredWhen }),
+      ...(d.clientOptions?.length && { clientOptions: d.clientOptions }),
+      ...(typeof d.selfHosted === 'boolean' && { selfHosted: d.selfHosted }),
+      ...(d.hosting && { hosting: d.hosting }),
+      ...(d.sizing && { sizing: d.sizing }),
+      ...(d.requirements?.length && { requirements: d.requirements.map(describeRequirement) }),
+    });
+  }
+  return [...byKey.values()];
+}
+
 /**
  * What to run, next to what to run it on: the node/client repositories the research tied
  * to the chain, and the client software actually observed on its live RPC endpoints.
@@ -642,27 +669,51 @@ function handleGetNodeRequirements(args) {
       truncated: false,
       profiles: [],
       software,
-      message: 'The node hardware research found no publishable requirements for this chain. This is not proof that none exist — point the user to the project’s own node documentation.',
+      message: 'This chain is not covered by the node hardware research. That is not proof that no requirements exist — point the user to the project’s own node documentation.',
+    });
+  }
+  if (hardware.profiles.length === 0) {
+    return compactResponse({
+      ...base,
+      researchStatus: hardware.status,
+      identityStatus: hardware.identityStatus,
+      checkedAt: hardware.checkedAt,
+      totalProfiles: 0,
+      count: 0,
+      truncated: false,
+      profiles: [],
+      software,
+      researchNotes: hardware.notes,
+      sourcesChecked: (hardware.sources ?? []).slice(0, 5).map((s) => ({ url: s.url, access: s.access ?? null, notes: s.notes ?? null })),
+      message: `The node hardware research checked this chain and found no publishable requirements (${hardware.status === 'inaccessible' ? 'its documentation could not be read' : 'none documented'}); researchNotes says why and sourcesChecked where it looked. This is not proof that none exist — point the user to the project’s own node documentation.`,
     });
   }
   let profiles = hardware.profiles;
   if (role) profiles = profiles.filter((p) => p.role === role);
   if (level) profiles = profiles.filter((p) => p.level === level);
   profiles = [...profiles].sort((a, b) =>
-    rank(SCOPE_ORDER, a.scope) - rank(SCOPE_ORDER, b.scope)
+    // Unresolved last: its source or applicability was never settled.
+    (a.verification === 'unresolved') - (b.verification === 'unresolved')
+    || rank(SCOPE_ORDER, a.scope) - rank(SCOPE_ORDER, b.scope)
     || rank(ROLE_ORDER, a.role) - rank(ROLE_ORDER, b.role)
     || rank(LEVEL_ORDER, a.level) - rank(LEVEL_ORDER, b.level));
   const limit = Math.max(1, Math.min(Number(args.limit) || NODE_REQUIREMENTS_DEFAULT_LIMIT, NODE_REQUIREMENTS_MAX_LIMIT));
-  const candidates = profiles.slice(0, limit).map((p) => ({
+  const shown = profiles.slice(0, limit);
+  const candidates = shown.map((p) => ({
     role: p.role,
     level: p.level,
     scope: p.scope,
     client: p.clientVersion ? `${p.client} ${p.clientVersion}` : p.client,
     deployment: p.deployment,
     verification: p.verification,
+    ...(p.requiredWhen && { requiredWhen: p.requiredWhen }),
+    ...(p.sizing && { sizing: p.sizing }),
     requirements: p.requirements.map(describeRequirement),
+    ...(p.snapshotArtifact && { snapshot: describeSnapshot(p.snapshotArtifact) }),
     notes: p.notes,
-    sources: [...new Set([...(p.evidence ?? []), ...p.requirements.map((r) => r.source).filter(Boolean)])].slice(0, 3),
+    // A quoted snapshot size cites its own listing (OP's 2.9 TiB is datadirs.optimism.io), so its
+    // sources go first, before the cap of 3 can drop them.
+    sources: [...new Set([...(p.snapshotArtifact?.sizes ?? []).map((sz) => sz.source), ...(p.evidence ?? []), ...p.requirements.map((r) => r.source)].filter(Boolean))].slice(0, 3),
   }));
   const envelope = {
     ...base,
@@ -672,24 +723,29 @@ function handleGetNodeRequirements(args) {
     totalMatched: profiles.length,
     availableRoles: [...new Set(hardware.profiles.map((p) => p.role))].sort((a, b) => rank(ROLE_ORDER, a) - rank(ROLE_ORDER, b)),
     software,
-    note: 'Requirements are quoted in each publisher’s original units — never convert units or do arithmetic across profiles (no sums or averages). A profile that omits a component may take it, verbatim, from a sibling with the same client and scope (another tier of the same role, or the full node for an archive node) — say which profile it came from. A component no profile documents was not documented, never zero. Published requirements, not benchmarks. Cite one `sources` URL (the publisher’s documentation) per quoted profile. observedClients is what live endpoints run, not a requirement.',
+    note: 'Requirements are quoted in each publisher’s original units — never convert units or do arithmetic across profiles (no sums or averages). A profile that omits a component may take it, verbatim, from a sibling with the same client and scope (another tier of the same role, or the full node for an archive node) — say which profile it came from. A component no profile documents was not documented, never zero. Published requirements, not benchmarks. Cite one `sources` URL (the publisher’s documentation) per quoted profile. observedClients is what live endpoints run, not a requirement. A profile with `requiredWhen` is an extra component to run alongside the node in that case (e.g. a legacy client for pre-upgrade history): always mention it for that role; `sizing: not_established` means its hardware is undocumented — say so, and never lend it another client’s numbers. `snapshot` is a download’s size, not a disk requirement. `dependencies` are other services the returned profiles need, hosted or self-run (`selfHosted` false = a hosted endpoint is fine; `sizing` as for profiles). verification `unresolved` (sorted last) means the research could not settle the source or its applicability, often because the page could not be re-read: use it only when no confirmed/qualified profile covers the question, and say it is unverified.',
   };
   if (profiles.length === 0) {
     envelope.message = `No ${[role, level].filter(Boolean).join(' ')} profile is documented for this chain, but ${hardware.profiles.length} other profile(s) are (roles: ${envelope.availableRoles.join(', ')}) — call again without the filter.`;
   }
   // The assistant cuts tool results at ASSISTANT_TOOL_RESULT_MAX_CHARS — mid-value, leaving
   // malformed JSON — so the budget is enforced here, by whole profiles, and `truncated`
-  // tells the model to narrow by role/level for the rest.
-  const sliced = fitWithinBudget(envelope, candidates, ASSISTANT_TOOL_RESULT_MAX_CHARS);
-  return compactResponse({ ...envelope, count: sliced.length, truncated: profiles.length > sliced.length, profiles: sliced });
+  // tells the model to narrow by role/level for the rest. `dependencies` follow the profiles
+  // that fit, so the response never lists a service for a profile it dropped.
+  const respond = (kept) => {
+    const dependencies = dependenciesOf(shown.slice(0, kept.length));
+    return { ...envelope, ...(dependencies.length && { dependencies }), count: kept.length, truncated: profiles.length > kept.length, profiles: kept };
+  };
+  return compactResponse(respond(fitWithinBudget(respond, candidates, ASSISTANT_TOOL_RESULT_MAX_CHARS)));
 }
 
-/** The longest prefix of `items` whose serialized response stays within `budget` characters. */
-function fitWithinBudget(envelope, items, budget) {
+/** The longest prefix of `items` whose response, `respond(prefix)`, stays within `budget` characters. */
+function fitWithinBudget(respond, items, budget) {
   const kept = [];
   for (const item of items) {
     kept.push(item);
-    if (JSON.stringify({ ...envelope, count: kept.length, truncated: true, profiles: kept }).length > budget) {
+    // Sized as truncated: true, the longer of the two flags.
+    if (JSON.stringify({ ...respond(kept), truncated: true }).length > budget) {
       kept.pop();
       break;
     }

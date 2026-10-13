@@ -1241,11 +1241,72 @@ describe('MCP Tools - Shared Module', () => {
       expect(data).toMatchObject({ totalProfiles: 40, totalMatched: 40, truncated: true });
     });
 
+    it('passes an unsized extra component through, with its condition, snapshot and shared dependencies once', async () => {
+      const l1 = { component: 'L1 execution RPC and beacon endpoints', requiredWhen: 'Running the rollup node.', hosting: 'Hosted endpoints are fine.', sizing: 'not_established' };
+      mockGetNodeHardware.mockReturnValue({
+        ...hardware,
+        profiles: [
+          profile({ id: 'archive-min', role: 'archive', client: null, dependencies: [l1] }),
+          profile({
+            id: 'l2geth', role: 'archive', level: 'unspecified', client: 'Legacy Geth (l2geth)', requirements: [],
+            requiredWhen: 'Serving pre-Bedrock historical state locally', sizing: 'not_established', dependencies: [l1],
+            snapshotArtifact: { file: 'mainnet-legacy-archival.tar.zst', type: 'compressed_snapshot_download', sizes: [{ value: 2.9, unit: 'TB' }, { value: 2.9, unit: 'TiB', source: 'https://datadirs.example/' }], publishedAt: '2023-06-14 08:13' }
+          })
+        ]
+      });
+      const data = JSON.parse((await handleToolCall('get_node_requirements', { chainId: 10 })).content[0].text);
+      const legacy = data.profiles.find((p) => p.client === 'Legacy Geth (l2geth)');
+      expect(legacy).toMatchObject({ requiredWhen: 'Serving pre-Bedrock historical state locally', sizing: 'not_established', requirements: [] });
+      expect(legacy.snapshot).toBe('mainnet-legacy-archival.tar.zst, compressed snapshot download: 2.9 TB / 2.9 TiB (2023-06-14 08:13)');
+      // The snapshot's own listing is cited first, ahead of the profile's evidence.
+      expect(legacy.sources).toEqual(['https://datadirs.example/', 'https://docs.example/']);
+      expect(data.profiles[0]).not.toHaveProperty('requiredWhen');
+      expect(data.dependencies).toEqual([{ component: l1.component, requiredWhen: l1.requiredWhen, hosting: l1.hosting, sizing: 'not_established' }]);
+      expect(data.note).toMatch(/never lend it another client’s numbers/);
+    });
+
+    it('lists only the dependencies of profiles that fit the budget, each condition kept', async () => {
+      const dep = (requiredWhen) => ({ component: 'L1 RPC', requiredWhen, selfHosted: false, sizing: 'not_established' });
+      mockGetNodeHardware.mockReturnValue({
+        ...hardware,
+        profiles: [
+          profile({ id: 'a', dependencies: [dep('Syncing'), dep('Proving')] }),
+          // Too big for the cap: dropped whole, and its dependency with it.
+          profile({ id: 'b', client: 'big', notes: 'x'.repeat(9000), dependencies: [{ component: 'Blob archive', sizing: 'not_established' }] })
+        ]
+      });
+      const text = (await handleToolCall('get_node_requirements', { chainId: 1 })).content[0].text;
+      expect(text.length).toBeLessThanOrEqual(8000);
+      const data = JSON.parse(text);
+      expect(data).toMatchObject({ count: 1, truncated: true });
+      expect(data.dependencies).toEqual([
+        { component: 'L1 RPC', requiredWhen: 'Syncing', selfHosted: false, sizing: 'not_established' },
+        { component: 'L1 RPC', requiredWhen: 'Proving', selfHosted: false, sizing: 'not_established' }
+      ]);
+    });
+
+    it('says what the research checked when it found no profile, and keeps unresolved profiles last', async () => {
+      mockGetNodeHardware.mockReturnValue({
+        status: 'inaccessible', identityStatus: 'qualified', checkedAt: '2026-10-10T09:26:03Z', profiles: [],
+        notes: 'Primary node guide returned 403.', sources: [{ url: 'https://docs.example/node', access: 'inaccessible', notes: '403' }]
+      });
+      let data = JSON.parse((await handleToolCall('get_node_requirements', { chainId: 1 })).content[0].text);
+      expect(data).toMatchObject({ researchStatus: 'inaccessible', totalProfiles: 0, profiles: [], researchNotes: 'Primary node guide returned 403.' });
+      expect(data.sourcesChecked).toEqual([{ url: 'https://docs.example/node', access: 'inaccessible', notes: '403' }]);
+      expect(data.message).toMatch(/could not be read/);
+
+      mockGetNodeHardware.mockReturnValue({ ...hardware, profiles: [profile({ id: 'old', verification: 'unresolved' }), ...hardware.profiles] });
+      data = JSON.parse((await handleToolCall('get_node_requirements', { chainId: 1 })).content[0].text);
+      expect(data.profiles.map((p) => p.verification)).toEqual(['confirmed', 'confirmed', 'confirmed', 'unresolved']);
+      expect(data.note).toMatch(/`unresolved` \(sorted last\)/);
+    });
+
     it('says plainly when the research has nothing for the chain', async () => {
       mockGetNodeHardware.mockReturnValue(null);
       const data = JSON.parse((await handleToolCall('get_node_requirements', { chainId: 1 })).content[0].text);
       expect(data).toMatchObject({ chainId: 1, name: 'Ethereum', profiles: [], totalProfiles: 0, truncated: false });
-      expect(data.message).toMatch(/not proof/);
+      expect(data.message).toMatch(/not covered by the node hardware research/);
+      expect(data).not.toHaveProperty('researchStatus');
     });
 
     it('rejects an invalid or unknown chainId', async () => {
