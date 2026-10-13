@@ -161,7 +161,10 @@ describe('loadNetworkResearch', () => {
         verifications.add(p.verification);
         expect(['confirmed', 'qualified', 'unresolved']).toContain(p.verification);
         // An unsized profile is kept only as a declared extra component (e.g. OP's l2geth).
-        if (p.requirements.length === 0) expect(p.requiredWhen ?? p.sizing).toBeTruthy();
+        if (p.requirements.length === 0) {
+          expect(p.requiredWhen).toBeTruthy();
+          expect(p.sizing).toBe('not_established');
+        }
         for (const r of p.requirements) expect(r.value != null || r.min != null || r.max != null).toBe(true);
       }
     }

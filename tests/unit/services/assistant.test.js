@@ -282,6 +282,12 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('PARTIAL PROFILES ARE COMBINED');
     expect(prompt).toContain('chainId only (no role or level filter)');
     expect(prompt).toContain('the full node when asked about an archive node');
+    // OP Mainnet's l2geth: an extra component is listed, never filled from the modern node's specs.
+    expect(prompt).toContain('`requiredWhen` is an extra component to run alongside');
+    expect(prompt).toContain('always list it with its condition for that role, never');
+    expect(prompt).toContain('borrow into it');
+    expect(prompt).toContain('`snapshot` size is a download, not a disk requirement');
+    expect(prompt).toContain('a profile with verification unresolved is unverified');
     expect(prompt).toContain('say which');
     expect(prompt).toContain('Never borrow across different clients or scopes');
     // A capped result can omit the sibling: the model must narrow by role to fetch it.

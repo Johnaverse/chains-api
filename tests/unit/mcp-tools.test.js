@@ -1250,7 +1250,7 @@ describe('MCP Tools - Shared Module', () => {
           profile({
             id: 'l2geth', role: 'archive', level: 'unspecified', client: 'Legacy Geth (l2geth)', requirements: [],
             requiredWhen: 'Serving pre-Bedrock historical state locally', sizing: 'not_established', dependencies: [l1],
-            snapshotArtifact: { file: 'mainnet-legacy-archival.tar.zst', type: 'compressed_snapshot_download', sizes: [{ value: 2.9, unit: 'TB' }, { value: 2.9, unit: 'TiB' }], publishedAt: '2023-06-14 08:13' }
+            snapshotArtifact: { file: 'mainnet-legacy-archival.tar.zst', type: 'compressed_snapshot_download', sizes: [{ value: 2.9, unit: 'TB' }, { value: 2.9, unit: 'TiB', source: 'https://datadirs.example/' }], publishedAt: '2023-06-14 08:13' }
           })
         ]
       });
@@ -1258,6 +1258,8 @@ describe('MCP Tools - Shared Module', () => {
       const legacy = data.profiles.find((p) => p.client === 'Legacy Geth (l2geth)');
       expect(legacy).toMatchObject({ requiredWhen: 'Serving pre-Bedrock historical state locally', sizing: 'not_established', requirements: [] });
       expect(legacy.snapshot).toBe('mainnet-legacy-archival.tar.zst, compressed snapshot download: 2.9 TB / 2.9 TiB (2023-06-14 08:13)');
+      // The snapshot's own listing is cited first, ahead of the profile's evidence.
+      expect(legacy.sources).toEqual(['https://datadirs.example/', 'https://docs.example/']);
       expect(data.profiles[0]).not.toHaveProperty('requiredWhen');
       expect(data.dependencies).toEqual([{ component: l1.component, requiredWhen: l1.requiredWhen, hosting: l1.hosting, sizing: 'not_established' }]);
       expect(data.note).toMatch(/never lend it another client’s numbers/);

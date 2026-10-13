@@ -711,7 +711,9 @@ function handleGetNodeRequirements(args) {
     requirements: p.requirements.map(describeRequirement),
     ...(p.snapshotArtifact && { snapshot: describeSnapshot(p.snapshotArtifact) }),
     notes: p.notes,
-    sources: [...new Set([...(p.evidence ?? []), ...p.requirements.map((r) => r.source).filter(Boolean)])].slice(0, 3),
+    // A quoted snapshot size cites its own listing (OP's 2.9 TiB is datadirs.optimism.io), so its
+    // sources go first, before the cap of 3 can drop them.
+    sources: [...new Set([...(p.snapshotArtifact?.sizes ?? []).map((sz) => sz.source), ...(p.evidence ?? []), ...p.requirements.map((r) => r.source)].filter(Boolean))].slice(0, 3),
   }));
   const envelope = {
     ...base,
