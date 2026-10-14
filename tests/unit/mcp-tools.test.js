@@ -1333,6 +1333,23 @@ describe('MCP Tools - Shared Module', () => {
         platform: 'telegram', title: 'Group 0', url: 'https://t.me/g0', mode: 'discussion',
         relationship: 'officially_endorsed', scope: 'project_family', access: 'invite_unverified', verification: 'qualified'
       });
+      expect(data.research.channelsByPlatform).toEqual({ telegram: 20 });
+    });
+
+    it('get_chain_by_id gives every platform a slot before one fills the cap', async () => {
+      // Algorand's shape: one "other" page, then 14 Telegram groups, then X, then Discord.
+      const ch = (platform, i) => ({ platform, title: `${platform} ${i}`, url: `https://${platform}.example/${i}`, scope: 'project_family' });
+      const channels = [ch('other', 0), ...Array.from({ length: 14 }, (_, i) => ch('telegram', i)),
+        ...Array.from({ length: 5 }, (_, i) => ch('x', i)), ch('discord', 0), ch('discord', 1)];
+      vi.mocked(dataService.getChainDetail).mockReturnValueOnce({ chainId: 4160, name: 'Algorand', research: { channels, updatedAt: 'x' } });
+      const data = JSON.parse((await handleToolCall('get_chain_by_id', { chainId: 4160 })).content[0].text);
+      const shown = data.research.channels.map(c => c.title);
+      expect(shown).toHaveLength(12);
+      expect(shown).toEqual(expect.arrayContaining(['discord 0', 'discord 1', 'x 0']));
+      // Picks keep the dataset's most-specific-first order.
+      expect(shown.slice(0, 2)).toEqual(['other 0', 'telegram 0']);
+      expect(shown.filter(t => t.startsWith('telegram'))).toHaveLength(5);
+      expect(data.research.channelsByPlatform).toEqual({ other: 1, telegram: 14, x: 5, discord: 2 });
     });
 
     it('get_chain_by_id leaves hardware to this tool and keeps price ahead of the research block', async () => {
