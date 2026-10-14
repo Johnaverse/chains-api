@@ -1,6 +1,6 @@
 import { getForkMentions } from '../sources/forkFeeds.js';
 import { getExplorerTip } from '../sources/blockscout.js';
-import { buildForks, FORK_PHASE, scopeName } from '../domain/forks.js';
+import { buildForks, FORK_PHASE, registryScopes, scopeLookups } from '../domain/forks.js';
 import { getAllChains } from '../store/queries.js';
 import { logger } from '../util/logger.js';
 
@@ -46,14 +46,19 @@ const MAX_CHAINS_PER_SCOPE = 2;
 function chainResolver() {
   const byScope = new Map();
   for (const chain of getAllChains()) {
-    const scope = scopeName(chain?.name);
-    if (!scope || !Number.isFinite(chain.chainId)) continue;
-    if (!byScope.has(scope)) byScope.set(scope, []);
-    byScope.get(scope).push(chain.chainId);
+    if (!Number.isFinite(chain?.chainId)) continue;
+    for (const scope of registryScopes(chain.name)) {
+      if (!byScope.has(scope)) byScope.set(scope, new Set());
+      byScope.get(scope).add(chain.chainId);
+    }
   }
   return (scope) => {
-    const ids = byScope.get(scope) ?? [];
-    return ids.length <= MAX_CHAINS_PER_SCOPE ? ids : [];
+    // Most specific first: "ethereum sepolia", then "sepolia" (the registry's name for 11155111).
+    for (const candidate of scopeLookups(scope)) {
+      const ids = [...(byScope.get(candidate) ?? [])];
+      if (ids.length) return ids.length <= MAX_CHAINS_PER_SCOPE ? ids : [];
+    }
+    return [];
   };
 }
 

@@ -172,6 +172,26 @@ function scopesOf(event) {
 const TEST_NETWORK_WORD = /\b(testnet|test|devnet|sepolia|holesky|hoodi|goerli|futurenet|preview|preprod|staging|signet)\b/;
 
 /**
+ * The scopes under which a registry chain name can be found. The registry writes test networks
+ * both bare ("Sepolia") and qualified ("Base Sepolia Testnet"), sources write "Ethereum Sepolia"
+ * and "Base Sepolia", so a name is indexed with a trailing "testnet" dropped as well, and a
+ * qualified scope is also looked up by its test-network tail alone.
+ */
+export function registryScopes(name) {
+  const scope = scopeName(name);
+  if (!scope) return [];
+  const bare = scope.replace(/ testnet$/, '');
+  return [...new Set([scope, bare])];
+}
+
+export function scopeLookups(scope) {
+  if (typeof scope !== 'string' || !scope) return [];
+  const words = scope.split(' ');
+  const tail = words.slice(1).join(' ');
+  return words.length > 1 && TEST_NETWORK_WORD.test(tail) ? [scope, tail] : [scope];
+}
+
+/**
  * "stellar" and "stellar testnet" are one network family; "ethereum" and "ethereum classic" are
  * not, which is why the extension must be a test-network qualifier and not any longer name.
  */
@@ -304,8 +324,13 @@ export function bestState(statements = []) {
  * is a provider's reading; secondary news is a report of someone else's announcement.
  */
 export function sourceRank(event) {
+  // A post from ANOTHER network about this fork is indirect, however official its own forum
+  // or blog: Arbitrum's governance thread on Ethereum's Glamsterdam is Arbitrum's reading of
+  // Ethereum's schedule, and must not tie Ethereum's own announcement or outrank a provider.
+  const { forkNetwork, named } = scopesOf(event);
+  if (forkNetwork && named.length && !named.some(n => sameNetworkFamily(n, forkNetwork))) return SECONDARY_RANK;
   const feed = event?.feed ?? 'status';
-  if (feed === 'news') return event.weight === 'primary' ? 0 : 2;
+  if (feed === 'news') return event.weight === 'primary' ? 0 : SECONDARY_RANK;
   if (feed === 'status') return event.statusPage?.kind === 'rpc-provider' ? 1 : 0;
   return 0;
 }
@@ -398,7 +423,10 @@ function memberChainIds({ scope, forkNetwork, named, eventChainIds, chainIdsFor 
   if (!forkNetwork) return eventChainIds;
   const resolved = chainIdsFor?.(scope) ?? [];
   if (resolved.length) return resolved;
-  const aboutNetwork = named.length > 0 && named.every(n => sameNetworkFamily(n, forkNetwork));
+  // The post's chains carry no per-network split, so they are reused only when the post names
+  // exactly this network: an article about "Ethereum" declaring chain 1 must not lend it to
+  // the "Ethereum Sepolia" activation, which is not the mainnet date.
+  const aboutNetwork = named.length > 0 && named.every(n => n === scope);
   return aboutNetwork ? eventChainIds : [];
 }
 

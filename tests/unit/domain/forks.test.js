@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   forkKey, forkScopes, normalizeForkName, resolveForkActivation, forkPhase,
-  bestActivation, bestState, buildForks, FORK_PHASE, forkIdentity, scopeName, sourceRank
+  bestActivation, bestState, buildForks, FORK_PHASE, forkIdentity, scopeName, sourceRank,
+  registryScopes, scopeLookups
 } from '../../../src/domain/forks.js';
 
 const NOW = Date.parse('2026-08-14T12:00:00Z');
@@ -421,5 +422,31 @@ describe('forks across status, forum and news feeds', () => {
       event('b', { fork: fork({ name: 'Protocol Upgrade', activationAt: '2026-11-02T10:00:00Z' }), affectedChains: ['X'] })
     ], { now: NOW });
     expect(out).toHaveLength(2);
+  });
+  it('ranks a post from another network about the fork as indirect, not as the network\'s own', async () => {
+    // Copilot on #184: Arbitrum's forum thread on Ethereum's Glamsterdam tied Ethereum's own date.
+    const arb = mention('arb', 'forum', { name: 'Glamsterdam', network: 'Ethereum' }, { affectedChains: ['Arbitrum One'] });
+    expect(sourceRank(arb)).toBe(2);
+    const own = mention('eth', 'forum', { name: 'Glamsterdam', network: 'Ethereum' }, { affectedChains: ['Ethereum'] });
+    expect(sourceRank(own)).toBe(0);
+    const out = await buildForks([
+      mention('ef', 'news', { name: 'Glamsterdam', network: 'Ethereum', activationAt: '2099-12-03T00:00:00Z' }, { weight: 'primary', affectedChains: ['Ethereum'], publishedAt: '2026-10-01T00:00:00Z' }),
+      mention('arb', 'forum', { name: 'Glamsterdam', network: 'Ethereum', activationAt: '2099-12-20T00:00:00Z' }, { affectedChains: ['Arbitrum One'], publishedAt: '2026-10-05T00:00:00Z' })
+    ], { now: NOW });
+    expect(out[0].activationAt).toBe('2099-12-03T00:00:00.000Z');
+  });
+
+  it('never lends a mainnet chain to a test-network activation', async () => {
+    // Copilot on #184: fork.network "Ethereum Sepolia" with affectedChains ["Ethereum"] and chain 1.
+    const item = { ...mention('ef', 'news', { name: 'Glamsterdam', network: 'Ethereum Sepolia' }, { affectedChains: ['Ethereum'] }), chains: [{ chainId: 1 }] };
+    const out = await buildForks([item], { now: NOW });
+    expect(out[0]).toMatchObject({ network: 'ethereum sepolia', chains: [] });
+  });
+
+  it('looks a qualified test network up by its registry name too', () => {
+    expect(scopeLookups('ethereum sepolia')).toEqual(['ethereum sepolia', 'sepolia']);
+    expect(scopeLookups('ethereum classic')).toEqual(['ethereum classic']);
+    expect(registryScopes('Base Sepolia Testnet')).toEqual(['base sepolia testnet', 'base sepolia']);
+    expect(registryScopes('Ethereum Mainnet')).toEqual(['ethereum']);
   });
 });

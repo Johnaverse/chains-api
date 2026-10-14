@@ -227,4 +227,20 @@ describe('getForks', () => {
     expect((await getForks({ chainId: 42161 })).forks).toHaveLength(0);
     expect((await getForks({ chainId: 1 })).forks.map(f => f.name)).toEqual(['Glamsterdam']);
   });
+  it('resolves a Sepolia fork to the registry\'s Sepolia chain', async () => {
+    getAllChains.mockReturnValue([
+      { chainId: 1, name: 'Ethereum Mainnet' },
+      { chainId: 11155111, name: 'Sepolia' },
+      { chainId: 84532, name: 'Base Sepolia Testnet' }
+    ]);
+    serveMentions([
+      { ...event('ef', { fork: fork({ name: 'Glamsterdam', network: 'Ethereum Sepolia', activationAt: '2099-10-06T13:53:36Z' }), affectedChains: ['Ethereum'], chains: [1] }), feed: 'news' },
+      { ...event('base', { fork: fork({ name: 'Jovian', network: 'Base Sepolia', activationAt: '2099-10-07T00:00:00Z' }), affectedChains: ['Base Sepolia'] }), feed: 'forum' }
+    ]);
+
+    const out = await getForks();
+    expect(out.forks.find(f => f.name === 'Glamsterdam').chains).toEqual([11155111]);
+    expect(out.forks.find(f => f.name === 'Jovian').chains).toEqual([84532]);
+    expect((await getForks({ chainId: 1 })).forks).toHaveLength(0);
+  });
 });
