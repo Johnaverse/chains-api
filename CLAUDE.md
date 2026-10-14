@@ -6,21 +6,24 @@ Chains API is a Node.js service that aggregates blockchain chain data from five 
 
 **Single data source per container:** `server.js` runs the REST API and the MCP HTTP server in **one process** (default `npm start` / Docker `CMD`). Both surfaces read the same module-level in-memory store (`src/store/`), and only the REST side starts the refreshers — so a container never refreshes the same public RPC endpoint twice. `index.js` (REST only) and `mcp-server-http.js` (MCP only) remain runnable standalone for local/dev use. The MCP tool surface in `mcp-tools.js` mirrors the REST read endpoints (chains, search, relations, endpoints, clients, scaling, slip44, status-pages, stats, keywords, rpc-monitor, refresher, validate, live-incidents, forum-news).
 
-**Upstream feed services (separate deployables):** live incidents and forum news do **not** come from the five data sources — they are served by two sibling Node services with their own repos, releases, and containers:
+**Upstream feed services (separate deployables):** live incidents, forum news and ecosystem news do **not** come from the five data sources — they are served by three sibling Node services with their own repos, releases, and containers:
 
 | Service | Feeds | Consumed via |
 |---------|-------|--------------|
 | `chains-status-news` | Chain + RPC-provider status pages → incidents, scheduled maintenance | `LIVE_INCIDENTS_URL` |
 | `chains-forum-news` | Official community/governance forums, keyed by chain ID | `FORUM_NEWS_URL` |
+| `chains-news` | Curated ecosystem publishers (project blogs = `primary`, news desks = `secondary`) | `WEB3_NEWS_URL` |
+
+Forks are the one view built from **all three** feeds: `src/sources/forkFeeds.js` fetches each with `?fork=true` (falling back to an unfiltered fetch where a deployment rejects the param), and every service's enrichment carries the same `fork = {name, network, activationAt, activationBlock, state}` object that `src/domain/forks.js` groups on.
 
 The wire contract shared by all three services — addressing, health/readiness, versioning, collection envelopes, error shape, WebSocket framing, timestamps, auth — is specified in [`docs/SERVICE-CONTRACT.md`](docs/SERVICE-CONTRACT.md). Read it before changing any cross-service payload.
 
-Both are **independent git repos**, so they are often checked out next to this one in the same working tree (`chains-status-news/`, `chains-forum-news/`) — useful for cross-checking a feed's payload against a consumer here. They are versioned and released separately from this project, and the paths in this document, in `package.json`, and in `.github/workflows/` are all relative to *this* project's root.
+All three are **independent git repos**, so they are often checked out next to this one in the same working tree (`chains-status-news/`, `chains-forum-news/`, `chains-news/`) — useful for cross-checking a feed's payload against a consumer here. They are versioned and released separately from this project, and the paths in this document, in `package.json`, and in `.github/workflows/` are all relative to *this* project's root.
 
 Each is consumed on **two independent paths**, which is easy to miss:
 
-1. **Server-side** — `src/sources/liveIncidents.js` and `src/sources/forumNews.js` poll the feeds' REST endpoints behind a short in-memory cache, so the MCP tools (`get_live_incidents`, `get_forum_news`) and the assistant have the same data. `forumNews.js` is WebSocket-first (lazy persistent `/ws` subscription, REST only to seed or when the socket is down).
-2. **Client-side** — the dashboard (`public/app.js`) connects to the same services' `/ws` **directly from the browser**, with the hosts hardcoded as `STATUS_NEWS_BASE` / `FORUM_NEWS_BASE`. Changing a feed host therefore needs edits in *both* `config.js` (server) and `public/app.js` (dashboard).
+1. **Server-side** — `src/sources/liveIncidents.js`, `src/sources/forumNews.js` and `src/sources/web3News.js` poll the feeds' REST endpoints behind a short in-memory cache, so the MCP tools (`get_live_incidents`, `get_forum_news`, `get_web3_news`) and the assistant have the same data. `forumNews.js` is WebSocket-first (lazy persistent `/ws` subscription, REST only to seed or when the socket is down); `web3News.js` is REST-only. `src/sources/forkFeeds.js` is a fourth, separate reader of all three (see above).
+2. **Client-side** — the dashboard (`public/app.js`) connects to the same services' `/ws` **directly from the browser**, with the hosts hardcoded as `STATUS_NEWS_BASE` / `FORUM_NEWS_BASE` / `NEWS_BASE`. Changing a feed host therefore needs edits in *both* `config.js` (server) and `public/app.js` (dashboard).
 
 `chains-status-news` can also stream a second-phase `status.enrichment` message per event (LLM classification: `class`, `severity`, `confidence`, `summary`, `context.actionRequired`) keyed by the raw `eventId`; the dashboard upgrades incident cards in place when it arrives. Events also carry a normalized lifecycle `status` and an `ongoing` boolean — prefer those over parsing incident text.
 

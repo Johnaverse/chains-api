@@ -3,7 +3,8 @@ import {
   LIVE_INCIDENTS_CACHE_TTL_MS,
   LIVE_INCIDENTS_FETCH_TIMEOUT_MS
 } from '../../config.js';
-import { proxyFetch } from '../../fetchUtil.js';
+import { getFeed } from './feedHttp.js';
+import { slimFork } from '../domain/forks.js';
 import { resolveIncidentChain } from '../domain/incidentChains.js';
 import { correlateChainIncidents } from '../services/chainIncidents.js';
 import { hasWindowBanner, windowEndMs } from '../domain/maintenanceWindow.js';
@@ -103,10 +104,7 @@ async function loadIncidents() {
     return cache.incidents;
   }
   try {
-    const response = await proxyFetch(`${LIVE_INCIDENTS_URL}/events?limit=${FEED_FETCH_LIMIT}`, {
-      headers: { accept: 'application/json' },
-      signal: AbortSignal.timeout(LIVE_INCIDENTS_FETCH_TIMEOUT_MS)
-    });
+    const response = await getFeed(`${LIVE_INCIDENTS_URL}/events?limit=${FEED_FETCH_LIMIT}`, LIVE_INCIDENTS_FETCH_TIMEOUT_MS);
     if (!response.ok) throw new Error(`Feed responded ${response.status}`);
     const body = await response.json();
     const events = Array.isArray(body?.events) ? body.events : [];
@@ -215,15 +213,8 @@ function slimEnrichment(enrichment) {
   if (Array.isArray(enrichment.chains)) {
     slim.chains = enrichment.chains.filter((id) => Number.isFinite(id));
   }
-  if (enrichment.fork && typeof enrichment.fork === 'object') {
-    const { name, activationAt, activationBlock, state } = enrichment.fork;
-    slim.fork = {
-      name: typeof name === 'string' ? name : null,
-      activationAt: typeof activationAt === 'string' ? activationAt : null,
-      activationBlock: Number.isSafeInteger(activationBlock) ? activationBlock : null,
-      state: typeof state === 'string' ? state : null
-    };
-  }
+  const fork = slimFork(enrichment.fork);
+  if (fork) slim.fork = fork;
   return Object.keys(slim).length ? slim : null;
 }
 

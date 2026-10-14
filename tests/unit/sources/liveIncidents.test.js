@@ -186,8 +186,9 @@ describe('enrichment passthrough (the fork join key)', () => {
 
     const [event] = await getLiveEvents();
 
+    // Same shape get_forks reads (slimFork), so the two tools cannot disagree about one event.
     expect(event.enrichment.fork).toEqual({
-      name: 'Protocol 28', activationAt: '2026-09-16T17:00:00Z', activationBlock: null, state: 'scheduled'
+      name: 'Protocol 28', network: null, activationAt: '2026-09-16T17:00:00Z', activationBlock: null, state: 'scheduled'
     });
     expect(event.enrichment.affectedChains).toEqual(['Stellar Mainnet']);
     expect(event.enrichment.class).toBe('planned_software_update');
@@ -224,6 +225,17 @@ describe('enrichment passthrough (the fork join key)', () => {
 
     const [event] = await getLiveEvents();
 
-    expect(event.enrichment.fork).toEqual({ name: null, activationAt: null, activationBlock: null, state: null });
+    expect(event.enrichment.fork).toEqual({ name: null, network: null, activationAt: null, activationBlock: null, state: null });
+  });
+
+  it('drops a prose activation date, which Date.parse would misread', async () => {
+    // "Oct 6" parses in V8 as a date in 2001; the fork feed already refused it, now both do.
+    proxyFetch.mockResolvedValue(okResponse([feedEvent({
+      enrichment: { fork: { name: 'Glamsterdam', network: 'Ethereum', activationAt: 'Oct 6' } }
+    })]));
+
+    const [event] = await getLiveEvents();
+
+    expect(event.enrichment.fork).toMatchObject({ name: 'Glamsterdam', network: 'Ethereum', activationAt: null });
   });
 });
