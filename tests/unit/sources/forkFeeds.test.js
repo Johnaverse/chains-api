@@ -73,6 +73,73 @@ describe('fork feeds', () => {
     await expect(getForkMentions()).rejects.toThrow(/Fork feeds unavailable/);
   });
 
+  it('marks every feed failed and stale when all are down and the cache is served', async () => {
+    // Review #184: the old ok:true flags came back with the stale set, so the assistant was
+    // told every feed had answered during a full outage.
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    serve([
+      ['https://status.test/events', ok('events', [statusEvent])],
+      ['https://forum.test/news', ok('news', [forumPost])],
+      ['https://news.test/news', ok('news', [article])]
+    ]);
+    await getForkMentions();
+    clock.mockReturnValue(1_000_000 + 120_000); // past the TTL
+    serve([['https://', { ok: false, status: 503 }]]);
+    const out = await getForkMentions();
+    expect(out.feeds).toEqual({
+      status: { ok: false, stale: true, count: 1 },
+      forum: { ok: false, stale: true, count: 1 },
+      news: { ok: false, stale: true, count: 1 }
+    });
+    expect(out.mentions).toHaveLength(3);
+    clock.mockRestore();
+  });
+
+  it('backs off after a full outage instead of re-fetching on every call', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    serve([['https://', ok('news', [forumPost])], ['https://status.test', ok('events', [])]]);
+    await getForkMentions();
+    clock.mockReturnValue(1_000_000 + 120_000);
+    serve([['https://', { ok: false, status: 503 }]]);
+    await getForkMentions();
+    const calls = proxyFetch.mock.calls.length;
+    clock.mockReturnValue(1_000_000 + 125_000); // inside the backoff
+    await getForkMentions();
+    expect(proxyFetch.mock.calls.length).toBe(calls);
+    clock.mockRestore();
+  });
+
+  it('marks a feed that failed this round as stale when its old items are kept', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    serve([
+      ['https://status.test/events', ok('events', [statusEvent])],
+      ['https://forum.test/news', ok('news', [forumPost])],
+      ['https://news.test/news', ok('news', [article])]
+    ]);
+    await getForkMentions();
+    clock.mockReturnValue(1_000_000 + 120_000);
+    serve([
+      ['https://status.test/events', { ok: false, status: 503 }],
+      ['https://forum.test/news', ok('news', [forumPost])],
+      ['https://news.test/news', ok('news', [article])]
+    ]);
+    const out = await getForkMentions();
+    expect(out.feeds.status).toEqual({ ok: false, stale: true, count: 1 });
+    expect(out.feeds.forum).toEqual({ ok: true, count: 1 });
+    clock.mockRestore();
+  });
+
+  it('shares one fetch round between concurrent callers', async () => {
+    serve([
+      ['https://status.test/events', ok('events', [statusEvent])],
+      ['https://forum.test/news', ok('news', [forumPost])],
+      ['https://news.test/news', ok('news', [article])]
+    ]);
+    const [a, b] = await Promise.all([getForkMentions(), getForkMentions()]);
+    expect(a).toEqual(b);
+    expect(proxyFetch).toHaveBeenCalledTimes(3);
+  });
+
   it('maps each feed onto the shape fork grouping reads', () => {
     const news = toMention('news', article);
     expect(news).toMatchObject({ feed: 'news', weight: 'primary', statusPage: { id: 'ethereum-foundation', kind: 'news' } });

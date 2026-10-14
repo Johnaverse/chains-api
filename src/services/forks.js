@@ -1,6 +1,7 @@
 import { getForkMentions } from '../sources/forkFeeds.js';
 import { getExplorerTip } from '../sources/blockscout.js';
-import { buildForks, FORK_PHASE } from '../domain/forks.js';
+import { buildForks, FORK_PHASE, scopeName } from '../domain/forks.js';
+import { getAllChains } from '../store/queries.js';
 import { logger } from '../util/logger.js';
 
 /**
@@ -35,6 +36,28 @@ async function tipFor(chainId) {
 }
 
 /**
+ * The chainIds a fork's network scope names, from the registry's chain names ("Ethereum
+ * Mainnet" → `ethereum` → 1). Used when a source names the forking network, so an Arbitrum
+ * post about Ethereum's fork is filed under chain 1, not under Arbitrum. A name more than two
+ * chains share is ambiguous and resolves to nothing rather than to a guess.
+ */
+const MAX_CHAINS_PER_SCOPE = 2;
+
+function chainResolver() {
+  const byScope = new Map();
+  for (const chain of getAllChains()) {
+    const scope = scopeName(chain?.name);
+    if (!scope || !Number.isFinite(chain.chainId)) continue;
+    if (!byScope.has(scope)) byScope.set(scope, []);
+    byScope.get(scope).push(chain.chainId);
+  }
+  return (scope) => {
+    const ids = byScope.get(scope) ?? [];
+    return ids.length <= MAX_CHAINS_PER_SCOPE ? ids : [];
+  };
+}
+
+/**
  * Forks assembled from every feed that mentions them: status pages, forums and news.
  *
  * @param {object} [opts]
@@ -45,7 +68,7 @@ async function tipFor(chainId) {
  */
 export async function getForks({ chainId, phase, scheduledOnly = false, limit = DEFAULT_LIMIT } = {}) {
   const { mentions, fetchedAt, feeds } = await getForkMentions();
-  const forks = (await buildForks(mentions, { tipFor })).map(present);
+  const forks = (await buildForks(mentions, { tipFor, chainIdsFor: chainResolver() })).map(present);
 
   let filtered = forks;
   if (chainId != null) filtered = filtered.filter((f) => f.chains.includes(Number(chainId)));

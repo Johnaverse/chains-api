@@ -267,8 +267,13 @@ describe('forks across status, forum and news feeds', () => {
     expect(forkIdentity('the Glamsterdam upgrade')).toBe('glamsterdam');
     expect(forkIdentity('Glamsterdam hard fork')).toBe('glamsterdam');
     expect(forkIdentity('Protocol 28')).toBe('protocol 28');
-    // A name that is only the generic word stays itself rather than vanishing.
-    expect(forkIdentity('Upgrade')).toBe('upgrade');
+    // A name made only of generic words identifies nothing, so it is no name at all: "Protocol
+    // Upgrade" must not collapse to "protocol" and merge two unrelated notices under it.
+    expect(forkIdentity('Upgrade')).toBeNull();
+    expect(forkIdentity('Protocol Upgrade')).toBeNull();
+    expect(forkIdentity('Network Upgrade')).toBeNull();
+    expect(forkIdentity('the hard fork')).toBeNull();
+    expect(forkIdentity('Network Upgrade 5')).toBe('network upgrade 5');
   });
 
   it('drops only the mainnet qualifier from a scope', () => {
@@ -325,5 +330,96 @@ describe('forks across status, forum and news feeds', () => {
     expect(sourceRank({ feed: 'news', weight: 'primary' })).toBe(0);
     expect(sourceRank({ feed: 'status', statusPage: { kind: 'rpc-provider' } })).toBe(1);
     expect(sourceRank({ feed: 'news', weight: 'secondary' })).toBe(2);
+  });
+  it('takes the forking network\'s chains, not the poster\'s, when the source named it', async () => {
+    // Review #184: an Arbitrum post about Ethereum's fork declared 42161, which converted an
+    // Ethereum height with Arbitrum's tip and listed Glamsterdam under ?chainId=42161.
+    const arb = { ...mention('arb', 'forum', { name: 'Glamsterdam', network: 'Ethereum', activationBlock: 25000000 }, { affectedChains: ['Arbitrum One'] }), chains: [{ chainId: 42161 }] };
+    const looked = [];
+    const tipFor = async (id) => { looked.push(id); return { height: 24000000, timestampMs: NOW, averageBlockSeconds: 12 }; };
+    const out = await buildForks([arb], { tipFor, chainIdsFor: (scope) => (scope === 'ethereum' ? [1] : []), now: NOW });
+    expect(out[0].chains).toEqual([1]);
+    expect(looked).toEqual([1]);
+    // Without a resolver the poster's chains are still not borrowed.
+    const bare = await buildForks([arb], { tipFor, now: NOW });
+    expect(bare[0].chains).toEqual([]);
+  });
+
+  it('keeps the post\'s chains when the post is about the forking network', async () => {
+    const ef = { ...mention('ef', 'news', { name: 'Glamsterdam', network: 'Ethereum' }, { affectedChains: ['Ethereum Mainnet'] }), chains: [{ chainId: 1 }] };
+    const out = await buildForks([ef], { now: NOW });
+    expect(out[0].chains).toEqual([1]);
+  });
+
+  it('keeps a multi-network window on the test network the fork network names alongside', () => {
+    // fork.network narrows the scopes; it must not drop "Stellar Testnet" from a window covering both.
+    const window = mention('qn', 'status', { name: 'Protocol 28', network: 'Stellar Mainnet' }, { affectedChains: ['Stellar Mainnet', 'Stellar Testnet'] });
+    expect(forkScopes(window)).toEqual(['stellar', 'stellar testnet']);
+    // A longer name that is a different network is not a test network of it.
+    const etc = mention('etc', 'forum', { name: 'Olympia', network: 'Ethereum Classic' }, { affectedChains: ['Ethereum Classic', 'Ethereum'] });
+    expect(forkScopes(etc)).toEqual(['ethereum classic']);
+  });
+
+  it('follows a reschedule that newer provider windows report, even over the network page', async () => {
+    const out = await buildForks([
+      mention('page', 'status', { name: 'Protocol 30', network: 'X', activationAt: '2099-09-01T00:00:00Z' }, { kind: 'chain', publishedAt: '2026-08-01T00:00:00Z' }),
+      mention('qn', 'status', { name: 'Protocol 30', network: 'X', activationAt: '2099-09-15T00:00:00Z' }, { kind: 'rpc-provider', publishedAt: '2026-08-20T00:00:00Z' }),
+      mention('alc', 'status', { name: 'Protocol 30', network: 'X', activationAt: '2099-09-15T01:00:00Z' }, { kind: 'rpc-provider', publishedAt: '2026-08-21T00:00:00Z' })
+    ], { now: NOW });
+    expect(out).toHaveLength(1);
+    expect(out[0].activationAt).toBe('2099-09-15T01:00:00.000Z');
+  });
+
+  it('does not treat a provider window a few hours early as a reschedule', () => {
+    const best = bestActivation([
+      { at: '2099-10-06T13:53:36.000Z', evidence: 'stated', rank: 0, observedAt: 1 },
+      { at: '2099-10-06T12:00:00.000Z', evidence: 'stated', rank: 1, observedAt: 2 }
+    ]);
+    expect(best.at).toBe('2099-10-06T13:53:36.000Z');
+  });
+
+  it('clusters unnamed provider windows a few hours apart into the named fork', async () => {
+    const out = await buildForks([
+      { ...event('a', { fork: fork({ activationAt: '2026-10-06T13:00:00Z' }), affectedChains: ['Ethereum Sepolia'], page: 'a' }), feed: 'status' },
+      { ...event('b', { fork: fork({ activationAt: '2026-10-06T13:30:00Z' }), affectedChains: ['Ethereum Sepolia'], page: 'b' }), feed: 'status' },
+      mention('ef', 'news', { name: 'Glamsterdam', network: 'Ethereum Sepolia', activationAt: '2026-10-06T13:53:36Z' }, { weight: 'primary', page: 'ef' })
+    ], { now: Date.parse('2026-10-01T00:00:00Z') });
+    expect(out).toHaveLength(1);
+    expect(out[0].sources.sort()).toEqual(['a', 'b', 'ef']);
+    expect(out[0].activationAt).toBe('2026-10-06T13:53:36.000Z');
+  });
+
+  it('joins an unnamed height notice and an unnamed time notice for one activation', async () => {
+    const out = await buildForks([
+      event('h', { fork: fork({ activationBlock: 18813000, activationAt: '2026-08-18T10:00:00Z' }), affectedChains: ['Aleo'], page: 'h' }),
+      event('t', { fork: fork({ activationAt: '2026-08-18T09:30:00Z' }), affectedChains: ['Aleo'], page: 't' })
+    ], { now: NOW });
+    expect(out).toHaveLength(1);
+    expect(out[0].activationBlock).toBe(18813000);
+  });
+
+  it('keeps unnamed notices days apart as separate forks', async () => {
+    const out = await buildForks([
+      event('a', { fork: fork({ activationAt: '2026-08-18T10:00:00Z' }), affectedChains: ['Aleo'] }),
+      event('b', { fork: fork({ activationAt: '2026-09-18T10:00:00Z' }), affectedChains: ['Aleo'] })
+    ], { now: NOW });
+    expect(out).toHaveLength(2);
+  });
+
+  it('joins a chainId-scoped mention with the same fork scoped by network name', async () => {
+    const forum = { ...mention('forum', 'forum', { name: 'Glamsterdam' }), chains: [{ chainId: 1 }] };
+    const ef = { ...mention('ef', 'news', { name: 'Glamsterdam', network: 'Ethereum' }, { affectedChains: ['Ethereum'] }), chains: [{ chainId: 1 }] };
+    const out = await buildForks([forum, ef], { now: NOW });
+    expect(out).toHaveLength(1);
+    expect(out[0].network).toBe('ethereum');
+    expect(out[0].sources.sort()).toEqual(['ef', 'forum']);
+  });
+
+  it('groups generic-named notices by their timing, not by the generic name', async () => {
+    const out = await buildForks([
+      event('a', { fork: fork({ name: 'Network Upgrade', activationAt: '2026-08-18T10:00:00Z' }), affectedChains: ['X'] }),
+      event('b', { fork: fork({ name: 'Protocol Upgrade', activationAt: '2026-11-02T10:00:00Z' }), affectedChains: ['X'] })
+    ], { now: NOW });
+    expect(out).toHaveLength(2);
   });
 });

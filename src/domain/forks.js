@@ -51,6 +51,24 @@ export const FORK_PHASE = Object.freeze({
 });
 
 /**
+ * The `enrichment.fork` object every feed service emits, validated into the one shape this
+ * module groups. Shared by the fork feeds and the live-incident feed so get_forks and
+ * get_chain_upgrades read the same event the same way.
+ */
+export function slimFork(fork) {
+  if (!fork || typeof fork !== 'object') return null;
+  const { name, network, activationAt, activationBlock, state } = fork;
+  return {
+    name: typeof name === 'string' && name.trim() ? name.trim() : null,
+    network: typeof network === 'string' && network.trim() ? network.trim() : null,
+    // ISO only: V8's Date.parse reads prose too — "Oct 6" parses as a date in 2001.
+    activationAt: typeof activationAt === 'string' && /^\d{4}-\d{2}-\d{2}/.test(activationAt) && Number.isFinite(Date.parse(activationAt)) ? activationAt : null,
+    activationBlock: Number.isSafeInteger(activationBlock) ? activationBlock : null,
+    state: typeof state === 'string' ? state : null
+  };
+}
+
+/**
  * The grouping identity of a fork.
  *
  * Prefers the codename because that is what actually travels between providers. Falls back to
@@ -61,18 +79,27 @@ export const FORK_PHASE = Object.freeze({
  * @returns {string|null} null when the event carries no fork identity at all
  */
 export function forkKey(fork, scope) {
+  const group = forkGroup(fork, scope);
+  return group ? group.key : null;
+}
+
+/** forkKey, with the parts kept apart so groups can be compared across scopes. */
+function forkGroup(fork, scope) {
   if (!fork || !scope) return null;
   const name = forkIdentity(fork.name);
-  if (name) return `name:${name}@${scope}`;
+  if (name) return { key: `name:${name}@${scope}`, kind: 'name', ident: name };
   if (Number.isSafeInteger(fork.activationBlock) && fork.activationBlock > 0) {
-    return `block:${scope}:${fork.activationBlock}`;
+    return { key: `block:${scope}:${fork.activationBlock}`, kind: 'block', ident: String(fork.activationBlock) };
   }
-  // Marked, unnamed, no height — but an exact stated instant. Alchemy's "Ethereum Sepolia
-  // Hard Fork Upgrade" gives only "October 6, 2026 at 13:53:36 UTC", and dropping it left the
-  // Sepolia fork out entirely. Two sources stating the same second for the same network are
-  // describing the same activation, exactly as with a shared height.
+  // Marked, unnamed, no height — but a stated instant. Alchemy's "Ethereum Sepolia Hard Fork
+  // Upgrade" gives only "October 6, 2026 at 13:53:36 UTC", and dropping it left the Sepolia
+  // fork out entirely. Notices a few hours apart are clustered afterwards (clusterUnnamed),
+  // because each provider states its own window start, not the activation second.
   const at = Date.parse(fork.activationAt ?? '');
-  if (Number.isFinite(at)) return `at:${scope}:${new Date(at).toISOString()}`;
+  if (Number.isFinite(at)) {
+    const iso = new Date(at).toISOString();
+    return { key: `at:${scope}:${iso}`, kind: 'at', ident: iso };
+  }
   return null;
 }
 
@@ -88,8 +115,18 @@ export function forkIdentity(name) {
     .replace(/^the /, '')
     .replace(/ (network upgrade|protocol upgrade|hard ?fork|upgrade|fork)$/, '')
     .trim();
+  // A name made only of generic words — "Protocol Upgrade", "Network Upgrade", "Hard Fork" —
+  // identifies nothing: two unrelated notices on one network would merge under it. Such a
+  // fork is treated as unnamed and grouped by height or time instead.
+  if (cleaned.split(' ').every(w => GENERIC_FORK_WORDS.has(w))) return null;
   return stripped || cleaned;
 }
+
+const GENERIC_FORK_WORDS = new Set([
+  'the', 'a', 'network', 'protocol', 'chain', 'mainnet', 'testnet', 'upgrade', 'upgrades', 'hard',
+  'soft', 'fork', 'hardfork', 'softfork', 'scheduled', 'planned', 'emergency', 'mandatory',
+  'node', 'client', 'software', 'release', 'maintenance', 'update', 'activation'
+]);
 
 /**
  * The networks one event is about, as grouping scopes.
@@ -106,20 +143,42 @@ export function forkIdentity(name) {
  * chainId is the fallback where the name was not extracted.
  */
 export function forkScopes(event) {
+  return scopesOf(event).scopes;
+}
+
+function scopesOf(event) {
+  const named = [...new Set((event?.enrichment?.affectedChains ?? [])
+    .map(name => scopeName(name))
+    .filter(Boolean))];
   // The network that forks, when the source said — which is not always what the post is ABOUT:
   // Arbitrum's "Update L1-Pricing Parameters for Ethereum Glamsterdam" is about Arbitrum One,
   // but the fork is Ethereum's, and scoping it by the post's chains invented an Arbitrum fork.
+  // It narrows the affected networks rather than replacing them: QuickNode's "Stellar - Mainnet
+  // & Testnet" window names Stellar Mainnet as the network and still belongs to the testnet
+  // activation too, so the same network's test networks named alongside it are kept.
   const forkNetwork = scopeName(event?.enrichment?.fork?.network);
-  if (forkNetwork) return [forkNetwork];
-  const named = (event?.enrichment?.affectedChains ?? [])
-    .map(name => scopeName(name))
-    .filter(Boolean);
-  if (named.length) return [...new Set(named)];
+  if (forkNetwork) {
+    const family = named.filter(n => sameNetworkFamily(n, forkNetwork));
+    return { scopes: family.includes(forkNetwork) ? family : [forkNetwork], forkNetwork, named };
+  }
+  if (named.length) return { scopes: named, forkNetwork: null, named };
   const chainIds = (event?.chains ?? []).map(c => c.chainId).filter(id => Number.isFinite(id));
-  if (chainIds.length) return [...new Set(chainIds.map(id => `chain:${id}`))];
+  if (chainIds.length) return { scopes: [...new Set(chainIds.map(id => `chain:${id}`))], forkNetwork: null, named };
   // No network identity at all. Still groupable by codename, which is better than discarding
   // the fork — it just cannot be split per network.
-  return ['unscoped'];
+  return { scopes: ['unscoped'], forkNetwork: null, named };
+}
+
+const TEST_NETWORK_WORD = /\b(testnet|test|devnet|sepolia|holesky|hoodi|goerli|futurenet|preview|preprod|staging|signet)\b/;
+
+/**
+ * "stellar" and "stellar testnet" are one network family; "ethereum" and "ethereum classic" are
+ * not, which is why the extension must be a test-network qualifier and not any longer name.
+ */
+function sameNetworkFamily(a, b) {
+  if (a === b) return true;
+  const [base, longer] = a.length < b.length ? [a, b] : [b, a];
+  return longer.startsWith(`${base} `) && TEST_NETWORK_WORD.test(longer.slice(base.length));
 }
 
 /**
@@ -195,25 +254,36 @@ export function forkPhase({ activationAt, state }, now = Date.now()) {
 /**
  * Pick the best activation across every event that mentions one fork.
  *
- * Strength first, then recency. Strength first because a provider posts "coming soon" before
- * the exact time, and a later vaguer note must not overwrite a precise one. Recency within a
- * strength level because that is exactly what a reschedule looks like: the same kind of claim,
- * made again, with a different answer.
+ * Strength first: a provider posts "coming soon" before the exact time, and a later vaguer note
+ * must not overwrite a precise one. Then who said it — the network's own announcement over a
+ * provider's window over a secondary outlet repeating a date — and recency within one rank.
+ *
+ * Rank alone would freeze a fork on its first official date, though: when a fork slips and the
+ * network page is never edited, every newer provider window says the new day. So a NEWER claim
+ * from a non-secondary source that moves the date by more than RESCHEDULE_MIN_MS is a
+ * reschedule, and only claims made from then on are considered. The threshold is what keeps a
+ * provider's window start (hours before the activation) from passing for one.
  */
+const RESCHEDULE_MIN_MS = 24 * 60 * 60 * 1000;
+const SECONDARY_RANK = 2;
+
 export function bestActivation(candidates = []) {
-  const ranked = candidates
-    .filter(c => c?.at && c.evidence)
-    .sort((a, b) => {
-      const byEvidence = FORK_ACTIVATION_EVIDENCE.indexOf(a.evidence) - FORK_ACTIVATION_EVIDENCE.indexOf(b.evidence);
-      if (byEvidence !== 0) return byEvidence;
-      // Then who said it: a secondary outlet repeating a date must not override the network's
-      // own announcement or a provider's window. Recency only breaks ties within one rank,
-      // which is what a reschedule from the same kind of source looks like.
-      const byRank = (a.rank ?? 0) - (b.rank ?? 0);
-      if (byRank !== 0) return byRank;
-      return (b.observedAt ?? 0) - (a.observedAt ?? 0);
-    });
-  return ranked[0] ?? null;
+  const usable = candidates.filter(c => c?.at && c.evidence);
+  if (!usable.length) return null;
+  const strength = Math.min(...usable.map(c => FORK_ACTIVATION_EVIDENCE.indexOf(c.evidence)));
+  let pool = usable.filter(c => FORK_ACTIVATION_EVIDENCE.indexOf(c.evidence) === strength);
+  const pick = (list) => [...list].sort((a, b) =>
+    ((a.rank ?? 0) - (b.rank ?? 0)) || ((b.observedAt ?? 0) - (a.observedAt ?? 0)))[0];
+  let best = pick(pool);
+  for (;;) {
+    const moved = pool.filter(c => (c.rank ?? 0) < SECONDARY_RANK
+      && (c.observedAt ?? 0) > (best.observedAt ?? 0)
+      && Math.abs(Date.parse(c.at) - Date.parse(best.at)) > RESCHEDULE_MIN_MS);
+    if (!moved.length) return best;
+    const since = Math.min(...moved.map(c => c.observedAt ?? 0));
+    pool = pool.filter(c => (c.observedAt ?? 0) >= since);
+    best = pick(pool);
+  }
 }
 
 /**
@@ -240,26 +310,96 @@ export function sourceRank(event) {
   return 0;
 }
 
+// How far apart two unnamed notices of one activation may be. Providers state their own window
+// start, typically an hour or a few before the activation second.
+const UNNAMED_MATCH_MS = 6 * 60 * 60 * 1000;
+
+function anchorsOf(members) {
+  return {
+    blocks: new Set(members.map(m => m.fork.activationBlock).filter(b => Number.isSafeInteger(b) && b > 0)),
+    times: members.map(m => Date.parse(m.fork.activationAt ?? '')).filter(Number.isFinite)
+  };
+}
+
+/** 0 = same height or same second, 1 = times within UNNAMED_MATCH_MS, null = unrelated. */
+function anchorDistance(a, b) {
+  if ([...a.blocks].some(x => b.blocks.has(x))) return 0;
+  if (a.times.some(x => b.times.includes(x))) return 0;
+  if (a.times.some(x => b.times.some(y => Math.abs(x - y) <= UNNAMED_MATCH_MS))) return 1;
+  return null;
+}
+
+function mergeInto(groups, target, source) {
+  target.members.push(...source.members);
+  groups.delete(source.key);
+}
+
 /**
- * Merge a group keyed by height or instant into the NAMED group on the same network with the
- * same activation. Alchemy never names the Sepolia fork; the EF post names it Glamsterdam and
- * states the same 13:53:36 UTC — one fork, which would otherwise be listed twice. Only an exact
- * match folds, and only into a single candidate: two named forks at one instant stay apart.
+ * A mention scoped only by chainId (`chain:1`: no network name was extracted) is the same fork
+ * as the name-scoped group whose chains include that id — otherwise Glamsterdam is listed once
+ * as "ethereum" and once with no network. Merged only into a single unambiguous candidate.
  */
-function foldUnnamed(byKey) {
-  const named = [...byKey].filter(([key]) => key.startsWith('name:'));
-  for (const [key, members] of [...byKey]) {
-    if (key.startsWith('name:')) continue;
-    const { scope } = members[0];
-    const block = members.map(m => m.fork.activationBlock).find(b => Number.isSafeInteger(b) && b > 0) ?? null;
-    const at = members.map(m => Date.parse(m.fork.activationAt ?? '')).find(Number.isFinite) ?? null;
-    const targets = named.filter(([, nm]) => nm[0].scope === scope && nm.some(m =>
-      (block !== null && m.fork.activationBlock === block)
-      || (at !== null && Date.parse(m.fork.activationAt ?? '') === at)));
-    if (targets.length !== 1) continue;
-    targets[0][1].push(...members);
-    byKey.delete(key);
+function mergeChainScopes(groups, chainIdsFor) {
+  for (const group of [...groups.values()]) {
+    if (!group.scope.startsWith('chain:')) continue;
+    const chainId = Number(group.scope.slice('chain:'.length));
+    const targets = [...groups.values()].filter(g => g !== group
+      && g.kind === group.kind && g.ident === group.ident
+      && g.scope !== 'unscoped' && !g.scope.startsWith('chain:')
+      && (g.members.some(m => m.chainIds.includes(chainId)) || (chainIdsFor?.(g.scope) ?? []).includes(chainId)));
+    if (targets.length === 1) mergeInto(groups, targets[0], group);
   }
+}
+
+/**
+ * Unnamed groups (keyed by height or by instant) on one network that describe the same
+ * activation become one: they share a height, or their times are within UNNAMED_MATCH_MS — one
+ * provider states block 18813000 and its time, another only a window start half an hour earlier.
+ * Each cluster then folds into the NAMED group on that network with the same activation: Alchemy
+ * never names the Sepolia fork, the EF post names it Glamsterdam. A fold needs one candidate —
+ * the exact match if there is one, else the only one in range; two named forks stay apart.
+ */
+function clusterUnnamed(groups) {
+  const unnamed = [...groups.values()].filter(g => g.kind !== 'name');
+  for (let i = 0; i < unnamed.length; i++) {
+    const a = unnamed[i];
+    if (!groups.has(a.key)) continue;
+    for (let j = i + 1; j < unnamed.length; j++) {
+      const b = unnamed[j];
+      if (!groups.has(b.key) || b.scope !== a.scope) continue;
+      if (anchorDistance(anchorsOf(a.members), anchorsOf(b.members)) !== null) {
+        mergeInto(groups, a, b);
+        j = i; // a's anchors grew; rescan the rest against them
+      }
+    }
+  }
+  const named = [...groups.values()].filter(g => g.kind === 'name');
+  for (const group of [...groups.values()]) {
+    if (group.kind === 'name') continue;
+    const anchors = anchorsOf(group.members);
+    const near = named
+      .filter(g => g.scope === group.scope)
+      .map(g => ({ g, d: anchorDistance(anchors, anchorsOf(g.members)) }))
+      .filter(x => x.d !== null);
+    const exact = near.filter(x => x.d === 0);
+    const targets = exact.length ? exact : near;
+    if (targets.length === 1) mergeInto(groups, targets[0].g, group);
+  }
+}
+
+/**
+ * The chains a mention attributes to one scope. When the source named the forking network,
+ * the post's own chains are about the POSTER: an Arbitrum post on Ethereum's Glamsterdam
+ * declares 42161, and attaching that to Ethereum's fork both converted its height with
+ * Arbitrum's tip and listed it under `?chainId=42161`. Such a member takes the chains the
+ * network name resolves to, and the post's chains only when the post is about that network.
+ */
+function memberChainIds({ scope, forkNetwork, named, eventChainIds, chainIdsFor }) {
+  if (!forkNetwork) return eventChainIds;
+  const resolved = chainIdsFor?.(scope) ?? [];
+  if (resolved.length) return resolved;
+  const aboutNetwork = named.length > 0 && named.every(n => sameNetworkFamily(n, forkNetwork));
+  return aboutNetwork ? eventChainIds : [];
 }
 
 /**
@@ -273,12 +413,13 @@ function foldUnnamed(byKey) {
  * @param {object[]} events enriched status events (each may carry `enrichment.fork`)
  * @param {object} [opts]
  * @param {(chainId:number)=>object|null} [opts.tipFor] chain tip lookup, for height-only forks
+ * @param {(scope:string)=>number[]} [opts.chainIdsFor] the chainIds a network scope names
  * @param {number} [opts.now]
  * @returns {Promise<object[]>} forks, soonest upcoming first, then unscheduled, then past
  */
-export async function buildForks(events = [], { tipFor = null, now = Date.now(), maxTipLookups = DEFAULT_MAX_TIP_LOOKUPS } = {}) {
+export async function buildForks(events = [], { tipFor = null, chainIdsFor = null, now = Date.now(), maxTipLookups = DEFAULT_MAX_TIP_LOOKUPS } = {}) {
   let tipBudget = maxTipLookups;
-  const byKey = new Map();
+  const groups = new Map();
   for (const event of events) {
     const fork = event?.enrichment?.fork;
     if (!fork) continue;
@@ -286,24 +427,27 @@ export async function buildForks(events = [], { tipFor = null, now = Date.now(),
     // declared chains alone under-reports: an OP Stack window naming nine networks declares
     // none of them, so `?chainId=` would answer "no forks" for a chain that is genuinely
     // affected. Same reasoning the incident feed already applies to its own chain filter.
-    const chainIds = [...new Set([
+    const eventChainIds = [...new Set([
       ...(event.chains ?? []).map(c => c.chainId),
       ...(event.enrichment?.chains ?? [])
     ])].filter(id => Number.isFinite(id));
     // One event may be about several networks ("Stellar - Mainnet & Testnet"), and each of those
     // is a separate activation with its own date. The event contributes to every one.
-    for (const scope of forkScopes(event)) {
-      const key = forkKey(fork, scope);
-      if (!key) continue;
-      if (!byKey.has(key)) byKey.set(key, []);
-      byKey.get(key).push({ event, fork, chainIds, scope });
+    const { scopes, forkNetwork, named } = scopesOf(event);
+    for (const scope of scopes) {
+      const group = forkGroup(fork, scope);
+      if (!group) continue;
+      const chainIds = memberChainIds({ scope, forkNetwork, named, eventChainIds, chainIdsFor });
+      if (!groups.has(group.key)) groups.set(group.key, { ...group, scope, members: [] });
+      groups.get(group.key).members.push({ event, fork, chainIds, scope });
     }
   }
 
-  foldUnnamed(byKey);
+  mergeChainScopes(groups, chainIdsFor);
+  clusterUnnamed(groups);
 
   const forks = [];
-  for (const [key, members] of byKey) {
+  for (const { key, members } of groups.values()) {
     const chainIds = [...new Set(members.flatMap(m => m.chainIds))];
     // A tip is only fetched when some member needs a height converted, so the common
     // stated-time fork costs no explorer call at all.

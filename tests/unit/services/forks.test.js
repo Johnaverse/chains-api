@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { getForks } from '../../../src/services/forks.js';
 import { getForkMentions } from '../../../src/sources/forkFeeds.js';
 import { getExplorerTip } from '../../../src/sources/blockscout.js';
+import { getAllChains } from '../../../src/store/queries.js';
+
+vi.mock('../../../src/store/queries.js', () => ({ getAllChains: vi.fn(() => []) }));
 
 vi.mock('../../../src/sources/forkFeeds.js', () => ({ getForkMentions: vi.fn() }));
 
@@ -24,6 +27,7 @@ describe('getForks', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getExplorerTip.mockResolvedValue(null);
+    getAllChains.mockReturnValue([]);
     fetchedAt = '2026-08-15T00:00:00.000Z';
   });
 
@@ -203,5 +207,24 @@ describe('getForks', () => {
 
     expect(out).toMatchObject({ count: 0, totalMatched: 0, truncated: false });
     expect(out.byPhase).toMatchObject({ upcoming: 0, past: 0, cancelled: 0, unscheduled: 0 });
+  });
+  it('files a fork named for another network under that network\'s chain, not the poster\'s', async () => {
+    getAllChains.mockReturnValue([
+      { chainId: 1, name: 'Ethereum Mainnet' },
+      { chainId: 42161, name: 'Arbitrum One' },
+      // A name shared by many chains is ambiguous and resolves to nothing.
+      { chainId: 7, name: 'Testchain' }, { chainId: 8, name: 'Testchain' }, { chainId: 9, name: 'Testchain' }
+    ]);
+    serveMentions([
+      { ...event('arb', { fork: fork({ name: 'Glamsterdam', network: 'Ethereum', activationAt: '2099-12-03T00:00:00Z' }), affectedChains: ['Arbitrum One'], chains: [42161] }), feed: 'forum' },
+      { ...event('t', { fork: fork({ name: 'Zeta', network: 'Testchain', activationAt: '2099-12-03T00:00:00Z' }), affectedChains: ['Other'], chains: [5] }), feed: 'forum' }
+    ]);
+
+    const out = await getForks();
+    const glam = out.forks.find(f => f.name === 'Glamsterdam');
+    expect(glam.chains).toEqual([1]);
+    expect(out.forks.find(f => f.name === 'Zeta').chains).toEqual([]);
+    expect((await getForks({ chainId: 42161 })).forks).toHaveLength(0);
+    expect((await getForks({ chainId: 1 })).forks.map(f => f.name)).toEqual(['Glamsterdam']);
   });
 });
