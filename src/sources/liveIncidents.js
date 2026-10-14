@@ -4,7 +4,7 @@ import {
   LIVE_INCIDENTS_FETCH_TIMEOUT_MS
 } from '../../config.js';
 import { getFeed } from './feedHttp.js';
-import { slimFork } from '../domain/forks.js';
+import { slimFork, forksOf } from '../domain/forks.js';
 import { resolveIncidentChain } from '../domain/incidentChains.js';
 import { correlateChainIncidents } from '../services/chainIncidents.js';
 import { hasWindowBanner, windowEndMs } from '../domain/maintenanceWindow.js';
@@ -215,6 +215,11 @@ function slimEnrichment(enrichment) {
   }
   const fork = slimFork(enrichment.fork);
   if (fork) slim.fork = fork;
+  // chains-news-style multi-activation posts: `forks` lists every activation, primary included.
+  if (Array.isArray(enrichment.forks) && enrichment.forks.length) {
+    const forks = forksOf(enrichment);
+    if (forks.length) slim.forks = forks;
+  }
   return Object.keys(slim).length ? slim : null;
 }
 

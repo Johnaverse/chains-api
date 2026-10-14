@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getForkMentions, toMention, _resetForkFeedsForTests } from '../../../src/sources/forkFeeds.js';
+import { getForkMentions, toMention, toMentions, _resetForkFeedsForTests } from '../../../src/sources/forkFeeds.js';
 import { proxyFetch } from '../../../fetchUtil.js';
 
 vi.mock('../../../fetchUtil.js', () => ({ proxyFetch: vi.fn() }));
@@ -42,7 +42,11 @@ describe('fork feeds', () => {
     ]);
     const out = await getForkMentions();
     expect(out.mentions.map((m) => m.feed).sort()).toEqual(['forum', 'news', 'status']);
-    expect(out.feeds).toEqual({ status: { ok: true, count: 1 }, forum: { ok: true, count: 1 }, news: { ok: true, count: 1 } });
+    expect(out.feeds).toEqual({
+      status: { ok: true, count: 1, filtered: true, oldest: null },
+      forum: { ok: true, count: 1, filtered: true, oldest: null },
+      news: { ok: true, count: 1, filtered: true, oldest: null }
+    });
     for (const [url] of proxyFetch.mock.calls) expect(url).toContain('fork=true');
   });
 
@@ -64,7 +68,7 @@ describe('fork feeds', () => {
       ['https://news.test/news', ok('news', [article])]
     ]);
     const out = await getForkMentions();
-    expect(out.feeds.status).toEqual({ ok: false, count: 0 });
+    expect(out.feeds.status).toEqual({ ok: false, count: 0, filtered: false, oldest: null });
     expect(out.mentions).toHaveLength(2);
   });
 
@@ -87,9 +91,9 @@ describe('fork feeds', () => {
     serve([['https://', { ok: false, status: 503 }]]);
     const out = await getForkMentions();
     expect(out.feeds).toEqual({
-      status: { ok: false, stale: true, count: 1 },
-      forum: { ok: false, stale: true, count: 1 },
-      news: { ok: false, stale: true, count: 1 }
+      status: { ok: false, stale: true, count: 1, filtered: true, oldest: null },
+      forum: { ok: false, stale: true, count: 1, filtered: true, oldest: null },
+      news: { ok: false, stale: true, count: 1, filtered: true, oldest: null }
     });
     expect(out.mentions).toHaveLength(3);
     clock.mockRestore();
@@ -124,8 +128,8 @@ describe('fork feeds', () => {
       ['https://news.test/news', ok('news', [article])]
     ]);
     const out = await getForkMentions();
-    expect(out.feeds.status).toEqual({ ok: false, stale: true, count: 1 });
-    expect(out.feeds.forum).toEqual({ ok: true, count: 1 });
+    expect(out.feeds.status).toEqual({ ok: false, stale: true, count: 1, filtered: true, oldest: null });
+    expect(out.feeds.forum).toEqual({ ok: true, count: 1, filtered: true, oldest: null });
     clock.mockRestore();
   });
 
@@ -151,5 +155,46 @@ describe('fork feeds', () => {
     expect(toMention('news', noFork)).toBeNull();
     // Prose is not a time, however Date.parse reads it.
     expect(toMention('news', { ...article, enrichment: { fork: { ...glamsterdam, activationAt: 'Oct 6' } } }).enrichment.fork.activationAt).toBeNull();
+  });
+
+  it('remembers a 400 to ?fork=true and reports the feed as unfiltered with its oldest item', async () => {
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    const page = [{ ...statusEvent, publishedAt: '2026-08-02T00:00:00Z' }, { title: 'x', publishedAt: '2026-07-01T00:00:00Z', enrichment: { fork: null } }];
+    serve([
+      ['https://status.test/events', (url) => (url.includes('fork=true') ? { ok: false, status: 400 } : ok('events', page))],
+      ['https://forum.test/news', ok('news', [])],
+      ['https://news.test/news', ok('news', [])]
+    ]);
+    const first = await getForkMentions();
+    expect(first.feeds.status).toMatchObject({ ok: true, filtered: false, oldest: '2026-07-01T00:00:00.000Z', count: 1 });
+    expect(first.feeds.forum.filtered).toBe(true);
+    clock.mockReturnValue(1_000_000 + 120_000); // past the TTL, inside the 1h memory
+    proxyFetch.mockClear();
+    await getForkMentions();
+    const statusCalls = proxyFetch.mock.calls.map(([u]) => u).filter((u) => u.startsWith('https://status.test'));
+    expect(statusCalls).toEqual(['https://status.test/events?limit=500']);
+    clock.mockReturnValue(1_000_000 + 2 * 60 * 60 * 1000); // memory expired: try the filter again
+    proxyFetch.mockClear();
+    await getForkMentions();
+    expect(proxyFetch.mock.calls.some(([u]) => u.startsWith('https://status.test') && u.includes('fork=true'))).toBe(true);
+    clock.mockRestore();
+  });
+
+  it('turns enrichment.forks into one mention per activation, keeping createdAt and lowConfidence', async () => {
+    const a = { ...glamsterdam, name: 'Glamsterdam' };
+    const b = { ...glamsterdam, name: 'Hegota' };
+    const multi = { ...article, enrichment: { chainNames: ['Ethereum'], lowConfidence: true, createdAt: '2026-09-01T00:00:00Z', fork: null, forks: [a, b] } };
+    const ms = toMentions('news', multi);
+    expect(ms.map((m) => m.enrichment.fork.name)).toEqual(['Glamsterdam', 'Hegota']);
+    expect(ms[0].enrichment).toMatchObject({ lowConfidence: true, createdAt: '2026-09-01T00:00:00Z' });
+    // The primary also sits in forks[]: it is not counted twice.
+    expect(toMentions('news', { ...multi, enrichment: { ...multi.enrichment, fork: a } })).toHaveLength(2);
+    expect(toMention('news', multi).enrichment.fork.name).toBe('Glamsterdam');
+    serve([
+      ['https://status.test/events', ok('events', [])],
+      ['https://forum.test/news', ok('news', [])],
+      ['https://news.test/news', ok('news', [multi])]
+    ]);
+    expect((await getForkMentions()).mentions).toHaveLength(2);
   });
 });

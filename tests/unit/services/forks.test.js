@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getForks } from '../../../src/services/forks.js';
+import { getForks, _resetForksMemoForTests } from '../../../src/services/forks.js';
 import { getForkMentions } from '../../../src/sources/forkFeeds.js';
 import { getExplorerTip } from '../../../src/sources/blockscout.js';
 import { getAllChains } from '../../../src/store/queries.js';
@@ -26,6 +26,7 @@ function event(id, { fork: f, affectedChains, chains = [], page = 'quicknode', p
 describe('getForks', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    _resetForksMemoForTests();
     getExplorerTip.mockResolvedValue(null);
     getAllChains.mockReturnValue([]);
     fetchedAt = '2026-08-15T00:00:00.000Z';
@@ -103,7 +104,7 @@ describe('getForks', () => {
     serveMentions([
       event('1', { fork: fork({ name: 'a', activationAt: '2099-09-01T00:00:00Z' }), affectedChains: ['x'] }),
       event('2', { fork: fork({ name: 'b', activationAt: '2099-09-02T00:00:00Z' }), affectedChains: ['y'] }),
-      event('3', { fork: fork({ name: 'c', activationAt: '2020-01-01T00:00:00Z' }), affectedChains: ['z'] })
+      event('3', { fork: fork({ name: 'c', activationAt: '2026-08-01T00:00:00Z' }), affectedChains: ['z'] })
     ]);
 
     const out = await getForks({ limit: 1 });
@@ -135,7 +136,7 @@ describe('getForks', () => {
   it('filters by chain and by phase', async () => {
     serveMentions([
       event('1', { fork: fork({ name: 'a', activationAt: '2099-09-01T00:00:00Z' }), chains: [1] }),
-      event('2', { fork: fork({ name: 'b', activationAt: '2020-01-01T00:00:00Z' }), chains: [8453] })
+      event('2', { fork: fork({ name: 'b', activationAt: '2026-08-01T00:00:00Z' }), chains: [8453] })
     ]);
 
     expect((await getForks({ chainId: 1 })).count).toBe(1);
@@ -242,5 +243,63 @@ describe('getForks', () => {
     expect(out.forks.find(f => f.name === 'Glamsterdam').chains).toEqual([11155111]);
     expect(out.forks.find(f => f.name === 'Jovian').chains).toEqual([84532]);
     expect((await getForks({ chainId: 1 })).forks).toHaveLength(0);
+  });
+
+  describe('review fixes', () => {
+    const classed = (e, c) => ({ ...e, enrichment: { ...e.enrichment, class: c } });
+
+    it('lists only forks by default and upgrades on request, counting both', async () => {
+      serveMentions([
+        classed(event('f', { fork: fork({ name: 'Protocol 28', activationAt: '2099-09-16T17:00:00Z' }), affectedChains: ['Stellar'] }), 'planned_hard_fork'),
+        classed(event('u', { fork: fork({ name: 'Nanoreth' }), affectedChains: ['HyperEVM'] }), 'planned_software_update')
+      ]);
+      const def = await getForks();
+      expect(def.forks.map(f => f.name)).toEqual(['Protocol 28']);
+      expect(def.byKind).toEqual({ fork: 1, upgrade: 1 });
+      expect(def.byPhase.unscheduled).toBe(0);
+      expect(def.upgradesIncluded).toBe(false);
+      const all = await getForks({ include: 'upgrades' });
+      expect(all.forks.map(f => f.kind).sort()).toEqual(['fork', 'upgrade']);
+      expect(all.byPhase.unscheduled).toBe(1);
+    });
+
+    it('resolves a network through the registry aliases, not only chain.name', async () => {
+      // Chain 999 is "Wanchain Testnet" by name, HyperEVM by its networks-registry names.
+      getAllChains.mockReturnValue([
+        { chainId: 999, name: 'Wanchain Testnet', shortName: 'twan', fullName: 'HyperEVM', aliases: ['hyperevm', 'hyperliquid-evm'] },
+        { chainId: 7, name: 'Testchain' }, { chainId: 8, name: 'Other', aliases: ['testchain'] }, { chainId: 9, name: 'Testchain' }
+      ]);
+      serveMentions([
+        // No fork.network and no declared chain: resolution must still run.
+        event('h', { fork: fork({ name: 'Nanoreth', activationAt: '2099-09-01T00:00:00Z' }), affectedChains: ['HyperEVM'] }),
+        event('t', { fork: fork({ name: 'Zeta', activationAt: '2099-09-01T00:00:00Z' }), affectedChains: ['Testchain'] })
+      ]);
+      expect((await getForks({ chainId: 999 })).forks.map(f => f.name)).toEqual(['Nanoreth']);
+      // Three chains answer to "testchain": ambiguous, resolves to nothing.
+      expect((await getForks()).forks.find(f => f.name === 'Zeta').chains).toEqual([]);
+    });
+
+    it('builds once per feed snapshot and registry version', async () => {
+      const chains = [{ chainId: 1, name: 'Ethereum Mainnet' }];
+      getAllChains.mockReturnValue(chains);
+      const mentions = [event('a', { fork: fork({ activationBlock: 18813000 }), chains: [1] })];
+      serveMentions(mentions);
+      await getForks();
+      await getForks({ phase: 'past' });
+      expect(getExplorerTip).toHaveBeenCalledTimes(1);
+      getAllChains.mockReturnValue([...chains]);   // registry reloaded
+      await getForks();
+      expect(getExplorerTip).toHaveBeenCalledTimes(2);
+    });
+
+    it('surfaces a dropped date and a low-confidence member on the event', async () => {
+      serveMentions([{
+        ...event('a', { fork: fork({ name: 'Alpenglow', activationAt: '2024-10-21T00:00:00Z', state: 'scheduled' }), affectedChains: ['Solana'] }),
+        enrichment: { class: 'planned_hard_fork', lowConfidence: true, affectedChains: ['Solana'], fork: fork({ name: 'Alpenglow', activationAt: '2024-10-21T00:00:00Z' }) }
+      }]);
+      const [f] = (await getForks()).forks;
+      expect(f).toMatchObject({ activationAt: null, phase: 'unscheduled', networks: ['solana'] });
+      expect(f.events[0]).toMatchObject({ activationAt: null, implausibleActivationAt: '2024-10-21T00:00:00Z', lowConfidence: true });
+    });
   });
 });

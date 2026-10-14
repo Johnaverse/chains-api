@@ -238,4 +238,14 @@ describe('enrichment passthrough (the fork join key)', () => {
 
     expect(event.enrichment.fork).toMatchObject({ name: 'Glamsterdam', network: 'Ethereum', activationAt: null });
   });
+  it('carries a multi-activation forks[] list, primary included once', async () => {
+    const a = { name: 'Glamsterdam', network: 'Ethereum', activationAt: null, activationBlock: null, state: null };
+    const b = { ...a, name: 'Hegota' };
+    proxyFetch.mockResolvedValue(okResponse([feedEvent({ enrichment: { fork: a, forks: [a, b] } })]));
+
+    const [event] = await getLiveEvents();
+
+    expect(event.enrichment.fork.name).toBe('Glamsterdam');
+    expect(event.enrichment.forks.map((f) => f.name)).toEqual(['Glamsterdam', 'Hegota']);
+  });
 });

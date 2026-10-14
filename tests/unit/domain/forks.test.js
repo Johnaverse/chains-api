@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   forkKey, forkScopes, normalizeForkName, resolveForkActivation, forkPhase,
   bestActivation, bestState, buildForks, FORK_PHASE, forkIdentity, scopeName, sourceRank,
-  registryScopes, scopeLookups
+  registryScopes, scopeLookups, forkKind, plausibleFork, observedAtOf, forksOf, isDateOnly, FORK_KIND
 } from '../../../src/domain/forks.js';
 
 const NOW = Date.parse('2026-08-14T12:00:00Z');
@@ -245,8 +245,9 @@ describe('assembling forks from events', () => {
 
   it('follows a reschedule announced later by a different source', async () => {
     const events = [
-      event('a', { fork: fork({ name: 'Rex6', activationAt: '2026-08-25T03:00:00Z' }), page: 'quicknode', updatedAt: '2026-08-10T00:00:00Z' }),
-      event('b', { fork: fork({ name: 'Rex6', activationAt: '2026-08-28T03:00:00Z', state: 'rescheduled' }), page: 'megaeth', updatedAt: '2026-08-13T00:00:00Z' })
+      // Ordered by publication: updatedAt is not trusted (QuickNode sets it to the window start).
+      event('a', { fork: fork({ name: 'Rex6', activationAt: '2026-08-25T03:00:00Z' }), page: 'quicknode', publishedAt: '2026-08-10T00:00:00Z' }),
+      event('b', { fork: fork({ name: 'Rex6', activationAt: '2026-08-28T03:00:00Z', state: 'rescheduled' }), page: 'megaeth', publishedAt: '2026-08-13T00:00:00Z' })
     ];
     const [forkOut] = await buildForks(events, { now: NOW });
 
@@ -366,7 +367,7 @@ describe('forks across status, forum and news feeds', () => {
       mention('page', 'status', { name: 'Protocol 30', network: 'X', activationAt: '2099-09-01T00:00:00Z' }, { kind: 'chain', publishedAt: '2026-08-01T00:00:00Z' }),
       mention('qn', 'status', { name: 'Protocol 30', network: 'X', activationAt: '2099-09-15T00:00:00Z' }, { kind: 'rpc-provider', publishedAt: '2026-08-20T00:00:00Z' }),
       mention('alc', 'status', { name: 'Protocol 30', network: 'X', activationAt: '2099-09-15T01:00:00Z' }, { kind: 'rpc-provider', publishedAt: '2026-08-21T00:00:00Z' })
-    ], { now: NOW });
+    ], { now: Date.parse('2026-08-22T00:00:00Z') });   // observed times are clamped to now
     expect(out).toHaveLength(1);
     expect(out[0].activationAt).toBe('2099-09-15T01:00:00.000Z');
   });
@@ -448,5 +449,173 @@ describe('forks across status, forum and news feeds', () => {
     expect(scopeLookups('ethereum classic')).toEqual(['ethereum classic']);
     expect(registryScopes('Base Sepolia Testnet')).toEqual(['base sepolia testnet', 'base sepolia']);
     expect(registryScopes('Ethereum Mainnet')).toEqual(['ethereum']);
+  });
+});
+
+describe('fork review fixes', () => {
+  const cls = (e, c) => ({ ...e, enrichment: { ...e.enrichment, class: c } });
+
+  describe('fork vs ordinary software update (kind)', () => {
+    const member = (f, c) => ({ fork: fork(f), event: { enrichment: { class: c } } });
+
+    it('treats a planned_software_update with no date as an upgrade, not a fork', async () => {
+      // Live: Nanoreth, a v29.0.1 RPC patch named "Protocol 29", Celestia "Fibre server setup".
+      const out = await buildForks([
+        cls(event('n', { fork: fork({ name: 'Nanoreth' }), affectedChains: ['HyperEVM'] }), 'planned_software_update'),
+        cls(event('p', { fork: fork({ name: 'Protocol 29' }), affectedChains: ['Stellar'] }), 'planned_software_update')
+      ], { now: NOW });
+      expect(out.map(f => f.kind)).toEqual(['upgrade', 'upgrade']);
+    });
+
+    it('keeps a hard-fork-classed group a fork, whatever the other members are', async () => {
+      const out = await buildForks([
+        cls(event('a', { fork: fork({ name: 'Glamsterdam' }), affectedChains: ['Ethereum'] }), 'planned_software_update'),
+        cls(event('b', { fork: fork({ name: 'Glamsterdam' }), affectedChains: ['Ethereum'] }), 'planned_hard_fork')
+      ], { now: NOW });
+      expect(out).toHaveLength(1);
+      expect(out[0].kind).toBe(FORK_KIND.FORK);
+    });
+
+    it('counts a named, dated network upgrade as a fork even when only provider windows report it', async () => {
+      // Stellar "Protocol 28" reaches the feed mostly as provider windows classed as software updates.
+      const out = await buildForks([
+        cls(event('qn', { fork: fork({ name: 'Protocol 28', activationAt: '2026-09-16T17:00:00Z' }), affectedChains: ['Stellar Mainnet'] }), 'planned_software_update')
+      ], { now: NOW });
+      expect(out[0].kind).toBe('fork');
+    });
+
+    it('applies the rule: version names and undated names are upgrades; heights are forks', () => {
+      const stated = { evidence: 'stated' };
+      expect(forkKind([member({ name: 'v29.0.1', activationAt: '2026-09-01T00:00:00Z' }, 'planned_software_update')], stated)).toBe('upgrade');
+      expect(forkKind([member({ name: 'Sui testnet v1.58.2', activationAt: '2026-09-01T00:00:00Z' }, 'planned_software_update')], stated)).toBe('upgrade');
+      expect(forkKind([member({ name: 'Rex6' }, 'planned_software_update')], null)).toBe('upgrade');
+      expect(forkKind([member({ name: 'Rex6' }, 'planned_software_update')], stated)).toBe('fork');
+      expect(forkKind([member({ activationBlock: 18813000 }, 'planned_software_update')], null)).toBe('fork');
+      expect(forkKind([member({ name: 'X' }, 'hard_fork')], null)).toBe('fork');   // legacy class
+      // No class anywhere: nothing to judge on, so it stays a fork.
+      expect(forkKind([member({ name: 'X' }, undefined)], null)).toBe('fork');
+    });
+  });
+
+  describe('implausible stated dates', () => {
+    it('drops a stated activation far before the post that states it', async () => {
+      // Alpenglow, announced in 2026, came back dated 2024-10-21: the model guessed the year.
+      const out = await buildForks([
+        event('a', { fork: fork({ name: 'Alpenglow', activationAt: '2024-10-21T00:00:00Z' }), affectedChains: ['Solana'], publishedAt: '2026-08-01T00:00:00Z' })
+      ], { now: NOW });
+      expect(out[0]).toMatchObject({ activationAt: null, phase: FORK_PHASE.UNSCHEDULED });
+      expect(out[0].events[0].enrichment.fork).toMatchObject({ activationAt: null, implausibleActivationAt: '2024-10-21T00:00:00Z' });
+    });
+
+    it('keeps a recent past date and a completed retrospective', () => {
+      const published = Date.parse('2026-08-01T00:00:00Z');
+      expect(plausibleFork(fork({ activationAt: '2026-07-20T00:00:00Z' }), published).activationAt).toBe('2026-07-20T00:00:00Z');
+      expect(plausibleFork(fork({ activationAt: '2024-10-21T00:00:00Z', state: 'completed' }), published).activationAt).toBe('2024-10-21T00:00:00Z');
+      expect(plausibleFork(fork({ activationAt: '2024-10-21T00:00:00Z' }), published).activationAt).toBeNull();
+    });
+  });
+
+  describe('when a claim was made', () => {
+    it('ignores updatedAt, prefers enrichment.createdAt, and never lies in the future', () => {
+      const now = Date.parse('2026-08-14T12:00:00Z');
+      // QuickNode sets updatedAt to the window start, in the future.
+      expect(observedAtOf({ publishedAt: '2026-08-01T00:00:00Z', updatedAt: '2026-09-01T00:00:00Z' }, now)).toBe(Date.parse('2026-08-01T00:00:00Z'));
+      expect(observedAtOf({ publishedAt: '2026-08-01T00:00:00Z', enrichment: { createdAt: '2026-08-02T00:00:00Z' } }, now)).toBe(Date.parse('2026-08-02T00:00:00Z'));
+      expect(observedAtOf({ publishedAt: '2026-09-01T00:00:00Z' }, now)).toBe(now);
+      expect(observedAtOf({}, now)).toBe(0);
+    });
+
+    it('does not let a future updatedAt pass for a reschedule', async () => {
+      const out = await buildForks([
+        event('net', { fork: fork({ name: 'Rex6', activationAt: '2026-08-25T03:00:00Z' }), page: 'megaeth', publishedAt: '2026-08-12T00:00:00Z' }),
+        // Older notice whose updatedAt is its (future) window start.
+        { ...event('qn', { fork: fork({ name: 'Rex6', activationAt: '2026-08-20T00:00:00Z' }), page: 'quicknode', publishedAt: '2026-08-01T00:00:00Z' }), updatedAt: '2026-08-20T00:00:00Z' }
+      ], { now: NOW });
+      expect(out[0].activationAt).toBe('2026-08-25T03:00:00.000Z');
+    });
+  });
+
+  it('puts a completed fork with no date in the past, not unscheduled', async () => {
+    // dYdX v9.8.0: reported done, never dated.
+    expect(forkPhase({ activationAt: null, state: 'completed' }, NOW)).toBe(FORK_PHASE.PAST);
+    const out = await buildForks([event('d', { fork: fork({ name: 'v9.8.0', state: 'completed' }), affectedChains: ['dYdX'] })], { now: NOW });
+    expect(out[0].phase).toBe(FORK_PHASE.PAST);
+  });
+
+  it('collapses one window naming several networks into a single entry', async () => {
+    // Nanoreth ×3: one window, three networks, identical evidence.
+    const out = await buildForks([
+      event('w', { fork: fork({ name: 'Nanoreth' }), affectedChains: ['HyperEVM', 'HyperEVM Testnet', 'Hyperliquid'], chains: [] })
+    ], { now: NOW });
+    expect(out).toHaveLength(1);
+    expect(out[0].networks).toEqual(['hyperevm', 'hyperevm testnet', 'hyperliquid']);
+    expect(out[0].events).toHaveLength(1);
+  });
+
+  it('does not collapse two forks one post names, nor networks with evidence of their own', async () => {
+    const both = event('both', { fork: fork({ name: 'Protocol 28' }), affectedChains: ['Stellar Mainnet', 'Stellar Testnet'], chains: [] });
+    const own = event('own', { fork: fork({ name: 'Protocol 28', activationAt: '2026-08-27T17:00:00Z' }), affectedChains: ['Stellar Testnet'], chains: [] });
+    expect(await buildForks([both, own], { now: NOW })).toHaveLength(2);
+    const a = { ...event('p', { fork: fork({ name: 'Alpha' }), affectedChains: ['X'] }), url: 'https://x/post' };
+    const b = { ...a, enrichment: { ...a.enrichment, fork: fork({ name: 'Beta' }) } };
+    expect(await buildForks([a, b], { now: NOW })).toHaveLength(2);
+  });
+
+  it('anchors unnamed clusters to their first time instead of chaining them', async () => {
+    // Single linkage strung notices 5h apart into one 30h fork.
+    const times = ['2026-08-18T00:00:00Z', '2026-08-18T05:00:00Z', '2026-08-18T10:00:00Z', '2026-08-18T15:00:00Z'];
+    const out = await buildForks(times.map((t, i) => event(`n${i}`, { fork: fork({ activationAt: t }), affectedChains: ['Aleo'], page: `p${i}` })), { now: NOW });
+    expect(out).toHaveLength(2);
+    expect(out.map(f => f.events.length).sort()).toEqual([2, 2]);
+  });
+
+  it('folds an unscoped named mention into the one network-scoped fork of that name', async () => {
+    const out = await buildForks([
+      event('net', { fork: fork({ name: 'Glamsterdam', activationAt: '2026-12-03T00:00:00Z' }), affectedChains: ['Ethereum'], chains: [] }),
+      event('loose', { fork: fork({ name: 'the Glamsterdam upgrade' }), chains: [] })
+    ], { now: NOW });
+    expect(out).toHaveLength(1);
+    expect(out[0].events).toHaveLength(2);
+    // Two candidates: ambiguous, left alone.
+    const two = await buildForks([
+      event('m', { fork: fork({ name: 'Z' }), affectedChains: ['A'], chains: [] }),
+      event('t', { fork: fork({ name: 'Z' }), affectedChains: ['B'], chains: [] }),
+      event('u', { fork: fork({ name: 'Z' }), chains: [] })
+    ], { now: NOW });
+    expect(two).toHaveLength(3);
+  });
+
+  it('lists each event URL once within a fork', async () => {
+    const copy = (i, publishedAt) => ({ ...event(`c${i}`, { fork: fork({ name: 'v9.8.0', state: 'completed' }), affectedChains: ['dYdX'], publishedAt }), url: 'https://dydx/post' });
+    const out = await buildForks([copy(1, '2026-08-01T00:00:00Z'), copy(2, '2026-08-03T00:00:00Z'), copy(3, '2026-08-02T00:00:00Z')], { now: NOW });
+    expect(out[0].events).toHaveLength(1);
+    expect(out[0].events[0].id).toBe('c2');   // the newest copy
+  });
+
+  describe('date-only activations', () => {
+    it('marks the precision and keeps the day upcoming until it is over', async () => {
+      expect(isDateOnly('2026-08-14')).toBe(true);
+      expect(isDateOnly('2026-08-14T00:00:00Z')).toBe(false);
+      const out = await buildForks([event('d', { fork: fork({ name: 'Rex7', activationAt: '2026-08-14' }), affectedChains: ['MegaETH'] })], { now: NOW });
+      expect(out[0]).toMatchObject({ activationPrecision: 'day', phase: FORK_PHASE.UPCOMING });
+      expect(forkPhase({ activationAt: '2026-08-13T00:00:00.000Z', activationPrecision: 'day' }, NOW)).toBe(FORK_PHASE.PAST);
+    });
+
+    it('prefers a precise time on the same day over a bare date', () => {
+      const best = bestActivation([
+        { at: '2026-09-16T00:00:00.000Z', evidence: 'stated', precision: 'day', rank: 0, observedAt: 2 },
+        { at: '2026-09-16T17:00:00.000Z', evidence: 'stated', precision: 'time', rank: 1, observedAt: 1 }
+      ]);
+      expect(best.at).toBe('2026-09-16T17:00:00.000Z');
+    });
+  });
+
+  it('reads enrichment.forks when present, without double-counting the primary', () => {
+    const a = { name: 'Alpha', network: 'X', activationAt: null, activationBlock: null, state: null };
+    const b = { ...a, name: 'Beta' };
+    expect(forksOf({ fork: a, forks: [a, b] }).map(f => f.name)).toEqual(['Alpha', 'Beta']);
+    expect(forksOf({ fork: null, forks: [a, b] })).toHaveLength(2);
+    expect(forksOf({ fork: a })).toHaveLength(1);
+    expect(forksOf({ fork: null })).toEqual([]);
   });
 });

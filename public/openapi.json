@@ -3,7 +3,7 @@
   "info": {
     "title": "Chains API",
     "description": "Aggregated blockchain chain data from five external sources (TheGraph, Chainlist, Chain ID Network, SLIP-0044, L2BEAT): chain metadata, relations, RPC endpoints and health, L2 scaling, and operator status.",
-    "version": "1.7.51"
+    "version": "1.7.52"
   },
   "components": {
     "schemas": {}
@@ -607,6 +607,18 @@
             "name": "scheduledOnly",
             "required": false,
             "description": "Drop forks with no known activation time. What a calendar wants — distinct from phase, because a fork can be real and announced with no day named yet."
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "upgrades"
+              ]
+            },
+            "in": "query",
+            "name": "include",
+            "required": false,
+            "description": "upgrades: also list ordinary software updates that carried a fork marker (kind \"upgrade\" — client releases, RPC patches, infra work). Excluded by default; byKind counts both either way."
           },
           {
             "schema": {

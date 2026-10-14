@@ -69,6 +69,92 @@ export function slimFork(fork) {
 }
 
 /**
+ * Every fork object one feed item carries. chains-news sends `enrichment.forks` (same entry
+ * shape) when one post names two or more activations; that array INCLUDES the primary entry
+ * `enrichment.fork` also holds, and may come with `fork: null`. So: `forks` when present, else
+ * `[fork]` — never both, which would count the primary twice. Each entry is its own mention.
+ */
+export function forksOf(enrichment) {
+  if (!enrichment || typeof enrichment !== 'object') return [];
+  const raw = Array.isArray(enrichment.forks) && enrichment.forks.length ? enrichment.forks : [enrichment.fork];
+  const seen = new Set();
+  const out = [];
+  for (const f of raw) {
+    const slim = slimFork(f);
+    if (!slim) continue;
+    const id = JSON.stringify(slim);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(slim);
+  }
+  return out;
+}
+
+/**
+ * Classes that by themselves mark a fork. Everything else (`planned_software_update`,
+ * `urgent_software_fix`, ...) can still carry `enrichment.fork` — a provider window that
+ * PREPARES for a fork is classed as the provider's software update and carries the fork so it
+ * groups with the network's announcement — but on its own it is evidence of an upgrade, not
+ * of a fork. `hard_fork` is the previous taxonomy's name, still present in archived events.
+ */
+export const FORK_CLASSES = new Set(['planned_hard_fork', 'hard_fork']);
+
+/** What a fork entry is: a consensus fork / network upgrade, or an ordinary software update. */
+export const FORK_KIND = Object.freeze({ FORK: 'fork', UPGRADE: 'upgrade' });
+
+// "v29.0.1", "1.58", "testnet-v4.9.1": a release number, not a codename.
+const VERSION_NAME = /\bv?\d+\.\d+/i;
+
+/**
+ * Whether a group of mentions is a fork, or an ordinary software update that happened to be
+ * marked. Measured on the live feed, 7 of 9 "forks" were client releases and RPC patches
+ * (Nanoreth, a v29.0.1 patch named "Protocol 29", a Celestia server setup, a Sui testnet
+ * client bump), so the class is the first test — but not the only one, because the Stellar
+ * "Protocol 28" activation reaches the feed mostly as provider windows classed as software
+ * updates. The rule, in order:
+ *
+ *   1. any member classed as a hard fork                                       -> fork
+ *   2. no member has a class at all (older payloads; nothing to judge on)      -> fork
+ *   3. an activation HEIGHT (software updates do not activate at a block)      -> fork
+ *   4. a real name (not generic, not a version number) AND a stated activation -> fork
+ *   5. otherwise                                                               -> upgrade
+ */
+export function forkKind(members, activation) {
+  const classes = members.map(m => m.event?.enrichment?.class).filter(c => typeof c === 'string' && c);
+  if (classes.some(c => FORK_CLASSES.has(c))) return FORK_KIND.FORK;
+  if (!classes.length) return FORK_KIND.FORK;
+  if (members.some(m => Number.isSafeInteger(m.fork.activationBlock) && m.fork.activationBlock > 0)) return FORK_KIND.FORK;
+  const named = members.some(m => forkIdentity(m.fork.name) && !VERSION_NAME.test(m.fork.name));
+  if (named && activation?.evidence === 'stated') return FORK_KIND.FORK;
+  return FORK_KIND.UPGRADE;
+}
+
+/** A date with no time of day ("2026-09-16"): the day is known, the instant is not. */
+export function isDateOnly(activationAt) {
+  return typeof activationAt === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(activationAt.trim());
+}
+
+// How far before its own announcement a stated activation may lie and still be believed.
+// The classifier fills in a year the text did not give: Solana's Alpenglow, announced in 2026,
+// came back as 2024-10-21. A notice describing an activation months in its own past is
+// almost always that, not news.
+const MAX_STATED_BEFORE_ANNOUNCEMENT_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * The fork as one mention states it, minus a stated time that cannot be right: more than
+ * MAX_STATED_BEFORE_ANNOUNCEMENT_MS before the mention was published. A `completed` fork is
+ * exempt — a retrospective legitimately dates an activation long past. The height, name and
+ * state survive; only the implausible time is dropped (the mention becomes undated rather
+ * than acquiring a guessed year).
+ */
+export function plausibleFork(fork, announcedMs) {
+  if (!fork?.activationAt || fork.state === 'completed' || !Number.isFinite(announcedMs)) return fork;
+  const at = Date.parse(fork.activationAt);
+  if (!Number.isFinite(at) || at >= announcedMs - MAX_STATED_BEFORE_ANNOUNCEMENT_MS) return fork;
+  return { ...fork, activationAt: null, implausibleActivationAt: fork.activationAt };
+}
+
+/**
  * The grouping identity of a fork.
  *
  * Prefers the codename because that is what actually travels between providers. Falls back to
@@ -240,7 +326,9 @@ export function resolveForkActivation(fork, tip = null) {
 
   const stated = typeof fork?.activationAt === 'string' ? Date.parse(fork.activationAt) : NaN;
   if (Number.isFinite(stated)) {
-    return { at: new Date(stated).toISOString(), evidence: 'stated', block };
+    // A date-only statement ("2026-09-16") names the day, not midnight UTC: `precision: 'day'`
+    // keeps a consumer from counting down to 00:00:00 or calling it past at 00:01.
+    return { at: new Date(stated).toISOString(), evidence: 'stated', block, precision: isDateOnly(fork.activationAt) ? 'day' : 'time' };
   }
 
   if (block === null || !tip || !Number.isFinite(tip.height) || !Number.isFinite(tip.timestampMs)) {
@@ -255,20 +343,26 @@ export function resolveForkActivation(fork, tip = null) {
   // function pure — the caller supplies an exact timestamp as `stated` when it has one.
   const deltaSeconds = (block - tip.height) * rate;
   const at = new Date(tip.timestampMs + deltaSeconds * 1000).toISOString();
-  return { at, evidence: block <= tip.height ? 'observed' : 'estimated', block };
+  return { at, evidence: block <= tip.height ? 'observed' : 'estimated', block, precision: 'time' };
 }
 
 /**
  * Where a fork stands right now.
  *
  * Cancellation cannot be inferred — a called-off fork looks exactly like one nobody mentioned
- * again — so it is only ever reported when a source said so.
+ * again, so it is only ever reported when a source said so. `completed` is past whether or
+ * not anyone gave the date (dYdX v9.8.0 was reported done, never dated, and read as
+ * unscheduled). A day-precision activation stays upcoming until that UTC day is over.
  */
-export function forkPhase({ activationAt, state }, now = Date.now()) {
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export function forkPhase({ activationAt, state, activationPrecision = null }, now = Date.now()) {
   if (state === 'cancelled') return FORK_PHASE.CANCELLED;
+  if (state === 'completed') return FORK_PHASE.PAST;
   const t = Date.parse(activationAt ?? '');
   if (!Number.isFinite(t)) return FORK_PHASE.UNSCHEDULED;
-  return t > now ? FORK_PHASE.UPCOMING : FORK_PHASE.PAST;
+  const end = activationPrecision === 'day' ? t + DAY_MS : t;
+  return end > now ? FORK_PHASE.UPCOMING : FORK_PHASE.PAST;
 }
 
 /**
@@ -299,11 +393,24 @@ export function bestActivation(candidates = []) {
     const moved = pool.filter(c => (c.rank ?? 0) < SECONDARY_RANK
       && (c.observedAt ?? 0) > (best.observedAt ?? 0)
       && Math.abs(Date.parse(c.at) - Date.parse(best.at)) > RESCHEDULE_MIN_MS);
-    if (!moved.length) return best;
+    if (!moved.length) return sharpen(best, pool);
     const since = Math.min(...moved.map(c => c.observedAt ?? 0));
     pool = pool.filter(c => (c.observedAt ?? 0) >= since);
     best = pick(pool);
   }
+}
+
+/**
+ * A day-only winner gives way to a precise claim on that same UTC day: "2026-09-16" from the
+ * network and "2026-09-16T17:00Z" from a provider are one statement at two resolutions.
+ */
+function sharpen(best, pool) {
+  if (best.precision !== 'day') return best;
+  const day = best.at.slice(0, 10);
+  const precise = pool.filter(c => c.precision !== 'day' && c.at.slice(0, 10) === day
+    && (c.rank ?? 0) < SECONDARY_RANK);
+  if (!precise.length) return best;
+  return [...precise].sort((a, b) => ((a.rank ?? 0) - (b.rank ?? 0)) || ((b.observedAt ?? 0) - (a.observedAt ?? 0)))[0];
 }
 
 /**
@@ -339,24 +446,60 @@ export function sourceRank(event) {
 // start, typically an hour or a few before the activation second.
 const UNNAMED_MATCH_MS = 6 * 60 * 60 * 1000;
 
+/**
+ * A member's activation height and stated instant, parsed once. The pairwise clustering below
+ * used to re-parse every member's time on every comparison — about a second of CPU at 1,500
+ * unnamed mentions.
+ */
+function memberAnchor(member) {
+  if (!member.anchor) {
+    const block = member.fork.activationBlock;
+    member.anchor = {
+      block: Number.isSafeInteger(block) && block > 0 ? block : null,
+      time: Date.parse(member.fork.activationAt ?? '')
+    };
+  }
+  return member.anchor;
+}
+
 function anchorsOf(members) {
-  return {
-    blocks: new Set(members.map(m => m.fork.activationBlock).filter(b => Number.isSafeInteger(b) && b > 0)),
-    times: members.map(m => Date.parse(m.fork.activationAt ?? '')).filter(Number.isFinite)
-  };
+  const blocks = new Set();
+  const times = [];
+  for (const m of members) {
+    const { block, time } = memberAnchor(m);
+    if (block !== null) blocks.add(block);
+    if (Number.isFinite(time)) times.push(time);
+  }
+  return { blocks, times };
 }
 
 /** 0 = same height or same second, 1 = times within UNNAMED_MATCH_MS, null = unrelated. */
 function anchorDistance(a, b) {
-  if ([...a.blocks].some(x => b.blocks.has(x))) return 0;
-  if (a.times.some(x => b.times.includes(x))) return 0;
-  if (a.times.some(x => b.times.some(y => Math.abs(x - y) <= UNNAMED_MATCH_MS))) return 1;
-  return null;
+  for (const x of a.blocks) if (b.blocks.has(x)) return 0;
+  let near = false;
+  for (const x of a.times) {
+    for (const y of b.times) {
+      if (x === y) return 0;
+      if (Math.abs(x - y) <= UNNAMED_MATCH_MS) near = true;
+    }
+  }
+  return near ? 1 : null;
 }
 
 function mergeInto(groups, target, source) {
   target.members.push(...source.members);
   groups.delete(source.key);
+}
+
+/** Groups indexed by `kind:ident`, the part of the key that is the same across scopes. */
+function byIdentity(groups) {
+  const index = new Map();
+  for (const g of groups.values()) {
+    const id = `${g.kind}:${g.ident}`;
+    if (!index.has(id)) index.set(id, []);
+    index.get(id).push(g);
+  }
+  return index;
 }
 
 /**
@@ -365,11 +508,11 @@ function mergeInto(groups, target, source) {
  * as "ethereum" and once with no network. Merged only into a single unambiguous candidate.
  */
 function mergeChainScopes(groups, chainIdsFor) {
+  const index = byIdentity(groups);
   for (const group of [...groups.values()]) {
     if (!group.scope.startsWith('chain:')) continue;
     const chainId = Number(group.scope.slice('chain:'.length));
-    const targets = [...groups.values()].filter(g => g !== group
-      && g.kind === group.kind && g.ident === group.ident
+    const targets = (index.get(`${group.kind}:${group.ident}`) ?? []).filter(g => g !== group && groups.has(g.key)
       && g.scope !== 'unscoped' && !g.scope.startsWith('chain:')
       && (g.members.some(m => m.chainIds.includes(chainId)) || (chainIdsFor?.(g.scope) ?? []).includes(chainId)));
     if (targets.length === 1) mergeInto(groups, targets[0], group);
@@ -377,38 +520,103 @@ function mergeChainScopes(groups, chainIdsFor) {
 }
 
 /**
+ * A named mention with no network identity at all (`unscoped`) is the same fork as the one
+ * group carrying that name under a network — "Glamsterdam" from an outlet that named no chain
+ * otherwise stood as its own entry beside Ethereum's. Two or more candidates stay apart: the
+ * name alone cannot say which network's activation it meant.
+ */
+function mergeUnscoped(groups) {
+  const index = byIdentity(groups);
+  for (const group of [...groups.values()]) {
+    if (group.scope !== 'unscoped' || group.kind !== 'name') continue;
+    const targets = (index.get(`name:${group.ident}`) ?? []).filter(g => g !== group && groups.has(g.key) && g.scope !== 'unscoped');
+    if (targets.length === 1) mergeInto(groups, targets[0], group);
+  }
+}
+
+/**
  * Unnamed groups (keyed by height or by instant) on one network that describe the same
- * activation become one: they share a height, or their times are within UNNAMED_MATCH_MS — one
- * provider states block 18813000 and its time, another only a window start half an hour earlier.
- * Each cluster then folds into the NAMED group on that network with the same activation: Alchemy
- * never names the Sepolia fork, the EF post names it Glamsterdam. A fold needs one candidate —
- * the exact match if there is one, else the only one in range; two named forks stay apart.
+ * activation become one: they share a height, or their times are within UNNAMED_MATCH_MS of
+ * the cluster's ANCHOR — the earliest time it was seeded with. Anchoring rather than chaining:
+ * single linkage strung notices 5h apart into one 30h "fork", while here every member is within
+ * six hours of the same instant. Heights still join at any distance, since a shared height is
+ * the activation itself. Each cluster then folds into the NAMED group on that network with the
+ * same activation: Alchemy never names the Sepolia fork, the EF post names it Glamsterdam. A
+ * fold needs one candidate — the exact match if there is one, else the only one in range; two
+ * named forks stay apart.
  */
 function clusterUnnamed(groups) {
-  const unnamed = [...groups.values()].filter(g => g.kind !== 'name');
-  for (let i = 0; i < unnamed.length; i++) {
-    const a = unnamed[i];
-    if (!groups.has(a.key)) continue;
-    for (let j = i + 1; j < unnamed.length; j++) {
-      const b = unnamed[j];
-      if (!groups.has(b.key) || b.scope !== a.scope) continue;
-      if (anchorDistance(anchorsOf(a.members), anchorsOf(b.members)) !== null) {
-        mergeInto(groups, a, b);
-        j = i; // a's anchors grew; rescan the rest against them
-      }
+  const earliest = (a) => (a.times.length ? Math.min(...a.times) : Infinity);
+  const unnamed = [...groups.values()]
+    .filter(g => g.kind !== 'name')
+    .map(g => ({ g, a: anchorsOf(g.members) }))
+    .sort((x, y) => earliest(x.a) - earliest(y.a));
+
+  const clustersByScope = new Map();
+  for (const { g, a } of unnamed) {
+    if (!clustersByScope.has(g.scope)) clustersByScope.set(g.scope, []);
+    const clusters = clustersByScope.get(g.scope);
+    const home = clusters.find(c => anchorDistance(c.anchor, a) !== null);
+    if (home) {
+      mergeInto(groups, home.g, g);
+      for (const b of a.blocks) home.anchor.blocks.add(b);
+      if (!home.anchor.times.length && a.times.length) home.anchor.times = [earliest(a)];
+    } else {
+      clusters.push({ g, anchor: { blocks: new Set(a.blocks), times: a.times.length ? [earliest(a)] : [] } });
     }
   }
-  const named = [...groups.values()].filter(g => g.kind === 'name');
-  for (const group of [...groups.values()]) {
-    if (group.kind === 'name') continue;
-    const anchors = anchorsOf(group.members);
-    const near = named
-      .filter(g => g.scope === group.scope)
-      .map(g => ({ g, d: anchorDistance(anchors, anchorsOf(g.members)) }))
-      .filter(x => x.d !== null);
-    const exact = near.filter(x => x.d === 0);
-    const targets = exact.length ? exact : near;
-    if (targets.length === 1) mergeInto(groups, targets[0].g, group);
+
+  // Named anchors are taken once, before any fold: a fold must not depend on which unnamed
+  // cluster happened to fold first.
+  const namedByScope = new Map();
+  for (const g of groups.values()) {
+    if (g.kind !== 'name') continue;
+    if (!namedByScope.has(g.scope)) namedByScope.set(g.scope, []);
+    namedByScope.get(g.scope).push({ g, a: anchorsOf(g.members) });
+  }
+  for (const [scope, clusters] of clustersByScope) {
+    const named = namedByScope.get(scope) ?? [];
+    if (!named.length) continue;
+    for (const { g } of clusters) {
+      const anchors = anchorsOf(g.members);
+      const near = named.map(x => ({ g: x.g, d: anchorDistance(anchors, x.a) })).filter(x => x.d !== null);
+      const exact = near.filter(x => x.d === 0);
+      const targets = exact.length ? exact : near;
+      if (targets.length === 1) mergeInto(groups, targets[0].g, g);
+    }
+  }
+}
+
+// Events with no URL still need a stable identity for de-duplication and collapsing.
+const anonymousIds = new WeakMap();
+let anonymousSeq = 0;
+function eventIdentity(event) {
+  if (typeof event?.url === 'string' && event.url) return `url:${event.url}`;
+  if (event?.id != null) return `id:${event.id}`;
+  if (!anonymousIds.has(event)) anonymousIds.set(event, `anon:${++anonymousSeq}`);
+  return anonymousIds.get(event);
+}
+
+/**
+ * One window naming several networks used to fan out into identical entries — Nanoreth ×3,
+ * "Protocol 29" ×2 — each made of exactly the same events, which inflated byPhase without
+ * adding a single independent claim. Groups of the same fork identity whose event sets are
+ * identical are one entry listing every network. Groups with any event of their own (Stellar's
+ * per-network status posts) stay apart, because then the dates genuinely can differ.
+ */
+function collapseIdentical(groups) {
+  const bySignature = new Map();
+  for (const g of [...groups.values()]) {
+    const events = [...new Set(g.members.map(m => eventIdentity(m.event)))].sort();
+    const signature = `${g.kind}:${g.ident}|${events.join('\n')}`;
+    const prior = bySignature.get(signature);
+    if (prior) {
+      prior.scopes.push(g.scope);
+      mergeInto(groups, prior, g);
+    } else {
+      g.scopes = [g.scope];
+      bySignature.set(signature, g);
+    }
   }
 }
 
@@ -418,9 +626,15 @@ function clusterUnnamed(groups) {
  * declares 42161, and attaching that to Ethereum's fork both converted its height with
  * Arbitrum's tip and listed it under `?chainId=42161`. Such a member takes the chains the
  * network name resolves to, and the post's chains only when the post is about that network.
+ * With no forking network named, the post's chains are kept and the scope's own resolution is
+ * added: a HyperEVM window that declares no chain is still a chain 999 fork.
  */
 function memberChainIds({ scope, forkNetwork, named, eventChainIds, chainIdsFor }) {
-  if (!forkNetwork) return eventChainIds;
+  if (!forkNetwork) {
+    const nameScope = scope !== 'unscoped' && !scope.startsWith('chain:');
+    const resolved = nameScope ? (chainIdsFor?.(scope) ?? []) : [];
+    return resolved.length ? [...new Set([...eventChainIds, ...resolved])] : eventChainIds;
+  }
   const resolved = chainIdsFor?.(scope) ?? [];
   if (resolved.length) return resolved;
   // The post's chains carry no per-network split, so they are reused only when the post names
@@ -428,6 +642,36 @@ function memberChainIds({ scope, forkNetwork, named, eventChainIds, chainIdsFor 
   // the "Ethereum Sepolia" activation, which is not the mainnet date.
   const aboutNetwork = named.length > 0 && named.every(n => n === scope);
   return aboutNetwork ? eventChainIds : [];
+}
+
+/**
+ * When a mention was made, for "newest claim wins". The enrichment's own `createdAt` when the
+ * feed sends it, else `publishedAt` — never `updatedAt`: QuickNode sets that to the window's
+ * START, in the future, which made a weeks-old notice the "newest" claim and fired spurious
+ * reschedules. Clamped to `now` so no source can claim to have spoken in the future.
+ */
+export function observedAtOf(event, now = Date.now()) {
+  const created = Date.parse(event?.enrichment?.createdAt ?? '');
+  const t = Number.isFinite(created) ? created : Date.parse(event?.publishedAt ?? '');
+  return Number.isFinite(t) ? Math.min(t, now) : 0;
+}
+
+/** When the source announced it: publication first, enrichment time as the fallback. */
+function announcedAtOf(event) {
+  const published = Date.parse(event?.publishedAt ?? '');
+  return Number.isFinite(published) ? published : Date.parse(event?.enrichment?.createdAt ?? '');
+}
+
+const PHASE_ORDER = { [FORK_PHASE.UPCOMING]: 0, [FORK_PHASE.UNSCHEDULED]: 1, [FORK_PHASE.CANCELLED]: 2, [FORK_PHASE.PAST]: 3 };
+
+/** Upcoming soonest first, then unscheduled, then cancelled, then history most recent first. */
+export function sortForks(forks) {
+  return forks.sort((a, b) => {
+    if (PHASE_ORDER[a.phase] !== PHASE_ORDER[b.phase]) return PHASE_ORDER[a.phase] - PHASE_ORDER[b.phase];
+    const ta = Date.parse(a.activationAt ?? '') || 0;
+    const tb = Date.parse(b.activationAt ?? '') || 0;
+    return a.phase === FORK_PHASE.PAST ? tb - ta : ta - tb;
+  });
 }
 
 /**
@@ -443,14 +687,17 @@ function memberChainIds({ scope, forkNetwork, named, eventChainIds, chainIdsFor 
  * @param {(chainId:number)=>object|null} [opts.tipFor] chain tip lookup, for height-only forks
  * @param {(scope:string)=>number[]} [opts.chainIdsFor] the chainIds a network scope names
  * @param {number} [opts.now]
- * @returns {Promise<object[]>} forks, soonest upcoming first, then unscheduled, then past
+ * @returns {Promise<object[]>} forks, soonest upcoming first, then unscheduled, then past. Each
+ *   carries `kind` (fork | upgrade, see forkKind); filtering on it is the caller's choice.
  */
 export async function buildForks(events = [], { tipFor = null, chainIdsFor = null, now = Date.now(), maxTipLookups = DEFAULT_MAX_TIP_LOOKUPS } = {}) {
   let tipBudget = maxTipLookups;
   const groups = new Map();
   for (const event of events) {
-    const fork = event?.enrichment?.fork;
-    if (!fork) continue;
+    const raw = event?.enrichment?.fork;
+    if (!raw) continue;
+    const fork = plausibleFork(raw, announcedAtOf(event));
+    const observedAt = observedAtOf(event, now);
     // Declared chains PLUS the ones the model named and the catalog resolved. Filtering on
     // declared chains alone under-reports: an OP Stack window naming nine networks declares
     // none of them, so `?chainId=` would answer "no forks" for a chain that is genuinely
@@ -467,15 +714,17 @@ export async function buildForks(events = [], { tipFor = null, chainIdsFor = nul
       if (!group) continue;
       const chainIds = memberChainIds({ scope, forkNetwork, named, eventChainIds, chainIdsFor });
       if (!groups.has(group.key)) groups.set(group.key, { ...group, scope, members: [] });
-      groups.get(group.key).members.push({ event, fork, chainIds, scope });
+      groups.get(group.key).members.push({ event, fork, chainIds, scope, observedAt });
     }
   }
 
   mergeChainScopes(groups, chainIdsFor);
+  mergeUnscoped(groups);
   clusterUnnamed(groups);
+  collapseIdentical(groups);
 
   const forks = [];
-  for (const { key, members } of groups.values()) {
+  for (const { key, members, scopes } of groups.values()) {
     const chainIds = [...new Set(members.flatMap(m => m.chainIds))];
     // A tip is only fetched when some member needs a height converted, so the common
     // stated-time fork costs no explorer call at all.
@@ -497,13 +746,11 @@ export async function buildForks(events = [], { tipFor = null, chainIdsFor = nul
     const candidates = members.map(m => ({
       ...resolveForkActivation(m.fork, tip),
       rank: sourceRank(m.event),
-      observedAt: Date.parse(m.event.updatedAt ?? m.event.publishedAt ?? '') || 0
+      observedAt: m.observedAt
     }));
     const activation = bestActivation(candidates);
-    const state = bestState(members.map(m => ({
-      state: m.fork.state,
-      observedAt: Date.parse(m.event.updatedAt ?? m.event.publishedAt ?? '') || 0
-    })));
+    const state = bestState(members.map(m => ({ state: m.fork.state, observedAt: m.observedAt })));
+    const activationPrecision = activation?.precision ?? null;
 
     const named = members.map(m => m.fork.name).find(Boolean) ?? null;
     const sources = [...new Set(members.map(m => m.event.statusPage?.id).filter(Boolean))];
@@ -511,35 +758,52 @@ export async function buildForks(events = [], { tipFor = null, chainIdsFor = nul
     forks.push({
       key,
       name: named,
+      // Consensus fork / network upgrade, or an ordinary software update that carried a fork
+      // marker. See forkKind for the rule.
+      kind: forkKind(members, activation),
       // The network this activation belongs to. Two entries can share a codename and differ
       // here — that is the normal case, not a duplicate.
       network: members[0].scope,
+      // Every network this entry covers: more than one only when the same events named them all
+      // (collapseIdentical), so no network has evidence of its own.
+      networks: [...new Set(scopes ?? [members[0].scope])],
       chains: chainIds,
       activationAt: activation?.at ?? null,
       // How the time was arrived at. A consumer that will not show a guess as a schedule needs
       // this, and the calendar shows only forks whose timing is known at all.
       activationEvidence: activation?.evidence ?? null,
+      // `day` when the winning claim named only a date: the day is known, not the instant.
+      activationPrecision,
       activationBlock: candidates.map(c => c.block).find(b => b != null) ?? null,
       state,
-      phase: forkPhase({ activationAt: activation?.at ?? null, state }, now),
+      phase: forkPhase({ activationAt: activation?.at ?? null, state, activationPrecision }, now),
       // Which status pages reported it — the point of the exercise. More than one means the
       // cross-provider join actually fired.
       sources,
       // Which KINDS of source: status pages, forums, news. A fork only news reported is a
       // claim to attribute, not a schedule the network published.
       feeds,
-      events: members
-        .map(m => m.event)
-        .sort((a, b) => (Date.parse(a.publishedAt ?? '') || 0) - (Date.parse(b.publishedAt ?? '') || 0))
+      events: uniqueEvents(members)
     });
   }
 
-  const rank = { [FORK_PHASE.UPCOMING]: 0, [FORK_PHASE.UNSCHEDULED]: 1, [FORK_PHASE.CANCELLED]: 2, [FORK_PHASE.PAST]: 3 };
-  return forks.sort((a, b) => {
-    if (rank[a.phase] !== rank[b.phase]) return rank[a.phase] - rank[b.phase];
-    const ta = Date.parse(a.activationAt ?? '') || 0;
-    const tb = Date.parse(b.activationAt ?? '') || 0;
-    // Upcoming: soonest first. Past: most recent first.
-    return a.phase === FORK_PHASE.PAST ? tb - ta : ta - tb;
-  });
+  return sortForks(forks);
+}
+
+/**
+ * The member events, one per URL (dYdX's upgrade arrived as 8 copies of one post), each
+ * carrying the fork as THIS fork read it — with an implausible stated date already dropped —
+ * oldest first. Where copies differ, the newest-observed one is kept.
+ */
+function uniqueEvents(members) {
+  const byId = new Map();
+  for (const m of members) {
+    const id = eventIdentity(m.event);
+    const prior = byId.get(id);
+    if (prior && prior.observedAt >= m.observedAt) continue;
+    byId.set(id, m);
+  }
+  return [...byId.values()]
+    .map(m => (m.fork === m.event.enrichment?.fork ? m.event : { ...m.event, enrichment: { ...m.event.enrichment, fork: m.fork } }))
+    .sort((a, b) => (Date.parse(a.publishedAt ?? '') || 0) - (Date.parse(b.publishedAt ?? '') || 0));
 }
