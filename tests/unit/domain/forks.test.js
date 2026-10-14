@@ -561,6 +561,20 @@ describe('fork review fixes', () => {
     expect(await buildForks([a, b], { now: NOW })).toHaveLength(2);
   });
 
+  it('keeps per-network dates from one post apart instead of collapsing them', async () => {
+    // One EF post, one name, Sepolia and Hoodi on different days: every event is shared, the
+    // claims are not, so collapsing would silently drop one network's date.
+    // The feed reader turns its `forks` array into one mention per entry, all with one URL.
+    const mention = (network, activationAt) => ({
+      ...event('ef', { fork: fork({ name: 'Glamsterdam', network, activationAt }), chains: [] }),
+      url: 'https://blog.ethereum.org/glamsterdam-testnets'
+    });
+    const posts = [mention('Ethereum Sepolia', '2026-10-21T14:00:00Z'), mention('Ethereum Hoodi', '2026-11-04T14:00:00Z')];
+    const out = await buildForks(posts, { now: NOW });
+    expect(out).toHaveLength(2);
+    expect(out.map(f => f.activationAt).sort()).toEqual(['2026-10-21T14:00:00.000Z', '2026-11-04T14:00:00.000Z']);
+  });
+
   it('anchors unnamed clusters to their first time instead of chaining them', async () => {
     // Single linkage strung notices 5h apart into one 30h fork.
     const times = ['2026-08-18T00:00:00Z', '2026-08-18T05:00:00Z', '2026-08-18T10:00:00Z', '2026-08-18T15:00:00Z'];

@@ -171,12 +171,12 @@ describe('fork feeds', () => {
     clock.mockReturnValue(1_000_000 + 120_000); // past the TTL, inside the 1h memory
     proxyFetch.mockClear();
     await getForkMentions();
-    const statusCalls = proxyFetch.mock.calls.map(([u]) => u).filter((u) => u.startsWith('https://status.test'));
+    const statusCalls = proxyFetch.mock.calls.map(([u]) => u).filter((u) => new URL(u).host === 'status.test');
     expect(statusCalls).toEqual(['https://status.test/events?limit=500']);
     clock.mockReturnValue(1_000_000 + 2 * 60 * 60 * 1000); // memory expired: try the filter again
     proxyFetch.mockClear();
     await getForkMentions();
-    expect(proxyFetch.mock.calls.some(([u]) => u.startsWith('https://status.test') && u.includes('fork=true'))).toBe(true);
+    expect(proxyFetch.mock.calls.some(([u]) => new URL(u).host === 'status.test' && new URL(u).searchParams.get('fork') === 'true')).toBe(true);
     clock.mockRestore();
   });
 

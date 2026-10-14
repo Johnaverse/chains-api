@@ -607,8 +607,12 @@ function eventIdentity(event) {
 function collapseIdentical(groups) {
   const bySignature = new Map();
   for (const g of [...groups.values()]) {
-    const events = [...new Set(g.members.map(m => eventIdentity(m.event)))].sort();
-    const signature = `${g.kind}:${g.ident}|${events.join('\n')}`;
+    // Each event's claim is part of the signature: one post giving Sepolia and Hoodi their own
+    // dates under the same fork name shares every event, but its claims differ per network.
+    const claims = [...new Set(g.members.map(m => [
+      eventIdentity(m.event), m.fork?.activationAt ?? '', m.fork?.activationBlock ?? '', m.fork?.state ?? ''
+    ].join('|')))].sort();
+    const signature = `${g.kind}:${g.ident}|${claims.join('\n')}`;
     const prior = bySignature.get(signature);
     if (prior) {
       prior.scopes.push(g.scope);
