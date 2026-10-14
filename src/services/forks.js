@@ -1,6 +1,6 @@
 import { getForkMentions } from '../sources/forkFeeds.js';
 import { getExplorerTip } from '../sources/blockscout.js';
-import { buildForks, FORK_PHASE, registryScopes, scopeLookups } from '../domain/forks.js';
+import { buildForks, forkPhase, sortForks, FORK_PHASE, FORK_KIND, registryScopes, scopeLookups } from '../domain/forks.js';
 import { getAllChains } from '../store/queries.js';
 import { logger } from '../util/logger.js';
 
@@ -37,19 +37,30 @@ async function tipFor(chainId) {
 
 /**
  * The chainIds a fork's network scope names, from the registry's chain names ("Ethereum
- * Mainnet" → `ethereum` → 1). Used when a source names the forking network, so an Arbitrum
+ * Mainnet" → `ethereum` → 1) and the names the networks registry also knows a chain by —
+ * `fullName`, `shortName`, `aliases`, the graph id. Chain 999 is "Wanchain Testnet" in the
+ * chain list but HyperEVM everywhere a fork notice is written, so name-only indexing lost
+ * every HyperEVM fork from `?chainId=999`. Used for every network-named scope, so an Arbitrum
  * post about Ethereum's fork is filed under chain 1, not under Arbitrum. A name more than two
  * chains share is ambiguous and resolves to nothing rather than to a guess.
  */
 const MAX_CHAINS_PER_SCOPE = 2;
 
-function chainResolver() {
+function chainNames(chain) {
+  const names = [chain.name, chain.fullName, chain.shortName, chain['theGraph-id'],
+    ...(Array.isArray(chain.aliases) ? chain.aliases : [])];
+  return names.filter((n) => typeof n === 'string' && n.trim());
+}
+
+function chainResolver(chains) {
   const byScope = new Map();
-  for (const chain of getAllChains()) {
+  for (const chain of chains) {
     if (!Number.isFinite(chain?.chainId)) continue;
-    for (const scope of registryScopes(chain.name)) {
-      if (!byScope.has(scope)) byScope.set(scope, new Set());
-      byScope.get(scope).add(chain.chainId);
+    for (const name of chainNames(chain)) {
+      for (const scope of registryScopes(name)) {
+        if (!byScope.has(scope)) byScope.set(scope, new Set());
+        byScope.get(scope).add(chain.chainId);
+      }
     }
   }
   return (scope) => {
@@ -63,20 +74,52 @@ function chainResolver() {
 }
 
 /**
+ * buildForks output, kept per (feed snapshot, registry version). The mentions only change when
+ * the feed cache refreshes and the resolver only when the registry reloads, and rebuilding on
+ * every call cost ~1s of CPU at 1,500 unnamed mentions. Phase depends on the clock, so it is
+ * re-derived per call from the memoized activation rather than cached with it.
+ */
+let memo = { mentions: null, fetchedAt: null, chains: null, forks: null };
+
+export function _resetForksMemoForTests() {
+  memo = { mentions: null, fetchedAt: null, chains: null, forks: null };
+}
+
+async function builtForks(mentions, fetchedAt) {
+  const chains = getAllChains();
+  if (memo.forks && memo.mentions === mentions && memo.fetchedAt === fetchedAt && memo.chains === chains) return memo.forks;
+  const forks = (await buildForks(mentions, { tipFor, chainIdsFor: chainResolver(chains) })).map(present);
+  memo = { mentions, fetchedAt, chains, forks };
+  return forks;
+}
+
+/**
  * Forks assembled from every feed that mentions them: status pages, forums and news.
  *
  * @param {object} [opts]
  * @param {number} [opts.chainId] only forks touching this chain
  * @param {string} [opts.phase] one of upcoming|past|cancelled|unscheduled
  * @param {boolean} [opts.scheduledOnly] drop forks with no known activation time
+ * @param {string} [opts.include] `upgrades` to also list ordinary software updates that carried
+ *   a fork marker (kind 'upgrade'); excluded by default
  * @param {number} [opts.limit]
  */
-export async function getForks({ chainId, phase, scheduledOnly = false, limit = DEFAULT_LIMIT } = {}) {
+export async function getForks({ chainId, phase, scheduledOnly = false, include, limit = DEFAULT_LIMIT } = {}) {
   const { mentions, fetchedAt, feeds } = await getForkMentions();
-  const forks = (await buildForks(mentions, { tipFor, chainIdsFor: chainResolver() })).map(present);
+  const now = Date.now();
+  const forks = sortForks((await builtForks(mentions, fetchedAt)).map((f) => ({
+    ...f,
+    phase: forkPhase({ activationAt: f.activationAt, state: f.state, activationPrecision: f.activationPrecision }, now)
+  })));
 
   let filtered = forks;
   if (chainId != null) filtered = filtered.filter((f) => f.chains.includes(Number(chainId)));
+  // Counted before the kind filter, so a caller sees how many upgrades were left out.
+  const byKind = countByKind(filtered);
+  // Ordinary software updates that carried a fork marker — 7 of 9 live "forks" were these —
+  // are not forks. They stay reachable on request rather than vanishing.
+  const includeUpgrades = includesUpgrades(include);
+  if (!includeUpgrades) filtered = filtered.filter((f) => f.kind !== FORK_KIND.UPGRADE);
   // Phase counts are taken BEFORE the phase filter. Counting after it makes byPhase describe
   // the filter rather than the world: asked "what forks are coming up", the assistant called
   // get_forks(phase='upcoming'), got byPhase all-zero, and answered "0 total matched across
@@ -105,8 +148,22 @@ export async function getForks({ chainId, phase, scheduledOnly = false, limit = 
     // Counts across everything matched, not just this page: a caller asking "how many upcoming
     // forks" must not have to add up a truncated list.
     byPhase,
+    // fork vs upgrade, over everything matched by chain — upgrades included or not.
+    byKind,
+    upgradesIncluded: includeUpgrades,
     forks: sliced
   };
+}
+
+function includesUpgrades(include) {
+  const list = Array.isArray(include) ? include : String(include ?? '').split(',');
+  return list.some((v) => String(v).trim() === 'upgrades');
+}
+
+function countByKind(forks) {
+  const counts = Object.fromEntries(Object.values(FORK_KIND).map((k) => [k, 0]));
+  for (const fork of forks) counts[fork.kind] = (counts[fork.kind] ?? 0) + 1;
+  return counts;
 }
 
 /**
@@ -128,6 +185,7 @@ function present(fork) {
     // `unscoped` and `chain:8453` are grouping keys, not network names. Exposing them put an
     // internal identifier in front of a reader who was told this field names the network.
     network: publicNetwork(fork.network),
+    networks: (fork.networks ?? [fork.network]).map(publicNetwork).filter(Boolean),
     events: fork.events.map((e) => ({
       feed: e.feed ?? 'status',
       title: e.title,
@@ -137,7 +195,11 @@ function present(fork) {
       provider: e.statusPage?.id ?? null,
       // What THIS source claimed. The fork's activationAt is the strongest claim; sources can
       // disagree, and a reader checking a date needs to see who said what.
-      activationAt: e.enrichment?.fork?.activationAt ?? null
+      activationAt: e.enrichment?.fork?.activationAt ?? null,
+      // A stated date dropped as implausible (well before the post itself): kept visible so a
+      // reader can see what the source said and why it was not used.
+      ...(e.enrichment?.fork?.implausibleActivationAt ? { implausibleActivationAt: e.enrichment.fork.implausibleActivationAt } : {}),
+      ...(e.enrichment?.lowConfidence ? { lowConfidence: true } : {})
     }))
   };
 }

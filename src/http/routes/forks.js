@@ -29,6 +29,11 @@ export async function forksRoutes(fastify) {
             default: false,
             description: 'Drop forks with no known activation time. What a calendar wants — distinct from phase, because a fork can be real and announced with no day named yet.'
           },
+          include: {
+            type: 'string',
+            enum: ['upgrades'],
+            description: 'upgrades: also list ordinary software updates that carried a fork marker (kind "upgrade" — client releases, RPC patches, infra work). Excluded by default; byKind counts both either way.'
+          },
           limit: { type: 'integer', minimum: 1, maximum: 200, default: 50 }
         }
       }

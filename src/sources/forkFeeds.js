@@ -9,7 +9,7 @@ import {
 } from '../../config.js';
 import { getFeed } from './feedHttp.js';
 import { logger } from '../util/logger.js';
-import { slimFork } from '../domain/forks.js';
+import { forksOf } from '../domain/forks.js';
 
 /**
  * Every fork mention across the three feed services, in one shape.
@@ -35,6 +35,12 @@ const FEEDS = [
 
 let cache = { fetchedAt: 0, failedAt: 0, mentions: null, feeds: {} };
 let inflight = null;
+// Per feed, until when `?fork=true` is known to be rejected. Every deployment answered 400 to
+// it, so each refresh paid six requests — the filtered one wasted — and fell back anyway.
+let forkParamRejectedUntil = {};
+
+// How long a 400 to `?fork=true` is remembered before the filtered request is tried again.
+const FORK_PARAM_REJECT_MEMORY_MS = 60 * 60 * 1000;
 
 // After a full outage, how long the last good set is served without asking again. Each round
 // is up to six requests that can each wait out the full timeout, and without this every
@@ -44,6 +50,7 @@ const FAILURE_BACKOFF_MS = 30_000;
 export function _resetForkFeedsForTests() {
   cache = { fetchedAt: 0, failedAt: 0, mentions: null, feeds: {} };
   inflight = null;
+  forkParamRejectedUntil = {};
 }
 
 /**
@@ -67,7 +74,7 @@ export async function getForkMentions() {
 async function refresh() {
   const results = await Promise.all(FEEDS.map(async (feed) => {
     try {
-      return { feed, items: await fetchFeed(feed) };
+      return { feed, ...(await fetchFeed(feed)) };
     } catch (err) {
       logger.warn({ feed: feed.kind, err: err.message }, 'fork feed unavailable');
       return { feed, error: err.message };
@@ -91,12 +98,16 @@ async function refresh() {
   const mentions = [];
   for (const r of results) {
     // A feed that failed THIS time keeps its last good items rather than silently vanishing.
-    const items = r.items ?? previous[r.feed.kind]?.items ?? null;
-    feeds[r.feed.kind] = { ok: Boolean(r.items), stale: !r.items && Boolean(items), items };
-    for (const it of items ?? []) {
-      const mention = toMention(r.feed.kind, it);
-      if (mention) mentions.push(mention);
-    }
+    const prior = previous[r.feed.kind];
+    const items = r.items ?? prior?.items ?? null;
+    feeds[r.feed.kind] = {
+      ok: Boolean(r.items),
+      stale: !r.items && Boolean(items),
+      items,
+      filtered: r.items ? r.filtered : (prior?.filtered ?? false),
+      oldest: r.items ? r.oldest : (prior?.oldest ?? null)
+    };
+    for (const it of items ?? []) mentions.push(...toMentions(r.feed.kind, it));
   }
   cache = { fetchedAt: Date.now(), failedAt: 0, mentions, feeds };
   return snapshot();
@@ -106,7 +117,12 @@ function snapshot() {
   return {
     fetchedAt: cache.fetchedAt ? new Date(cache.fetchedAt).toISOString() : null,
     feeds: Object.fromEntries(Object.entries(cache.feeds).map(([k, v]) => [k, {
-      ok: v.ok, ...(v.stale ? { stale: true } : {}), count: v.items?.length ?? 0
+      ok: v.ok, ...(v.stale ? { stale: true } : {}), count: v.items?.length ?? 0,
+      // Whether the feed honoured `?fork=true`. When false, the forks are whatever the newest
+      // FETCH_LIMIT items happened to contain, and `oldest` says how far back that reaches —
+      // a fork announced before it is invisible, not absent.
+      filtered: Boolean(v.filtered),
+      oldest: v.oldest ?? null
     }])),
     mentions: cache.mentions ?? []
   };
@@ -115,24 +131,54 @@ function snapshot() {
 async function fetchFeed(feed) {
   const url = `${feed.base()}${feed.path}?limit=${FETCH_LIMIT}`;
   const get = (u) => getFeed(u, feed.timeout());
-  let response = await get(`${url}&fork=true`);
+  let filtered = Date.now() >= (forkParamRejectedUntil[feed.kind] ?? 0);
+  let response = filtered ? await get(`${url}&fork=true`) : null;
   // The feeds reject unknown query keys with 400, and `fork` is newer than some deployments:
-  // fall back to the unfiltered window and filter here, which is what the param saves.
-  if (response.status === 400) response = await get(url);
+  // fall back to the unfiltered window and filter here, which is what the param saves. The
+  // rejection is remembered, so the next refreshes go straight to the unfiltered request.
+  if (response?.status === 400) {
+    forkParamRejectedUntil[feed.kind] = Date.now() + FORK_PARAM_REJECT_MEMORY_MS;
+    logger.debug({ feed: feed.kind }, 'fork feed rejects ?fork=true; using the unfiltered window');
+  }
+  if (!response || response.status === 400) {
+    filtered = false;
+    response = await get(url);
+  }
   if (!response.ok) throw new Error(`responded ${response.status}`);
   const body = await response.json();
   const list = Array.isArray(body?.[feed.listKey]) ? body[feed.listKey] : [];
-  return list.filter((it) => it?.enrichment?.fork && typeof it.enrichment.fork === 'object');
+  return { items: list.filter((it) => forksOf(it?.enrichment).length > 0), filtered, oldest: oldestTime(list) };
+}
+
+/** The oldest publication time in a raw feed page, ISO, or null. */
+function oldestTime(list) {
+  let oldest = Infinity;
+  for (const it of list) {
+    const t = Date.parse(it?.publishedAt ?? '');
+    if (Number.isFinite(t) && t < oldest) oldest = t;
+  }
+  return Number.isFinite(oldest) ? new Date(oldest).toISOString() : null;
 }
 
 /**
- * One feed item -> the event shape src/domain/forks.js groups. `source` is the status page,
+ * One feed item -> one mention per fork it carries (`enrichment.forks` lists several when a
+ * post names more than one activation). Each is the shape src/domain/forks.js groups.
+ */
+export function toMentions(kind, it) {
+  return forksOf(it?.enrichment).map((fork) => mentionOf(kind, it, fork));
+}
+
+/**
+ * One feed item -> the event shape src/domain/forks.js groups, for its first fork. `source` is the status page,
  * forum or publication; `feed` says which kind, because a secondary news outlet's date is
  * weaker evidence than the network's own announcement.
  */
 export function toMention(kind, it) {
-  const fork = slimFork(it?.enrichment?.fork);
-  if (!fork) return null;
+  const [fork] = forksOf(it?.enrichment);
+  return fork ? mentionOf(kind, it, fork) : null;
+}
+
+function mentionOf(kind, it, fork) {
   const enrichment = it.enrichment;
   const source = kind === 'status' ? it.statusPage : kind === 'forum' ? it.forum : it.source;
   const strings = (list) => (Array.isArray(list) ? list.filter((n) => typeof n === 'string') : []);
@@ -149,6 +195,11 @@ export function toMention(kind, it) {
     weight: kind === 'news' ? (source?.weight ?? null) : null,
     enrichment: {
       class: enrichment.class ?? null,
+      // A class the model was unsure of must not read as fact downstream.
+      ...(enrichment.lowConfidence === true ? { lowConfidence: true } : {}),
+      // When the enrichment was made: the claim's time for "newest wins", since updatedAt is
+      // not (QuickNode sets it to the future window start).
+      createdAt: typeof enrichment.createdAt === 'string' ? enrichment.createdAt : null,
       // chains-news names them chainNames; the other two affectedChains.
       affectedChains: strings(enrichment.affectedChains ?? enrichment.chainNames),
       chains: (enrichment.chains ?? []).filter((id) => Number.isFinite(id)),
