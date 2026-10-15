@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const feed = vi.hoisted(() => ({ getClientReleases: vi.fn(), getFeedClients: vi.fn(), getNetworkClients: vi.fn() }));
+const feed = vi.hoisted(() => {
+  class ClientFeedNotFoundError extends Error {}
+  return { getClientReleases: vi.fn(), getFeedClient: vi.fn(), getFeedClients: vi.fn(), getNetworkClients: vi.fn(), ClientFeedNotFoundError };
+});
 vi.mock('../../src/sources/clientFeed.js', () => feed);
 
 const { handleToolCall } = await import('../../mcp-tools.js');
@@ -56,6 +59,47 @@ describe('client release MCP tools', () => {
     expect(feed.getClientReleases).toHaveBeenLastCalledWith(expect.objectContaining({ repo: 'gitlab:tezos/tezos' }));
     expect((await handleToolCall('get_client_releases', { repo: '../x' })).isError).toBe(true);
     expect((await handleToolCall('get_client_releases', { repo: 'bitbucket:o/r' })).isError).toBe(true);
+  });
+
+  it('get_client_releases passes a since/until range to the feed and rejects a bad one', async () => {
+    feed.getClientReleases.mockResolvedValue({ fetchedAt: 'now', totalMatched: 1, truncated: false, count: 1, items: [rel('o/a', 'a')] });
+    await handleToolCall('get_client_releases', { since: '2026-09-01', until: '2026-09-30' });
+    expect(feed.getClientReleases).toHaveBeenLastCalledWith(expect.objectContaining({ since: '2026-09-01', until: '2026-09-30' }));
+    // Through the registry path too.
+    feed.getFeedClients.mockResolvedValue({ clients: [{ id: 'github:sigp/lighthouse' }], truncated: false });
+    await handleToolCall('get_client_releases', { client: 'lighthouse', since: '2026-09-01' });
+    expect(feed.getClientReleases).toHaveBeenLastCalledWith(expect.objectContaining({ repo: 'github:sigp/lighthouse', since: '2026-09-01' }));
+
+    expect((await handleToolCall('get_client_releases', { since: 'last week' })).isError).toBe(true);
+    const inverted = await handleToolCall('get_client_releases', { since: '2026-10-02', until: '2026-10-01' });
+    expect(parse(inverted).message).toMatch(/before since/);
+    // A bare until date covers its day: the same day is a valid one-day range.
+    expect((await handleToolCall('get_client_releases', { since: '2026-10-01T12:00:00Z', until: '2026-10-01' })).isError).toBeFalsy();
+  });
+
+  it('get_client_activity returns one repo\'s full activity, or the top matches for a name', async () => {
+    const activity = { level: 'active', attention: { level: 'high', reasons: ['1 critical/high security advisory in the last 90 days (GHSA-x)'] } };
+    feed.getFeedClient.mockImplementation(async (host, owner, repo) => {
+      if (repo === 'gone') throw new feed.ClientFeedNotFoundError('Client not found');
+      return { client: { id: `${host}:${owner}/${repo}`, repo: `${owner}/${repo}`, url: 'u', names: ['Lighthouse'], kinds: ['consensus'], role: 'client', networkCount: 3, latestRelease: null, activity } };
+    });
+    let out = parse(await handleToolCall('get_client_activity', { repo: 'sigp/lighthouse' }));
+    expect(feed.getFeedClient).toHaveBeenCalledWith('github', 'sigp', 'lighthouse');
+    expect(out).toMatchObject({ count: 1, clients: [{ id: 'github:sigp/lighthouse', activity: { level: 'active', attention: { level: 'high' } } }] });
+
+    await handleToolCall('get_client_activity', { repo: 'gitlab:tezos/tezos' });
+    expect(feed.getFeedClient).toHaveBeenLastCalledWith('gitlab', 'tezos', 'tezos');
+
+    feed.getFeedClients.mockResolvedValue({ clients: [{ id: 'name:lighthouse-docker' }, { id: 'github:sigp/lighthouse' }, { id: 'github:o/a' }, { id: 'github:o/b' }, { id: 'github:o/c' }], truncated: false });
+    out = parse(await handleToolCall('get_client_activity', { client: 'lighthouse' }));
+    expect(out.clients.map(c => c.id)).toEqual(['github:sigp/lighthouse', 'github:o/a', 'github:o/b']);
+    expect(out.note).toMatch(/More repositories match/);
+
+    out = parse(await handleToolCall('get_client_activity', { repo: 'o/gone' }));
+    expect(out).toMatchObject({ count: 0, clients: [] });
+    expect(out.message).toMatch(/not in the client registry/);
+    expect((await handleToolCall('get_client_activity', {})).isError).toBe(true);
+    expect((await handleToolCall('get_client_activity', { repo: '../x' })).isError).toBe(true);
   });
 
   it('reports the feed error instead of throwing', async () => {

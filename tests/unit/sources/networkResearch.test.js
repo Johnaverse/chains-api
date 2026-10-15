@@ -11,6 +11,7 @@ import {
   getNetworkResearchInfo,
   attachNetworkResearch,
   getRepositoryInputs,
+  loadClientRegistryOverrides,
   _setNetworkResearchForTests
 } from '../../../src/sources/networkResearch.js';
 import { indexData } from '../../../src/store/indexer.js';
@@ -405,7 +406,7 @@ describe('getRepositoryInputs (chains-client-feed registry source)', () => {
     expect(out.networks.map(n => n.chainId)).toEqual([5151, 8453]);
     const base = out.networks.find(n => n.chainId === 8453);
     expect(base.repositories).toEqual([repo]);
-    expect(base.hardware.profiles).toEqual([{ client: 'Base Reth', clientVersion: null, scope: 'exact_network', deployment: 'current', verification: 'confirmed', evidence: ['https://docs.base.org/'] }]);
+    expect(base.hardware.profiles).toEqual([{ client: 'Base Reth', clientVersion: null, scope: 'exact_network', deployment: 'current', verification: 'confirmed', evidence: ['https://docs.base.org/'], requirementSources: ['https://docs.base.org/node'] }]);
     expect(base.hardware.profiles[0]).not.toHaveProperty('requirements');
     expect(base.hardware).toMatchObject({ status: 'documented', identityStatus: 'confirmed', sources: [] });
     // A lead's qualification travels with it, so the feed can tell it from verified evidence.
@@ -413,6 +414,16 @@ describe('getRepositoryInputs (chains-client-feed registry source)', () => {
     expect(lead.sources).toEqual([{ url: 'https://lead.example/', title: 'Operator lead', access: 'repurposed', notes: 'Now an exchange.' }]);
     expect(lead.profiles[0]).toMatchObject({ scope: 'project_family', verification: 'qualified' });
     expect(out.count).toBe(out.networks.length);
+  });
+
+  it('passes the curated overrides through, and null when the file is missing or malformed', () => {
+    const overrides = { reviewedAt: '2026-10-15', repositories: { 'github:o/r': { exclude: true } }, pending: [] };
+    _setNetworkResearchForTests(write('dataset.json', JSON.stringify(DATASET)), write('forums.json', JSON.stringify(FORUMS)),
+      write('hardware.json', JSON.stringify(HARDWARE)), write('channels.json', JSON.stringify(CHANNELS)), write('overrides.json', JSON.stringify(overrides)));
+    expect(getRepositoryInputs()).toMatchObject({ overridesReviewedAt: '2026-10-15', overrides });
+    _setNetworkResearchForTests(undefined, undefined, undefined, undefined, write('bad.json', '{"repositories": []}'));
+    expect(getRepositoryInputs()).toMatchObject({ overridesReviewedAt: null, overrides: null });
+    expect(loadClientRegistryOverrides('/nonexistent.json')).toBeNull();
   });
 
   it('prefers the hardware name, then the registry name', () => {

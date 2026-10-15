@@ -3,7 +3,7 @@
   "info": {
     "title": "Chains API",
     "description": "Aggregated blockchain chain data from five external sources (TheGraph, Chainlist, Chain ID Network, SLIP-0044, L2BEAT): chain metadata, relations, RPC endpoints and health, L2 scaling, and operator status.",
-    "version": "1.7.54"
+    "version": "1.7.56"
   },
   "components": {
     "schemas": {}
@@ -715,6 +715,20 @@
             "name": "since",
             "required": false,
             "description": "Only releases published at or after this ISO date/time"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 40,
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}([T ][0-9:.]+(Z|[+-]\\d{2}:?\\d{2})?)?$",
+              "errorMessage": {
+                "pattern": "until must be an ISO date or date-time"
+              }
+            },
+            "in": "query",
+            "name": "until",
+            "required": false,
+            "description": "Only releases published at or before this ISO date/time (inclusive; a bare date covers that whole UTC day)"
           }
         ],
         "responses": {
