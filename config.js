@@ -206,6 +206,11 @@ export const WEB3_NEWS_URL = parseStringEnv(
   'WEB3_NEWS_URL',
   'https://chains-news.johnaverse.cc'
 );
+// Blockchain client release feed (chains-client-feed): hard-fork activations read from client
+// release notes and changelogs. Unlike the other feeds there is no public host to fall back to,
+// so unset means the feed is simply not read — never a request that leaves the cluster.
+export const CLIENT_FEED_URL = parseStringEnv('CLIENT_FEED_URL', '');
+export const CLIENT_FEED_FETCH_TIMEOUT_MS = parseIntEnv('CLIENT_FEED_FETCH_TIMEOUT_MS', 10000);
 export const WEB3_NEWS_CACHE_TTL_MS = parseIntEnv('WEB3_NEWS_CACHE_TTL_MS', 60000);
 export const WEB3_NEWS_FETCH_TIMEOUT_MS = parseIntEnv('WEB3_NEWS_FETCH_TIMEOUT_MS', 10000);
 

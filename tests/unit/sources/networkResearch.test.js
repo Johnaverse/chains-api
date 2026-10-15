@@ -10,6 +10,7 @@ import {
   getNetworkResearch,
   getNetworkResearchInfo,
   attachNetworkResearch,
+  getRepositoryInputs,
   _setNetworkResearchForTests
 } from '../../../src/sources/networkResearch.js';
 import { indexData } from '../../../src/store/indexer.js';
@@ -392,5 +393,31 @@ describe('queries — research reaches the API projections', () => {
     load();
     expect(getChainById(8453).forumUrl).toBe('https://gov.optimism.io');
     expect(getChainDetail(8453).research.forums.map(f => f.url)).toEqual(['https://github.com/base/web/discussions']);
+  });
+});
+
+describe('getRepositoryInputs (chains-client-feed registry source)', () => {
+  it('lists research repositories and hardware client links per chain, without requirements', () => {
+    useFixtures();
+    const out = getRepositoryInputs(id => (id === 8453 ? 'Base' : null));
+    expect(out.updatedAt).toBe(DATASET.updatedAt);
+    expect(out.networks.map(n => n.chainId)).toEqual([5151, 8453]);
+    const base = out.networks.find(n => n.chainId === 8453);
+    expect(base.repositories).toEqual([repo]);
+    expect(base.hardware.profiles).toEqual([{ client: 'Base Reth', clientVersion: null, evidence: ['https://docs.base.org/'] }]);
+    expect(base.hardware.profiles[0]).not.toHaveProperty('requirements');
+    expect(out.count).toBe(out.networks.length);
+  });
+
+  it('prefers the hardware name, then the registry name', () => {
+    useFixtures();
+    const out = getRepositoryInputs(id => `registry-${id}`);
+    expect(out.networks.find(n => n.chainId === 8453).name).toBe('registry-8453');
+  });
+
+  it('returns copies, so callers cannot mutate the datasets', () => {
+    useFixtures();
+    getRepositoryInputs().networks.find(n => n.chainId === 8453).repositories[0].url = 'x';
+    expect(getRepositoryInputs().networks.find(n => n.chainId === 8453).repositories[0].url).toBe(repo.url);
   });
 });
