@@ -1,7 +1,7 @@
 {
  "source": "Node hardware requirements for 3,088 Johnaverse networks",
  "updatedAt": "2026-10-12T20:43:21.524101+00:00",
- "importedAt": "2026-10-13T03:55:29.650Z",
+ "importedAt": "2026-10-15T00:00:00.000Z",
  "networks": [
   {
    "chainId": 1,
@@ -2124,13 +2124,19 @@
        "component": "Ethereum Mainnet L1 execution RPC and beacon endpoints",
        "requiredWhen": "Running the modern OP Mainnet rollup node.",
        "hosting": "Hosted endpoints or separately self-hosted L1 clients; no mandatory extra local host.",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://docs.optimism.io/node-operators/tutorials/run-node-from-source"
+       ]
       },
       {
        "component": "Retained historical blob data endpoint",
        "requiredWhen": "Syncing from genesis or a snapshot older than the normal 18-day beacon blob retention window, or recovering after an outage longer than that window.",
        "hosting": "Use a third-party retained-blob service, an archival beacon endpoint, or a self-hosted archiver; an additional local host is not mandatory.",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://docs.optimism.io/node-operators/guides/management/blobs"
+       ]
       }
      ],
      "requirements": [
@@ -2179,13 +2185,19 @@
        "component": "Ethereum Mainnet L1 execution RPC and beacon endpoints",
        "requiredWhen": "Running the modern OP Mainnet rollup node.",
        "hosting": "Hosted endpoints or separately self-hosted L1 clients; no mandatory extra local host.",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://docs.optimism.io/node-operators/tutorials/run-node-from-source"
+       ]
       },
       {
        "component": "Retained historical blob data endpoint",
        "requiredWhen": "Syncing from genesis or a snapshot older than the normal 18-day beacon blob retention window, or recovering after an outage longer than that window.",
        "hosting": "Use a third-party retained-blob service, an archival beacon endpoint, or a self-hosted archiver; an additional local host is not mandatory.",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://docs.optimism.io/node-operators/guides/management/blobs"
+       ]
       }
      ],
      "requirements": [
@@ -2227,13 +2239,19 @@
        "component": "Ethereum Mainnet L1 execution RPC and beacon endpoints",
        "requiredWhen": "Running the modern OP Mainnet rollup node.",
        "hosting": "Hosted endpoints or separately self-hosted L1 clients; no mandatory extra local host.",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://docs.optimism.io/node-operators/tutorials/run-node-from-source"
+       ]
       },
       {
        "component": "Retained historical blob data endpoint",
        "requiredWhen": "Syncing from genesis or a snapshot older than the normal 18-day beacon blob retention window, or recovering after an outage longer than that window.",
        "hosting": "Use a third-party retained-blob service, an archival beacon endpoint, or a self-hosted archiver; an additional local host is not mandatory.",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://docs.optimism.io/node-operators/guides/management/blobs"
+       ]
       }
      ],
      "requirements": [
@@ -2282,13 +2300,19 @@
        "component": "Ethereum Mainnet L1 execution RPC and beacon endpoints",
        "requiredWhen": "Running the modern OP Mainnet rollup node.",
        "hosting": "Hosted endpoints or separately self-hosted L1 clients; no mandatory extra local host.",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://docs.optimism.io/node-operators/tutorials/run-node-from-source"
+       ]
       },
       {
        "component": "Retained historical blob data endpoint",
        "requiredWhen": "Syncing from genesis or a snapshot older than the normal 18-day beacon blob retention window, or recovering after an outage longer than that window.",
        "hosting": "Use a third-party retained-blob service, an archival beacon endpoint, or a self-hosted archiver; an additional local host is not mandatory.",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://docs.optimism.io/node-operators/guides/management/blobs"
+       ]
       }
      ],
      "requirements": [
@@ -4922,7 +4946,10 @@
       {
        "component": "Legacy genesis-ethermint synchronization stage",
        "requiredWhen": "Syncing Genesis L1 mainnet from genesis instead of the provided current snapshot",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://github.com/GenesisL1/genesis-crypto/blob/main/README.md"
+       ]
       }
      ],
      "requirements": [
@@ -6085,7 +6112,10 @@
       {
        "component": "Execution client + consensus client",
        "requiredWhen": "Operating a LUKSO mainnet full node",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://docs.lukso.network/networks/mainnet/running-a-node/"
+       ]
       }
      ],
      "requirements": [
@@ -6265,7 +6295,10 @@
       {
        "component": "Relay-chain node alongside parachain node",
        "requiredWhen": "Running the Darwinia2 collator configuration documented in the guide",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://docs.darwinia.network/node-operators/run-collator-node/"
+       ]
       }
      ],
      "requirements": [
@@ -8362,7 +8395,10 @@
       {
        "component": "gatecli evm rest-server (EVM RPC service)",
        "requiredWhen": "Serving Ethereum-compatible JSON-RPC from the Gate Chain node",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://www.gatechain.io/docs/nodes/run-node/"
+       ]
       }
      ],
      "requirements": [
@@ -8453,7 +8489,10 @@
       {
        "component": "gatecli evm rest-server (EVM RPC service)",
        "requiredWhen": "Serving Ethereum-compatible JSON-RPC from the Gate Chain node",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://www.gatechain.io/docs/nodes/run-node/"
+       ]
       }
      ],
      "requirements": [
@@ -9919,7 +9958,7 @@
        "component": "network",
        "metric": "bandwidth",
        "value": 500,
-       "unit": "MB+it/s",
+       "unit": "MBit/s",
        "qualifier": "at_least",
        "notes": "Original malformed unit preserved; symmetric commercial service. No silent Mbps conversion.",
        "source": "https://docs.velas.com/running-validator/validator-reqs/"
@@ -10019,7 +10058,7 @@
        "component": "network",
        "metric": "bandwidth",
        "value": 500,
-       "unit": "MB+it/s",
+       "unit": "MBit/s",
        "qualifier": "at_least",
        "notes": "Original malformed unit preserved; symmetric commercial service. No silent Mbps conversion.",
        "source": "https://docs.velas.com/running-validator/validator-reqs/"
@@ -12181,7 +12220,10 @@
        "component": "Ethereum execution RPC + beacon API",
        "requiredWhen": "Synchronizing Unichain mainnet",
        "hosting": "Endpoint access required; self-hosting not required",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://github.com/Uniswap/unichain-node"
+       ]
       }
      ],
      "clientVersion": null,
@@ -12977,7 +13019,10 @@
       {
        "component": "monad-bft + monad-execution + monad-rpc",
        "requiredWhen": "Official full-node deployment with RPC",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://docs.monad.xyz/node-ops/full-node-installation"
+       ]
       }
      ],
      "requirements": [
@@ -17313,7 +17358,10 @@
        "component": "B2 Hub execution RPC and consensus/beacon API",
        "requiredWhen": "Synchronizing B2 mainnet",
        "hosting": "Endpoint access required; self-hosting not required",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://docs.bsquared.network/for-developers/running_rollup_node"
+       ]
       }
      ],
      "requirements": [
@@ -18269,7 +18317,12 @@
        "component": "Fraxtal-modified op-node, L1 RPC and DA endpoint",
        "requiredWhen": "Running the documented Fraxtal replica",
        "hosting": "Remote L1 and DA endpoints permitted; no required private DA server",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://docs.frax.com/fraxtal/network/running-a-node",
+        "https://github.com/FraxFinance/fraxtal-node",
+        "https://docs.frax.com/fraxtal/network/data-availability"
+       ]
       }
      ],
      "requirements": [
@@ -19885,7 +19938,10 @@
        "component": "Hedera consensus-node and mirror-node API access",
        "requiredWhen": "Serving JSON-RPC requests",
        "hosting": "Remote endpoints permitted; local consensus/mirror hosts not mandatory",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://github.com/hiero-ledger/hiero-json-rpc-relay"
+       ]
       }
      ],
      "clientVersion": null,
@@ -19941,7 +19997,10 @@
        "component": "Hedera consensus-node and mirror-node API access",
        "requiredWhen": "Serving JSON-RPC requests",
        "hosting": "Remote endpoints permitted; local consensus/mirror hosts not mandatory",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://github.com/hiero-ledger/hiero-json-rpc-relay"
+       ]
       }
      ],
      "clientVersion": null,
@@ -19997,7 +20056,10 @@
        "component": "Hedera consensus-node and mirror-node API access",
        "requiredWhen": "Serving JSON-RPC requests",
        "hosting": "Remote endpoints permitted; local consensus/mirror hosts not mandatory",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://github.com/hiero-ledger/hiero-json-rpc-relay"
+       ]
       }
      ],
      "clientVersion": null,
@@ -20043,7 +20105,11 @@
       {
        "component": "Consensus node, mirror-node services and JSON-RPC relay",
        "requiredWhen": "Running deprecated hiero-local-node stack",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://github.com/hiero-ledger/hiero-local-node",
+        "https://github.com/hiero-ledger/hiero-json-rpc-relay"
+       ]
       }
      ],
      "requirements": [
@@ -23057,13 +23123,19 @@
        "component": "Ethereum L1 execution RPC and beacon endpoint",
        "requiredWhen": "Running Shape op-node",
        "hosting": "Remote endpoints permitted",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://docs.shape.network/technical-details/run-a-node"
+       ]
       },
       {
        "component": "Retained historical blob data endpoint",
        "requiredWhen": "Syncing from genesis or a snapshot older than the normal 18-day beacon blob retention window, or recovering after an outage longer than that window.",
        "hosting": "Use a third-party retained-blob service, an archival beacon endpoint, or a self-hosted archiver; an additional local host is not mandatory.",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://docs.shape.network/technical-details/run-a-node"
+       ]
       }
      ],
      "requirements": [
@@ -23128,13 +23200,19 @@
        "component": "Ethereum L1 execution RPC and beacon endpoint",
        "requiredWhen": "Running Shape op-node",
        "hosting": "Remote endpoints permitted",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://docs.shape.network/technical-details/run-a-node"
+       ]
       },
       {
        "component": "Retained historical blob data endpoint",
        "requiredWhen": "Syncing from genesis or a snapshot older than the normal 18-day beacon blob retention window, or recovering after an outage longer than that window.",
        "hosting": "Use a third-party retained-blob service, an archival beacon endpoint, or a self-hosted archiver; an additional local host is not mandatory.",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://docs.shape.network/technical-details/run-a-node"
+       ]
       }
      ],
      "requirements": [
@@ -28553,7 +28631,11 @@
       {
        "component": "Kusama relay-chain access",
        "hosting": "Remote relay RPC supported instead of full local relay synchronization",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://wiki.acala.network/integrate/karura/full-node",
+        "https://wiki.acala.network/integrate/karura/collator"
+       ]
       }
      ],
      "clientVersion": null,
@@ -32628,7 +32710,11 @@
         "Go-Pulse",
         "Erigon-Pulse"
        ],
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Choose one execution client; combined host sizing remains on this profile.",
+       "sources": [
+        "https://gitlab.com/pulsechaincom/pulsechain-testnet/-/raw/master/README.md"
+       ]
       },
       {
        "component": "Consensus client",
@@ -32637,7 +32723,11 @@
         "Prysm-Pulse",
         "Lighthouse-Pulse"
        ],
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Choose one consensus client and connect to the execution client. Standalone sizing is not stated.",
+       "sources": [
+        "https://gitlab.com/pulsechaincom/pulsechain-testnet/-/raw/master/README.md"
+       ]
       }
      ],
      "requirements": [
@@ -32699,7 +32789,11 @@
         "Go-Pulse",
         "Erigon-Pulse"
        ],
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Choose one execution client; combined host sizing remains on this profile.",
+       "sources": [
+        "https://gitlab.com/pulsechaincom/pulsechain-testnet/-/raw/master/README.md"
+       ]
       },
       {
        "component": "Consensus client",
@@ -32708,7 +32802,11 @@
         "Prysm-Pulse",
         "Lighthouse-Pulse"
        ],
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Choose one consensus client and connect to the execution client. Standalone sizing is not stated.",
+       "sources": [
+        "https://gitlab.com/pulsechaincom/pulsechain-testnet/-/raw/master/README.md"
+       ]
       }
      ],
      "requirements": [
@@ -39279,17 +39377,29 @@
         "op-geth",
         "op-reth"
        ],
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Choose one; runtime host totals are not duplicated per component.",
+       "sources": [
+        "https://docs.lisk.com/guides/run-a-lisk-node/"
+       ]
       },
       {
        "component": "op-node",
        "requiredWhen": "Running the Lisk L2 node",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Runs alongside the execution client.",
+       "sources": [
+        "https://docs.lisk.com/guides/run-a-lisk-node/"
+       ]
       },
       {
        "component": "Ethereum execution and beacon RPC access",
        "requiredWhen": "Syncing the Lisk L2 node",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "External endpoints are permitted. Self-hosted L1 hardware is conditional and not sized here.",
+       "sources": [
+        "https://docs.lisk.com/guides/run-a-lisk-node/"
+       ]
       }
      ],
      "requirements": [
@@ -39334,17 +39444,29 @@
         "op-geth",
         "op-reth"
        ],
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Choose one; runtime host totals are not duplicated per component.",
+       "sources": [
+        "https://docs.lisk.com/guides/run-a-lisk-node/"
+       ]
       },
       {
        "component": "op-node",
        "requiredWhen": "Running the Lisk L2 node",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Runs alongside the execution client.",
+       "sources": [
+        "https://docs.lisk.com/guides/run-a-lisk-node/"
+       ]
       },
       {
        "component": "Ethereum execution and beacon RPC access",
        "requiredWhen": "Syncing the Lisk L2 node",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "External endpoints are permitted. Self-hosted L1 hardware is conditional and not sized here.",
+       "sources": [
+        "https://docs.lisk.com/guides/run-a-lisk-node/"
+       ]
       }
      ],
      "requirements": [
@@ -41432,7 +41554,12 @@
       {
        "component": "Embedded relay-chain synchronization",
        "requiredWhen": "Embedded relay-chain mode",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Embedded in the parachain node deployment; remote relay RPC/light modes are alternatives requiring separate verification.",
+       "sources": [
+        "https://docs.moonbeam.network/node-operators/networks/run-a-node/overview/",
+        "https://docs.moonbeam.network/node-operators/networks/run-a-node/docker/"
+       ]
       }
      ],
      "clientVersion": null,
@@ -41499,7 +41626,12 @@
       {
        "component": "Embedded relay-chain synchronization",
        "requiredWhen": "Embedded relay-chain mode",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Embedded in the parachain node deployment; remote relay RPC/light modes are alternatives requiring separate verification.",
+       "sources": [
+        "https://docs.moonbeam.network/node-operators/networks/run-a-node/overview/",
+        "https://docs.moonbeam.network/node-operators/networks/run-a-node/docker/"
+       ]
       }
      ],
      "clientVersion": null,
@@ -41589,7 +41721,12 @@
       {
        "component": "Embedded relay-chain synchronization",
        "requiredWhen": "Embedded relay-chain mode",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Embedded in the parachain node deployment; remote relay RPC/light modes are alternatives requiring separate verification.",
+       "sources": [
+        "https://docs.moonbeam.network/node-operators/networks/run-a-node/overview/",
+        "https://docs.moonbeam.network/node-operators/networks/run-a-node/docker/"
+       ]
       }
      ],
      "clientVersion": null,
@@ -42084,12 +42221,21 @@
       {
        "component": "op-node",
        "requiredWhen": "Running Unichain Sepolia",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://developers.uniswap.org/docs/unichain/getting-started/set-up-a-node",
+        "https://github.com/Uniswap/unichain-node"
+       ]
       },
       {
        "component": "Ethereum L1 execution and beacon RPC access",
        "requiredWhen": "Syncing Unichain Sepolia",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "External endpoints may be used; self-hosted L1 is conditional.",
+       "sources": [
+        "https://developers.uniswap.org/docs/unichain/getting-started/set-up-a-node",
+        "https://github.com/Uniswap/unichain-node"
+       ]
       }
      ],
      "clientVersion": null,
@@ -44464,7 +44610,11 @@
       {
        "component": "Embedded zkVerify relay-chain node",
        "requiredWhen": "Documented VFlow RPC deployment",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Both chains are synced and stored; no separate host presumed.",
+       "sources": [
+        "https://docs.zkverify.io/node-operators/run_vflow_rpc_node"
+       ]
       }
      ],
      "clientVersion": null,
@@ -44519,7 +44669,11 @@
       {
        "component": "Embedded zkVerify relay-chain node",
        "requiredWhen": "Documented VFlow RPC deployment",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Both chains are synced and stored; no separate host presumed.",
+       "sources": [
+        "https://docs.zkverify.io/node-operators/run_vflow_rpc_node"
+       ]
       }
      ],
      "clientVersion": null,
@@ -48254,7 +48408,7 @@
      "access": "inaccessible"
     },
     {
-     "url": "https://teapartycrypto.com/",
+     "url": "https://TeaPartyCrypto.com",
      "title": "PartyChain website",
      "access": "inaccessible"
     }
@@ -52897,7 +53051,7 @@
      "url": "https://ethglobal.com/showcase/dexilla-ry79x",
      "title": "Dexilla project showcase",
      "access": "read",
-     "notes": "Creator submission describes Bedrock-based DEX chain; no hardware. Linked source-code target failed."
+     "notes": "Creator submission describes Bedrock-based DEX chain; no hardware. Linked source-code target failed. "
     }
    ],
    "profiles": []
@@ -70521,7 +70675,7 @@
    "notes": "Inventory Mainnet L1 label preserved, but official docs describe Rata as testnet. Only historical family requirement verified; no current exact deployment sizing.",
    "sources": [
     {
-     "url": "https://medium.com/centrality/%E9%AA%8C%E8%AF%81%E8%80%85%E8%8A%82%E7%82%B9%E5%B8%B8%E8%A7%81%E9%97%AE%E9%A2%98%E5%8F%8A%E8%A7%A3%E7%AD%94-7ecd2970761d",
+     "url": "https://medium.com/centrality/验证者节点常见问题及解答-7ecd2970761d",
      "title": "Primary source checked",
      "access": "read",
      "notes": "Actual Chinese official FAQ read and rechecked: minimum250G storage8G RAM. Additional pass: primary text read via web tool."
@@ -70599,7 +70753,7 @@
    "notes": "Inventory Mainnet L1 label preserved, but official docs describe Nikau as testnet. Only historical family requirement verified; no current exact deployment sizing.",
    "sources": [
     {
-     "url": "https://medium.com/centrality/%E9%AA%8C%E8%AF%81%E8%80%85%E8%8A%82%E7%82%B9%E5%B8%B8%E8%A7%81%E9%97%AE%E9%A2%98%E5%8F%8A%E8%A7%A3%E7%AD%94-7ecd2970761d",
+     "url": "https://medium.com/centrality/验证者节点常见问题及解答-7ecd2970761d",
      "title": "Primary source checked",
      "access": "read",
      "notes": "Actual Chinese official FAQ read and rechecked: minimum250G storage8G RAM. Additional pass: primary text read via web tool."
@@ -72583,7 +72737,11 @@
        "component": "Sepolia execution RPC and beacon API",
        "requiredWhen": "Running es-node for EthStorage Public Testnet 3333 on Sepolia.",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Provider endpoints are permitted; no additional self-hosted hardware budget established.",
+       "sources": [
+        "https://docs.ethstorage.io/storage-provider-guide/tutorials"
+       ]
       }
      ],
      "requirements": [
@@ -72650,7 +72808,11 @@
        "component": "Sepolia execution RPC and beacon API",
        "requiredWhen": "Running es-node for EthStorage Public Testnet 3333 on Sepolia.",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Provider endpoints are permitted; no additional self-hosted hardware budget established.",
+       "sources": [
+        "https://docs.ethstorage.io/storage-provider-guide/tutorials"
+       ]
       }
      ],
      "requirements": [
@@ -73526,7 +73688,11 @@
       {
        "component": "RISC0 Merkle service",
        "requiredWhen": "Documented light-node operation",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Separate background service; published 4–8 GB machine guidance is not assigned again to this process.",
+       "sources": [
+        "https://docs.layeredge.io/docs/getting-started/running-light-node"
+       ]
       }
      ],
      "requirements": [
@@ -75321,7 +75487,11 @@
       {
        "component": "Quantum security service",
        "requiredWhen": "Validator operation",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Separate service/tunnels in the documented validator stack; excludes non-validator nodes.",
+       "sources": [
+        "https://ozonechain.io/validator-node/"
+       ]
       }
      ],
      "requirements": [
@@ -75362,7 +75532,11 @@
       {
        "component": "Quantum security service",
        "requiredWhen": "Validator operation",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Separate service/tunnels in the documented validator stack; excludes non-validator nodes.",
+       "sources": [
+        "https://ozonechain.io/validator-node/"
+       ]
       }
      ],
      "requirements": [
@@ -75411,7 +75585,11 @@
       {
        "component": "Quantum security service",
        "requiredWhen": "Validator operation",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Separate service/tunnels in the documented validator stack; excludes non-validator nodes.",
+       "sources": [
+        "https://ozonechain.io/validator-node/"
+       ]
       }
      ],
      "requirements": [
@@ -77079,7 +77257,10 @@
        "component": "Sepolia execution RPC and beacon API",
        "requiredWhen": "Lisk Sepolia node operation",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://docs.lisk.com/guides/run-a-lisk-node/"
+       ]
       }
      ],
      "requirements": [
@@ -77121,7 +77302,10 @@
        "component": "Sepolia execution RPC and beacon API",
        "requiredWhen": "Lisk Sepolia node operation",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://docs.lisk.com/guides/run-a-lisk-node/"
+       ]
       }
      ],
      "requirements": [
@@ -77222,7 +77406,11 @@
       {
        "component": "RISC0 Merkle service",
        "requiredWhen": "Documented light-node operation",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Separate background service; published 4–8 GB machine guidance is not assigned again to this process.",
+       "sources": [
+        "https://docs.layeredge.io/docs/getting-started/running-light-node"
+       ]
       }
      ],
      "requirements": [
@@ -79346,7 +79534,10 @@
       {
        "component": "Sepolia execution RPC and beacon API",
        "requiredWhen": "Operating the documented World Chain Sepolia launcher",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://github.com/worldcoin-foundation/simple-worldchain-node"
+       ]
       }
      ],
      "requirements": [
@@ -79783,7 +79974,8 @@
      "requiredWhen": "Complete historical RPC access with the documented Mantle v2 stack.",
      "sizing": "not_established",
      "snapshotArtifact": {
-      "type": "compressed_snapshot"
+      "type": "compressed_snapshot",
+      "url": "https://s3.ap-southeast-1.amazonaws.com/snapshot.mantle.xyz/historyrpcdata-mainnet-chaindata.tar.zst"
      },
      "requirements": []
     }
@@ -79970,13 +80162,20 @@
       {
        "component": "proxyd",
        "requiredWhen": "Using the documented reth configuration",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Routes historical and unsupported-method calls to the public Mantle Sepolia RPC. No standalone sizing supplied.",
+       "sources": [
+        "https://github.com/mantle-xyz/networks/blob/main/run-node-sepolia.md"
+       ]
       },
       {
        "component": "Sepolia execution RPC plus beacon API or Mantle DA indexer access",
        "requiredWhen": "The selected documented data acquisition path",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://github.com/mantle-xyz/networks/blob/main/run-node-sepolia.md"
+       ]
       }
      ],
      "requirements": [
@@ -82331,7 +82530,10 @@
       {
        "component": "BSC Testnet L1 RPC",
        "requiredWhen": "Operating opBNB testnet replica",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://docs.bnbchain.org/bnb-opbnb/advanced/local-node/"
+       ]
       }
      ],
      "requirements": [
@@ -83176,7 +83378,10 @@
       {
        "component": "MANTRA Connect oracle sidecar",
        "requiredWhen": "Validator oracle participation; disabled for non-validator nodes",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://docs.mantrachain.io/operators/node-setup-and-deployment/validator-nodes/connect-sidecar"
+       ]
       }
      ],
      "requirements": [
@@ -83352,7 +83557,10 @@
       {
        "component": "MANTRA Connect oracle sidecar",
        "requiredWhen": "Validator oracle participation; disabled for non-validator nodes",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://docs.mantrachain.io/operators/node-setup-and-deployment/validator-nodes/connect-sidecar"
+       ]
       }
      ],
      "requirements": [
@@ -84169,7 +84377,10 @@
       {
        "component": "op-node and MegaETH replica",
        "requiredWhen": "Current project-family trust-minimized canonical-chain validation workflow",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://github.com/megaeth-labs/stateless-validator"
+       ]
       }
      ],
      "requirements": [
@@ -84329,7 +84540,10 @@
       {
        "component": "op-node and MegaETH replica",
        "requiredWhen": "Current project-family trust-minimized canonical-chain validation workflow",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://github.com/megaeth-labs/stateless-validator"
+       ]
       }
      ],
      "requirements": [
@@ -96260,7 +96474,10 @@
       {
        "component": "Autonomys consensus node",
        "requiredWhen": "Supplying consensus RPC to domain operator",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://docs.autonomys.xyz/network/port-config/domain-operator/"
+       ]
       }
      ],
      "clientVersion": null,
@@ -104539,7 +104756,10 @@
        "component": "Bitcoin Cash node RPC (BCHN/BCHD)",
        "requiredWhen": "A normal smartBCH mainnet node needs a trusted Bitcoin Cash node RPC for staking information; self-hosting is conditional.",
        "hosting": "local_or_remote",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://docs.smartbch.org/smartbch/mainnet"
+       ]
       }
      ],
      "clientVersion": null,
@@ -104789,12 +105009,20 @@
       {
        "component": "Geth execution client",
        "requiredWhen": "Self-operated JOC Testnet node after the completed September 7, 2026 Tokyo hardfork.",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://www.japanopenchain.org/en/docs/tokyo-hardfork/tokyo-hardfork-overview/",
+        "https://www.japanopenchain.org/en/docs/developer/dev-on-ethereum/"
+       ]
       },
       {
        "component": "Consensus client (Lighthouse recommended)",
        "requiredWhen": "Self-operated JOC Testnet node after the completed September 7, 2026 Tokyo hardfork.",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://www.japanopenchain.org/en/docs/tokyo-hardfork/tokyo-hardfork-overview/",
+        "https://www.japanopenchain.org/en/docs/developer/dev-on-ethereum/"
+       ]
       }
      ],
      "clientVersion": null,
@@ -104883,24 +105111,36 @@
       {
        "component": "gatelayer-geth",
        "requiredWhen": "Operating a Gate Layer RPC node for synchronization and queries.",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://www.gatechain.io/docs/GateLayer/Development/RunRPCNode/"
+       ]
       },
       {
        "component": "gatelayer-node",
        "requiredWhen": "Operating a Gate Layer RPC node for synchronization and queries.",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://www.gatechain.io/docs/GateLayer/Development/RunRPCNode/"
+       ]
       },
       {
        "component": "L1 execution and beacon RPC services",
        "requiredWhen": "Derivation and synchronization; may use remote endpoints.",
        "hosting": "local_or_remote",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://www.gatechain.io/docs/GateLayer/Development/RunRPCNode/"
+       ]
       },
       {
        "component": "Retained historical blob data endpoint",
        "requiredWhen": "Synchronizing blocks outside the normal 18-day beacon blob retention window; the official GateLayer blob archive begins on 2025-11-28 and cannot supply earlier history.",
        "hosting": "Use a third-party retained-blob service, an archival beacon endpoint, or a self-hosted archiver; an additional local host is not mandatory.",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://www.gatechain.io/docs/GateLayer/Development/RunRPCNode/"
+       ]
       }
      ],
      "clientVersion": null,
@@ -105026,7 +105266,11 @@
       {
        "component": "monad-bft + monad-execution + monad-rpc",
        "requiredWhen": "Running the documented Monad full-node stack; exact testnet deployment/version still requires confirmation.",
-       "sizing": "included_in_existing_whole_host_profile"
+       "sizing": "included_in_existing_whole_host_profile",
+       "sources": [
+        "https://docs.monad.xyz/node-ops/hardware-requirements",
+        "https://docs.monad.xyz/node-ops/full-node-installation"
+       ]
       }
      ],
      "requirements": [
@@ -105220,12 +105464,18 @@
       {
        "component": "Execution client",
        "requiredWhen": "Running a self-operated Gnosis/Chiado node.",
-       "sizing": "included_in_existing_whole_host_profile"
+       "sizing": "included_in_existing_whole_host_profile",
+       "sources": [
+        "https://docs.gnosischain.com/node"
+       ]
       },
       {
        "component": "Consensus client",
        "requiredWhen": "Running a self-operated Gnosis/Chiado node.",
-       "sizing": "not_established_separately"
+       "sizing": "not_established_separately",
+       "sources": [
+        "https://docs.gnosischain.com/node"
+       ]
       }
      ],
      "requirements": [
@@ -105777,13 +106027,19 @@
        "component": "L1 execution and beacon RPC services",
        "requiredWhen": "Shape full or archive node derivation and post-Ecotone blob retrieval; either self-hosted or remote services.",
        "hosting": "local_or_remote",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://docs.shape.network/technical-details/run-a-node"
+       ]
       },
       {
        "component": "Retained historical blob data endpoint",
        "requiredWhen": "Syncing from genesis or a snapshot older than the normal 18-day beacon blob retention window, or recovering after an outage longer than that window.",
        "hosting": "Use a third-party retained-blob service, an archival beacon endpoint, or a self-hosted archiver; an additional local host is not mandatory.",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://docs.shape.network/technical-details/run-a-node"
+       ]
       }
      ],
      "requirements": [
@@ -105849,13 +106105,19 @@
        "component": "L1 execution and beacon RPC services",
        "requiredWhen": "Shape full or archive node derivation and post-Ecotone blob retrieval; either self-hosted or remote services.",
        "hosting": "local_or_remote",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://docs.shape.network/technical-details/run-a-node"
+       ]
       },
       {
        "component": "Retained historical blob data endpoint",
        "requiredWhen": "Syncing from genesis or a snapshot older than the normal 18-day beacon blob retention window, or recovering after an outage longer than that window.",
        "hosting": "Use a third-party retained-blob service, an archival beacon endpoint, or a self-hosted archiver; an additional local host is not mandatory.",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://docs.shape.network/technical-details/run-a-node"
+       ]
       }
      ],
      "requirements": [
@@ -117617,7 +117879,7 @@
    "sources": [
     {
      "url": "https://testnet-explorer.evokescan.org/",
-     "title": "MTHN Testnet Explorer",
+     "title": "MTHN Testnet  Explorer",
      "access": "read",
      "notes": "No hardware specification was established from this retrieval."
     }
@@ -122999,7 +123261,8 @@
     {
      "url": "https://docs.alephzero.org/aleph-zero/use/using-the-evm-layer",
      "access": "read",
-     "notes": "Inspected primary lead; no applicable hardware capacities established."
+     "notes": "Inspected primary lead; no applicable hardware capacities established.",
+     "title": null
     }
    ],
    "profiles": []
@@ -125914,7 +126177,8 @@
     {
      "url": "https://docs.assetchain.org/general-info/add-asset-chain",
      "access": "read",
-     "notes": "Inspected primary lead; no applicable hardware capacities established."
+     "notes": "Inspected primary lead; no applicable hardware capacities established.",
+     "title": null
     },
     {
      "url": "https://github.com/xendfinance/assetchain-blockchain/blob/testnet/MAINNET.md",
@@ -126398,7 +126662,11 @@
        "component": "Tezos L1 node controlled by operator",
        "requiredWhen": "Smart Rollup maintenance or operator mode posting commitments",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Observer mode may use a public L1 RPC; snapshot bootstrap needs history from snapshot to head. No L1 hardware numbers assigned from the Smart Rollup profile.",
+       "sources": [
+        "https://docs.etherlink.com/network/smart-rollup-nodes"
+       ]
       }
      ],
      "requirements": [
@@ -130913,7 +131181,11 @@
       {
        "component": "Production JSON-RPC reverse proxy",
        "requiredWhen": "Recommended when exposing production JSON-RPC externally.",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "nginx or caddy recommendation, not required for private basic-node sync.",
+       "sources": [
+        "https://docs.bitbadges.io/chain/run-a-node"
+       ]
       }
      ],
      "clientVersion": null,
@@ -131022,12 +131294,20 @@
       {
        "component": "PostgreSQL14",
        "requiredWhen": "Required by historical external-node DATABASE_URL and service health dependency.",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Separate persistent database. Compose memory24g is a container limit, not a published host minimum.",
+       "sources": [
+        "https://github.com/sophon-org/sophon-en-config/blob/main/docker-compose.yml"
+       ]
       },
       {
        "component": "Integrated Avail DA fetcher",
        "requiredWhen": "Historical mainnet validium data retrieval.",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Runs as external-node component with remote Avail RPC/bridge endpoints; no independently hosted Avail node required by this recipe.",
+       "sources": [
+        "https://github.com/sophon-org/sophon-en-config/blob/main/docker-compose.yml"
+       ]
       }
      ],
      "clientVersion": null,
@@ -131531,7 +131811,8 @@
     {
      "url": "https://docs.cytonic.com/network-documentation/cytonic-ethereum",
      "access": "read",
-     "notes": "Inspected primary lead; no applicable hardware capacities established."
+     "notes": "Inspected primary lead; no applicable hardware capacities established.",
+     "title": null
     }
    ],
    "profiles": []
@@ -131726,7 +132007,12 @@
       {
        "component": "AvalancheGo host with DFK Subnet-EVM plugin",
        "requiredWhen": "Running a DFK53935 node using the official mainnet guide.",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Official DFK guide links AvalancheGo/Subnet-EVM setup and configures DFK alongside C-Chain. Primary-network and plugin storage/host overhead are additional considerations; dated DFK snapshot sizes do not size the entire machine. No generic Avalanche capacity is copied.",
+       "sources": [
+        "https://devs.defikingdoms.com/dfk-chain/nodes-and-validators",
+        "https://docs.avax.network/nodes/run/subnet-node"
+       ]
       }
      ],
      "requirements": [
@@ -131759,7 +132045,12 @@
       {
        "component": "AvalancheGo host with DFK Subnet-EVM plugin",
        "requiredWhen": "Running a DFK53935 node using the official mainnet guide.",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Official DFK guide links AvalancheGo/Subnet-EVM setup and configures DFK alongside C-Chain. Primary-network and plugin storage/host overhead are additional considerations; dated DFK snapshot sizes do not size the entire machine. No generic Avalanche capacity is copied.",
+       "sources": [
+        "https://devs.defikingdoms.com/dfk-chain/nodes-and-validators",
+        "https://docs.avax.network/nodes/run/subnet-node"
+       ]
       }
      ],
      "requirements": [
@@ -132238,7 +132529,8 @@
     {
      "url": "https://docs.superposition.so/superposition-mainnet/mainnet-network-details",
      "access": "read",
-     "notes": "Inspected primary lead; no applicable hardware capacities established."
+     "notes": "Inspected primary lead; no applicable hardware capacities established.",
+     "title": null
     }
    ],
    "profiles": []
@@ -149084,7 +149376,12 @@
        "component": "Octez Smart Rollup node",
        "requiredWhen": "Required when the EVM observer independently verifies sequencer blocks against Tezos L1. EVM-only observer mode can skip tracking it.",
        "hosting": "Self-hosted Smart Rollup node for the independently verifying configuration described by the documentation.",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Conditional verification component omitted from the structured profiles. Separate Shadownet hardware sizing is not established. The rollup node also needs a Tezos L1 RPC endpoint.",
+       "sources": [
+        "https://docs.etherlink.com/network/evm-nodes/",
+        "https://docs.etherlink.com/network/smart-rollup-nodes/"
+       ]
       }
      ],
      "requirements": [
@@ -149144,7 +149441,12 @@
        "component": "Octez Smart Rollup node",
        "requiredWhen": "Required when the EVM observer independently verifies sequencer blocks against Tezos L1. EVM-only observer mode can skip tracking it.",
        "hosting": "Self-hosted Smart Rollup node for the independently verifying configuration described by the documentation.",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Conditional verification component omitted from the structured profiles. Separate Shadownet hardware sizing is not established. The rollup node also needs a Tezos L1 RPC endpoint.",
+       "sources": [
+        "https://docs.etherlink.com/network/evm-nodes/",
+        "https://docs.etherlink.com/network/smart-rollup-nodes/"
+       ]
       }
      ],
      "requirements": [
@@ -149205,7 +149507,12 @@
        "component": "Octez Smart Rollup node",
        "requiredWhen": "Required when the EVM observer independently verifies sequencer blocks against Tezos L1. EVM-only observer mode can skip tracking it.",
        "hosting": "Self-hosted Smart Rollup node for the independently verifying configuration described by the documentation.",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Conditional verification component omitted from the structured profiles. Separate Shadownet hardware sizing is not established. The rollup node also needs a Tezos L1 RPC endpoint.",
+       "sources": [
+        "https://docs.etherlink.com/network/evm-nodes/",
+        "https://docs.etherlink.com/network/smart-rollup-nodes/"
+       ]
       }
      ],
      "requirements": [
@@ -149265,7 +149572,12 @@
        "component": "Octez Smart Rollup node",
        "requiredWhen": "Required when the EVM observer independently verifies sequencer blocks against Tezos L1. EVM-only observer mode can skip tracking it.",
        "hosting": "Self-hosted Smart Rollup node for the independently verifying configuration described by the documentation.",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Conditional verification component omitted from the structured profiles. Separate Shadownet hardware sizing is not established. The rollup node also needs a Tezos L1 RPC endpoint.",
+       "sources": [
+        "https://docs.etherlink.com/network/evm-nodes/",
+        "https://docs.etherlink.com/network/smart-rollup-nodes/"
+       ]
       }
      ],
      "requirements": [
@@ -149326,7 +149638,12 @@
        "component": "Octez Smart Rollup node",
        "requiredWhen": "Required when the EVM observer independently verifies sequencer blocks against Tezos L1. EVM-only observer mode can skip tracking it.",
        "hosting": "Self-hosted Smart Rollup node for the independently verifying configuration described by the documentation.",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Conditional verification component omitted from the structured profiles. Separate Shadownet hardware sizing is not established. The rollup node also needs a Tezos L1 RPC endpoint.",
+       "sources": [
+        "https://docs.etherlink.com/network/evm-nodes/",
+        "https://docs.etherlink.com/network/smart-rollup-nodes/"
+       ]
       }
      ],
      "requirements": [
@@ -149386,7 +149703,12 @@
        "component": "Octez Smart Rollup node",
        "requiredWhen": "Required when the EVM observer independently verifies sequencer blocks against Tezos L1. EVM-only observer mode can skip tracking it.",
        "hosting": "Self-hosted Smart Rollup node for the independently verifying configuration described by the documentation.",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Conditional verification component omitted from the structured profiles. Separate Shadownet hardware sizing is not established. The rollup node also needs a Tezos L1 RPC endpoint.",
+       "sources": [
+        "https://docs.etherlink.com/network/evm-nodes/",
+        "https://docs.etherlink.com/network/smart-rollup-nodes/"
+       ]
       }
      ],
      "requirements": [
@@ -161355,7 +161677,11 @@
        "component": "Ethereum Sepolia RPC endpoint",
        "requiredWhen": "Running the documented Patex Sepolia replica",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "The pt-node command needs an L1 Sepolia service-provider URL. Self-hosted Ethereum hardware is not mandated.",
+       "sources": [
+        "https://docs.patex.io/tech/for-developers/how-to-setup-node/testnet-node-launch"
+       ]
       }
      ],
      "requirements": [
@@ -162082,7 +162408,11 @@
        "component": "Ethereum Mainnet execution RPC and blob data endpoints",
        "requiredWhen": "Running the documented Scroll mainnet l2geth rollup verifier",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "The guide requires synchronized L1 execution RPC, configures Beacon/Blobscan/S3 blob sources, and reports failure when no blob client is configured.",
+       "sources": [
+        "https://docs.scroll.io/en/developers/guides/running-a-scroll-node/"
+       ]
       }
      ],
      "requirements": [
@@ -162552,7 +162882,11 @@
        "component": "Narwhal mempool / Hetu consensus service",
        "requiredWhen": "Using the documented Hetu family fast-build deployment",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "The deployment section requires the Narwhal mempool to be deployed before starting hhubd; the guide's single machine configuration is not per-process sizing.",
+       "sources": [
+        "https://docs.hetu.org/chain/fast-build"
+       ]
       }
      ],
      "requirements": [
@@ -163083,7 +163417,11 @@
        "component": "AnyTrust DAS REST endpoints",
        "requiredWhen": "Xai full-node deployment using AnyTrust configuration",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "The official guide requires enabling data availability and providing a DAS REST URL list or online list; operating a DAC server locally is not required.",
+       "sources": [
+        "https://xai-foundation.gitbook.io/xai-network/build-on-xai/how-to-run-a-full-node-for-xai-chain"
+       ]
       }
      ],
      "requirements": [
@@ -164766,13 +165104,21 @@
        "component": "Historical Ethereum Beacon blob API",
        "requiredWhen": "Full/genesis derivation sync or long-offline recovery",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Bundled Prysm cannot restore blobs already pruned by Ethereum peers. Supply retained historical blobs or use snap sync where appropriate.",
+       "sources": [
+        "https://github.com/hemilabs/hemi-node/blob/main/NODE_RUNNING.md"
+       ]
       },
       {
        "component": "PostgreSQL",
        "requiredWhen": "BFG enabled in full/hemi profile",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "BFG backing database within the combined host profile.",
+       "sources": [
+        "https://github.com/hemilabs/hemi-node/blob/main/NODE_RUNNING.md"
+       ]
       }
      ],
      "requirements": [
@@ -164821,13 +165167,21 @@
        "component": "Historical Ethereum Beacon blob API",
        "requiredWhen": "Full/genesis derivation sync or long-offline recovery",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Bundled Prysm cannot restore blobs already pruned by Ethereum peers. Supply retained historical blobs or use snap sync where appropriate.",
+       "sources": [
+        "https://github.com/hemilabs/hemi-node/blob/main/NODE_RUNNING.md"
+       ]
       },
       {
        "component": "PostgreSQL",
        "requiredWhen": "BFG enabled in full/hemi profile",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "BFG backing database within the combined host profile.",
+       "sources": [
+        "https://github.com/hemilabs/hemi-node/blob/main/NODE_RUNNING.md"
+       ]
       }
      ],
      "requirements": [
@@ -164876,7 +165230,11 @@
        "component": "Historical Ethereum Beacon blob API",
        "requiredWhen": "Full/genesis derivation sync or long-offline recovery",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Bundled Prysm cannot restore blobs already pruned by Ethereum peers. Supply retained historical blobs or use snap sync where appropriate.",
+       "sources": [
+        "https://github.com/hemilabs/hemi-node/blob/main/NODE_RUNNING.md"
+       ]
       }
      ],
      "requirements": [
@@ -166137,7 +166495,11 @@
        "component": "Subnet-EVM VM plugin and P-Chain synchronization",
        "requiredWhen": "Running the Lamina1 subnet-node deployment described by the official integration guide",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Lamina1's official guide points to the Avalanche subnet installation process, whose EVM runtime is loaded as a VM plugin by AvalancheGo. P-Chain synchronization is included in Lamina1's combined footprint statement; no independent host capacity is added.",
+       "sources": [
+        "https://build.avax.network/docs/nodes/run-a-node/avalanche-l1-nodes"
+       ]
       }
      ],
      "requirements": [
@@ -166171,7 +166533,11 @@
        "component": "Subnet-EVM VM plugin and P-Chain synchronization",
        "requiredWhen": "Running the Lamina1 subnet-node deployment described by the official integration guide",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Lamina1's official guide points to the Avalanche subnet installation process, whose EVM runtime is loaded as a VM plugin by AvalancheGo. P-Chain synchronization is included in Lamina1's combined footprint statement; no independent host capacity is added.",
+       "sources": [
+        "https://build.avax.network/docs/nodes/run-a-node/avalanche-l1-nodes"
+       ]
       }
      ],
      "requirements": [
@@ -166244,7 +166610,11 @@
        "component": "Subnet-EVM VM plugin and P-Chain synchronization",
        "requiredWhen": "Running the Lamina1 subnet-node deployment described by the official integration guide",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Lamina1's official guide points to the Avalanche subnet installation process, whose EVM runtime is loaded as a VM plugin by AvalancheGo. P-Chain synchronization is included in Lamina1's combined footprint statement; no independent host capacity is added.",
+       "sources": [
+        "https://build.avax.network/docs/nodes/run-a-node/avalanche-l1-nodes"
+       ]
       }
      ],
      "requirements": [
@@ -166278,7 +166648,11 @@
        "component": "Subnet-EVM VM plugin and P-Chain synchronization",
        "requiredWhen": "Running the Lamina1 subnet-node deployment described by the official integration guide",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Lamina1's official guide points to the Avalanche subnet installation process, whose EVM runtime is loaded as a VM plugin by AvalancheGo. P-Chain synchronization is included in Lamina1's combined footprint statement; no independent host capacity is added.",
+       "sources": [
+        "https://build.avax.network/docs/nodes/run-a-node/avalanche-l1-nodes"
+       ]
       }
      ],
      "requirements": [
@@ -167183,7 +167557,11 @@
        "component": "PostgreSQL service and RocksDB data directories",
        "requiredWhen": "Running the documented zkLink Nova external RPC node",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Official procedure creates PostgreSQL and RocksDB data directories, starts PostgreSQL first, restores its database, then starts the external node.",
+       "sources": [
+        "https://docs.zklink.io/developer/run-a-node"
+       ]
       }
      ],
      "requirements": [
@@ -167284,7 +167662,11 @@
        "component": "PostgreSQL service and RocksDB data directories",
        "requiredWhen": "Running the documented zkLink Nova external RPC node",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Official procedure creates PostgreSQL and RocksDB data directories, starts PostgreSQL first, restores its database, then starts the external node.",
+       "sources": [
+        "https://docs.zklink.io/developer/run-a-node"
+       ]
       }
      ],
      "requirements": [
@@ -169595,7 +169977,11 @@
        "component": "Pico Gnark final-proof service and bidder with CockroachDB",
        "requiredWhen": "The referenced Brevis proving-network operation procedure; current guide is Base mainnet, exact999983 unverified",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "CPU and GPU proving paths start Pico plus Gnark. A separate bidder uses CockroachDB; hardware allocation for these supporting services is not specified.",
+       "sources": [
+        "https://github.com/brevis-network/prover-network-ops/blob/main/docs/run_prover_node.md"
+       ]
       }
      ],
      "requirements": [
@@ -174028,7 +174414,11 @@
        "component": "Arbitrum Sepolia HTTP and WebSocket RPC",
        "requiredWhen": "Running the documented Geneva supernode",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Required environment endpoints must be Arbitrum Sepolia; commercial RPC providers are permitted.",
+       "sources": [
+        "https://doc.mxc.com/docs/Testnet-Tutorials/Run-Moonchain-Supernode/"
+       ]
       }
      ],
      "requirements": [
@@ -174603,7 +174993,11 @@
        "component": "Sepolia execution RPC for L1 Interface data availability",
        "requiredWhen": "Running the supported complete DogeOS testnet RPC stack",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "L1 Interface requires a Sepolia-capable execution RPC; the optional override changes its provider rather than requiring a self-hosted Ethereum node.",
+       "sources": [
+        "https://github.com/DogeOS69/dogeos-rpc-package"
+       ]
       }
      ],
      "requirements": [
@@ -174660,7 +175054,11 @@
        "component": "Sepolia execution RPC for L1 Interface data availability",
        "requiredWhen": "Running the supported complete DogeOS testnet RPC stack",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "L1 Interface requires a Sepolia-capable execution RPC; the optional override changes its provider rather than requiring a self-hosted Ethereum node.",
+       "sources": [
+        "https://github.com/DogeOS69/dogeos-rpc-package"
+       ]
       }
      ],
      "requirements": [
@@ -177032,13 +177430,21 @@
        "component": "EigenDA proxy",
        "requiredWhen": "Running a Celo Sepolia L2 node; local proxy if no remote endpoint is supplied",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "The official Celo Sepolia environment requires an EigenDA proxy endpoint and defaults to a local proxy. A hosted endpoint is supported, so self-hosting is conditional.",
+       "sources": [
+        "https://github.com/celo-org/celo-l2-node-docker-compose/blob/main/celo-sepolia.env"
+       ]
       },
       {
        "component": "Historical proofs sidecar database",
        "requiredWhen": "Explicitly enabling bounded historical eth_getProof support, disabled by default",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Store proofs on a separate volume; capacity depends on retained history window. This is not the mainnet pre-L2 archive backend.",
+       "sources": [
+        "https://github.com/celo-org/celo-l2-node-docker-compose/blob/main/celo-sepolia.env"
+       ]
       }
      ],
      "requirements": [
@@ -177072,13 +177478,21 @@
        "component": "EigenDA proxy",
        "requiredWhen": "Running a Celo Sepolia L2 node; local proxy if no remote endpoint is supplied",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "The official Celo Sepolia environment requires an EigenDA proxy endpoint and defaults to a local proxy. A hosted endpoint is supported, so self-hosting is conditional.",
+       "sources": [
+        "https://github.com/celo-org/celo-l2-node-docker-compose/blob/main/celo-sepolia.env"
+       ]
       },
       {
        "component": "Historical proofs sidecar database",
        "requiredWhen": "Explicitly enabling bounded historical eth_getProof support, disabled by default",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Store proofs on a separate volume; capacity depends on retained history window. This is not the mainnet pre-L2 archive backend.",
+       "sources": [
+        "https://github.com/celo-org/celo-l2-node-docker-compose/blob/main/celo-sepolia.env"
+       ]
       }
      ],
      "requirements": [
@@ -177437,13 +177851,19 @@
        "component": "Sepolia L1 execution RPC and beacon endpoints",
        "requiredWhen": "Running OP Sepolia op-node and its execution client.",
        "hosting": "Remote service endpoints are supported; local L1 self-hosting is optional.",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://docs.optimism.io/node-operators/tutorials/run-node-from-source"
+       ]
       },
       {
        "component": "Retained historical blob data endpoint",
        "requiredWhen": "Syncing from genesis or a snapshot older than the normal 18-day beacon blob retention window, or recovering after an outage longer than that window.",
        "hosting": "Use a third-party retained-blob service, an archival beacon endpoint, or a self-hosted archiver; an additional local host is not mandatory.",
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "sources": [
+        "https://docs.optimism.io/node-operators/guides/management/blobs"
+       ]
       }
      ],
      "clientVersion": null,
@@ -177496,7 +177916,11 @@
        "component": "RISE testnet alternative-DA endpoint",
        "requiredWhen": "Running the supported RISE testnet replica",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "The testnet preset supplies DA_SERVER and compose passes it to rise-op-node as altda.da-server. This is an external dependency, not a mandatory self-hosted DA server.",
+       "sources": [
+        "https://github.com/risechain/rise-node/blob/main/env.testnet"
+       ]
       }
      ],
      "requirements": [
@@ -177988,7 +178412,11 @@
        "component": "Groth16 DKG proving artifacts and anti-MEV keystore",
        "requiredWhen": "Running a T4 consensus validator participating in on-chain DKG",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "The exact T4 miner command consumes three R1CS/proving-key pairs and an anti-MEV keystore. These are local inputs to the existing Geth process, not a separate GPU prover or external consensus client.",
+       "sources": [
+        "https://xdocs.ngd.network/development/running-a-neo-x-node"
+       ]
       }
      ],
      "requirements": [
@@ -180505,7 +180933,11 @@
        "component": "Backup server running PlatON",
        "requiredWhen": "Documented devnet validator server setup",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "System requirements explicitly list primary and backup servers, both firewalled; sizing allocation and active/passive arrangement are not separately specified.",
+       "sources": [
+        "https://devdocs.platon.network/docs/en/Become_PlatON_Dev_Verification/"
+       ]
       }
      ],
      "requirements": [
@@ -181110,7 +181542,11 @@
        "component": "Lotus-Miner genesis block producer",
        "requiredWhen": "Creating and maintaining the standalone local devnet in the linked tutorial",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "The guide leaves lotus daemon and lotus-miner running concurrently. Production storage-provider hardware is not applicable to this2KiB local tutorial.",
+       "sources": [
+        "https://lotus.filecoin.io/lotus/developers/local-network/"
+       ]
       }
      ],
      "requirements": [
@@ -181274,7 +181710,7 @@
      "client": "SKALE Node",
      "deployment": "unknown",
      "verification": "qualified",
-     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked.",
+     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked. Network ports not documented: Current compliance page has only the placeholder some_port_range. Numeric supernode ports are not established in the primary text read during this pass; sync-node ports must not be substituted.",
      "verificationNotes": "Rechecked primary page values, original units, node role and requirement label. Inventory SKALE Nebula Hub Testnet is a SKALE chain lead. These primary pages describe the shared SKALE operator family, not this exact chain ID or its chain size/deployment generation. Supernodes host virtualized chain assignments; resources are not per-appchain quotas. Additional review 2026-10-10: Exact ID linkage in external identity evidence was not independently re-established; retain as qualified. See additional_verification.corrections for the superseding values and preserved prior history.",
      "evidence": [
       "https://docs.skale.space/validators/hardware",
@@ -181285,7 +181721,11 @@
        "component": "Ethereum Geth execution client and consensus client",
        "requiredWhen": "Ethereum-mainnet supernode under cited compliance procedure only; exact testnet/deprecated deployment applicability not established",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Prysm is recommended, not the only stated consensus option. Hardware must be sized separately; existing SKALE host quantities do not size these clients.",
+       "sources": [
+        "https://docs.skale.space/validators/compliance-requirements"
+       ]
       }
      ],
      "requirements": [
@@ -182209,7 +182649,7 @@
        "component": "memory",
        "metric": "capacity",
        "value": 4,
-       "unit": "GiB per2vCPU",
+       "unit": "GiB per 2 vCPU",
        "qualifier": "at_least",
        "notes": "DDR4+",
        "source": "https://fluence.dev/docs/connect_servers/overview"
@@ -182218,7 +182658,7 @@
        "component": "storage",
        "metric": "capacity",
        "value": 25,
-       "unit": "GiB per2vCPU",
+       "unit": "GiB per 2 vCPU",
        "qualifier": "at_least",
        "notes": "Customer workloads, RAID disabled.",
        "source": "https://fluence.dev/docs/connect_servers/overview"
@@ -190558,19 +190998,31 @@
        "component": "Neon indexer service",
        "requiredWhen": "Documented Neon Proxy Kubernetes deployment",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Included in shared cluster requirements; not an extra full-sized host.",
+       "sources": [
+        "https://docs.neonevm.org/docs/operating/enhanced/"
+       ]
       },
       {
        "component": "PostgreSQL",
        "requiredWhen": "Documented Neon Proxy Kubernetes deployment",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Local chart database or external PostgreSQL; external recommended for production.",
+       "sources": [
+        "https://docs.neonevm.org/docs/operating/enhanced/"
+       ]
       },
       {
        "component": "Solana RPC endpoint",
        "requiredWhen": "Proxy transaction settlement and indexing",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Dedicated self-hosted Solana node recommended, not required.",
+       "sources": [
+        "https://docs.neonevm.org/docs/operating/enhanced/"
+       ]
       }
      ],
      "requirements": [
@@ -190638,19 +191090,31 @@
        "component": "Neon indexer service",
        "requiredWhen": "Documented Neon Proxy Kubernetes deployment",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Included in shared cluster requirements; not an extra full-sized host.",
+       "sources": [
+        "https://docs.neonevm.org/docs/operating/enhanced/"
+       ]
       },
       {
        "component": "PostgreSQL",
        "requiredWhen": "Documented Neon Proxy Kubernetes deployment",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Local chart database or external PostgreSQL; external recommended for production.",
+       "sources": [
+        "https://docs.neonevm.org/docs/operating/enhanced/"
+       ]
       },
       {
        "component": "Solana RPC endpoint",
        "requiredWhen": "Proxy transaction settlement and indexing",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Dedicated self-hosted Solana node recommended, not required.",
+       "sources": [
+        "https://docs.neonevm.org/docs/operating/enhanced/"
+       ]
       }
      ],
      "requirements": [
@@ -190726,19 +191190,31 @@
        "component": "Neon indexer service",
        "requiredWhen": "Documented Neon Proxy Kubernetes deployment",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Included in shared cluster requirements; not an extra full-sized host.",
+       "sources": [
+        "https://docs.neonevm.org/docs/operating/enhanced/"
+       ]
       },
       {
        "component": "PostgreSQL",
        "requiredWhen": "Documented Neon Proxy Kubernetes deployment",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Local chart database or external PostgreSQL; external recommended for production.",
+       "sources": [
+        "https://docs.neonevm.org/docs/operating/enhanced/"
+       ]
       },
       {
        "component": "Solana RPC endpoint",
        "requiredWhen": "Proxy transaction settlement and indexing",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Dedicated self-hosted Solana node recommended, not required.",
+       "sources": [
+        "https://docs.neonevm.org/docs/operating/enhanced/"
+       ]
       }
      ],
      "requirements": [
@@ -190806,19 +191282,31 @@
        "component": "Neon indexer service",
        "requiredWhen": "Documented Neon Proxy Kubernetes deployment",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Included in shared cluster requirements; not an extra full-sized host.",
+       "sources": [
+        "https://docs.neonevm.org/docs/operating/enhanced/"
+       ]
       },
       {
        "component": "PostgreSQL",
        "requiredWhen": "Documented Neon Proxy Kubernetes deployment",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Local chart database or external PostgreSQL; external recommended for production.",
+       "sources": [
+        "https://docs.neonevm.org/docs/operating/enhanced/"
+       ]
       },
       {
        "component": "Solana RPC endpoint",
        "requiredWhen": "Proxy transaction settlement and indexing",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Dedicated self-hosted Solana node recommended, not required.",
+       "sources": [
+        "https://docs.neonevm.org/docs/operating/enhanced/"
+       ]
       }
      ],
      "requirements": [
@@ -190894,19 +191382,31 @@
        "component": "Neon indexer service",
        "requiredWhen": "Documented Neon Proxy Kubernetes deployment",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Included in shared cluster requirements; not an extra full-sized host.",
+       "sources": [
+        "https://docs.neonevm.org/docs/operating/enhanced/"
+       ]
       },
       {
        "component": "PostgreSQL",
        "requiredWhen": "Documented Neon Proxy Kubernetes deployment",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Local chart database or external PostgreSQL; external recommended for production.",
+       "sources": [
+        "https://docs.neonevm.org/docs/operating/enhanced/"
+       ]
       },
       {
        "component": "Solana RPC endpoint",
        "requiredWhen": "Proxy transaction settlement and indexing",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Dedicated self-hosted Solana node recommended, not required.",
+       "sources": [
+        "https://docs.neonevm.org/docs/operating/enhanced/"
+       ]
       }
      ],
      "requirements": [
@@ -190974,19 +191474,31 @@
        "component": "Neon indexer service",
        "requiredWhen": "Documented Neon Proxy Kubernetes deployment",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Included in shared cluster requirements; not an extra full-sized host.",
+       "sources": [
+        "https://docs.neonevm.org/docs/operating/enhanced/"
+       ]
       },
       {
        "component": "PostgreSQL",
        "requiredWhen": "Documented Neon Proxy Kubernetes deployment",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Local chart database or external PostgreSQL; external recommended for production.",
+       "sources": [
+        "https://docs.neonevm.org/docs/operating/enhanced/"
+       ]
       },
       {
        "component": "Solana RPC endpoint",
        "requiredWhen": "Proxy transaction settlement and indexing",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Dedicated self-hosted Solana node recommended, not required.",
+       "sources": [
+        "https://docs.neonevm.org/docs/operating/enhanced/"
+       ]
       }
      ],
      "requirements": [
@@ -191062,19 +191574,31 @@
        "component": "Neon indexer service",
        "requiredWhen": "Documented Neon Proxy Kubernetes deployment",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Included in shared cluster requirements; not an extra full-sized host.",
+       "sources": [
+        "https://docs.neonevm.org/docs/operating/enhanced/"
+       ]
       },
       {
        "component": "PostgreSQL",
        "requiredWhen": "Documented Neon Proxy Kubernetes deployment",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Local chart database or external PostgreSQL; external recommended for production.",
+       "sources": [
+        "https://docs.neonevm.org/docs/operating/enhanced/"
+       ]
       },
       {
        "component": "Solana RPC endpoint",
        "requiredWhen": "Proxy transaction settlement and indexing",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Dedicated self-hosted Solana node recommended, not required.",
+       "sources": [
+        "https://docs.neonevm.org/docs/operating/enhanced/"
+       ]
       }
      ],
      "requirements": [
@@ -191142,19 +191666,31 @@
        "component": "Neon indexer service",
        "requiredWhen": "Documented Neon Proxy Kubernetes deployment",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Included in shared cluster requirements; not an extra full-sized host.",
+       "sources": [
+        "https://docs.neonevm.org/docs/operating/enhanced/"
+       ]
       },
       {
        "component": "PostgreSQL",
        "requiredWhen": "Documented Neon Proxy Kubernetes deployment",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Local chart database or external PostgreSQL; external recommended for production.",
+       "sources": [
+        "https://docs.neonevm.org/docs/operating/enhanced/"
+       ]
       },
       {
        "component": "Solana RPC endpoint",
        "requiredWhen": "Proxy transaction settlement and indexing",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Dedicated self-hosted Solana node recommended, not required.",
+       "sources": [
+        "https://docs.neonevm.org/docs/operating/enhanced/"
+       ]
       }
      ],
      "requirements": [
@@ -191274,7 +191810,7 @@
      "client": "SKALE Node",
      "deployment": "unknown",
      "verification": "qualified",
-     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked.",
+     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked. Network ports not documented: Current compliance page has only the placeholder some_port_range. Numeric supernode ports are not established in the primary text read during this pass; sync-node ports must not be substituted.",
      "verificationNotes": "Rechecked primary page values, original units, node role and requirement label. Inventory Razor Skale Chain is a SKALE chain lead. These primary pages describe the shared SKALE operator family, not this exact chain ID or its chain size/deployment generation. Supernodes host virtualized chain assignments; resources are not per-appchain quotas. Additional review 2026-10-10: Exact ID linkage in external identity evidence was not independently re-established; retain as qualified. See additional_verification.corrections for the superseding values and preserved prior history.",
      "evidence": [
       "https://docs.skale.space/validators/hardware",
@@ -191285,7 +191821,11 @@
        "component": "Ethereum Geth execution client and consensus client",
        "requiredWhen": "Ethereum-mainnet supernode under cited compliance procedure only; exact testnet/deprecated deployment applicability not established",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Prysm is recommended, not the only stated consensus option. Hardware must be sized separately; existing SKALE host quantities do not size these clients.",
+       "sources": [
+        "https://docs.skale.space/validators/compliance-requirements"
+       ]
       }
      ],
      "requirements": [
@@ -191898,7 +192438,7 @@
      "client": "SKALE Node",
      "deployment": "unknown",
      "verification": "qualified",
-     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked.",
+     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked. Network ports not documented: Current compliance page has only the placeholder some_port_range. Numeric supernode ports are not established in the primary text read during this pass; sync-node ports must not be substituted.",
      "verificationNotes": "Rechecked primary page values, original units, node role and requirement label. Inventory SKALE Base Sepolia is a SKALE chain lead. These primary pages describe the shared SKALE operator family, not this exact chain ID or its chain size/deployment generation. Supernodes host virtualized chain assignments; resources are not per-appchain quotas. Additional review 2026-10-10: Exact ID linkage in external identity evidence was not independently re-established; retain as qualified. See additional_verification.corrections for the superseding values and preserved prior history.",
      "evidence": [
       "https://docs.skale.space/validators/hardware",
@@ -191909,7 +192449,11 @@
        "component": "Base Mainnet RPC endpoint",
        "requiredWhen": "Base-mainnet supernode deployment only",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "External endpoint dependency; do not add a mandatory local Base node.",
+       "sources": [
+        "https://docs.skale.space/validators/run-supernode-on-base"
+       ]
       }
      ],
      "requirements": [
@@ -192379,7 +192923,7 @@
      "client": "SKALE Node",
      "deployment": "unknown",
      "verification": "qualified",
-     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked.",
+     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked. Network ports not documented: Current compliance page has only the placeholder some_port_range. Numeric supernode ports are not established in the primary text read during this pass; sync-node ports must not be substituted.",
      "verificationNotes": "Rechecked primary page values, original units, node role and requirement label. Inventory Deprecated SKALE Calypso Hub Testnet is a SKALE chain lead. These primary pages describe the shared SKALE operator family, not this exact chain ID or its chain size/deployment generation. Supernodes host virtualized chain assignments; resources are not per-appchain quotas. Additional review 2026-10-10: Exact ID linkage in external identity evidence was not independently re-established; retain as qualified. See additional_verification.corrections for the superseding values and preserved prior history.",
      "evidence": [
       "https://docs.skale.space/validators/hardware",
@@ -192390,7 +192934,11 @@
        "component": "Ethereum Geth execution client and consensus client",
        "requiredWhen": "Ethereum-mainnet supernode under cited compliance procedure only; exact testnet/deprecated deployment applicability not established",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Prysm is recommended, not the only stated consensus option. Hardware must be sized separately; existing SKALE host quantities do not size these clients.",
+       "sources": [
+        "https://docs.skale.space/validators/compliance-requirements"
+       ]
       }
      ],
      "requirements": [
@@ -194229,7 +194777,7 @@
      "client": "SKALE Node",
      "deployment": "unknown",
      "verification": "qualified",
-     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked.",
+     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked. Network ports not documented: Current compliance page has only the placeholder some_port_range. Numeric supernode ports are not established in the primary text read during this pass; sync-node ports must not be substituted.",
      "verificationNotes": "Rechecked primary page values, original units, node role and requirement label. Inventory Deprecated SKALE Europa Hub Testnet is a SKALE chain lead. These primary pages describe the shared SKALE operator family, not this exact chain ID or its chain size/deployment generation. Supernodes host virtualized chain assignments; resources are not per-appchain quotas. Additional review 2026-10-10: Exact ID linkage in external identity evidence was not independently re-established; retain as qualified. See additional_verification.corrections for the superseding values and preserved prior history.",
      "evidence": [
       "https://docs.skale.space/validators/hardware",
@@ -194240,7 +194788,11 @@
        "component": "Ethereum Geth execution client and consensus client",
        "requiredWhen": "Ethereum-mainnet supernode under cited compliance procedure only; exact testnet/deprecated deployment applicability not established",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Prysm is recommended, not the only stated consensus option. Hardware must be sized separately; existing SKALE host quantities do not size these clients.",
+       "sources": [
+        "https://docs.skale.space/validators/compliance-requirements"
+       ]
       }
      ],
      "requirements": [
@@ -194710,7 +195262,7 @@
      "client": "SKALE Node",
      "deployment": "unknown",
      "verification": "qualified",
-     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked.",
+     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked. Network ports not documented: Current compliance page has only the placeholder some_port_range. Numeric supernode ports are not established in the primary text read during this pass; sync-node ports must not be substituted.",
      "verificationNotes": "Rechecked primary page values, original units, node role and requirement label. Inventory Deprecated SKALE Nebula Hub Testnet is a SKALE chain lead. These primary pages describe the shared SKALE operator family, not this exact chain ID or its chain size/deployment generation. Supernodes host virtualized chain assignments; resources are not per-appchain quotas. Additional review 2026-10-10: Exact ID linkage in external identity evidence was not independently re-established; retain as qualified. See additional_verification.corrections for the superseding values and preserved prior history.",
      "evidence": [
       "https://docs.skale.space/validators/hardware",
@@ -194721,7 +195273,11 @@
        "component": "Ethereum Geth execution client and consensus client",
        "requiredWhen": "Ethereum-mainnet supernode under cited compliance procedure only; exact testnet/deprecated deployment applicability not established",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Prysm is recommended, not the only stated consensus option. Hardware must be sized separately; existing SKALE host quantities do not size these clients.",
+       "sources": [
+        "https://docs.skale.space/validators/compliance-requirements"
+       ]
       }
      ],
      "requirements": [
@@ -195657,7 +196213,7 @@
      "client": "SKALE Node",
      "deployment": "unknown",
      "verification": "qualified",
-     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked.",
+     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked. Network ports not documented: Current compliance page has only the placeholder some_port_range. Numeric supernode ports are not established in the primary text read during this pass; sync-node ports must not be substituted.",
      "verificationNotes": "Rechecked primary page values, original units, node role and requirement label. Inventory SKALE Calypso Hub Testnet is a SKALE chain lead. These primary pages describe the shared SKALE operator family, not this exact chain ID or its chain size/deployment generation. Supernodes host virtualized chain assignments; resources are not per-appchain quotas. Additional review 2026-10-10: Exact ID linkage in external identity evidence was not independently re-established; retain as qualified. See additional_verification.corrections for the superseding values and preserved prior history.",
      "evidence": [
       "https://docs.skale.space/validators/hardware",
@@ -195668,7 +196224,11 @@
        "component": "Ethereum Geth execution client and consensus client",
        "requiredWhen": "Ethereum-mainnet supernode under cited compliance procedure only; exact testnet/deprecated deployment applicability not established",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Prysm is recommended, not the only stated consensus option. Hardware must be sized separately; existing SKALE host quantities do not size these clients.",
+       "sources": [
+        "https://docs.skale.space/validators/compliance-requirements"
+       ]
       }
      ],
      "requirements": [
@@ -196180,7 +196740,7 @@
      "client": "SKALE Node",
      "deployment": "unknown",
      "verification": "qualified",
-     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked.",
+     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked. Network ports not documented: Current compliance page has only the placeholder some_port_range. Numeric supernode ports are not established in the primary text read during this pass; sync-node ports must not be substituted.",
      "verificationNotes": "Rechecked primary page values, original units, node role and requirement label. Inventory SKALE Titan Hub Testnet is a SKALE chain lead. These primary pages describe the shared SKALE operator family, not this exact chain ID or its chain size/deployment generation. Supernodes host virtualized chain assignments; resources are not per-appchain quotas. Additional review 2026-10-10: Exact ID linkage in external identity evidence was not independently re-established; retain as qualified. See additional_verification.corrections for the superseding values and preserved prior history.",
      "evidence": [
       "https://docs.skale.space/validators/hardware",
@@ -196191,7 +196751,11 @@
        "component": "Ethereum Geth execution client and consensus client",
        "requiredWhen": "Ethereum-mainnet supernode under cited compliance procedure only; exact testnet/deprecated deployment applicability not established",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Prysm is recommended, not the only stated consensus option. Hardware must be sized separately; existing SKALE host quantities do not size these clients.",
+       "sources": [
+        "https://docs.skale.space/validators/compliance-requirements"
+       ]
       }
      ],
      "requirements": [
@@ -196668,7 +197232,7 @@
      "client": "SKALE Node",
      "deployment": "unknown",
      "verification": "qualified",
-     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked.",
+     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked. Network ports not documented: Current compliance page has only the placeholder some_port_range. Numeric supernode ports are not established in the primary text read during this pass; sync-node ports must not be substituted.",
      "verificationNotes": "Rechecked primary page values, original units, node role and requirement label. Inventory SKALE Base is a SKALE chain lead. These primary pages describe the shared SKALE operator family, not this exact chain ID or its chain size/deployment generation. Supernodes host virtualized chain assignments; resources are not per-appchain quotas. Additional review 2026-10-10: Exact ID linkage in external identity evidence was not independently re-established; retain as qualified. See additional_verification.corrections for the superseding values and preserved prior history.",
      "evidence": [
       "https://docs.skale.space/validators/hardware",
@@ -196679,7 +197243,11 @@
        "component": "Base Mainnet RPC endpoint",
        "requiredWhen": "Base-mainnet supernode deployment only",
        "selfHosted": false,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "External endpoint dependency; do not add a mandatory local Base node.",
+       "sources": [
+        "https://docs.skale.space/validators/run-supernode-on-base"
+       ]
       }
      ],
      "requirements": [
@@ -197154,7 +197722,7 @@
      "client": "SKALE Node",
      "deployment": "unknown",
      "verification": "qualified",
-     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked.",
+     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked. Network ports not documented: Current compliance page has only the placeholder some_port_range. Numeric supernode ports are not established in the primary text read during this pass; sync-node ports must not be substituted.",
      "verificationNotes": "Rechecked primary page values, original units, node role and requirement label. Inventory HUMAN Protocol is a SKALE chain lead. These primary pages describe the shared SKALE operator family, not this exact chain ID or its chain size/deployment generation. Supernodes host virtualized chain assignments; resources are not per-appchain quotas. Additional review 2026-10-10: Exact ID linkage in external identity evidence was not independently re-established; retain as qualified. See additional_verification.corrections for the superseding values and preserved prior history.",
      "evidence": [
       "https://docs.skale.space/validators/hardware",
@@ -197165,7 +197733,11 @@
        "component": "Ethereum Geth execution client and consensus client",
        "requiredWhen": "Ethereum-mainnet supernode under cited compliance procedure only; exact testnet/deprecated deployment applicability not established",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Prysm is recommended, not the only stated consensus option. Hardware must be sized separately; existing SKALE host quantities do not size these clients.",
+       "sources": [
+        "https://docs.skale.space/validators/compliance-requirements"
+       ]
       }
      ],
      "requirements": [
@@ -198225,7 +198797,7 @@
      "client": "SKALE Node",
      "deployment": "unknown",
      "verification": "qualified",
-     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked.",
+     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked. Network ports not documented: Current compliance page has only the placeholder some_port_range. Numeric supernode ports are not established in the primary text read during this pass; sync-node ports must not be substituted.",
      "verificationNotes": "Rechecked primary page values, original units, node role and requirement label. Inventory SKALE Titan Hub is a SKALE chain lead. These primary pages describe the shared SKALE operator family, not this exact chain ID or its chain size/deployment generation. Supernodes host virtualized chain assignments; resources are not per-appchain quotas. Additional review 2026-10-10: Exact ID linkage in external identity evidence was not independently re-established; retain as qualified. See additional_verification.corrections for the superseding values and preserved prior history.",
      "evidence": [
       "https://docs.skale.space/validators/hardware",
@@ -198236,7 +198808,11 @@
        "component": "Ethereum Geth execution client and consensus client",
        "requiredWhen": "Ethereum-mainnet supernode under cited compliance procedure only; exact testnet/deprecated deployment applicability not established",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Prysm is recommended, not the only stated consensus option. Hardware must be sized separately; existing SKALE host quantities do not size these clients.",
+       "sources": [
+        "https://docs.skale.space/validators/compliance-requirements"
+       ]
       }
      ],
      "requirements": [
@@ -198669,7 +199245,7 @@
      "client": "SKALE Node",
      "deployment": "unknown",
      "verification": "qualified",
-     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked.",
+     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked. Network ports not documented: Current compliance page has only the placeholder some_port_range. Numeric supernode ports are not established in the primary text read during this pass; sync-node ports must not be substituted.",
      "verificationNotes": "Rechecked primary page values, original units, node role and requirement label. Inventory Chaos (SKALE Testnet) is a SKALE chain lead. These primary pages describe the shared SKALE operator family, not this exact chain ID or its chain size/deployment generation. Supernodes host virtualized chain assignments; resources are not per-appchain quotas. Additional review 2026-10-10: Exact ID linkage in external identity evidence was not independently re-established; retain as qualified. See additional_verification.corrections for the superseding values and preserved prior history.",
      "evidence": [
       "https://docs.skale.space/validators/hardware",
@@ -198680,7 +199256,11 @@
        "component": "Ethereum Geth execution client and consensus client",
        "requiredWhen": "Ethereum-mainnet supernode under cited compliance procedure only; exact testnet/deprecated deployment applicability not established",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Prysm is recommended, not the only stated consensus option. Hardware must be sized separately; existing SKALE host quantities do not size these clients.",
+       "sources": [
+        "https://docs.skale.space/validators/compliance-requirements"
+       ]
       }
      ],
      "requirements": [
@@ -199247,7 +199827,7 @@
      "client": "SKALE Node",
      "deployment": "unknown",
      "verification": "qualified",
-     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked.",
+     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked. Network ports not documented: Current compliance page has only the placeholder some_port_range. Numeric supernode ports are not established in the primary text read during this pass; sync-node ports must not be substituted.",
      "verificationNotes": "Rechecked primary page values, original units, node role and requirement label. Inventory SKALE Europa Hub Testnet is a SKALE chain lead. These primary pages describe the shared SKALE operator family, not this exact chain ID or its chain size/deployment generation. Supernodes host virtualized chain assignments; resources are not per-appchain quotas. Additional review 2026-10-10: Exact ID linkage in external identity evidence was not independently re-established; retain as qualified. See additional_verification.corrections for the superseding values and preserved prior history.",
      "evidence": [
       "https://docs.skale.space/validators/hardware",
@@ -199258,7 +199838,11 @@
        "component": "Ethereum Geth execution client and consensus client",
        "requiredWhen": "Ethereum-mainnet supernode under cited compliance procedure only; exact testnet/deprecated deployment applicability not established",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Prysm is recommended, not the only stated consensus option. Hardware must be sized separately; existing SKALE host quantities do not size these clients.",
+       "sources": [
+        "https://docs.skale.space/validators/compliance-requirements"
+       ]
       }
      ],
      "requirements": [
@@ -199691,7 +200275,7 @@
      "client": "SKALE Node",
      "deployment": "unknown",
      "verification": "qualified",
-     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked.",
+     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked. Network ports not documented: Current compliance page has only the placeholder some_port_range. Numeric supernode ports are not established in the primary text read during this pass; sync-node ports must not be substituted.",
      "verificationNotes": "Rechecked primary page values, original units, node role and requirement label. Inventory SKALE Nebula Hub is a SKALE chain lead. These primary pages describe the shared SKALE operator family, not this exact chain ID or its chain size/deployment generation. Supernodes host virtualized chain assignments; resources are not per-appchain quotas. Additional review 2026-10-10: Exact ID linkage in external identity evidence was not independently re-established; retain as qualified. See additional_verification.corrections for the superseding values and preserved prior history.",
      "evidence": [
       "https://docs.skale.space/validators/hardware",
@@ -199702,7 +200286,11 @@
        "component": "Ethereum Geth execution client and consensus client",
        "requiredWhen": "Ethereum-mainnet supernode under cited compliance procedure only; exact testnet/deprecated deployment applicability not established",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Prysm is recommended, not the only stated consensus option. Hardware must be sized separately; existing SKALE host quantities do not size these clients.",
+       "sources": [
+        "https://docs.skale.space/validators/compliance-requirements"
+       ]
       }
      ],
      "requirements": [
@@ -200156,7 +200744,7 @@
      "client": "SKALE Node",
      "deployment": "unknown",
      "verification": "qualified",
-     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked.",
+     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked. Network ports not documented: Current compliance page has only the placeholder some_port_range. Numeric supernode ports are not established in the primary text read during this pass; sync-node ports must not be substituted.",
      "verificationNotes": "Rechecked primary page values, original units, node role and requirement label. Inventory Deprecated SKALE Titan Hub Testnet is a SKALE chain lead. These primary pages describe the shared SKALE operator family, not this exact chain ID or its chain size/deployment generation. Supernodes host virtualized chain assignments; resources are not per-appchain quotas. Additional review 2026-10-10: Exact ID linkage in external identity evidence was not independently re-established; retain as qualified. See additional_verification.corrections for the superseding values and preserved prior history.",
      "evidence": [
       "https://docs.skale.space/validators/hardware",
@@ -200167,7 +200755,11 @@
        "component": "Ethereum Geth execution client and consensus client",
        "requiredWhen": "Ethereum-mainnet supernode under cited compliance procedure only; exact testnet/deprecated deployment applicability not established",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Prysm is recommended, not the only stated consensus option. Hardware must be sized separately; existing SKALE host quantities do not size these clients.",
+       "sources": [
+        "https://docs.skale.space/validators/compliance-requirements"
+       ]
       }
      ],
      "requirements": [
@@ -200621,7 +201213,7 @@
      "client": "SKALE Node",
      "deployment": "unknown",
      "verification": "qualified",
-     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked.",
+     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked. Network ports not documented: Current compliance page has only the placeholder some_port_range. Numeric supernode ports are not established in the primary text read during this pass; sync-node ports must not be substituted.",
      "verificationNotes": "Rechecked primary page values, original units, node role and requirement label. Inventory SKALE Calypso Hub is a SKALE chain lead. These primary pages describe the shared SKALE operator family, not this exact chain ID or its chain size/deployment generation. Supernodes host virtualized chain assignments; resources are not per-appchain quotas. Additional review 2026-10-10: Exact ID linkage in external identity evidence was not independently re-established; retain as qualified. See additional_verification.corrections for the superseding values and preserved prior history.",
      "evidence": [
       "https://docs.skale.space/validators/hardware",
@@ -200632,7 +201224,11 @@
        "component": "Ethereum Geth execution client and consensus client",
        "requiredWhen": "Ethereum-mainnet supernode under cited compliance procedure only; exact testnet/deprecated deployment applicability not established",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Prysm is recommended, not the only stated consensus option. Hardware must be sized separately; existing SKALE host quantities do not size these clients.",
+       "sources": [
+        "https://docs.skale.space/validators/compliance-requirements"
+       ]
       }
      ],
      "requirements": [
@@ -203191,7 +203787,7 @@
    "notes": "Two targeted hardware/operator searches and the listed primary site were checked; no readable identity-matched node hardware specification was established. Missing findings do not prove that no requirements exist.",
    "sources": [
     {
-     "url": "https://www.datahopper.com/",
+     "url": "https://www.DataHopper.com",
      "title": "DataHopper listed site",
      "access": "inaccessible",
      "notes": "Two targeted hardware/operator searches and the listed primary site were checked; no readable identity-matched node hardware specification was established. Missing findings do not prove that no requirements exist."
@@ -203281,7 +203877,7 @@
      "client": "SKALE Node",
      "deployment": "unknown",
      "verification": "qualified",
-     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked.",
+     "notes": "Full shared supernode requirement. SGX wallet server and settlement-layer connection are separate dependencies; no aggregate resources inferred. Compliance additionally requires public IP to match registered supernode IP and non-expired SSL certificates; certificate validity is checked. Network ports not documented: Current compliance page has only the placeholder some_port_range. Numeric supernode ports are not established in the primary text read during this pass; sync-node ports must not be substituted.",
      "verificationNotes": "Rechecked primary page values, original units, node role and requirement label. Inventory SKALE Europa Hub is a SKALE chain lead. These primary pages describe the shared SKALE operator family, not this exact chain ID or its chain size/deployment generation. Supernodes host virtualized chain assignments; resources are not per-appchain quotas. Additional review 2026-10-10: Exact ID linkage in external identity evidence was not independently re-established; retain as qualified. See additional_verification.corrections for the superseding values and preserved prior history.",
      "evidence": [
       "https://docs.skale.space/validators/hardware",
@@ -203292,7 +203888,11 @@
        "component": "Ethereum Geth execution client and consensus client",
        "requiredWhen": "Ethereum-mainnet supernode under cited compliance procedure only; exact testnet/deprecated deployment applicability not established",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Prysm is recommended, not the only stated consensus option. Hardware must be sized separately; existing SKALE host quantities do not size these clients.",
+       "sources": [
+        "https://docs.skale.space/validators/compliance-requirements"
+       ]
       }
      ],
      "requirements": [
@@ -205096,7 +205696,7 @@
        "component": "memory",
        "metric": "capacity",
        "value": 4,
-       "unit": "GiB per2vCPU",
+       "unit": "GiB per 2 vCPU",
        "qualifier": "at_least",
        "notes": "DDR4+",
        "source": "https://fluence.dev/docs/connect_servers/overview"
@@ -205105,7 +205705,7 @@
        "component": "storage",
        "metric": "capacity",
        "value": 25,
-       "unit": "GiB per2vCPU",
+       "unit": "GiB per 2 vCPU",
        "qualifier": "at_least",
        "notes": "Customer workloads, RAID disabled.",
        "source": "https://fluence.dev/docs/connect_servers/overview"
@@ -205730,7 +206330,11 @@
        "component": "STRATO indexer/slipstream, PostgreSQL, Redis and embedded JLog",
        "requiredWhen": "Running the documented strato-up stack.",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Persistence and indexing are resident stack dependencies. Existing hardware is whole-node; standalone allocations remain unknown. Local Vault and Ory auth are conditional on --localAuth.",
+       "sources": [
+        "https://docs.strato.nexus/node/"
+       ]
       }
      ],
      "requirements": [
@@ -205788,7 +206392,11 @@
        "component": "STRATO indexer/slipstream, PostgreSQL, Redis and embedded JLog",
        "requiredWhen": "Running the documented strato-up stack.",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Persistence and indexing are resident stack dependencies. Existing hardware is whole-node; standalone allocations remain unknown. Local Vault and Ory auth are conditional on --localAuth.",
+       "sources": [
+        "https://docs.strato.nexus/node/"
+       ]
       }
      ],
      "requirements": [
@@ -205846,7 +206454,11 @@
        "component": "STRATO indexer/slipstream, PostgreSQL, Redis and embedded JLog",
        "requiredWhen": "Running the documented strato-up stack.",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Persistence and indexing are resident stack dependencies. Existing hardware is whole-node; standalone allocations remain unknown. Local Vault and Ory auth are conditional on --localAuth.",
+       "sources": [
+        "https://docs.strato.nexus/node/"
+       ]
       }
      ],
      "requirements": [
@@ -205914,7 +206526,11 @@
        "component": "STRATO indexer/slipstream, PostgreSQL, Redis and embedded JLog",
        "requiredWhen": "Running the documented strato-up stack.",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Persistence and indexing are resident stack dependencies. Existing hardware is whole-node; standalone allocations remain unknown. Local Vault and Ory auth are conditional on --localAuth.",
+       "sources": [
+        "https://docs.strato.nexus/node/"
+       ]
       }
      ],
      "requirements": [
@@ -205972,7 +206588,11 @@
        "component": "STRATO indexer/slipstream, PostgreSQL, Redis and embedded JLog",
        "requiredWhen": "Running the documented strato-up stack.",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Persistence and indexing are resident stack dependencies. Existing hardware is whole-node; standalone allocations remain unknown. Local Vault and Ory auth are conditional on --localAuth.",
+       "sources": [
+        "https://docs.strato.nexus/node/"
+       ]
       }
      ],
      "requirements": [
@@ -206030,7 +206650,11 @@
        "component": "STRATO indexer/slipstream, PostgreSQL, Redis and embedded JLog",
        "requiredWhen": "Running the documented strato-up stack.",
        "selfHosted": true,
-       "sizing": "not_established"
+       "sizing": "not_established",
+       "notes": "Persistence and indexing are resident stack dependencies. Existing hardware is whole-node; standalone allocations remain unknown. Local Vault and Ory auth are conditional on --localAuth.",
+       "sources": [
+        "https://docs.strato.nexus/node/"
+       ]
       }
      ],
      "requirements": [
