@@ -22,6 +22,15 @@ describe('GET /repositories', () => {
     expect(eth.hardware).toHaveProperty('profiles');
   });
 
+  it('serves the curated registry corrections for the feed to apply', async () => {
+    const body = (await app.inject({ method: 'GET', url: '/repositories' })).json();
+    expect(body.overridesReviewedAt).toMatch(/^\d{4}-\d{2}-\d{2}/);
+    expect(Object.keys(body.overrides.repositories).length).toBeGreaterThan(900);
+    // Base runs base/base, not op-geth (the review moved 8453/84532 off the upstream client).
+    expect(body.overrides.repositories['github:ethereum-optimism/op-geth'].drop).toEqual(expect.arrayContaining([8453, 84532]));
+    expect(Array.isArray(body.overrides.pending)).toBe(true);
+  });
+
   it('rejects a filter it does not support instead of returning everything', async () => {
     const res = await app.inject({ method: 'GET', url: '/repositories?chainId=1' });
     expect(res.statusCode).toBe(400);

@@ -8,6 +8,7 @@ const DATASET_PATH = join(__dir, '..', '..', 'data', 'network-research.json');
 const FORUMS_PATH = join(__dir, '..', '..', 'data', 'forum-research.json');
 const HARDWARE_PATH = join(__dir, '..', '..', 'data', 'node-hardware.json');
 const CHANNELS_PATH = join(__dir, '..', '..', 'data', 'channel-research.json');
+const REGISTRY_OVERRIDES_PATH = join(__dir, '..', '..', 'data', 'client-registry-overrides.json');
 
 function indexByChainId(parsed) {
   const byChainId = new Map();
@@ -60,17 +61,30 @@ export function loadChannelResearch(path = CHANNELS_PATH) {
   return indexByChainId(readStaticJson(path, 'Channel research dataset'));
 }
 
+// Curated corrections to the client registry chains-client-feed builds from /repositories
+// (data/client-registry-overrides.json, from the one-by-one registry review): per repository
+// id, exclude / keep / drop / add network links, a missing url, a role, and whether to poll.
+// chains-api only serves them; the feed applies them after every build, so the curation
+// lives with the research it corrects instead of in a file the feed maintains. Null when
+// the file is missing or has no `repositories` map — the feed then builds uncorrected.
+export function loadClientRegistryOverrides(path = REGISTRY_OVERRIDES_PATH) {
+  const parsed = readStaticJson(path, 'Client registry overrides');
+  return parsed?.repositories && typeof parsed.repositories === 'object' && !Array.isArray(parsed.repositories) ? parsed : null;
+}
+
 let dataset = loadNetworkResearch();
 let forums = loadForumResearch();
 let hardware = loadNodeHardware();
 let channels = loadChannelResearch();
+let registryOverrides = loadClientRegistryOverrides();
 
 /** Test-only: swap the datasets (pass paths, or nothing to reload the checked-in files). */
-export function _setNetworkResearchForTests(path, forumsPath, hardwarePath, channelsPath) {
+export function _setNetworkResearchForTests(path, forumsPath, hardwarePath, channelsPath, overridesPath) {
   dataset = loadNetworkResearch(path);
   forums = loadForumResearch(forumsPath);
   hardware = loadNodeHardware(hardwarePath);
   channels = loadChannelResearch(channelsPath);
+  registryOverrides = loadClientRegistryOverrides(overridesPath);
 }
 
 /**
@@ -176,7 +190,8 @@ export function getNodeHardware(chainId) {
  * the client name, version and evidence of each profile (requirements left out — the feed
  * only links clients to repositories). Only chains with either are listed. The research file
  * carries no names, so `nameFor` fills them from the chain registry. The feed owns the
- * normalisation and linking, so this stays a projection of the checked-in files.
+ * normalisation and linking, so this stays a projection of the checked-in files. `overrides`
+ * is the curated correction set, verbatim (see loadClientRegistryOverrides), or null.
  */
 export function getRepositoryInputs(nameFor = () => null) {
   const chainIds = new Set([...dataset.byChainId.keys(), ...hardware.byChainId.keys()]);
@@ -209,7 +224,14 @@ export function getRepositoryInputs(nameFor = () => null) {
       hardware: { status: hw?.status ?? null, identityStatus: hw?.identityStatus ?? null, sources, profiles }
     });
   }
-  return { updatedAt: dataset.updatedAt, hardwareUpdatedAt: hardware.updatedAt, count: networks.length, networks };
+  return {
+    updatedAt: dataset.updatedAt,
+    hardwareUpdatedAt: hardware.updatedAt,
+    overridesReviewedAt: registryOverrides?.reviewedAt ?? null,
+    count: networks.length,
+    networks,
+    overrides: registryOverrides
+  };
 }
 
 // A correction with `replaces: null` fills a missing website only; otherwise both sides
