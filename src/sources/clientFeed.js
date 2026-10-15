@@ -238,6 +238,16 @@ export function normalizeClient(entry, { includeNetworks = true } = {}) {
 // ─── reads ──────────────────────────────────────────────────────────────────
 
 /**
+ * The feed's own totals for a capped list. A legacy body without them (a bare array) is
+ * reported as unknown (null), never as complete: `count` alone cannot tell a page from the whole.
+ */
+function completeness(body, count) {
+  const totalMatched = Number.isSafeInteger(body?.totalMatched) ? body.totalMatched : null;
+  const truncated = typeof body?.truncated === 'boolean' ? body.truncated : (totalMatched != null ? totalMatched > count : null);
+  return { totalMatched, truncated };
+}
+
+/**
  * Client releases, newest first, filters passed through to the feed.
  * @param {{limit?: number, fork?: boolean, chainId?: number, repo?: string, since?: string}} [options]
  */
@@ -252,14 +262,14 @@ export async function getClientReleases({ limit, fork, chainId, repo, since } = 
     since
   });
   const items = listOf(body, 'items', 'releases').map(normalizeRelease);
-  return { fetchedAt: new Date(fetchedAt).toISOString(), stale, count: items.length, items };
+  return { fetchedAt: new Date(fetchedAt).toISOString(), stale, ...completeness(body, items.length), count: items.length, items };
 }
 
 /** Registry entries matching a text/kind/chain filter. */
 export async function getFeedClients({ q, kind, chainId, limit } = {}) {
   const { body, fetchedAt, stale } = await cachedGet('/clients', { q, kind, chainId, limit });
   const clients = listOf(body, 'clients', 'items', 'repositories').map((e) => normalizeClient(e, { includeNetworks: false }));
-  return { fetchedAt: new Date(fetchedAt).toISOString(), stale, count: clients.length, clients };
+  return { fetchedAt: new Date(fetchedAt).toISOString(), stale, ...completeness(body, clients.length), count: clients.length, clients };
 }
 
 /**
@@ -307,7 +317,8 @@ export async function getNetworkClients(chainId) {
     const entry = it?.entry ?? it;
     const net = it?.network ?? (Array.isArray(entry?.networks) ? entry.networks.find((n) => n?.chainId === chainId) : null);
     const base = normalizeClient(entry, { includeNetworks: false });
-    return { ...base, kinds: strList(net?.kinds).length ? strList(net.kinds) : base.kinds, source: str(net?.source) };
+    // A flattened row carries its per-chain source on the entry itself.
+    return { ...base, kinds: strList(net?.kinds).length ? strList(net.kinds) : base.kinds, source: str(net?.source ?? (it?.entry ? null : it?.source)) };
   });
   return { fetchedAt: new Date(res.fetchedAt).toISOString(), stale: res.stale, chainId, name: str(res.body?.name), count: clients.length, clients };
 }

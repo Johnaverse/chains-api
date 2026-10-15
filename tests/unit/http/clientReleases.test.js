@@ -133,6 +133,20 @@ describe('GET /client-releases/clients', () => {
     expect(res.json().error).toMatch(/kind/);
   });
 
+  it('rejects query parameters on the lookup routes', async () => {
+    expect((await get('/client-releases/clients/github/ethereum/go-ethereum?chainId=1')).statusCode).toBe(400);
+    expect((await get('/client-releases/networks/1?kind=consensus')).statusCode).toBe(400);
+    expect(proxyFetch).not.toHaveBeenCalled();
+  });
+
+  it('passes the feed totals through, and leaves them unknown for a legacy bare list', async () => {
+    proxyFetch.mockResolvedValue(json({ totalMatched: 42, count: 1, truncated: true, clients: [geth] }));
+    expect((await get('/client-releases/clients?q=geth')).json()).toMatchObject({ totalMatched: 42, truncated: true, count: 1 });
+    _resetClientFeedCacheForTests();
+    proxyFetch.mockResolvedValue(json([geth]));
+    expect((await get('/client-releases/clients?q=geth')).json()).toMatchObject({ totalMatched: null, truncated: null, count: 1 });
+  });
+
   it('rejects a malformed kind', async () => {
     expect((await get('/client-releases/clients?kind=EXEC%20UTION')).statusCode).toBe(400);
   });
@@ -189,6 +203,8 @@ describe('GET /client-releases/networks/:chainId', () => {
       kinds: ['execution'], source: 'research', latestVersion: '1.16.7', latestTag: 'v1.16.7', pollStatus: 'ok'
     }] }));
     const body = (await get('/client-releases/networks/1')).json();
+    // Flattened row: its source is on the entry, not a nested network.
+    expect(body.clients[0].source).toBe('research');
     expect(body).toMatchObject({ name: 'Ethereum Mainnet', clients: [{ latestRelease: { version: '1.16.7', tag: 'v1.16.7' }, networkCount: null, latestFork: null, pollStatus: 'ok' }] });
   });
 

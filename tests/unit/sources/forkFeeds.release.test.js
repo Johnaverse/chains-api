@@ -4,12 +4,13 @@ import { proxyFetch } from '../../../fetchUtil.js';
 
 vi.mock('../../../fetchUtil.js', () => ({ proxyFetch: vi.fn() }));
 
+const cfg = vi.hoisted(() => ({ clientFeedUrl: 'https://clients.test' }));
 vi.mock('../../../config.js', async (importOriginal) => ({
   ...(await importOriginal()),
+  get CLIENT_FEED_URL() { return cfg.clientFeedUrl; },
   LIVE_INCIDENTS_URL: 'https://status.test',
   FORUM_NEWS_URL: 'https://forum.test',
   WEB3_NEWS_URL: 'https://news.test',
-  CLIENT_FEED_URL: 'https://clients.test',
   LIVE_INCIDENTS_CACHE_TTL_MS: 60000
 }));
 
@@ -29,12 +30,20 @@ describe('client release feed', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     _resetForkFeedsForTests();
+    cfg.clientFeedUrl = 'https://clients.test';
+  });
+
+  it('joins a base URL with a trailing slash without doubling it', async () => {
+    cfg.clientFeedUrl = 'https://clients.test/';
+    proxyFetch.mockImplementation(async (url) => ok(new URL(url).host === 'status.test' ? 'events' : new URL(url).host === 'clients.test' ? 'items' : 'news', []));
+    await getForkMentions();
+    expect(proxyFetch.mock.calls.map(([u]) => u)).toContain('https://clients.test/releases?limit=500&fork=true');
   });
 
   it('reads /releases?fork=true as a fourth feed when CLIENT_FEED_URL is set', async () => {
     proxyFetch.mockImplementation(async (url) => {
-      if (url.startsWith('https://clients.test/releases')) return ok('items', [release()]);
-      return ok(url.startsWith('https://status.test') ? 'events' : 'news', []);
+      if (new URL(url).host === 'clients.test') return ok('items', [release()]);
+      return ok(new URL(url).host === 'status.test' ? 'events' : 'news', []);
     });
     const out = await getForkMentions();
     expect(proxyFetch.mock.calls.map(([u]) => u)).toContain('https://clients.test/releases?limit=500&fork=true');

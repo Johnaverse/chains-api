@@ -21,4 +21,9 @@ describe('GET /repositories', () => {
     expect(eth.repositories.some(r => r.repo === 'ethereum/go-ethereum')).toBe(true);
     expect(eth.hardware).toHaveProperty('profiles');
   });
+
+  it('rejects a filter it does not support instead of returning everything', async () => {
+    const res = await app.inject({ method: 'GET', url: '/repositories?chainId=1' });
+    expect(res.statusCode).toBe(400);
+  });
 });

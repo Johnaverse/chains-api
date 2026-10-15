@@ -9,7 +9,12 @@ import { getChainById } from '../../store/queries.js';
 let cached = null;
 
 export async function repositoriesRoutes(fastify) {
-  fastify.get('/repositories', async () => {
+  fastify.get('/repositories', {
+    schema: {
+      description: 'Raw node/client repository research per chain, for chains-client-feed\'s registry. Takes no query parameters.',
+      querystring: { type: 'object', additionalProperties: false, properties: {} }
+    }
+  }, async () => {
     if (cached) return cached;
     const inputs = getRepositoryInputs(chainId => getChainById(chainId)?.name ?? null);
     // Before the registry loads only the hardware names exist; don't pin that.

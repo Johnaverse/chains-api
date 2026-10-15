@@ -5456,7 +5456,7 @@ const releases = {
     items: { all: null, fork: null },
     loading: { all: false, fork: false },
     error: { all: false, fork: false },
-    stale: false,
+    stale: { all: false, fork: false },
     scope: 'all', chain: '', client: '',
     shown: null
 };
@@ -5514,14 +5514,16 @@ function ensureReleasesView() {
     renderReleaseList();
 }
 
+// Re-entering the view or a scope revalidates (the proxy caches upstream); only a request
+// already in flight is not repeated. Cached items keep rendering meanwhile.
 async function loadReleases(scope) {
-    if (releases.items[scope] || releases.loading[scope]) return;
+    if (releases.loading[scope]) return;
     releases.loading[scope] = true;
     releases.error[scope] = false;
     try {
         const d = await api(`/client-releases?limit=${RELEASE_FETCH_LIMIT}${scope === 'fork' ? '&fork=true' : ''}`);
         releases.items[scope] = (Array.isArray(d.items) ? d.items : []).map(releaseModel);
-        releases.stale = d.stale === true;
+        releases.stale[scope] = d.stale === true;
         setClientFeedConfigured(true);
     } catch (err) {
         if (isFeedAbsent(err)) setClientFeedConfigured(false);
@@ -5741,7 +5743,8 @@ function renderReleaseList() {
         empty('Client releases are not available on this deployment.', 'The client release feed (chains-client-feed) is not configured for this API.');
         return;
     }
-    if (releases.error[scope]) {
+    // A failed revalidation keeps the list already shown.
+    if (releases.error[scope] && !releases.items[scope]) {
         empty('Client release feed unavailable (chains-client-feed).', 'The API could not reach the feed just now. Every other view is unaffected.');
         return;
     }
@@ -5774,7 +5777,7 @@ function renderReleaseList() {
     }
     if (note) {
         const parts = [`The newest ${fmtNum(RELEASE_FETCH_LIMIT)} ${scope === 'fork' ? 'fork-announcing ' : ''}releases the feed holds.`];
-        if (releases.stale) parts.push('The feed did not answer on the last refresh, so this is the last good copy.');
+        if (releases.stale[releases.scope]) parts.push('The feed did not answer on the last refresh, so this is the last good copy.');
         parts.push('Fork names, dates and summaries are extracted from release notes by a model and carry its AI label; "Repository networks" means the notes named no network.');
         note.textContent = parts.join(' ');
     }

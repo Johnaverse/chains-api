@@ -139,7 +139,8 @@ function snapshot() {
 }
 
 async function fetchFeed(feed) {
-  const url = `${feed.base()}${feed.path}?limit=${FETCH_LIMIT}`;
+  // `http://feed:3000/` + `/releases` must not become `//releases`.
+  const url = `${feed.base().replace(/\/+$/, '')}${feed.path}?limit=${FETCH_LIMIT}`;
   const get = (u) => getFeed(u, feed.timeout());
   let filtered = Date.now() >= (forkParamRejectedUntil[feed.kind] ?? 0);
   let response = filtered ? await get(`${url}&fork=true`) : null;

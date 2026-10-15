@@ -37,6 +37,9 @@ async function proxy(reply, fn) {
   }
 }
 
+// A route that takes no filter still rejects one: `?chainId=1` must be a 400, not an unfiltered 200.
+const NO_QUERY = { type: 'object', additionalProperties: false, properties: {} };
+
 export async function clientReleasesRoutes(fastify) {
   fastify.get('/client-releases', {
     schema: {
@@ -85,6 +88,7 @@ export async function clientReleasesRoutes(fastify) {
   fastify.get('/client-releases/clients/:host/:owner/:repo', {
     schema: {
       description: 'One client repository with every network it serves (reverse lookup), its latest release and latest fork.',
+      querystring: NO_QUERY,
       params: {
         type: 'object',
         required: ['host', 'owner', 'repo'],
@@ -103,6 +107,7 @@ export async function clientReleasesRoutes(fastify) {
   fastify.get('/client-releases/networks/:chainId', {
     schema: {
       description: 'Clients known to serve a chain, each with the kinds it plays there, its latest release and latest fork.',
+      querystring: NO_QUERY,
       params: {
         type: 'object',
         required: ['chainId'],

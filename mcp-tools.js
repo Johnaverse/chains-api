@@ -29,7 +29,7 @@ import {
 import { getLiveIncidents } from './src/sources/liveIncidents.js';
 import { getForumNews } from './src/sources/forumNews.js';
 import { getWeb3News } from './src/sources/web3News.js';
-import { getClientReleases, getNetworkClients } from './src/sources/clientFeed.js';
+import { getClientReleases, getFeedClients, getNetworkClients } from './src/sources/clientFeed.js';
 import { getChainUpgrades } from './src/services/upgrades.js';
 import { getForks } from './src/services/forks.js';
 import { getProviderStats } from './src/services/providerStats.js';
@@ -487,7 +487,7 @@ export function getToolDefinitions() {
     {
       name: 'get_client_releases',
       description:
-        'Get recent blockchain CLIENT software releases (geth, Nethermind, Lighthouse, op-node, …) read from their GitHub/GitLab releases and changelogs, newest first. Use for "latest version of X", "is this release mandatory", "which client release ships fork Y". `release.mandatory` = the notes say operators must upgrade; `enrichment.fork` = the hard fork the release announces (name, network, activationAt/activationBlock/activationEpoch, state). `chainsFrom: "repository"` means the chains are every network the repo serves, not ones the notes named. For fork dates across all sources prefer get_forks. Returns a capped list (default 15, max 50) with `totalMatched`.',
+        'Get recent blockchain CLIENT software releases (geth, Nethermind, Lighthouse, op-node, …) read from their GitHub/GitLab releases and changelogs, newest first. Use for "latest version of X", "is this release mandatory", "which client release ships fork Y". `release.mandatory` = the notes say operators must upgrade; `enrichment.fork` = the hard fork the release announces (name, network, activationAt/activationBlock/activationEpoch, state). `chainsFrom: "repository"` means the chains are every network the repo serves, not ones the notes named. For fork dates across all sources prefer get_forks. Returns a capped list (default 15, max 50) with `totalMatched` (null = completeness unknown; `note` says why — tell the user it may be partial).',
       inputSchema: {
         type: 'object',
         properties: {
@@ -497,7 +497,7 @@ export function getToolDefinitions() {
           },
           repo: {
             type: 'string',
-            description: 'Exact repository, "owner/repo" (e.g. "ethereum/go-ethereum")',
+            description: 'Exact repository: "owner/repo" for GitHub (e.g. "ethereum/go-ethereum"), or prefixed "github:owner/repo" / "gitlab:owner/repo"',
           },
           chainId: {
             type: 'number',
@@ -1224,27 +1224,72 @@ async function handleGetWeb3News(args) {
 
 const CLIENT_TOOL_DEFAULT_LIMIT = 15;
 const CLIENT_TOOL_MAX_LIMIT = 50;
+// A free-text client resolves to at most this many registry repositories, each queried exactly.
+const CLIENT_TOOL_MAX_REPOS = 5;
+const CLIENT_TOOL_WINDOW = 500;
+const REPO_ARG = /^((github|gitlab):)?(?!\.+\/)[A-Za-z0-9_.-]+\/(?!\.+$)[A-Za-z0-9_.-]+$/i;
+
+const byNewest = (a, b) => (Date.parse(b.publishedAt) || 0) - (Date.parse(a.publishedAt) || 0);
+const matchesClient = (needle) => (it) => [it.release.repo, it.source.name, it.source.id, it.title]
+  .some((v) => typeof v === 'string' && v.toLowerCase().includes(needle));
+
+/**
+ * Releases of the repositories the registry ties to a client name, each fetched by repo — a
+ * text match over one global page would miss a client whose latest release is older than the
+ * newest 500. Null when the registry knows no repository by that name.
+ */
+async function releasesForClient(needle, filters, limit) {
+  const registry = await getFeedClients({ q: needle, limit: CLIENT_TOOL_MAX_REPOS + 1 });
+  const ids = [...new Set(registry.clients.map((c) => c.id).filter(Boolean))];
+  if (!ids.length) return null;
+  const pages = await Promise.all(ids.slice(0, CLIENT_TOOL_MAX_REPOS).map((repo) => getClientReleases({ ...filters, repo, limit })));
+  const items = pages.flatMap((p) => p.items).sort(byNewest);
+  const totals = pages.map((p) => p.totalMatched);
+  const reposCut = ids.length > CLIENT_TOOL_MAX_REPOS || registry.truncated === true;
+  return {
+    fetchedAt: pages.map((p) => p.fetchedAt).sort()[0],
+    stale: pages.some((p) => p.stale),
+    items,
+    // Unknown when a page had no total, or when more repositories matched than were queried.
+    totalMatched: !reposCut && totals.every((t) => t != null) ? totals.reduce((a, b) => a + b, 0) : null,
+    repos: ids.slice(0, CLIENT_TOOL_MAX_REPOS),
+    ...(reposCut && { note: `More than ${CLIENT_TOOL_MAX_REPOS} repositories match "${needle}"; only the first ${CLIENT_TOOL_MAX_REPOS} were searched — pass repo for an exact one.` }),
+  };
+}
 
 async function handleGetClientReleases(args) {
   const { client, repo, chainId, fork, limit } = args ?? {};
-  if (repo != null && !/^(?!\.+\/)[A-Za-z0-9_.-]+\/(?!\.+$)[A-Za-z0-9_.-]+$/.test(String(repo))) {
-    return errorResponse('Invalid repo', 'repo must be "owner/repo"');
+  if (repo != null && !REPO_ARG.test(String(repo))) {
+    return errorResponse('Invalid repo', 'repo must be "owner/repo", "github:owner/repo" or "gitlab:owner/repo"');
   }
   if (chainId != null && !isValidChainId(chainId)) return errorResponse('Invalid chain ID');
+  const capped = Math.max(1, Math.min(Number(limit) || CLIENT_TOOL_DEFAULT_LIMIT, CLIENT_TOOL_MAX_LIMIT));
+  const needle = client ? String(client).toLowerCase().trim() : '';
+  const filters = { fork: typeof fork === 'boolean' ? fork : undefined, chainId: chainId ?? undefined };
   try {
-    // The feed filters repo/chain/fork; the free-text client match is done here over a wide page.
-    const result = await getClientReleases({
-      limit: 500,
-      fork: typeof fork === 'boolean' ? fork : undefined,
-      chainId: chainId ?? undefined,
-      repo: repo ?? undefined,
-    });
-    const needle = client ? String(client).toLowerCase().trim() : '';
-    const matched = needle
-      ? result.items.filter((it) => [it.release.repo, it.source.name, it.source.id, it.title]
-        .some((v) => typeof v === 'string' && v.toLowerCase().includes(needle)))
-      : result.items;
-    const capped = Math.max(1, Math.min(Number(limit) || CLIENT_TOOL_DEFAULT_LIMIT, CLIENT_TOOL_MAX_LIMIT));
+    let result = null;
+    let matched;
+    // totalMatched null = completeness unknown; never a count passed off as the whole.
+    let totalMatched;
+    let note;
+    if (needle && repo == null) result = await releasesForClient(needle, filters, capped);
+    if (result) {
+      matched = result.items;
+      totalMatched = result.totalMatched;
+      note = result.note;
+    } else {
+      // An exact repo, no filter, or a name the registry does not know: the feed filters what it
+      // can and the name is matched over one page, which is complete only if the feed says so.
+      result = await getClientReleases({ ...filters, limit: CLIENT_TOOL_WINDOW, repo: repo ?? undefined });
+      matched = needle ? result.items.filter(matchesClient(needle)) : result.items;
+      const windowComplete = result.truncated === false;
+      if (!needle) totalMatched = result.totalMatched ?? (windowComplete ? matched.length : null);
+      else if (windowComplete) totalMatched = matched.length;
+      else {
+        totalMatched = null;
+        note = `Matched "${client}" within the newest ${result.items.length} releases only; older ones may exist — pass repo for an exact query.`;
+      }
+    }
     const releases = matched.slice(0, capped).map((it) => ({
       title: it.title,
       url: it.url,
@@ -1264,9 +1309,11 @@ async function handleGetClientReleases(args) {
     return compactResponse({
       fetchedAt: result.fetchedAt,
       ...(result.stale ? { stale: true } : {}),
+      ...(result.repos ? { repos: result.repos } : {}),
       count: releases.length,
-      totalMatched: matched.length,
-      truncated: matched.length > releases.length,
+      totalMatched,
+      truncated: totalMatched == null ? (matched.length > releases.length || null) : totalMatched > releases.length,
+      ...(note ? { note } : {}),
       releases,
     });
   } catch (error) {

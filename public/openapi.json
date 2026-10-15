@@ -644,6 +644,7 @@
         "tags": [
           "Clients"
         ],
+        "description": "Raw node/client repository research per chain, for chains-client-feed's registry. Takes no query parameters.",
         "responses": {
           "200": {
             "description": "Default Response"

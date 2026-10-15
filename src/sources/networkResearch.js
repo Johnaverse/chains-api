@@ -186,15 +186,27 @@ export function getRepositoryInputs(nameFor = () => null) {
     const hw = hardware.byChainId.get(chainId);
     const repositories = structuredClone(research?.repositories ?? []);
     const profiles = (hw?.profiles ?? [])
-      .map(p => ({ client: p.client ?? null, clientVersion: p.clientVersion ?? null, evidence: structuredClone(p.evidence ?? []) }))
+      // Applicability and verification travel with the link, so an unresolved or historical
+      // profile is not read as verified evidence for a client.
+      .map(p => ({
+        client: p.client ?? null,
+        clientVersion: p.clientVersion ?? null,
+        scope: p.scope ?? null,
+        deployment: p.deployment ?? null,
+        verification: p.verification ?? null,
+        evidence: structuredClone(p.evidence ?? [])
+      }))
       .filter(p => p.client || p.evidence.length);
-    const sources = (hw?.sources ?? []).map(s => ({ url: s.url ?? null, title: s.title ?? null })).filter(s => s.url);
+    // access/notes say when a lead is repurposed or unreadable (chain 112's "operator" site is now an exchange).
+    const sources = (hw?.sources ?? [])
+      .map(s => ({ url: s.url ?? null, title: s.title ?? null, access: s.access ?? null, notes: s.notes ?? null }))
+      .filter(s => s.url);
     if (!repositories.length && !profiles.length && !sources.length) continue;
     networks.push({
       chainId,
       name: hw?.name ?? nameFor(chainId) ?? null,
       repositories,
-      hardware: { sources, profiles }
+      hardware: { status: hw?.status ?? null, identityStatus: hw?.identityStatus ?? null, sources, profiles }
     });
   }
   return { updatedAt: dataset.updatedAt, hardwareUpdatedAt: hardware.updatedAt, count: networks.length, networks };

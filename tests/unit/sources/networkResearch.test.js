@@ -62,7 +62,8 @@ const HARDWARE = {
   updatedAt: '2026-10-10T16:20:12.747009+00:00',
   networks: [
     { chainId: 8453, status: 'documented', identityStatus: 'confirmed', checkedAt: '2026-10-10T09:27:13.772253+00:00', profiles: [profile] },
-    { chainId: 5151, status: 'partial', identityStatus: 'qualified', checkedAt: null, profiles: [{ ...profile, scope: 'project_family', verification: 'qualified' }] },
+    { chainId: 5151, status: 'partial', identityStatus: 'qualified', checkedAt: null, profiles: [{ ...profile, scope: 'project_family', verification: 'qualified' }],
+      sources: [{ url: 'https://lead.example/', title: 'Operator lead', access: 'repurposed', notes: 'Now an exchange.', relationship: 'x' }] },
     { chainId: 777, status: 'partial', identityStatus: 'unresolved', checkedAt: null, profiles: [] },
     { chainId: 8453, profiles: [{ ...profile, id: 'duplicate ignored' }] }
   ]
@@ -404,8 +405,13 @@ describe('getRepositoryInputs (chains-client-feed registry source)', () => {
     expect(out.networks.map(n => n.chainId)).toEqual([5151, 8453]);
     const base = out.networks.find(n => n.chainId === 8453);
     expect(base.repositories).toEqual([repo]);
-    expect(base.hardware.profiles).toEqual([{ client: 'Base Reth', clientVersion: null, evidence: ['https://docs.base.org/'] }]);
+    expect(base.hardware.profiles).toEqual([{ client: 'Base Reth', clientVersion: null, scope: 'exact_network', deployment: 'current', verification: 'confirmed', evidence: ['https://docs.base.org/'] }]);
     expect(base.hardware.profiles[0]).not.toHaveProperty('requirements');
+    expect(base.hardware).toMatchObject({ status: 'documented', identityStatus: 'confirmed', sources: [] });
+    // A lead's qualification travels with it, so the feed can tell it from verified evidence.
+    const lead = out.networks.find(n => n.chainId === 5151).hardware;
+    expect(lead.sources).toEqual([{ url: 'https://lead.example/', title: 'Operator lead', access: 'repurposed', notes: 'Now an exchange.' }]);
+    expect(lead.profiles[0]).toMatchObject({ scope: 'project_family', verification: 'qualified' });
     expect(out.count).toBe(out.networks.length);
   });
 
