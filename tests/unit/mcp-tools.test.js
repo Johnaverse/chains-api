@@ -1267,6 +1267,17 @@ describe('MCP Tools - Shared Module', () => {
       expect(data.note).toMatch(/never lend it another client’s numbers/);
     });
 
+    it('keeps a dependency\'s notes and sources, and a snapshot\'s download URL', async () => {
+      const l1 = { component: 'Ethereum L1 RPC', requiredWhen: 'Always', sizing: 'not_established', notes: 'External L1 endpoints are permitted.', sources: ['https://a.example/', 'https://b.example/', 'https://c.example/', 'https://d.example/'] };
+      mockGetNodeHardware.mockReturnValue({
+        ...hardware,
+        profiles: [profile({ id: 'archive', role: 'archive', dependencies: [l1], snapshotArtifact: { type: 'compressed_snapshot', url: 'https://snap.example/chaindata.tar.zst' } })]
+      });
+      const data = JSON.parse((await handleToolCall('get_node_requirements', { chainId: 1 })).content[0].text);
+      expect(data.dependencies).toEqual([{ component: l1.component, requiredWhen: 'Always', sizing: 'not_established', notes: l1.notes, sources: l1.sources.slice(0, 3) }]);
+      expect(data.profiles[0].snapshot).toBe('snapshot, compressed snapshot <https://snap.example/chaindata.tar.zst>');
+    });
+
     it('lists only the dependencies of profiles that fit the budget, each condition kept', async () => {
       const dep = (requiredWhen) => ({ component: 'L1 RPC', requiredWhen, selfHosted: false, sizing: 'not_established' });
       mockGetNodeHardware.mockReturnValue({

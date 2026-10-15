@@ -676,11 +676,12 @@ function describeRequirement(r) {
   return `${r.component} ${String(r.metric).replace(/_/g, ' ')}: ${value}${unit}${notes}`;
 }
 
-/** "mainnet-legacy-archival.tar.zst, compressed snapshot download: 2.9 TB / 2.9 TiB (2023-06-14 08:13)". */
+/** "mainnet-legacy-archival.tar.zst, compressed snapshot download: 2.9 TB / 2.9 TiB (2023-06-14 08:13)", then the download URL when known. */
 function describeSnapshot(a) {
   const sizes = [...new Set((a.sizes ?? []).map((s) => `${s.value}${s.unit ? ` ${s.unit}` : ''}`))].join(' / ');
   const kind = a.type ? `, ${a.type.replace(/_/g, ' ')}` : '';
-  return `${a.file ?? 'snapshot'}${kind}${sizes ? `: ${sizes}` : ''}${a.publishedAt ? ` (${a.publishedAt})` : ''}`;
+  const url = a.url ? ` <${a.url}>` : '';
+  return `${a.file ?? 'snapshot'}${kind}${sizes ? `: ${sizes}` : ''}${a.publishedAt ? ` (${a.publishedAt})` : ''}${url}`;
 }
 
 /** The returned profiles' other services, once each (OP repeats the same two on every profile). */
@@ -698,6 +699,9 @@ function dependenciesOf(profiles) {
       ...(d.hosting && { hosting: d.hosting }),
       ...(d.sizing && { sizing: d.sizing }),
       ...(d.requirements?.length && { requirements: d.requirements.map(describeRequirement) }),
+      // Notes carry the qualification ("external L1 endpoints are fine"); sources are capped like a profile's.
+      ...(d.notes && { notes: d.notes }),
+      ...(d.sources?.length && { sources: d.sources.slice(0, 3) }),
     });
   }
   return [...byKey.values()];
@@ -800,7 +804,7 @@ function handleGetNodeRequirements(args) {
     totalMatched: profiles.length,
     availableRoles: [...new Set(hardware.profiles.map((p) => p.role))].sort((a, b) => rank(ROLE_ORDER, a) - rank(ROLE_ORDER, b)),
     software,
-    note: 'Requirements are quoted in each publisher’s original units — never convert units or do arithmetic across profiles (no sums or averages). A profile that omits a component may take it, verbatim, from a sibling with the same client and scope (another tier of the same role, or the full node for an archive node) — say which profile it came from. A component no profile documents was not documented, never zero. Published requirements, not benchmarks. Cite one `sources` URL (the publisher’s documentation) per quoted profile. observedClients is what live endpoints run, not a requirement. A profile with `requiredWhen` is an extra component to run alongside the node in that case (e.g. a legacy client for pre-upgrade history): always mention it for that role; `sizing: not_established` means its hardware is undocumented — say so, and never lend it another client’s numbers. `snapshot` is a download’s size, not a disk requirement. `dependencies` are other services the returned profiles need, hosted or self-run (`selfHosted` false = a hosted endpoint is fine; `sizing` as for profiles). verification `unresolved` (sorted last) means the research could not settle the source or its applicability, often because the page could not be re-read: use it only when no confirmed/qualified profile covers the question, and say it is unverified.',
+    note: 'Requirements are quoted in each publisher’s original units — never convert units or do arithmetic across profiles (no sums or averages). A profile that omits a component may take it, verbatim, from a sibling with the same client and scope (another tier of the same role, or the full node for an archive node) — say which profile it came from. A component no profile documents was not documented, never zero. Published requirements, not benchmarks. Cite one `sources` URL (the publisher’s documentation) per quoted profile. observedClients is what live endpoints run, not a requirement. A profile with `requiredWhen` is an extra component to run alongside the node in that case (e.g. a legacy client for pre-upgrade history): always mention it for that role; `sizing: not_established` means its hardware is undocumented — say so, and never lend it another client’s numbers. `snapshot` is a download’s size (and link, in <>), not a disk requirement. `dependencies` are other services the returned profiles need, hosted or self-run (`selfHosted` false = a hosted endpoint is fine; `sizing` as for profiles; `notes` qualify it — quote them). verification `unresolved` (sorted last) means the research could not settle the source or its applicability, often because the page could not be re-read: use it only when no confirmed/qualified profile covers the question, and say it is unverified.',
   };
   if (profiles.length === 0) {
     envelope.message = `No ${[role, level].filter(Boolean).join(' ')} profile is documented for this chain, but ${hardware.profiles.length} other profile(s) are (roles: ${envelope.availableRoles.join(', ')}) — call again without the filter.`;
