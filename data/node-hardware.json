@@ -3474,7 +3474,7 @@
        "source": "https://docs.elastos.net/blockchain/nodes/prerequisites"
       }
      ],
-     "client": "ESC + EID",
+     "client": "ESC",
      "clientVersion": null
     },
     {
@@ -3532,7 +3532,7 @@
        "source": "https://docs.elastos.net/blockchain/nodes/prerequisites"
       }
      ],
-     "client": "ESC + EID",
+     "client": "ESC",
      "clientVersion": null
     },
     {
@@ -3790,7 +3790,7 @@
        "source": "https://docs.elastos.net/blockchain/nodes/prerequisites"
       }
      ],
-     "client": "ESC + EID",
+     "client": "ESC",
      "clientVersion": null
     },
     {
@@ -3848,7 +3848,7 @@
        "source": "https://docs.elastos.net/blockchain/nodes/prerequisites"
       }
      ],
-     "client": "ESC + EID",
+     "client": "ESC",
      "clientVersion": null
     },
     {
@@ -4106,7 +4106,7 @@
        "source": "https://docs.elastos.net/blockchain/nodes/prerequisites"
       }
      ],
-     "client": "ESC + EID",
+     "client": "EID",
      "clientVersion": null
     },
     {
@@ -4164,7 +4164,7 @@
        "source": "https://docs.elastos.net/blockchain/nodes/prerequisites"
       }
      ],
-     "client": "ESC + EID",
+     "client": "EID",
      "clientVersion": null
     },
     {
@@ -4422,7 +4422,7 @@
        "source": "https://docs.elastos.net/blockchain/nodes/prerequisites"
       }
      ],
-     "client": "ESC + EID",
+     "client": "EID",
      "clientVersion": null
     },
     {
@@ -4480,7 +4480,7 @@
        "source": "https://docs.elastos.net/blockchain/nodes/prerequisites"
       }
      ],
-     "client": "ESC + EID",
+     "client": "EID",
      "clientVersion": null
     },
     {
@@ -13234,15 +13234,15 @@
      "clientVersion": null
     },
     {
-     "id": "archive-server-recommended",
+     "id": "archive-server-minimum",
      "role": "archive",
-     "level": "recommended",
+     "level": "minimum",
      "scope": "project_family",
      "client": "MongoDB + monad-indexer (Archive Server)",
      "clientVersion": null,
      "deployment": "current",
      "verification": "qualified",
-     "notes": "Archive Server is a separate host fed by Archive Writer full nodes; not a full-node spec. RAM preferred >512GB; storage preferred 32TB+.",
+     "notes": "Archive Server is a separate host fed by Archive Writer full nodes; not a full-node spec. RAM preferred >512GB; storage preferred 32TB+. The page also prefers >512GB RAM and 32TB+ storage for best performance.",
      "verificationNotes": "Read 'Recommended Archive Server host specs': 16 cores, min 64GB RAM, min recommended 16TB NVMe RAID 10, 10K IOPS, >1GbE.",
      "evidence": [
       "https://docs.monad.xyz/node-ops/archive-data/running-an-archive-server"
@@ -28783,7 +28783,8 @@
      "notes": "Storage grows with the network; archive nodes may need a larger server depending on dApp query load.",
      "verificationNotes": "Read the Astar tab of the archive-node requirements table verbatim (Shiden identical; Shibuya testnet lower).",
      "evidence": [
-      "https://docs.astar.network/docs/build/nodes/archive-node/"
+      "https://docs.astar.network/docs/build/nodes/archive-node/",
+      "https://docs.astar.network/docs/build/nodes/archive-node/binary"
      ],
      "requirements": [
       {
@@ -28850,7 +28851,8 @@
      "verificationNotes": "Full-node page states requirements are similar to the archive node's but the archive disk requirement does not apply; CPU/memory/OS taken from the Astar archive table.",
      "evidence": [
       "https://docs.astar.network/docs/build/nodes/full-node",
-      "https://docs.astar.network/docs/build/nodes/archive-node/"
+      "https://docs.astar.network/docs/build/nodes/archive-node/",
+      "https://docs.astar.network/docs/build/nodes/archive-node/binary"
      ],
      "requirements": [
       {
@@ -32052,7 +32054,7 @@
        "source": "https://github.com/haven1network/haven1-validator-docs"
       }
      ],
-     "client": "Haven1 Docker validator stack",
+     "client": "geth",
      "clientVersion": null
     }
    ]
@@ -34349,7 +34351,7 @@
        "source": "https://munode.dev/about"
       }
      ],
-     "client": "go-ethereum + prysm-beacon",
+     "client": "go-ethereum + prysm",
      "clientVersion": null
     }
    ]
@@ -42738,13 +42740,13 @@
      "id": "collator-recommended",
      "role": "collator",
      "level": "recommended",
-     "scope": "exact_network",
+     "scope": "project_family",
      "client": "Moonbeam (parachain + embedded relay chain)",
      "clientVersion": null,
      "deployment": "current",
-     "verification": "confirmed",
+     "verification": "qualified",
      "notes": "Applies to Moonbeam networks generally (Moonbeam, Moonriver, Moonbase Alpha). Collators need higher single-core CPU performance; Docker and multi-thread-focused cloud not recommended; primary and backup bare-metal servers advised.",
-     "verificationNotes": "Read collators/requirements.md Hardware Requirements: recommended CPUs, 1 TB NVMe, 32 GB RAM.",
+     "verificationNotes": "Read collators/requirements.md Hardware Requirements: recommended CPUs, 1 TB NVMe, 32 GB RAM. Verification pass: figures are stated for all networks of the project, not this chain alone.",
      "evidence": [
       "https://docs.moonbeam.network/node-operators/networks/collators/requirements/",
       "https://raw.githubusercontent.com/moonbeam-foundation/moonbeam-docs/master/node-operators/networks/collators/requirements.md"
@@ -45499,7 +45501,7 @@
      "deployment": "historical",
      "verification": "unresolved",
      "notes": "Storage differs across primary sources: production 2/4+TB vs Dec 3, 2024 blog 1/2TB. Blog also uses different single ramestta-node client recipe, so historical-qualified; no attempt to combine conflicting stacks.",
-     "verificationNotes": "Historical Ramestta validator blog could not be retrieved and no actual saved primary capture was found. Prior values retained unconfirmed. Client from the publisher's own client docs (2026-10-15 review).",
+     "verificationNotes": "Historical Ramestta validator blog could not be retrieved and no actual saved primary capture was found. Prior values retained unconfirmed.",
      "evidence": [
       "https://www.ramestta.com/blog/validator-guide/",
       "https://www.ramestta.com/validator/"
@@ -45554,7 +45556,7 @@
        "source": "https://www.ramestta.com/blog/validator-guide/"
       }
      ],
-     "client": "ramestta-node",
+     "client": null,
      "clientVersion": null
     },
     {
@@ -45565,7 +45567,7 @@
      "deployment": "historical",
      "verification": "unresolved",
      "notes": "Storage differs across primary sources: production 2/4+TB vs Dec 3, 2024 blog 1/2TB. Blog also uses different single ramestta-node client recipe, so historical-qualified; no attempt to combine conflicting stacks.",
-     "verificationNotes": "Historical Ramestta validator blog could not be retrieved and no actual saved primary capture was found. Prior values retained unconfirmed. Client from the publisher's own client docs (2026-10-15 review).",
+     "verificationNotes": "Historical Ramestta validator blog could not be retrieved and no actual saved primary capture was found. Prior values retained unconfirmed.",
      "evidence": [
       "https://www.ramestta.com/blog/validator-guide/",
       "https://www.ramestta.com/validator/"
@@ -45620,7 +45622,7 @@
        "source": "https://www.ramestta.com/blog/validator-guide/"
       }
      ],
-     "client": "ramestta-node",
+     "client": null,
      "clientVersion": null
     }
    ]
@@ -51530,7 +51532,7 @@
      "clientVersion": null,
      "deployment": "current",
      "verification": "qualified",
-     "notes": "Generic OP Stack figure that the Soneium FAQ defers to; OP page's storage sizes are for OP Mainnet and are not applied. OP docs state op-geth reached end-of-support 2026-05-31 (op-reth now primary).",
+     "notes": "OP docs figure, stated for OP Mainnet nodes; the Soneium FAQ recommends an i3.2xlarge AWS instance or equivalent and says to also consider the OP docs. OP page's storage sizes are not applied. OP docs state op-geth reached end-of-support 2026-05-31 (op-reth now primary).",
      "verificationNotes": "Optimism docs list 'suggested minimum hardware requirements for each type of node': 16GB RAM, Reasonably modern CPU.",
      "evidence": [
       "https://docs.optimism.io/node-operators/tutorials/run-node-from-source",
@@ -71126,7 +71128,7 @@
        "source": "https://docs.abs.xyz/infrastructure/nodes/running-a-node"
       }
      ],
-     "client": "Abstract external node",
+     "client": "Abstract node",
      "clientVersion": null
     },
     {
@@ -71153,7 +71155,7 @@
        "source": "https://github.com/Abstract-Foundation/abstract-node"
       }
      ],
-     "client": "Abstract external node",
+     "client": "Abstract node",
      "clientVersion": null
     },
     {
@@ -71751,13 +71753,13 @@
      "id": "full_node-unspecified-prune-ssd",
      "role": "full_node",
      "level": "unspecified",
-     "scope": "exact_network",
+     "scope": "project_family",
      "client": "Morph geth",
      "clientVersion": null,
      "deployment": "current",
-     "verification": "confirmed",
+     "verification": "qualified",
      "notes": "Stated in the pruning context (before the MPT-nodes section); 200 GB is free space needed to prune, not total disk.",
-     "verificationNotes": "Morph Prune State page: 'To prune a Geth node at least 200 GB of free disk space is recommended' and 'make sure the SSD meets: solid-state drive(SSD), 8k IOPS, 500 MB/S throughput, read latency < 1ms'.",
+     "verificationNotes": "Morph Prune State page: 'To prune a Geth node at least 200 GB of free disk space is recommended' and 'make sure the SSD meets: solid-state drive(SSD), 8k IOPS, 500 MB/S throughput, read latency < 1ms'. Verification pass: figures are stated for all networks of the project, not this chain alone.",
      "evidence": [
       "https://docs.morph.network/docs/build-on-morph/developer-resources/node-operation/prune-state"
      ],
@@ -71925,7 +71927,7 @@
        "source": "https://hyperdust-foundation.gitbook.io/hyperagi-docs/mining/node-mining/run-a-hyper-node/deployment-guide"
       }
      ],
-     "client": "HyperNode",
+     "client": "moss-inference-engine",
      "clientVersion": null
     },
     {
@@ -71960,7 +71962,7 @@
        "source": "https://hyperdust-foundation.gitbook.io/hyperagi-docs/mining/node-mining/run-a-hyper-node/deployment-guide"
       }
      ],
-     "client": "HyperNode",
+     "client": "moss-inference-engine",
      "clientVersion": null
     }
    ]
@@ -110427,7 +110429,7 @@
      "deployment": "unknown",
      "verification": "qualified",
      "notes": "Approximately 50GB current chain consumption is distinct from 1 TiB provisioned minimum and is not substituted for disk requirements.",
-     "verificationNotes": "Rechecked primary page values, original units, node role and requirement label. Primary Beam validator requirements after Horizon upgrade; no explicit 13337 testnet configuration on page. Client from the publisher's own client docs (2026-10-15 review).",
+     "verificationNotes": "Rechecked primary page values, original units, node role and requirement label. Primary Beam validator requirements after Horizon upgrade; no explicit 13337 testnet configuration on page.",
      "evidence": [
       "https://docs.onbeam.com/nodes/requirements"
      ],
@@ -110484,7 +110486,7 @@
        "source": "https://docs.onbeam.com/nodes/requirements"
       }
      ],
-     "client": "avalanchego",
+     "client": null,
      "clientVersion": null
     }
    ]
@@ -133781,9 +133783,9 @@
      "scope": "project_family",
      "client": "ZKsync external node",
      "clientVersion": null,
-     "deployment": "historical",
+     "deployment": "unknown",
      "verification": "qualified",
-     "notes": "Generic ZKsync Era sizing for snapshot-recovery/pruned nodes; the docs say other ZK Stack chains may need slightly less CPU/RAM and much less storage, so storage is omitted. Sophon full-node infrastructure is legacy.",
+     "notes": "Generic ZKsync Era sizing for snapshot-recovery/pruned nodes; the docs say other ZK Stack chains may need slightly less CPU/RAM and much less storage, so storage is omitted. Earlier research recorded Sophon's full-node stack as legacy; the cited ZKsync page does not say so.",
      "verificationNotes": "Read the System Requirements section of the zksync-era external node quick start verbatim; Sophon's own docs give no figures and run this software via sophon-en-config.",
      "evidence": [
       "https://github.com/matter-labs/zksync-era/blob/main/docs/src/guides/external-node/00_quick_start.md"
@@ -168127,7 +168129,7 @@
      "deployment": "historical",
      "verification": "qualified",
      "notes": "Applies to disk in all documented Docker profiles; Ubuntu 24.04 assumed by guide.",
-     "verificationNotes": "Rechecked original values, units, role and tier; applicability limitations retained. Client from the publisher's own client docs (2026-10-15 review).",
+     "verificationNotes": "Rechecked original values, units, role and tier; applicability limitations retained.",
      "evidence": [
       "https://github.com/hemilabs/hemi-node/blob/main/NODE_RUNNING.md"
      ],
@@ -168141,7 +168143,7 @@
        "source": "https://github.com/hemilabs/hemi-node/blob/main/NODE_RUNNING.md"
       }
      ],
-     "client": "Hemi Docker stack",
+     "client": null,
      "clientVersion": null
     },
     {
@@ -184288,7 +184290,7 @@
      "role": "full_node",
      "level": "unspecified",
      "scope": "exact_network",
-     "client": "Arbitrum Nitro (Orbit)",
+     "client": "Arbitrum Orbit",
      "clientVersion": null,
      "deployment": "current",
      "verification": "confirmed",
