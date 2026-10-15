@@ -5451,15 +5451,20 @@ function renderNewsList() {
 const releases = {
     // null = not yet known; true/false once the proxy has answered.
     configured: null,
-    // Per scope, loaded lazily: "Forks only" asks the feed for fork=true instead of filtering
-    // the newest 200, which would hide every fork announced before the 200th release.
-    items: { all: null, fork: null },
-    loading: { all: false, fork: false },
-    error: { all: false, fork: false },
-    stale: { all: false, fork: false },
-    scope: 'all', chain: '', client: '',
+    // Per query (scope + date range, see releaseKey), loaded lazily: "Forks only" asks the feed
+    // for fork=true and a date range asks for since/until, instead of filtering the newest 200,
+    // which would hide everything older than the 200th release.
+    items: {},
+    loading: {},
+    error: {},
+    stale: {},
+    scope: 'all', chain: '', client: '', from: '', to: '',
     shown: null
 };
+
+function releaseKey() {
+    return `${releases.scope}|${releases.from}|${releases.to}`;
+}
 const RELEASE_FETCH_LIMIT = 200;
 const RELEASE_PAGE = 25;
 const RELEASE_CHAINS_SHOWN = 8;
@@ -5493,10 +5498,18 @@ function initReleaseControls() {
             releases.shown = null;
             document.querySelectorAll('#releaseScope .chip').forEach(c =>
                 c.setAttribute('aria-pressed', String(c === chip)));
-            loadReleases(releases.scope);
+            loadReleases();
             renderReleaseList();
         });
     });
+    for (const [id, field] of [['releaseFrom', 'from'], ['releaseTo', 'to']]) {
+        byId(id)?.addEventListener('change', e => {
+            releases[field] = /^\d{4}-\d{2}-\d{2}$/.test(e.target.value) ? e.target.value : '';
+            releases.shown = null;
+            loadReleases();
+            renderReleaseList();
+        });
+    }
     byId('releaseChain')?.addEventListener('change', e => {
         releases.chain = e.target.value;
         releases.shown = null;
@@ -5510,26 +5523,39 @@ function initReleaseControls() {
 }
 
 function ensureReleasesView() {
-    loadReleases(releases.scope);
+    loadReleases();
     renderReleaseList();
 }
 
-// Re-entering the view or a scope revalidates (the proxy caches upstream); only a request
-// already in flight is not repeated. Cached items keep rendering meanwhile.
-async function loadReleases(scope) {
-    if (releases.loading[scope]) return;
-    releases.loading[scope] = true;
-    releases.error[scope] = false;
+// Re-entering the view, a scope or a date range revalidates (the proxy caches upstream); only
+// a request already in flight is not repeated. Cached items keep rendering meanwhile.
+async function loadReleases() {
+    const key = releaseKey();
+    if (releases.loading[key]) return;
+    if (releases.from && releases.to && releases.to < releases.from) {
+        releases.error[key] = 'range';
+        if (activeView === 'releases') renderReleaseList();
+        return;
+    }
+    releases.loading[key] = true;
+    releases.error[key] = false;
     try {
-        const d = await api(`/client-releases?limit=${RELEASE_FETCH_LIMIT}${scope === 'fork' ? '&fork=true' : ''}`);
-        releases.items[scope] = (Array.isArray(d.items) ? d.items : []).map(releaseModel);
-        releases.stale[scope] = d.stale === true;
+        const q = new URLSearchParams({ limit: String(RELEASE_FETCH_LIMIT) });
+        if (releases.scope === 'fork') q.set('fork', 'true');
+        if (releases.from) q.set('since', releases.from);
+        // A bare date: the API includes that whole day.
+        if (releases.to) q.set('until', releases.to);
+        const d = await api(`/client-releases?${q}`);
+        releases.items[key] = (Array.isArray(d.items) ? d.items : []).map(releaseModel);
+        releases.stale[key] = d.stale === true;
+        releases.total = releases.total || {};
+        releases.total[key] = Number.isFinite(d.totalMatched) ? d.totalMatched : null;
         setClientFeedConfigured(true);
     } catch (err) {
         if (isFeedAbsent(err)) setClientFeedConfigured(false);
-        else releases.error[scope] = true;
+        else releases.error[key] = true;
     } finally {
-        releases.loading[scope] = false;
+        releases.loading[key] = false;
     }
     rebuildReleaseChainOptions();
     if (activeView === 'releases') renderReleaseList();
@@ -5574,7 +5600,8 @@ function rebuildReleaseChainOptions() {
     const select = byId('releaseChain');
     if (!select) return;
     const counts = new Map();
-    for (const list of [releases.items.all, releases.items.fork]) {
+    // Chains from every loaded query (scopes and date ranges), so a chain stays selectable.
+    for (const list of Object.values(releases.items)) {
         for (const r of list || []) {
             for (const c of r.chains) {
                 const cur = counts.get(c.chainId) || { c, n: 0 };
@@ -5603,7 +5630,7 @@ function releaseSearchMatch(r, q) {
     return r.chains.some(c => String(c.chainId) === q || releaseChainName(c).toLowerCase().includes(q));
 }
 function visibleReleases() {
-    let items = releases.items[releases.scope] || [];
+    let items = releases.items[releaseKey()] || [];
     if (releases.chain) {
         const id = Number(releases.chain);
         items = items.filter(r => r.chains.some(c => c.chainId === id));
@@ -5743,12 +5770,17 @@ function renderReleaseList() {
         empty('Client releases are not available on this deployment.', 'The client release feed (chains-client-feed) is not configured for this API.');
         return;
     }
+    const key = releaseKey();
+    if (releases.error[key] === 'range') {
+        empty('The “To” date is before the “From” date.', 'Pick a range that ends on or after it starts.');
+        return;
+    }
     // A failed revalidation keeps the list already shown.
-    if (releases.error[scope] && !releases.items[scope]) {
+    if (releases.error[key] && !releases.items[key]) {
         empty('Client release feed unavailable (chains-client-feed).', 'The API could not reach the feed just now. Every other view is unaffected.');
         return;
     }
-    if (!releases.items[scope]) { empty('Loading client releases…'); return; }
+    if (!releases.items[key]) { empty('Loading client releases…'); return; }
 
     const items = visibleReleases();
     if (countEl) {
@@ -5759,6 +5791,7 @@ function renderReleaseList() {
             bits.push(`on ${state.byId.get(id)?.name || `chain ${id}`}`);
         }
         if (releases.client) bits.push(`client “${releases.client}”`);
+        if (releases.from || releases.to) bits.push(releaseRangeText());
         if (searchQuery) bits.push(`matching “${searchQuery}”`);
         countEl.textContent = bits.join(' · ');
     }
@@ -5776,11 +5809,20 @@ function renderReleaseList() {
         }
     }
     if (note) {
-        const parts = [`The newest ${fmtNum(RELEASE_FETCH_LIMIT)} ${scope === 'fork' ? 'fork-announcing ' : ''}releases the feed holds.`];
-        if (releases.stale[releases.scope]) parts.push('The feed did not answer on the last refresh, so this is the last good copy.');
+        const total = releases.total?.[key];
+        const ranged = releases.from || releases.to;
+        const parts = [ranged
+            ? `${total != null && total > RELEASE_FETCH_LIMIT ? `The newest ${fmtNum(RELEASE_FETCH_LIMIT)} of ${fmtNum(total)}` : 'All'} ${scope === 'fork' ? 'fork-announcing ' : ''}releases published ${releaseRangeText()} (UTC dates).`
+            : `The newest ${fmtNum(RELEASE_FETCH_LIMIT)} ${scope === 'fork' ? 'fork-announcing ' : ''}releases the feed holds.`];
+        if (releases.stale[key]) parts.push('The feed did not answer on the last refresh, so this is the last good copy.');
         parts.push('Fork names, dates and summaries are extracted from release notes by a model and carry its AI label; "Repository networks" means the notes named no network.');
         note.textContent = parts.join(' ');
     }
+}
+
+function releaseRangeText() {
+    if (releases.from && releases.to) return releases.from === releases.to ? `on ${releases.from}` : `${releases.from} to ${releases.to}`;
+    return releases.from ? `since ${releases.from}` : `until ${releases.to}`;
 }
 
 // ─── drawer: clients serving a chain (+ reverse lookup of each client's networks) ───
@@ -5821,6 +5863,42 @@ function clientNetworksList(networks, currentChainId) {
     return box;
 }
 
+const ACTIVITY_LEVEL_TEXT = {
+    active: 'Active development', moderate: 'Moderate development', low: 'Low activity', dormant: 'Dormant', archived: 'Archived'
+};
+
+/**
+ * The compact activity a list row carries: development level, attention when raised, and the
+ * counts behind them. Counts of critical issues are what maintainers LABELED, so the title
+ * says so; null (not collected yet) renders nothing.
+ */
+function clientActivityLine(a) {
+    if (!a || !a.level) return null;
+    const bits = [];
+    if (Number.isFinite(a.commits30) || Number.isFinite(a.merged30)) {
+        bits.push(`${fmtNum(a.commits30 ?? 0)} commits · ${fmtNum(a.merged30 ?? 0)}${a.merged30AtLeast ? '+' : ''} PRs merged (30d)`);
+    }
+    if (Number.isFinite(a.openIssues)) bits.push(`${fmtNum(a.openIssues)} open issues`);
+    if (a.criticalIssues > 0) bits.push(`${fmtNum(a.criticalIssues)} labeled critical/security`);
+    if (a.advisories365 > 0) bits.push(`${fmtNum(a.advisories365)} security advisor${a.advisories365 === 1 ? 'y' : 'ies'} (12 mo)`);
+    const refreshed = Date.parse(a.refreshedAt || '');
+    return el('div', { class: 'r-meta client-activity' }, [
+        el('span', { class: 'pill sm', title: 'From default-branch commits and merged pull requests', text: ACTIVITY_LEVEL_TEXT[a.level] || a.level }),
+        a.attention === 'high' || a.attention === 'elevated'
+            ? el('span', {
+                class: `pill sm pill-attention-${a.attention}`,
+                title: 'Recent security advisories, or open issues the maintainers labeled critical/security',
+                text: a.attention === 'high' ? 'High attention' : 'Needs attention'
+            })
+            : null,
+        bits.length ? el('span', {
+            class: 'r-note',
+            title: Number.isNaN(refreshed) ? null : `GitHub/GitLab activity as of ${fmtDateTime(refreshed)}`,
+            text: bits.join(' · ')
+        }) : null
+    ]);
+}
+
 function networkClientItem(c, chainId) {
     const href = safeUrl(c.url);
     const label = c.repo || c.names?.[0] || c.id || 'Unknown client';
@@ -5846,7 +5924,8 @@ function networkClientItem(c, chainId) {
                 ]) : null,
                 c.latestFork ? el('span', { class: 'r-note', text: `Fork: ${forkSummaryText(c.latestFork)}` }) : null
             ])
-            : null
+            : null,
+        clientActivityLine(c.activity)
     ]);
 
     const path = clientLookupPath(c);

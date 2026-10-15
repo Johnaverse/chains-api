@@ -63,6 +63,13 @@ export async function clientReleasesRoutes(fastify) {
             pattern: '^\\d{4}-\\d{2}-\\d{2}([T ][0-9:.]+(Z|[+-]\\d{2}:?\\d{2})?)?$',
             description: 'Only releases published at or after this ISO date/time',
             errorMessage: { pattern: 'since must be an ISO date or date-time' }
+          },
+          until: {
+            type: 'string',
+            maxLength: 40,
+            pattern: '^\\d{4}-\\d{2}-\\d{2}([T ][0-9:.]+(Z|[+-]\\d{2}:?\\d{2})?)?$',
+            description: 'Only releases published at or before this ISO date/time (inclusive; a bare date covers that whole UTC day)',
+            errorMessage: { pattern: 'until must be an ISO date or date-time' }
           }
         }
       }

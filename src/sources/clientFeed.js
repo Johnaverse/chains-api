@@ -197,6 +197,72 @@ function normalizeLatestRelease(r, entry) {
   };
 }
 
+const int = (v) => (Number.isSafeInteger(v) ? v : null);
+const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+const ACTIVITY_LEVELS = new Set(['active', 'moderate', 'low', 'dormant', 'archived']);
+const ATTENTION_LEVELS = new Set(['high', 'elevated', 'normal']);
+const level = (v, allowed) => (allowed.has(v) ? v : null);
+
+/**
+ * A client's development activity and open-issue health, as the feed reports it. List rows
+ * carry the compact form (`attention` a string); one client carries the full record (`attention`
+ * an object with reasons). Null when the feed has none yet (or GitHub without a token).
+ */
+export function normalizeActivity(a) {
+  if (!a || typeof a !== 'object') return null;
+  if (typeof a.attention === 'string' || (a.attention == null && 'commits30' in a)) {
+    return {
+      level: level(a.level, ACTIVITY_LEVELS),
+      attention: level(a.attention, ATTENTION_LEVELS),
+      commits30: int(a.commits30),
+      merged30: int(a.merged30),
+      merged30AtLeast: a.merged30AtLeast === true,
+      openIssues: int(a.openIssues),
+      criticalIssues: int(a.criticalIssues),
+      advisories365: int(a.advisories365),
+      refreshedAt: iso(a.refreshedAt)
+    };
+  }
+  const issues = a.issues ?? {};
+  const adv = a.advisories && typeof a.advisories === 'object' ? a.advisories : null;
+  return {
+    refreshedAt: iso(a.refreshedAt),
+    source: str(a.source),
+    archived: a.archived === true,
+    pushedAt: iso(a.pushedAt),
+    stars: int(a.stars),
+    commits: { days30: int(a.commits?.days30), days90: int(a.commits?.days90), branch: str(a.commits?.branch) },
+    mergedPullRequests: { days30: int(a.mergedPullRequests?.days30), days90: int(a.mergedPullRequests?.days90), atLeast: a.mergedPullRequests?.atLeast === true },
+    openPullRequests: int(a.openPullRequests),
+    issues: {
+      open: int(issues.open),
+      openedDays30: int(issues.openedDays30),
+      openedAtLeast: issues.openedAtLeast === true,
+      bug: int(issues.bug),
+      critical: int(issues.critical),
+      criticalLabels: Array.isArray(issues.criticalLabels)
+        ? issues.criticalLabels.filter((l) => str(l?.name)).map((l) => ({ name: l.name, open: int(l.open) }))
+        : [],
+      countsExact: issues.countsExact === true
+    },
+    advisories: adv
+      ? {
+        total: int(adv.total),
+        last365Days: int(adv.last365Days),
+        bySeverity: Object.fromEntries(['critical', 'high', 'medium', 'low'].map((k) => [k, int(adv.bySeverity?.[k]) ?? 0])),
+        latest: (Array.isArray(adv.latest) ? adv.latest : []).slice(0, 3).map((x) => ({
+          id: str(x?.id), cve: str(x?.cve), severity: str(x?.severity), cvss: num(x?.cvss), publishedAt: iso(x?.publishedAt), summary: str(x?.summary), url: str(x?.url)
+        }))
+      }
+      : null,
+    level: level(a.level, ACTIVITY_LEVELS),
+    attention: {
+      level: level(a.attention?.level, ATTENTION_LEVELS),
+      reasons: strList(a.attention?.reasons)
+    }
+  };
+}
+
 function normalizeNetwork(n) {
   return {
     chainId: n.chainId,
@@ -228,10 +294,12 @@ export function normalizeClient(entry, { includeNetworks = true } = {}) {
     names: strList(entry?.names),
     supported: typeof entry?.supported === 'boolean' ? entry.supported : null,
     pollStatus: str(entry?.pollStatus),
+    role: str(entry?.role),
     networkCount,
     ...(includeNetworks ? { networks: networks ?? [] } : {}),
     latestRelease: normalizeLatestRelease(entry?.latestRelease, entry),
-    latestFork
+    latestFork,
+    activity: normalizeActivity(entry?.activity)
   };
 }
 
@@ -249,9 +317,10 @@ function completeness(body, count) {
 
 /**
  * Client releases, newest first, filters passed through to the feed.
- * @param {{limit?: number, fork?: boolean, chainId?: number, repo?: string, since?: string}} [options]
+ * `since`/`until` bound publishedAt, both inclusive (a bare `until` date covers that day).
+ * @param {{limit?: number, fork?: boolean, chainId?: number, repo?: string, since?: string, until?: string}} [options]
  */
-export async function getClientReleases({ limit, fork, chainId, repo, since } = {}) {
+export async function getClientReleases({ limit, fork, chainId, repo, since, until } = {}) {
   const capped = Math.max(1, Math.min(Number(limit) || 100, MAX_RELEASE_LIMIT));
   const { body, fetchedAt, stale } = await cachedGet('/releases', {
     limit: capped,
@@ -259,7 +328,8 @@ export async function getClientReleases({ limit, fork, chainId, repo, since } = 
     chainId,
     // The feed matches its registry id (`github:owner/repo`, lowercase); a bare slug is GitHub.
     repo: repo ? (/^(github|gitlab):/i.test(repo) ? repo : `github:${repo}`).toLowerCase() : undefined,
-    since
+    since,
+    until
   });
   const items = listOf(body, 'items', 'releases').map(normalizeRelease);
   return { fetchedAt: new Date(fetchedAt).toISOString(), stale, ...completeness(body, items.length), count: items.length, items };
@@ -293,6 +363,7 @@ export async function getFeedClient(host, owner, repo) {
     ...entry,
     latestRelease: body.latestRelease ?? entry?.latestRelease,
     latestFork: body.latestFork ?? entry?.latestFork,
+    activity: body.activity ?? entry?.activity,
     pollStatus: body.poll?.status ?? entry?.pollStatus
   };
   return { fetchedAt: new Date(res.fetchedAt).toISOString(), stale: res.stale, client: normalizeClient(merged) };
