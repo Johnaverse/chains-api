@@ -270,7 +270,12 @@ async function api(path, { timeoutMs = 25000 } = {}) {
         const res = await fetch(`${API_BASE}${path}`, {
             headers: { accept: 'application/json' }, signal: ctrl.signal
         });
-        if (!res.ok) throw new Error(`${path} → ${res.status}`);
+        if (!res.ok) {
+            // Status kept on the error: some callers branch on it (503 = feed not configured).
+            const err = new Error(`${path} → ${res.status}`);
+            err.status = res.status;
+            throw err;
+        }
         return await res.json();
     } finally { clearTimeout(timer); }
 }
@@ -305,6 +310,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initProviderControls();
     initOverviewControls();
     initNewsControls();
+    initReleaseControls();
     initChainsTable();
     initAppbarHeight();
     initResizeHandling();
@@ -320,6 +326,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // small request, and having it already resolved means switching to Providers paints the
     // board immediately instead of after a round-trip.
     loadProviderStats();
+    probeClientFeed();
     window.addEventListener('popstate', applyUrlState);
 });
 
@@ -584,12 +591,12 @@ function initAppbarHeight() {
 }
 
 // ─────────────────────────────── tabs / routing ──────────────────────────
-const VIEWS = ['overview', 'networks', 'graph', 'incidents', 'providers', 'timeline', 'news', 'forum'];
+const VIEWS = ['overview', 'networks', 'graph', 'incidents', 'providers', 'timeline', 'news', 'forum', 'releases'];
 // The five feed views share one top-level "Activity" tab; the strip built by
 // initSubTabs() inside each of their sections picks between them. URLs are
 // untouched — ?view=news still deep-links, it just lights up Activity + News.
-const FEED_VIEWS = ['incidents', 'providers', 'timeline', 'news', 'forum'];
-const FEED_LABELS = { incidents: 'Incidents', providers: 'Providers', timeline: 'Timeline', news: 'News', forum: 'Forum' };
+const FEED_VIEWS = ['incidents', 'providers', 'timeline', 'news', 'forum', 'releases'];
+const FEED_LABELS = { incidents: 'Incidents', providers: 'Providers', timeline: 'Timeline', news: 'News', forum: 'Forum', releases: 'Releases' };
 const DEFAULT_VIEW = 'overview';
 let activeView = DEFAULT_VIEW;
 let searchQuery = '';
@@ -634,6 +641,9 @@ function initSubTabs() {
             subTabBadge = el('span', { class: 'tab-badge hidden' });
             btn.appendChild(subTabBadge);
         }
+        // Hidden until probeClientFeed() learns the API has a client feed configured: a tab
+        // that appears and then vanishes is worse than one that appears a moment late.
+        if (v === 'releases') btn.classList.add('hidden');
         subTabStrip.appendChild(btn);
     }
 }
@@ -676,6 +686,7 @@ function switchView(view, opts = {}) {
     else pauseGraph();   // stop the WebGL loop the moment the graph is hidden
     if (view === 'forum') ensureForumView();
     if (view === 'news') ensureNewsView();
+    if (view === 'releases') ensureReleasesView();
     if (view === 'overview') renderOverview();
     if (view === 'incidents') renderIncidents();
     if (view === 'providers') renderProviders();
@@ -700,6 +711,7 @@ function updateSearchPlaceholder() {
                     : activeView === 'timeline' ? 'Filter timeline — network, software or title…'
                     : activeView === 'news' ? 'Filter news — title, source or network…'
                 : activeView === 'forum' ? 'Filter posts — network, forum or title…'
+                : activeView === 'releases' ? 'Filter releases — client, version, fork or network…'
                         : 'Search networks — id or name…';
 }
 
@@ -710,6 +722,7 @@ function applySearch() {
     else if (activeView === 'timeline') renderTimeline();
     else if (activeView === 'news') renderNewsList();
     else if (activeView === 'forum') { renderForumTreemap(); renderForumList(); }
+    else if (activeView === 'releases') { releases.shown = null; renderReleaseList(); }
 }
 
 function updateUrl({ push = false } = {}) {
@@ -4028,6 +4041,11 @@ function openChainDetail(chainId, opts = {}) {
     rpcSec.appendChild(detailRow('Clients (live)', clientBox));
     body.appendChild(rpcSec);
 
+    // ── client software (chains-client-feed via /client-releases) — hidden until it answers ──
+    const clientSec = drawerSection('Clients');
+    clientSec.classList.add('hidden');
+    body.appendChild(clientSec);
+
     // ── forum ──
     const forumBox = el('div', { class: 'rpc-list' });
     const forumSec = drawerSection('Recent forum posts');
@@ -4047,6 +4065,7 @@ function openChainDetail(chainId, opts = {}) {
 
     loadChainDetail(chainId, extraBox, researchSec);
     loadForumNews(chainId, forumBox, forumSec);
+    loadNetworkClients(chainId, clientSec);
     loadLiveRpc(chainId, rpcBox, headCell);
     loadLiveClients(chainId, clientBox);
 }
@@ -5419,6 +5438,493 @@ function renderNewsList() {
         parts.push('Chain links appear only where an article named a chain the registry recognises; the feed tags market commentary rather than dropping it, so low-signal stories are filterable but never hidden from you silently.');
         note.textContent = parts.join(' ');
     }
+}
+
+// ═══ Client releases (GET /client-releases, proxied by this API) ═══════════════
+// chains-client-feed polls every client repository's releases and changelogs and extracts the
+// hard forks they announce. It has no public host, so unlike the other Activity feeds this one
+// is read through the API's /client-releases proxy rather than from the browser directly.
+//
+// A 503 from the proxy means this deployment has no feed configured (CLIENT_FEED_URL unset):
+// the Releases sub-tab and the drawer's Clients section then stay hidden, rather than showing
+// an error the reader can do nothing about. Any other failure is a real outage and says so.
+const releases = {
+    // null = not yet known; true/false once the proxy has answered.
+    configured: null,
+    // Per scope, loaded lazily: "Forks only" asks the feed for fork=true instead of filtering
+    // the newest 200, which would hide every fork announced before the 200th release.
+    items: { all: null, fork: null },
+    loading: { all: false, fork: false },
+    error: { all: false, fork: false },
+    stale: false,
+    scope: 'all', chain: '', client: '',
+    shown: null
+};
+const RELEASE_FETCH_LIMIT = 200;
+const RELEASE_PAGE = 25;
+const RELEASE_CHAINS_SHOWN = 8;
+
+// 404 = an API that predates the proxy; treated like "not configured".
+function isFeedAbsent(err) { return err?.status === 503 || err?.status === 404; }
+
+function setClientFeedConfigured(ok) {
+    if (releases.configured === ok) return;
+    releases.configured = ok;
+    subTabStrip?.querySelector('[data-view="releases"]')?.classList.toggle('hidden', !ok);
+    if (activeView === 'releases') renderReleaseList();
+}
+
+async function probeClientFeed() {
+    try {
+        await api('/client-releases?limit=1', { timeoutMs: 15000 });
+        setClientFeedConfigured(true);
+    } catch (err) {
+        if (isFeedAbsent(err)) setClientFeedConfigured(false);
+        // Configured but failing (502, 429…): keep the tab, whose list shows the outage.
+        else if (err?.status) setClientFeedConfigured(true);
+        // No status at all = the API itself is unreachable; leave the tab hidden.
+    }
+}
+
+function initReleaseControls() {
+    document.querySelectorAll('#releaseScope .chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+            releases.scope = chip.dataset.scope;
+            releases.shown = null;
+            document.querySelectorAll('#releaseScope .chip').forEach(c =>
+                c.setAttribute('aria-pressed', String(c === chip)));
+            loadReleases(releases.scope);
+            renderReleaseList();
+        });
+    });
+    byId('releaseChain')?.addEventListener('change', e => {
+        releases.chain = e.target.value;
+        releases.shown = null;
+        renderReleaseList();
+    });
+    byId('releaseClient')?.addEventListener('input', debounce(e => {
+        releases.client = e.target.value.trim().toLowerCase();
+        releases.shown = null;
+        renderReleaseList();
+    }, 150));
+}
+
+function ensureReleasesView() {
+    loadReleases(releases.scope);
+    renderReleaseList();
+}
+
+async function loadReleases(scope) {
+    if (releases.items[scope] || releases.loading[scope]) return;
+    releases.loading[scope] = true;
+    releases.error[scope] = false;
+    try {
+        const d = await api(`/client-releases?limit=${RELEASE_FETCH_LIMIT}${scope === 'fork' ? '&fork=true' : ''}`);
+        releases.items[scope] = (Array.isArray(d.items) ? d.items : []).map(releaseModel);
+        releases.stale = d.stale === true;
+        setClientFeedConfigured(true);
+    } catch (err) {
+        if (isFeedAbsent(err)) setClientFeedConfigured(false);
+        else releases.error[scope] = true;
+    } finally {
+        releases.loading[scope] = false;
+    }
+    rebuildReleaseChainOptions();
+    if (activeView === 'releases') renderReleaseList();
+}
+
+function releaseModel(r) {
+    const rel = r?.release || {};
+    const enr = r?.enrichment || null;
+    const rawForks = Array.isArray(enr?.forks) && enr.forks.length ? enr.forks : (enr?.fork ? [enr.fork] : []);
+    const publishedMs = Date.parse(r?.publishedAt || '');
+    return {
+        id: r?.id || null,
+        url: r?.url || null,
+        title: typeof r?.title === 'string' ? r.title : '',
+        name: r?.source?.name || rel.repo || r?.title || 'Unknown client',
+        repo: rel.repo || null,
+        tag: rel.tag || null,
+        version: rel.version || null,
+        prerelease: rel.prerelease === true,
+        mandatory: rel.mandatory === true,
+        publishedMs: Number.isNaN(publishedMs) ? null : publishedMs,
+        summary: typeof enr?.summary === 'string' ? enr.summary : null,
+        // The feed's clip of the release notes themselves — shown, unlabelled, only when no
+        // model summary exists, so the AI tag is never attached to the publisher's own words.
+        notes: typeof r?.summary === 'string' ? r.summary : null,
+        component: rel.component || null,
+        cls: typeof enr?.class === 'string' ? enr.class : null,
+        forks: rawForks.filter(f => f && (f.name || f.network || f.activationAt || f.activationBlock != null
+            || f.activationEpoch != null || f.activationSlot != null || f.activationTimestamp != null)),
+        chains: Array.isArray(r?.chains) ? r.chains.filter(c => Number.isFinite(c?.chainId)) : [],
+        chainsFrom: r?.chainsFrom || null
+    };
+}
+
+function releaseChainName(c) {
+    return state.byId.get(c.chainId)?.name || c.name || `Chain ${c.chainId}`;
+}
+
+// The chain filter offers only chains that appear in what has been loaded, so no option can
+// lead to a guaranteed-empty list.
+function rebuildReleaseChainOptions() {
+    const select = byId('releaseChain');
+    if (!select) return;
+    const counts = new Map();
+    for (const list of [releases.items.all, releases.items.fork]) {
+        for (const r of list || []) {
+            for (const c of r.chains) {
+                const cur = counts.get(c.chainId) || { c, n: 0 };
+                cur.n++;
+                counts.set(c.chainId, cur);
+            }
+        }
+    }
+    const opts = [...counts.values()].sort((a, b) => releaseChainName(a.c).localeCompare(releaseChainName(b.c)));
+    if (releases.chain && !counts.has(Number(releases.chain))) releases.chain = '';
+    clear(select);
+    select.appendChild(el('option', { value: '', text: 'All chains' }));
+    for (const { c } of opts) {
+        select.appendChild(el('option', { value: String(c.chainId), text: `${releaseChainName(c)} (${c.chainId})` }));
+    }
+    select.value = releases.chain;
+}
+
+function releaseClientMatch(r, q) {
+    return [r.name, r.repo, r.title].some(v => typeof v === 'string' && v.toLowerCase().includes(q));
+}
+function releaseSearchMatch(r, q) {
+    if (releaseClientMatch(r, q)) return true;
+    if ([r.version, r.tag].some(v => v && v.toLowerCase().includes(q))) return true;
+    if (r.forks.some(f => [f.name, f.network].some(v => typeof v === 'string' && v.toLowerCase().includes(q)))) return true;
+    return r.chains.some(c => String(c.chainId) === q || releaseChainName(c).toLowerCase().includes(q));
+}
+function visibleReleases() {
+    let items = releases.items[releases.scope] || [];
+    if (releases.chain) {
+        const id = Number(releases.chain);
+        items = items.filter(r => r.chains.some(c => c.chainId === id));
+    }
+    if (releases.client) items = items.filter(r => releaseClientMatch(r, releases.client));
+    if (searchQuery) items = items.filter(r => releaseSearchMatch(r, searchQuery));
+    return items;
+}
+
+// A date-only activation ("2025-12-03", or midnight UTC, which is how feeds write a day) is
+// shown as a day: printing "Dec 3, 2025, 1:00 AM" in the reader's zone would invent a time.
+function isDateOnlyActivation(s) {
+    return !/T\d{2}:\d{2}/.test(s) || /T00:00(:00(\.0+)?)?(Z|[+-]00:?00)?$/.test(s);
+}
+function forkActivationBits(f) {
+    const bits = [];
+    if (typeof f.activationAt === 'string' && !Number.isNaN(Date.parse(f.activationAt))) {
+        const ms = Date.parse(f.activationAt);
+        bits.push({
+            text: isDateOnlyActivation(f.activationAt)
+                ? new Date(ms).toLocaleDateString(undefined, { dateStyle: 'medium', timeZone: 'UTC' })
+                : fmtDateTime(ms),
+            title: f.activationAt
+        });
+    } else if (Number.isFinite(f.activationTimestamp)) {
+        bits.push({ text: fmtDateTime(f.activationTimestamp * 1000), title: `Unix ${f.activationTimestamp}` });
+    }
+    if (Number.isFinite(f.activationBlock)) bits.push({ text: `block ${f.activationBlock.toLocaleString()}` });
+    if (Number.isFinite(f.activationEpoch)) bits.push({ text: `epoch ${f.activationEpoch.toLocaleString()}` });
+    if (Number.isFinite(f.activationSlot)) bits.push({ text: `slot ${f.activationSlot.toLocaleString()}` });
+    if (Number.isFinite(f.activationTimestamp) && f.activationAt) bits.push({ text: `timestamp ${f.activationTimestamp}` });
+    return bits;
+}
+function forkLine(f) {
+    const activation = forkActivationBits(f);
+    return el('div', { class: 'release-fork' }, [
+        el('span', { class: 'kind-tag', text: 'Fork' }),
+        el('span', { class: 'release-fork-name', text: f.name || 'Unnamed fork' }),
+        f.network ? el('span', { class: 'r-note', text: f.network }) : null,
+        activation.length
+            ? el('span', { class: 'release-fork-when' }, activation.flatMap((b, i) => [
+                i ? ' · ' : null,
+                el('span', { title: b.title || null, text: b.text })
+            ]))
+            : el('span', { class: 'r-note', text: 'activation not stated' }),
+        f.state ? el('span', { class: 'pill sm', text: String(f.state).replace(/_/g, ' ') }) : null
+    ]);
+}
+
+function releaseChainChips(r) {
+    if (!r.chains.length) return null;
+    const box = el('div', { class: 'affected-chains' });
+    if (r.chainsFrom === 'repository') {
+        box.appendChild(el('span', {
+            class: 'r-note',
+            title: 'The release notes named no network, so these are every network the repository is known to serve.',
+            text: 'Repository networks:'
+        }));
+    }
+    for (const c of r.chains.slice(0, RELEASE_CHAINS_SHOWN)) {
+        box.appendChild(state.byId.has(c.chainId)
+            ? el('button', { class: 'chain-chip', type: 'button', text: releaseChainName(c), onclick: () => openChainDetail(c.chainId) })
+            : el('span', { class: 'pill', text: releaseChainName(c) }));
+    }
+    if (r.chains.length > RELEASE_CHAINS_SHOWN) {
+        box.appendChild(el('span', { class: 'r-note', text: `+${r.chains.length - RELEASE_CHAINS_SHOWN} more` }));
+    }
+    return box;
+}
+
+function releaseCard(r) {
+    const href = safeUrl(r.url);
+    const label = r.repo || r.name;
+    const ver = r.version || r.tag;
+    const tagNote = r.tag && r.version && r.tag !== r.version && r.tag !== `v${r.version}` ? r.tag : null;
+    const published = r.publishedMs != null
+        ? el('span', { title: fmtDateTime(r.publishedMs), text: relTime(new Date(r.publishedMs).toISOString()) })
+        : null;
+
+    const main = el('div', { class: 'incident-main' }, [
+        el('div', { class: 'incident-title' }, [
+            el('span', { class: 'incident-title-text' }, [
+                href
+                    ? el('a', { href, target: '_blank', rel: 'noopener', text: label })
+                    : el('span', { text: label }),
+                ver ? ' ' : null,
+                ver ? el('span', { class: 'client-ver', text: ver }) : null,
+                tagNote ? el('span', { class: 'r-note', text: ` (${tagNote})` }) : null
+            ])
+        ]),
+        el('div', { class: 'incident-meta' }, [
+            r.name && r.name !== label ? `${r.name} · ` : null,
+            r.component ? `${r.component} · ` : null,
+            published || 'date unknown'
+        ])
+    ]);
+
+    if (r.summary || r.cls) {
+        main.appendChild(el('div', { class: 'ai-block' }, [
+            el('div', { class: 'ai-head' }, [
+                el('span', { class: 'ai-tag', text: 'AI' }),
+                r.cls ? el('span', { class: 'ai-class', text: r.cls.replace(/_/g, ' ') }) : null
+            ]),
+            r.summary ? el('div', { class: 'ai-summary', text: Viz.truncate(plainText(r.summary), 320) }) : null
+        ]));
+    }
+    if (!r.summary && r.notes) {
+        main.appendChild(el('div', { class: 'ai-summary', text: Viz.truncate(plainText(r.notes), 260) }));
+    }
+    for (const f of r.forks) main.appendChild(forkLine(f));
+    const chips = releaseChainChips(r);
+    if (chips) main.appendChild(chips);
+
+    const side = el('div', { class: 'incident-side' }, [
+        r.mandatory ? el('span', { class: 'pill pill-mandatory', title: 'The release notes say operators must upgrade', text: 'mandatory' }) : null,
+        r.prerelease ? el('span', { class: 'pill pill-prerelease', title: 'Marked as a pre-release by the repository', text: 'pre-release' }) : null
+    ]);
+    return el('div', { class: 'incident-card' }, [main, side]);
+}
+
+function renderReleaseList() {
+    const list = byId('releaseList');
+    if (!list) return;
+    const countEl = byId('releaseCount');
+    const note = byId('releaseNote');
+    const scope = releases.scope;
+    const empty = (text, sub) => {
+        clear(list);
+        if (countEl) countEl.textContent = '';
+        if (note) note.textContent = '';
+        list.appendChild(el('div', { class: 'feed-empty' }, [
+            el('div', { text }),
+            sub ? el('div', { class: 'note', style: 'border:0;margin-top:8px;padding:0', text: sub }) : null
+        ]));
+    };
+    if (releases.configured === false) {
+        empty('Client releases are not available on this deployment.', 'The client release feed (chains-client-feed) is not configured for this API.');
+        return;
+    }
+    if (releases.error[scope]) {
+        empty('Client release feed unavailable (chains-client-feed).', 'The API could not reach the feed just now. Every other view is unaffected.');
+        return;
+    }
+    if (!releases.items[scope]) { empty('Loading client releases…'); return; }
+
+    const items = visibleReleases();
+    if (countEl) {
+        const bits = [`${fmtNum(items.length)} release${items.length === 1 ? '' : 's'}`];
+        if (scope === 'fork') bits.push('announcing a fork');
+        if (releases.chain) {
+            const id = Number(releases.chain);
+            bits.push(`on ${state.byId.get(id)?.name || `chain ${id}`}`);
+        }
+        if (releases.client) bits.push(`client “${releases.client}”`);
+        if (searchQuery) bits.push(`matching “${searchQuery}”`);
+        countEl.textContent = bits.join(' · ');
+    }
+    clear(list);
+    if (!items.length) {
+        list.appendChild(el('div', { class: 'feed-empty', text: 'No releases match these filters.' }));
+    } else {
+        const limit = releases.shown ?? (isNarrow() ? 10 : RELEASE_PAGE);
+        for (const r of items.slice(0, limit)) list.appendChild(releaseCard(r));
+        if (items.length > limit) {
+            list.appendChild(feedMoreButton(items.length, limit, () => {
+                releases.shown = limit + (isNarrow() ? 10 : RELEASE_PAGE) * 2;
+                renderReleaseList();
+            }));
+        }
+    }
+    if (note) {
+        const parts = [`The newest ${fmtNum(RELEASE_FETCH_LIMIT)} ${scope === 'fork' ? 'fork-announcing ' : ''}releases the feed holds.`];
+        if (releases.stale) parts.push('The feed did not answer on the last refresh, so this is the last good copy.');
+        parts.push('Fork names, dates and summaries are extracted from release notes by a model and carry its AI label; "Repository networks" means the notes named no network.');
+        note.textContent = parts.join(' ');
+    }
+}
+
+// ─── drawer: clients serving a chain (+ reverse lookup of each client's networks) ───
+const CLIENTS_SHOWN = 8;
+const CLIENT_NETWORKS_SHOWN = 40;
+const REPO_PART = /^(?!\.+$)[A-Za-z0-9_.-]+$/;
+
+// The proxy route is /client-releases/clients/:host/:owner/:repo. Only github/gitlab two-part
+// slugs fit it (a GitLab subgroup path does not), and anything else gets no expander.
+function clientLookupPath(c) {
+    const host = String(c.host || c.id?.split(':')[0] || '').toLowerCase().replace(/\.com$/, '');
+    if (host !== 'github' && host !== 'gitlab') return null;
+    const parts = String(c.repo || '').split('/');
+    if (parts.length !== 2 || !parts.every(p => REPO_PART.test(p))) return null;
+    return `/client-releases/clients/${host}/${encodeURIComponent(parts[0])}/${encodeURIComponent(parts[1])}`;
+}
+
+function forkSummaryText(f) {
+    return [f.name || 'Unnamed fork', f.network, ...forkActivationBits(f).map(b => b.text), f.state ? String(f.state).replace(/_/g, ' ') : null]
+        .filter(Boolean).join(' · ');
+}
+
+function clientNetworksList(networks, currentChainId) {
+    const chip = n => (n.chainId === currentChainId
+        ? el('span', { class: 'pill', title: 'This network', text: releaseChainName(n) })
+        : state.byId.has(n.chainId)
+            ? el('button', { class: 'chain-chip', type: 'button', text: releaseChainName(n), onclick: () => openChainDetail(n.chainId) })
+            : el('span', { class: 'pill', text: releaseChainName(n) }));
+    const box = el('div', { class: 'affected-chains' }, networks.slice(0, CLIENT_NETWORKS_SHOWN).map(chip));
+    if (networks.length > CLIENT_NETWORKS_SHOWN) {
+        const more = el('button', {
+            class: 'btn r-more', type: 'button',
+            text: `Show all ${networks.length}`,
+            onclick: () => { more.remove(); for (const n of networks.slice(CLIENT_NETWORKS_SHOWN)) box.appendChild(chip(n)); }
+        });
+        box.appendChild(more);
+    }
+    return box;
+}
+
+function networkClientItem(c, chainId) {
+    const href = safeUrl(c.url);
+    const label = c.repo || c.names?.[0] || c.id || 'Unknown client';
+    const kinds = (c.kinds || []).filter(k => k && k !== 'unknown');
+    const rel = c.latestRelease;
+    const relMs = Date.parse(rel?.publishedAt || '');
+    const relHref = safeUrl(rel?.url);
+    const relVer = rel?.version || rel?.tag;
+
+    const item = el('div', { class: 'r-item' }, [
+        el('div', { class: 'r-main' }, [
+            href ? el('a', { href, target: '_blank', rel: 'noopener', text: label }) : el('span', { text: label }),
+            ...kinds.map(k => el('span', { class: 'tag', text: k })),
+            c.repo && c.names?.length ? el('span', { class: 'r-note', text: c.names.slice(0, 3).join(', ') }) : null
+        ]),
+        relVer || c.latestFork
+            ? el('div', { class: 'r-meta' }, [
+                relVer ? el('span', { class: 'r-note' }, [
+                    'Latest ',
+                    relHref ? el('a', { href: relHref, target: '_blank', rel: 'noopener', class: 'client-ver', text: relVer })
+                        : el('span', { class: 'client-ver', text: relVer }),
+                    Number.isNaN(relMs) ? null : el('span', { title: fmtDateTime(relMs), text: ` · ${relTime(rel.publishedAt)}` })
+                ]) : null,
+                c.latestFork ? el('span', { class: 'r-note', text: `Fork: ${forkSummaryText(c.latestFork)}` }) : null
+            ])
+            : null
+    ]);
+
+    const path = clientLookupPath(c);
+    const n = Number.isFinite(c.networkCount) ? c.networkCount : null;
+    if (path && n !== 1) {
+        const text = n != null ? `Supports ${fmtNum(n)} networks` : 'Supported networks';
+        let box = null;
+        const toggle = el('button', {
+            class: 'btn r-more', type: 'button', 'aria-expanded': 'false', text,
+            onclick: async () => {
+                if (box) {
+                    const open = box.classList.toggle('hidden') === false;
+                    toggle.setAttribute('aria-expanded', String(open));
+                    return;
+                }
+                toggle.disabled = true;
+                box = el('div', { class: 'r-meta' }, [el('span', { class: 'r-note', text: 'Loading networks…' })]);
+                item.appendChild(box);
+                try {
+                    const d = await api(path, { timeoutMs: 15000 });
+                    const networks = (d.client?.networks || []).filter(x => Number.isFinite(x?.chainId));
+                    clear(box);
+                    box.appendChild(networks.length
+                        ? clientNetworksList(networks, chainId)
+                        : el('span', { class: 'r-note', text: 'No networks on record.' }));
+                    toggle.setAttribute('aria-expanded', 'true');
+                } catch {
+                    clear(box);
+                    box.appendChild(el('span', { class: 'r-note', text: 'Could not load this client’s networks.' }));
+                    // Let the next click retry.
+                    const failed = box;
+                    box = null;
+                    setTimeout(() => failed.remove(), 4000);
+                } finally {
+                    toggle.disabled = false;
+                }
+            }
+        });
+        item.appendChild(toggle);
+    } else if (n === 1) {
+        item.appendChild(el('span', { class: 'r-note', text: 'Only known on this network' }));
+    }
+    return item;
+}
+
+async function loadNetworkClients(chainId, sec) {
+    if (releases.configured === false) return;
+    let d;
+    try {
+        d = await api(`/client-releases/networks/${chainId}`, { timeoutMs: 15000 });
+    } catch (err) {
+        if (isFeedAbsent(err)) setClientFeedConfigured(false);
+        return;   // section stays hidden
+    }
+    if (openChainId !== chainId) return;
+    const clients = (Array.isArray(d.clients) ? d.clients : []).filter(c => c && (c.repo || c.names?.length));
+    if (!clients.length) return;
+    while (sec.children.length > 1) sec.removeChild(sec.lastChild);
+    const items = clients.map(c => networkClientItem(c, chainId));
+    const rest = items.slice(CLIENTS_SHOWN);
+    let extra = null;
+    let toggle = null;
+    if (rest.length) {
+        extra = el('div', { class: 'rpc-list hidden' }, rest);
+        const moreText = `Show ${rest.length} more`;
+        toggle = el('button', {
+            class: 'btn r-more', type: 'button', 'aria-expanded': 'false', text: moreText,
+            onclick: () => {
+                const open = extra.classList.toggle('hidden') === false;
+                toggle.setAttribute('aria-expanded', String(open));
+                toggle.textContent = open ? 'Show less' : moreText;
+                if (!open) toggle.scrollIntoView({ block: 'nearest' });
+            }
+        });
+    }
+    sec.appendChild(el('div', { class: 'rpc-list' }, [...items.slice(0, CLIENTS_SHOWN), extra, toggle].filter(Boolean)));
+    sec.appendChild(el('div', {
+        class: 'r-foot dim',
+        text: 'Repositories the network research ties to this chain, with releases read by chains-client-feed.'
+    }));
+    sec.classList.remove('hidden');
 }
 
 // ═══ Timeline view (GET /upgrades) ══════════════════════════════════════════

@@ -29,6 +29,7 @@ import {
 import { getLiveIncidents } from './src/sources/liveIncidents.js';
 import { getForumNews } from './src/sources/forumNews.js';
 import { getWeb3News } from './src/sources/web3News.js';
+import { getClientReleases, getNetworkClients } from './src/sources/clientFeed.js';
 import { getChainUpgrades } from './src/services/upgrades.js';
 import { getForks } from './src/services/forks.js';
 import { getProviderStats } from './src/services/providerStats.js';
@@ -481,6 +482,51 @@ export function getToolDefinitions() {
             description: 'Max articles to return (default 15, max 50)',
           },
         },
+      },
+    },
+    {
+      name: 'get_client_releases',
+      description:
+        'Get recent blockchain CLIENT software releases (geth, Nethermind, Lighthouse, op-node, …) read from their GitHub/GitLab releases and changelogs, newest first. Use for "latest version of X", "is this release mandatory", "which client release ships fork Y". `release.mandatory` = the notes say operators must upgrade; `enrichment.fork` = the hard fork the release announces (name, network, activationAt/activationBlock/activationEpoch, state). `chainsFrom: "repository"` means the chains are every network the repo serves, not ones the notes named. For fork dates across all sources prefer get_forks. Returns a capped list (default 15, max 50) with `totalMatched`.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          client: {
+            type: 'string',
+            description: 'Case-insensitive text matched against the repo slug and client name (e.g. "geth", "lighthouse")',
+          },
+          repo: {
+            type: 'string',
+            description: 'Exact repository, "owner/repo" (e.g. "ethereum/go-ethereum")',
+          },
+          chainId: {
+            type: 'number',
+            description: 'Only releases attributed to this chain ID',
+          },
+          fork: {
+            type: 'boolean',
+            description: 'true = only releases that announce a hard fork',
+          },
+          limit: {
+            type: 'number',
+            description: 'Max releases to return (default 15, max 50)',
+          },
+        },
+      },
+    },
+    {
+      name: 'get_network_clients',
+      description:
+        'List the node/client software repositories known to serve a chain (execution, consensus, node, sequencer, …), each with the kinds it plays on that chain, how many networks it serves (`networkCount`), its latest release and latest announced fork. Use for "which clients run X" and "what is the latest geth version for X". Different from get_clients, which reports what live RPC endpoints self-report.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          chainId: {
+            type: 'number',
+            description: 'The chain ID',
+          },
+        },
+        required: ['chainId'],
       },
     },
   ];
@@ -1176,6 +1222,68 @@ async function handleGetWeb3News(args) {
   }
 }
 
+const CLIENT_TOOL_DEFAULT_LIMIT = 15;
+const CLIENT_TOOL_MAX_LIMIT = 50;
+
+async function handleGetClientReleases(args) {
+  const { client, repo, chainId, fork, limit } = args ?? {};
+  if (repo != null && !/^(?!\.+\/)[A-Za-z0-9_.-]+\/(?!\.+$)[A-Za-z0-9_.-]+$/.test(String(repo))) {
+    return errorResponse('Invalid repo', 'repo must be "owner/repo"');
+  }
+  if (chainId != null && !isValidChainId(chainId)) return errorResponse('Invalid chain ID');
+  try {
+    // The feed filters repo/chain/fork; the free-text client match is done here over a wide page.
+    const result = await getClientReleases({
+      limit: 500,
+      fork: typeof fork === 'boolean' ? fork : undefined,
+      chainId: chainId ?? undefined,
+      repo: repo ?? undefined,
+    });
+    const needle = client ? String(client).toLowerCase().trim() : '';
+    const matched = needle
+      ? result.items.filter((it) => [it.release.repo, it.source.name, it.source.id, it.title]
+        .some((v) => typeof v === 'string' && v.toLowerCase().includes(needle)))
+      : result.items;
+    const capped = Math.max(1, Math.min(Number(limit) || CLIENT_TOOL_DEFAULT_LIMIT, CLIENT_TOOL_MAX_LIMIT));
+    const releases = matched.slice(0, capped).map((it) => ({
+      title: it.title,
+      url: it.url,
+      publishedAt: it.publishedAt,
+      repo: it.release.repo,
+      client: it.source.name,
+      tag: it.release.tag,
+      version: it.release.version,
+      prerelease: it.release.prerelease,
+      mandatory: it.release.mandatory,
+      chains: it.chains,
+      chainsFrom: it.chainsFrom,
+      summary: it.enrichment?.summary ?? null,
+      fork: it.enrichment?.fork ?? null,
+      ...(it.enrichment?.forks ? { forks: it.enrichment.forks } : {}),
+    }));
+    return compactResponse({
+      fetchedAt: result.fetchedAt,
+      ...(result.stale ? { stale: true } : {}),
+      count: releases.length,
+      totalMatched: matched.length,
+      truncated: matched.length > releases.length,
+      releases,
+    });
+  } catch (error) {
+    return errorResponse('Client release feed unavailable', error.message);
+  }
+}
+
+async function handleGetNetworkClients(args) {
+  const { chainId } = args ?? {};
+  if (!isValidChainId(chainId)) return errorResponse('Invalid chain ID');
+  try {
+    return compactResponse(await getNetworkClients(chainId));
+  } catch (error) {
+    return errorResponse('Client release feed unavailable', error.message);
+  }
+}
+
 async function handleGetLiveIncidents(args) {
   const { type, chainId, provider, ongoing, status, limit } = args ?? {};
   try {
@@ -1216,6 +1324,8 @@ const toolHandlers = {
   get_live_incidents: handleGetLiveIncidents,
   get_forum_news: handleGetForumNews,
   get_web3_news: handleGetWeb3News,
+  get_client_releases: handleGetClientReleases,
+  get_network_clients: handleGetNetworkClients,
   get_chain_upgrades: handleGetChainUpgrades,
   get_forks: handleGetForks,
   get_provider_stats: handleGetProviderStats,

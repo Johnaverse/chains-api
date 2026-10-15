@@ -560,6 +560,43 @@
         </div>
     </section>
 
+    <!-- ═══ View: Client releases ══════════════════════════════════════ -->
+    <section id="view-releases" class="view scroll-view" role="tabpanel" aria-label="Client releases" tabindex="0">
+        <div class="view-inner">
+            <div class="view-head">
+                <h2 class="view-title">Client releases</h2>
+                <p class="view-lead">Node and client software releases, with the hard forks their notes announce.</p>
+            </div>
+
+            <div class="toolbar">
+                <div class="toolbar-group">
+                    <span class="toolbar-label" id="lblReleaseScope">Show</span>
+                    <div class="chip-row" id="releaseScope" role="group" aria-labelledby="lblReleaseScope">
+                        <button class="chip" type="button" data-scope="all" aria-pressed="true">All releases</button>
+                        <button class="chip" type="button" data-scope="fork" aria-pressed="false">Forks only</button>
+                    </div>
+                </div>
+                <label class="toolbar-group rel-filter">
+                    <span class="toolbar-label">Chain</span>
+                    <select id="releaseChain" aria-label="Filter releases by chain">
+                        <option value="">All chains</option>
+                    </select>
+                </label>
+                <label class="toolbar-group rel-filter">
+                    <span class="toolbar-label">Client</span>
+                    <input id="releaseClient" type="search" placeholder="geth, lighthouse…" autocomplete="off"
+                        spellcheck="false" aria-label="Filter releases by client or repository">
+                </label>
+                <span class="toolbar-count" id="releaseCount"></span>
+            </div>
+
+            <div id="releaseList" class="feed-list" aria-live="polite">
+                <div class="feed-empty">Loading client releases…</div>
+            </div>
+            <p class="note" id="releaseNote"></p>
+        </div>
+    </section>
+
     <!-- ═══ Chain detail drawer ════════════════════════════════════════ -->
     <aside id="detailDrawer" class="drawer hidden" role="dialog" aria-modal="true" aria-labelledby="drawerTitle">
         <div class="drawer-scrim" id="drawerScrim"></div>

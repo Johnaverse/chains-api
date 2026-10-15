@@ -552,7 +552,9 @@ export function buildSystemPrompt(context, nowDate) {
     'exposes no chain coverage); endpointReachability there is registry data quality,',
     'NOT uptime), and documented node hardware / setup requirements per chain',
     '(get_node_requirements: CPU, memory, storage, bandwidth, OS per node role and',
-    'minimum/recommended tier, from audited project documentation).',
+    'minimum/recommended tier, from audited project documentation), and node CLIENT',
+    'software releases (get_client_releases: versions, mandatory upgrades, the fork a release',
+    'ships; get_network_clients: which client repositories serve a chain).',
     // Explicit manifest: some serving stacks render tool schemas in ways weak
     // models under-attend to; naming every tool here keeps the full toolbox
     // discoverable even then.
@@ -575,7 +577,9 @@ export function buildSystemPrompt(context, nowDate) {
     '  FORKS (which/when/still on) → get_forks; provider upgrade window or required version →',
     '  get_chain_upgrades; node setup / hardware requirements (run a node, validator, RPC or',
     '  archive node; CPU, RAM, disk, bandwidth) → get_node_requirements; counts → get_stats;',
-    '  governance → get_forum_news; ecosystem news → get_web3_news; otherwise the matching',
+    '  governance → get_forum_news; ecosystem news → get_web3_news; client software versions /',
+    '  releases → get_client_releases; which clients run a chain → get_network_clients;',
+    '  otherwise the matching',
     '  *_by_id tool.',
     '  get_forks vs get_chain_upgrades: a fork produces one event PER PROVIDER, so',
     '  get_chain_upgrades shows the same fork several times over. Use get_forks for the fork',
