@@ -209,9 +209,12 @@ export function getRepositoryInputs(nameFor = () => null) {
         scope: p.scope ?? null,
         deployment: p.deployment ?? null,
         verification: p.verification ?? null,
-        evidence: structuredClone(p.evidence ?? [])
+        evidence: structuredClone(p.evidence ?? []),
+        // The pages the figures were read from often name the client's repository (a GitHub
+        // README): the feed links client names through them too. URLs only, no requirements.
+        requirementSources: [...new Set((p.requirements ?? []).map(r => r.source).filter(s => typeof s === 'string' && s))]
       }))
-      .filter(p => p.client || p.evidence.length);
+      .filter(p => p.client || p.evidence.length || p.requirementSources.length);
     // access/notes say when a lead is repurposed or unreadable (chain 112's "operator" site is now an exchange).
     const sources = (hw?.sources ?? [])
       .map(s => ({ url: s.url ?? null, title: s.title ?? null, access: s.access ?? null, notes: s.notes ?? null }))

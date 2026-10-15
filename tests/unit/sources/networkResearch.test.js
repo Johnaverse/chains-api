@@ -406,7 +406,7 @@ describe('getRepositoryInputs (chains-client-feed registry source)', () => {
     expect(out.networks.map(n => n.chainId)).toEqual([5151, 8453]);
     const base = out.networks.find(n => n.chainId === 8453);
     expect(base.repositories).toEqual([repo]);
-    expect(base.hardware.profiles).toEqual([{ client: 'Base Reth', clientVersion: null, scope: 'exact_network', deployment: 'current', verification: 'confirmed', evidence: ['https://docs.base.org/'] }]);
+    expect(base.hardware.profiles).toEqual([{ client: 'Base Reth', clientVersion: null, scope: 'exact_network', deployment: 'current', verification: 'confirmed', evidence: ['https://docs.base.org/'], requirementSources: ['https://docs.base.org/node'] }]);
     expect(base.hardware.profiles[0]).not.toHaveProperty('requirements');
     expect(base.hardware).toMatchObject({ status: 'documented', identityStatus: 'confirmed', sources: [] });
     // A lead's qualification travels with it, so the feed can tell it from verified evidence.
