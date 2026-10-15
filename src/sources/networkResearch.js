@@ -170,6 +170,48 @@ export function getNodeHardware(chainId) {
   };
 }
 
+/**
+ * The raw repository inputs chains-client-feed builds its client registry from: per chain,
+ * the research's node/client repositories verbatim, plus the hardware research's sources and
+ * the client name, version and evidence of each profile (requirements left out — the feed
+ * only links clients to repositories). Only chains with either are listed. The research file
+ * carries no names, so `nameFor` fills them from the chain registry. The feed owns the
+ * normalisation and linking, so this stays a projection of the checked-in files.
+ */
+export function getRepositoryInputs(nameFor = () => null) {
+  const chainIds = new Set([...dataset.byChainId.keys(), ...hardware.byChainId.keys()]);
+  const networks = [];
+  for (const chainId of [...chainIds].sort((a, b) => a - b)) {
+    const research = dataset.byChainId.get(chainId);
+    const hw = hardware.byChainId.get(chainId);
+    const repositories = structuredClone(research?.repositories ?? []);
+    const profiles = (hw?.profiles ?? [])
+      // Applicability and verification travel with the link, so an unresolved or historical
+      // profile is not read as verified evidence for a client.
+      .map(p => ({
+        client: p.client ?? null,
+        clientVersion: p.clientVersion ?? null,
+        scope: p.scope ?? null,
+        deployment: p.deployment ?? null,
+        verification: p.verification ?? null,
+        evidence: structuredClone(p.evidence ?? [])
+      }))
+      .filter(p => p.client || p.evidence.length);
+    // access/notes say when a lead is repurposed or unreadable (chain 112's "operator" site is now an exchange).
+    const sources = (hw?.sources ?? [])
+      .map(s => ({ url: s.url ?? null, title: s.title ?? null, access: s.access ?? null, notes: s.notes ?? null }))
+      .filter(s => s.url);
+    if (!repositories.length && !profiles.length && !sources.length) continue;
+    networks.push({
+      chainId,
+      name: hw?.name ?? nameFor(chainId) ?? null,
+      repositories,
+      hardware: { status: hw?.status ?? null, identityStatus: hw?.identityStatus ?? null, sources, profiles }
+    });
+  }
+  return { updatedAt: dataset.updatedAt, hardwareUpdatedAt: hardware.updatedAt, count: networks.length, networks };
+}
+
 // A correction with `replaces: null` fills a missing website only; otherwise both sides
 // must parse to the same public URL (two unparseable values are not "the same").
 function stillListsReplaced(registryInfoURL, replaces) {

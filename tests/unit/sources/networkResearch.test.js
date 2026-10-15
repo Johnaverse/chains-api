@@ -10,6 +10,7 @@ import {
   getNetworkResearch,
   getNetworkResearchInfo,
   attachNetworkResearch,
+  getRepositoryInputs,
   _setNetworkResearchForTests
 } from '../../../src/sources/networkResearch.js';
 import { indexData } from '../../../src/store/indexer.js';
@@ -61,7 +62,8 @@ const HARDWARE = {
   updatedAt: '2026-10-10T16:20:12.747009+00:00',
   networks: [
     { chainId: 8453, status: 'documented', identityStatus: 'confirmed', checkedAt: '2026-10-10T09:27:13.772253+00:00', profiles: [profile] },
-    { chainId: 5151, status: 'partial', identityStatus: 'qualified', checkedAt: null, profiles: [{ ...profile, scope: 'project_family', verification: 'qualified' }] },
+    { chainId: 5151, status: 'partial', identityStatus: 'qualified', checkedAt: null, profiles: [{ ...profile, scope: 'project_family', verification: 'qualified' }],
+      sources: [{ url: 'https://lead.example/', title: 'Operator lead', access: 'repurposed', notes: 'Now an exchange.', relationship: 'x' }] },
     { chainId: 777, status: 'partial', identityStatus: 'unresolved', checkedAt: null, profiles: [] },
     { chainId: 8453, profiles: [{ ...profile, id: 'duplicate ignored' }] }
   ]
@@ -392,5 +394,36 @@ describe('queries — research reaches the API projections', () => {
     load();
     expect(getChainById(8453).forumUrl).toBe('https://gov.optimism.io');
     expect(getChainDetail(8453).research.forums.map(f => f.url)).toEqual(['https://github.com/base/web/discussions']);
+  });
+});
+
+describe('getRepositoryInputs (chains-client-feed registry source)', () => {
+  it('lists research repositories and hardware client links per chain, without requirements', () => {
+    useFixtures();
+    const out = getRepositoryInputs(id => (id === 8453 ? 'Base' : null));
+    expect(out.updatedAt).toBe(DATASET.updatedAt);
+    expect(out.networks.map(n => n.chainId)).toEqual([5151, 8453]);
+    const base = out.networks.find(n => n.chainId === 8453);
+    expect(base.repositories).toEqual([repo]);
+    expect(base.hardware.profiles).toEqual([{ client: 'Base Reth', clientVersion: null, scope: 'exact_network', deployment: 'current', verification: 'confirmed', evidence: ['https://docs.base.org/'] }]);
+    expect(base.hardware.profiles[0]).not.toHaveProperty('requirements');
+    expect(base.hardware).toMatchObject({ status: 'documented', identityStatus: 'confirmed', sources: [] });
+    // A lead's qualification travels with it, so the feed can tell it from verified evidence.
+    const lead = out.networks.find(n => n.chainId === 5151).hardware;
+    expect(lead.sources).toEqual([{ url: 'https://lead.example/', title: 'Operator lead', access: 'repurposed', notes: 'Now an exchange.' }]);
+    expect(lead.profiles[0]).toMatchObject({ scope: 'project_family', verification: 'qualified' });
+    expect(out.count).toBe(out.networks.length);
+  });
+
+  it('prefers the hardware name, then the registry name', () => {
+    useFixtures();
+    const out = getRepositoryInputs(id => `registry-${id}`);
+    expect(out.networks.find(n => n.chainId === 8453).name).toBe('registry-8453');
+  });
+
+  it('returns copies, so callers cannot mutate the datasets', () => {
+    useFixtures();
+    getRepositoryInputs().networks.find(n => n.chainId === 8453).repositories[0].url = 'x';
+    expect(getRepositoryInputs().networks.find(n => n.chainId === 8453).repositories[0].url).toBe(repo.url);
   });
 });

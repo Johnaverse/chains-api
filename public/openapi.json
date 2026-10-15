@@ -639,6 +639,223 @@
         }
       }
     },
+    "/repositories": {
+      "get": {
+        "tags": [
+          "Clients"
+        ],
+        "description": "Raw node/client repository research per chain, for chains-client-feed's registry. Takes no query parameters.",
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/client-releases": {
+      "get": {
+        "tags": [
+          "Clients"
+        ],
+        "description": "Blockchain client releases and changelog entries from chains-client-feed, newest first, with any hard fork the notes announce (`enrichment.fork`). 503 when the feed is not configured.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "boolean"
+            },
+            "in": "query",
+            "name": "fork",
+            "required": false,
+            "description": "true = only releases announcing a fork; false = only those that do not"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "in": "query",
+            "name": "chainId",
+            "required": false,
+            "description": "Chain ID"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^((github|gitlab):)?(?!\\.+/)[A-Za-z0-9_.-]{1,100}/(?!\\.+$)[A-Za-z0-9_.-]{1,100}$",
+              "errorMessage": {
+                "pattern": "repo must be owner/repo"
+              }
+            },
+            "in": "query",
+            "name": "repo",
+            "required": false,
+            "description": "Only this repository (`owner/repo` = GitHub, or `github:` / `gitlab:` prefixed)"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 40,
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}([T ][0-9:.]+(Z|[+-]\\d{2}:?\\d{2})?)?$",
+              "errorMessage": {
+                "pattern": "since must be an ISO date or date-time"
+              }
+            },
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "description": "Only releases published at or after this ISO date/time"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/client-releases/clients": {
+      "get": {
+        "tags": [
+          "Clients"
+        ],
+        "description": "Client registry from chains-client-feed: repositories and name-only clients, filtered by text, kind or chain.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 100
+            },
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "description": "Substring of the repo slug or any client name"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z0-9_-]{1,40}$"
+            },
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "description": "Repository kind (e.g. execution, consensus, node)"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "in": "query",
+            "name": "chainId",
+            "required": false,
+            "description": "Chain ID"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/client-releases/clients/{host}/{owner}/{repo}": {
+      "get": {
+        "tags": [
+          "Clients"
+        ],
+        "description": "One client repository with every network it serves (reverse lookup), its latest release and latest fork.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "github",
+                "gitlab"
+              ]
+            },
+            "in": "path",
+            "name": "host",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^(?!\\.+$)[A-Za-z0-9_.-]{1,100}$",
+              "errorMessage": {
+                "pattern": "Invalid owner"
+              }
+            },
+            "in": "path",
+            "name": "owner",
+            "required": true
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^(?!\\.+$)[A-Za-z0-9_.-]{1,100}$",
+              "errorMessage": {
+                "pattern": "Invalid repo"
+              }
+            },
+            "in": "path",
+            "name": "repo",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/client-releases/networks/{chainId}": {
+      "get": {
+        "tags": [
+          "Clients"
+        ],
+        "description": "Clients known to serve a chain, each with the kinds it plays there, its latest release and latest fork.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "in": "path",
+            "name": "chainId",
+            "required": true,
+            "description": "Chain ID"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
     "/providers/stats": {
       "get": {
         "tags": [

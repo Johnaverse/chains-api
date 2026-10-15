@@ -439,6 +439,7 @@ export function sourceRank(event) {
   const feed = event?.feed ?? 'status';
   if (feed === 'news') return event.weight === 'primary' ? 0 : SECONDARY_RANK;
   if (feed === 'status') return event.statusPage?.kind === 'rpc-provider' ? 1 : 0;
+  // forum, and release: a client team's own release notes are the network's schedule.
   return 0;
 }
 
