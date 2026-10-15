@@ -554,7 +554,9 @@ export function buildSystemPrompt(context, nowDate) {
     '(get_node_requirements: CPU, memory, storage, bandwidth, OS per node role and',
     'minimum/recommended tier, from audited project documentation), and node CLIENT',
     'software releases (get_client_releases: versions, mandatory upgrades, the fork a release',
-    'ships; get_network_clients: which client repositories serve a chain).',
+    'ships, filterable by since/until dates; get_network_clients: which client repositories',
+    'serve a chain; get_client_activity: how actively a client is developed, its open',
+    'critical/bug-labeled issues and security advisories).',
     // Explicit manifest: some serving stacks render tool schemas in ways weak
     // models under-attend to; naming every tool here keeps the full toolbox
     // discoverable even then.
@@ -579,6 +581,7 @@ export function buildSystemPrompt(context, nowDate) {
     '  archive node; CPU, RAM, disk, bandwidth) → get_node_requirements; counts → get_stats;',
     '  governance → get_forum_news; ecosystem news → get_web3_news; client software versions /',
     '  releases → get_client_releases; which clients run a chain → get_network_clients;',
+    '  is a client maintained / critical issues / advisories → get_client_activity;',
     '  otherwise the matching',
     '  *_by_id tool.',
     '  get_forks vs get_chain_upgrades: a fork produces one event PER PROVIDER, so',

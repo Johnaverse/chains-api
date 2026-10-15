@@ -133,6 +133,38 @@ describe('GET /client-releases/clients', () => {
     expect(res.json().error).toMatch(/kind/);
   });
 
+  it('passes until through and rejects a malformed one', async () => {
+    proxyFetch.mockResolvedValue(json({ totalMatched: 0, count: 0, truncated: false, items: [] }));
+    expect((await get('/client-releases?since=2026-09-01&until=2026-09-30')).statusCode).toBe(200);
+    expect(Object.fromEntries(new URL(proxyFetch.mock.calls[0][0]).searchParams)).toMatchObject({ since: '2026-09-01', until: '2026-09-30' });
+    expect((await get('/client-releases?until=yesterday')).statusCode).toBe(400);
+  });
+
+  it('carries the full activity on one client and the compact one on list rows', async () => {
+    const full = {
+      refreshedAt: '2026-10-15T00:00:00Z', source: 'github', archived: false, pushedAt: '2026-10-14T00:00:00Z', stars: 9,
+      commits: { days30: 40, days90: 120, branch: 'master' }, mergedPullRequests: { days30: 30, days90: 90, atLeast: false }, openPullRequests: 5,
+      issues: { open: 211, openedDays30: 42, openedAtLeast: false, bug: 65, critical: 2, criticalLabels: [{ name: 'C-security', open: 2 }], countsExact: true },
+      advisories: { total: 1, last365Days: 1, bySeverity: { high: 1 }, latest: [{ id: 'GHSA-x', severity: 'high', publishedAt: '2026-10-10T00:00:00Z', summary: 's', url: 'u', extra: 'dropped' }] },
+      level: 'active', attention: { level: 'high', reasons: ['r'] }, junk: 1
+    };
+    proxyFetch.mockResolvedValue(json({ client: { ...geth, role: 'client' }, activity: full, poll: { status: 'ok' } }));
+    const one = (await get('/client-releases/clients/github/ethereum/go-ethereum')).json().client;
+    expect(one.role).toBe('client');
+    expect(one.activity).toMatchObject({ level: 'active', issues: { bug: 65, critical: 2, criticalLabels: [{ name: 'C-security', open: 2 }] }, attention: { level: 'high', reasons: ['r'] } });
+    expect(one.activity.advisories.bySeverity).toEqual({ critical: 0, high: 1, medium: 0, low: 0 });
+    expect(one.activity.advisories.latest[0]).not.toHaveProperty('extra');
+    expect(one.activity).not.toHaveProperty('junk');
+
+    _resetClientFeedCacheForTests();
+    proxyFetch.mockResolvedValue(json({ totalMatched: 1, count: 1, truncated: false, clients: [{ ...geth, activity: { level: 'active', attention: 'high', commits30: 40, merged30: 30, openIssues: 211, criticalIssues: 2, advisories365: 1, refreshedAt: '2026-10-15T00:00:00Z' } }] }));
+    const row = (await get('/client-releases/clients?q=geth')).json().clients[0];
+    expect(row.activity).toEqual({ level: 'active', attention: 'high', commits30: 40, merged30: 30, merged30AtLeast: false, openIssues: 211, criticalIssues: 2, advisories365: 1, refreshedAt: '2026-10-15T00:00:00Z' });
+    _resetClientFeedCacheForTests();
+    proxyFetch.mockResolvedValue(json({ clients: [geth] }));
+    expect((await get('/client-releases/clients?q=geth')).json().clients[0].activity).toBeNull();
+  });
+
   it('rejects query parameters on the lookup routes', async () => {
     expect((await get('/client-releases/clients/github/ethereum/go-ethereum?chainId=1')).statusCode).toBe(400);
     expect((await get('/client-releases/networks/1?kind=consensus')).statusCode).toBe(400);

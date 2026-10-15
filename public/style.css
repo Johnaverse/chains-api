@@ -1862,6 +1862,14 @@ a.tlx-row-title:hover { color: var(--accent-hover); }
     color: var(--ink-3); background: none;
     border: 1px dashed var(--rule-strong); padding: 0 5px;
 }
+/* Client activity (drawer Clients rows). Development level is plain text in a muted pill;
+   attention carries colour only with its label (critical ink for high, warning for elevated),
+   and its reasons are in the title and the line beside it. */
+.pill-attention-high { color: var(--critical-text); background: none; border: 1px solid var(--critical); padding: 0 5px; }
+.pill-attention-elevated { color: var(--warn-text); background: none; border: 1px solid var(--warn); padding: 0 5px; }
+.client-activity { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px var(--sp-2); }
+.rel-date { min-width: 0; }
+.rel-date input[type="date"] { min-width: 0; max-width: 150px; }
 .release-fork {
     display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px var(--sp-2);
     margin-top: var(--sp-2); font-size: var(--fs-200); color: var(--ink-2);

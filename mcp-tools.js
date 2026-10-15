@@ -29,7 +29,7 @@ import {
 import { getLiveIncidents } from './src/sources/liveIncidents.js';
 import { getForumNews } from './src/sources/forumNews.js';
 import { getWeb3News } from './src/sources/web3News.js';
-import { getClientReleases, getFeedClients, getNetworkClients } from './src/sources/clientFeed.js';
+import { getClientReleases, getFeedClient, getFeedClients, getNetworkClients, ClientFeedNotFoundError } from './src/sources/clientFeed.js';
 import { getChainUpgrades } from './src/services/upgrades.js';
 import { getForks } from './src/services/forks.js';
 import { getProviderStats } from './src/services/providerStats.js';
@@ -507,6 +507,14 @@ export function getToolDefinitions() {
             type: 'boolean',
             description: 'true = only releases that announce a hard fork',
           },
+          since: {
+            type: 'string',
+            description: 'Only releases published on/after this ISO date or date-time (e.g. "2026-09-01")',
+          },
+          until: {
+            type: 'string',
+            description: 'Only releases published on/before this ISO date or date-time; a bare date includes that whole day (UTC)',
+          },
           limit: {
             type: 'number',
             description: 'Max releases to return (default 15, max 50)',
@@ -515,9 +523,31 @@ export function getToolDefinitions() {
       },
     },
     {
+      name: 'get_client_activity',
+      description:
+        'How actively a node CLIENT is developed and how much of its open work is flagged as critical: default-branch commits and merged pull requests in the last 30/90 days, open issues and PRs, issues opened in 30 days, open issues labeled as bugs or as critical/security/priority (with the label names), published GitHub security advisories (count by severity, newest three), a development `level` (active / moderate / low / dormant / archived) and an `attention` level (high / elevated / normal) with its reasons. Use for "is X still maintained", "how active is X", "does X have critical open issues or recent security advisories". Label counts say what maintainers labeled, not a code audit — say so. Refreshed daily; `activity: null` means not collected yet. Give `repo` for one repository, or `client` (a name such as "lighthouse") for up to `limit` matching repositories.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          client: {
+            type: 'string',
+            description: 'Client name or repo text, e.g. "geth", "lighthouse", "op-node"',
+          },
+          repo: {
+            type: 'string',
+            description: 'Exact repository: "owner/repo" for GitHub, or "github:owner/repo" / "gitlab:owner/repo"',
+          },
+          limit: {
+            type: 'number',
+            description: 'Max repositories for a `client` search (default 3, max 5)',
+          },
+        },
+      },
+    },
+    {
       name: 'get_network_clients',
       description:
-        'List the node/client software repositories known to serve a chain (execution, consensus, node, sequencer, …), each with the kinds it plays on that chain, how many networks it serves (`networkCount`), its latest release and latest announced fork. Use for "which clients run X" and "what is the latest geth version for X". Different from get_clients, which reports what live RPC endpoints self-report.',
+        'List the node/client software repositories known to serve a chain (execution, consensus, node, sequencer, …), each with the kinds it plays on that chain, how many networks it serves (`networkCount`), its latest release and latest announced fork, and a compact `activity` (development level, attention level, commits/merged PRs in 30 days, open and critical-labeled issues, advisories in the last year; null until collected). Use for "which clients run X" and "what is the latest geth version for X"; for one client\'s full activity call get_client_activity. Different from get_clients, which reports what live RPC endpoints self-report.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1242,6 +1272,25 @@ const matchesClient = (needle) => (it) => [it.release.repo, it.source.name, it.s
  * text match over one global page would miss a client whose latest release is older than the
  * newest 500. Null when the registry knows no repository by that name.
  */
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}([T ][0-9:.]+(Z|[+-]\d{2}:?\d{2})?)?$/;
+
+/**
+ * Checks a since/until pair the way the feed reads it: both inclusive, a bare `until` date
+ * through the end of that day. `{error}` for a malformed bound or an inverted range.
+ */
+function releaseRange(since, until) {
+  for (const [name, value] of [['since', since], ['until', until]]) {
+    if (value != null && (!ISO_DATE.test(String(value)) || !Number.isFinite(Date.parse(value)))) {
+      return { error: `${name} must be an ISO date or date-time, e.g. "2026-09-01"` };
+    }
+  }
+  if (since != null && until != null) {
+    const end = Date.parse(until) + (/^\d{4}-\d{2}-\d{2}$/.test(String(until)) ? 24 * 60 * 60 * 1000 : 1);
+    if (end <= Date.parse(since)) return { error: 'until must not be before since' };
+  }
+  return {};
+}
+
 async function releasesForClient(needle, filters, limit) {
   const registry = await getFeedClients({ q: needle, limit: CLIENT_TOOL_MAX_REPOS + 1 });
   const ids = [...new Set(registry.clients.map((c) => c.id).filter(Boolean))];
@@ -1262,14 +1311,21 @@ async function releasesForClient(needle, filters, limit) {
 }
 
 async function handleGetClientReleases(args) {
-  const { client, repo, chainId, fork, limit } = args ?? {};
+  const { client, repo, chainId, fork, limit, since, until } = args ?? {};
   if (repo != null && !REPO_ARG.test(String(repo))) {
     return errorResponse('Invalid repo', 'repo must be "owner/repo", "github:owner/repo" or "gitlab:owner/repo"');
   }
   if (chainId != null && !isValidChainId(chainId)) return errorResponse('Invalid chain ID');
+  const range = releaseRange(since, until);
+  if (range.error) return errorResponse('Invalid date range', range.error);
   const capped = Math.max(1, Math.min(Number(limit) || CLIENT_TOOL_DEFAULT_LIMIT, CLIENT_TOOL_MAX_LIMIT));
   const needle = client ? String(client).toLowerCase().trim() : '';
-  const filters = { fork: typeof fork === 'boolean' ? fork : undefined, chainId: chainId ?? undefined };
+  const filters = {
+    fork: typeof fork === 'boolean' ? fork : undefined,
+    chainId: chainId ?? undefined,
+    since: since ?? undefined,
+    until: until ?? undefined,
+  };
   try {
     let result = null;
     let matched;
@@ -1319,6 +1375,68 @@ async function handleGetClientReleases(args) {
       truncated: totalMatched == null ? (matched.length > releases.length || null) : totalMatched > releases.length,
       ...(note ? { note } : {}),
       releases,
+    });
+  } catch (error) {
+    return errorResponse('Client release feed unavailable', error.message);
+  }
+}
+
+const ACTIVITY_TOOL_DEFAULT_LIMIT = 3;
+const ACTIVITY_TOOL_MAX_LIMIT = 5;
+
+/** `github:owner/repo` / `owner/repo` / `gitlab:owner/repo` -> the feed's lookup parts. */
+function repoParts(value) {
+  const match = String(value).match(/^(?:(github|gitlab):)?([^/]+)\/(.+)$/i);
+  return { host: (match[1] ?? 'github').toLowerCase(), owner: match[2], repo: match[3] };
+}
+
+async function handleGetClientActivity(args) {
+  const { client, repo, limit } = args ?? {};
+  if (repo == null && !(typeof client === 'string' && client.trim())) {
+    return errorResponse('repo or client is required', 'Pass repo ("owner/repo") or a client name');
+  }
+  if (repo != null && !REPO_ARG.test(String(repo))) {
+    return errorResponse('Invalid repo', 'repo must be "owner/repo", "github:owner/repo" or "gitlab:owner/repo"');
+  }
+  const capped = Math.max(1, Math.min(Number(limit) || ACTIVITY_TOOL_DEFAULT_LIMIT, ACTIVITY_TOOL_MAX_LIMIT));
+  try {
+    let ids;
+    let more = false;
+    if (repo != null) {
+      const { host, owner, repo: name } = repoParts(repo);
+      ids = [`${host}:${owner}/${name}`];
+    } else {
+      // Name-only clients (`name:…`) have no repository to measure.
+      const registry = await getFeedClients({ q: client.trim(), limit: capped + 5 });
+      const withRepo = registry.clients.filter((c) => c.id && !c.id.startsWith('name:'));
+      ids = withRepo.slice(0, capped).map((c) => c.id);
+      more = withRepo.length > capped || registry.truncated === true;
+    }
+    const found = await Promise.all(ids.map(async (id) => {
+      const { host, owner, repo: name } = repoParts(id);
+      try {
+        return (await getFeedClient(host, owner, name)).client;
+      } catch (error) {
+        if (error instanceof ClientFeedNotFoundError) return null;
+        throw error;
+      }
+    }));
+    const clients = found.filter(Boolean).map((c) => ({
+      id: c.id,
+      repo: c.repo,
+      url: c.url,
+      names: c.names,
+      kinds: c.kinds,
+      role: c.role,
+      networkCount: c.networkCount,
+      latestRelease: c.latestRelease,
+      activity: c.activity,
+    }));
+    return compactResponse({
+      count: clients.length,
+      ...(more ? { note: `More repositories match "${client}"; showing ${clients.length} — pass repo for a specific one.` } : {}),
+      ...(clients.length === 0 ? { message: repo != null ? `${ids[0]} is not in the client registry.` : `No client repository matches "${client}".` } : {}),
+      clients,
     });
   } catch (error) {
     return errorResponse('Client release feed unavailable', error.message);
@@ -1377,6 +1495,7 @@ const toolHandlers = {
   get_web3_news: handleGetWeb3News,
   get_client_releases: handleGetClientReleases,
   get_network_clients: handleGetNetworkClients,
+  get_client_activity: handleGetClientActivity,
   get_chain_upgrades: handleGetChainUpgrades,
   get_forks: handleGetForks,
   get_provider_stats: handleGetProviderStats,
