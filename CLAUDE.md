@@ -13,7 +13,7 @@ Chains API is a Node.js service that aggregates blockchain chain data from five 
 | `chains-status-news` | Chain + RPC-provider status pages → incidents, scheduled maintenance | `LIVE_INCIDENTS_URL` |
 | `chains-forum-news` | Official community/governance forums, keyed by chain ID | `FORUM_NEWS_URL` |
 | `chains-news` | Curated ecosystem publishers (project blogs = `primary`, news desks = `secondary`) | `WEB3_NEWS_URL` |
-| `chains-client-feed` | Blockchain client releases/changelogs → hard-fork activations; client → networks index built from `GET /repositories` | `CLIENT_FEED_URL` (optional, forks only) |
+| `chains-client-feed` | Blockchain client releases/changelogs → hard-fork activations; client → networks index built from `GET /repositories` | `CLIENT_FEED_URL` (optional): `/forks`, `/client-releases*` proxy (dashboard Releases view + chain-drawer Clients), `get_client_releases` / `get_network_clients` |
 
 Forks are the one view built from **all** feeds (plus chains-client-feed when `CLIENT_FEED_URL` is set): `src/sources/forkFeeds.js` fetches each with `?fork=true` (falling back to an unfiltered fetch where a deployment rejects the param), and every service's enrichment carries the same `fork = {name, network, activationAt, activationBlock, state}` object that `src/domain/forks.js` groups on.
 
