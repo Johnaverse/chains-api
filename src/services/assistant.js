@@ -9,7 +9,8 @@ import {
   ASSISTANT_MAX_TOOL_ITERATIONS,
   ASSISTANT_TIMEOUT_MS,
   ASSISTANT_MAX_TOKENS,
-  ASSISTANT_TOPIC_GUARD
+  ASSISTANT_TOPIC_GUARD,
+  ASSISTANT_GUARD_TIMEOUT_MS
 } from '../../config.js';
 import { proxyFetch } from '../../fetchUtil.js';
 import { logger } from '../util/logger.js';
@@ -213,9 +214,9 @@ async function llmRequest({ provider, payload, deadline, timeoutCapMs, fetchImpl
   const budget = deadline - Date.now();
   if (budget <= 0) { const err = new Error('Assistant deadline exhausted'); err.network = true; throw err; }
   // Must be an integer — AbortSignal.timeout rejects fractional delays.
-  const timeoutMs = Math.floor(timeoutCapMs
-    ? Math.max(1000, Math.min(budget * ATTEMPT_RESERVE_FRACTION, timeoutCapMs))
-    : Math.max(1000, budget));
+  const timeoutMs = Math.max(1, Math.floor(timeoutCapMs
+    ? Math.min(budget * ATTEMPT_RESERVE_FRACTION, timeoutCapMs)
+    : budget));
   let response;
   try {
     response = await fetchImpl(`${provider.url}/v1/chat/completions`, {
@@ -301,9 +302,9 @@ async function isOnTopic({ messages, deadline, fetchImpl, log, run }) {
         max_tokens: GUARD_MAX_TOKENS
       },
       deadline,
-      // The guard is optional — never let it eat the run's budget on a
-      // black-holed server.
-      timeoutCapMs: 15000,
+      // Allow slower classifiers, while reserving budget for the main loop
+      // (and fallback) using llmRequest's remaining-budget fraction.
+      timeoutCapMs: ASSISTANT_GUARD_TIMEOUT_MS,
       fetchImpl
     });
     incCounter('chains_api_assistant_llm_calls_total', { outcome: 'ok', provider: provider.name });

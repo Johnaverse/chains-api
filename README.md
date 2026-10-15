@@ -354,6 +354,7 @@ ASSISTANT_LLM_URL=http://localhost:11434 npm start
 - `ASSISTANT_TIMEOUT_MS`: Overall per-request deadline (default: 60000)
 - `ASSISTANT_MAX_TOKENS`: `max_tokens` per LLM call (default: 1024)
 - `ASSISTANT_RATE_LIMIT_MAX`: Maximum `/assistant/chat` requests per window per IP (default: 10)
+- `ASSISTANT_GUARD_TIMEOUT_MS`: Topic-classifier request cap (default: `60000` ms; positive safe integer, clamped to `120000`; invalid/nonpositive values use the default). Each guard attempt also uses at most 60% of the remaining overall deadline, preserving time for the answer/fallback. This does not change classification prompts, refusal rules, or existing fail-open behavior on classifier errors.
 - `ASSISTANT_TOPIC_GUARD`: Pre-classify each question with a cheap extra LLM call and refuse off-topic ones before the tool loop runs; fails open if the classifier misbehaves (default: `true`)
 - `ASSISTANT_FALLBACK_LLM_URL` / `ASSISTANT_FALLBACK_MODEL` / `ASSISTANT_FALLBACK_LLM_API_KEY`: Optional backup provider — see below.
 

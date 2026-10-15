@@ -244,6 +244,12 @@ export const ASSISTANT_TOOL_RESULT_MAX_CHARS = parseIntEnv('ASSISTANT_TOOL_RESUL
 // off-topic questions before the (expensive) tool loop runs. Fails open —
 // classifier trouble never blocks on-topic questions.
 export const ASSISTANT_TOPIC_GUARD = parseBooleanEnv('ASSISTANT_TOPIC_GUARD', true);
+// Invalid, zero or excessive settings cannot remove the guard's time bound.
+// The effective request timeout also reserves 40% of the remaining run budget.
+const guardTimeoutMs = Number(process.env.ASSISTANT_GUARD_TIMEOUT_MS || 60000);
+export const ASSISTANT_GUARD_TIMEOUT_MS = Number.isSafeInteger(guardTimeoutMs) && guardTimeoutMs > 0
+  ? Math.min(guardTimeoutMs, 120000)
+  : 60000;
 export const ASSISTANT_SYNC_WAIT_MS = parseIntEnv('ASSISTANT_SYNC_WAIT_MS', 8000);
 export const ASSISTANT_JOB_TTL_MS = parseIntEnv('ASSISTANT_JOB_TTL_MS', 600000);
 export const ASSISTANT_MAX_CONCURRENT_JOBS = parseIntEnv('ASSISTANT_MAX_CONCURRENT_JOBS', 4);
