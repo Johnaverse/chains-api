@@ -29,6 +29,7 @@ import {
 import { getLiveIncidents } from './src/sources/liveIncidents.js';
 import { getForumNews } from './src/sources/forumNews.js';
 import { getWeb3News } from './src/sources/web3News.js';
+import { getClientReleases, getFeedClients, getNetworkClients } from './src/sources/clientFeed.js';
 import { getChainUpgrades } from './src/services/upgrades.js';
 import { getForks } from './src/services/forks.js';
 import { getProviderStats } from './src/services/providerStats.js';
@@ -419,7 +420,7 @@ export function getToolDefinitions() {
     {
       name: 'get_forks',
       description:
-        'Get FORKS as entities: one entry per fork per network, grouped across ALL feeds — status pages (the network\'s and each provider\'s maintenance windows), governance/research forums, and news (the project\'s own blog = primary, outlets = secondary). A fork produces many events (each provider posts its own maintenance window), so get_chain_upgrades shows the same fork repeatedly — this collapses them. Use for "what forks are coming", "when does X fork", "is the fork still on". Only consensus forks / network upgrades are listed by default (`kind: "fork"`): ordinary software updates that merely carried a fork marker — client releases, RPC patches, provider infrastructure work — are `kind: "upgrade"` and appear only with include="upgrades"; `byKind` counts both. Each fork carries: `name` (codename such as "Protocol 28", or null when the text marked a fork without naming one), `network` (plus `networks` when one set of events covered several), `phase`, `activationAt` WITH `activationEvidence` and `activationPrecision` (`day` = only the date was given, not the time — say "on <date>", never a time of day), `activationBlock`, `state`, `sources` (which status pages, forums or outlets reported it — more than one means independent confirmation), `feeds` (status / forum / news) and `events`, each with its own claimed `activationAt`. The fork\'s activationAt is the strongest claim (the network or a primary source over secondary news), except that newer non-secondary sources moving the date by more than a day are treated as a reschedule; when `feeds` is only ["news"], attribute it ("CoinDesk reports…") rather than stating it as the network\'s schedule. A top-level `feeds` says which feeds answered — if one is not ok, say forks from it may be missing or out of date (`stale: true` means its forks are from an earlier fetch). NEVER read activationAt without activationEvidence: `stated` is a time a source actually gave; `observed` is derived from a block height already reached; `estimated` is a height still ahead multiplied by the average block rate, so it is an order-of-magnitude answer and must be described as approximate, never as a schedule. `phase` is upcoming / past / cancelled / unscheduled — `unscheduled` means no source has named a date (or the only stated date was implausible and dropped — see the event `implausibleActivationAt`), so say the date is not announced rather than implying one; `completed` forks are `past` even with no date, and `cancelled` only ever appears when a source said so (a quietly dropped fork stays upcoming until its date passes). Pass scheduledOnly=true for a calendar view. Returns a capped list with totalMatched/truncated plus byPhase counts over everything matched — quote byPhase for totals rather than counting the rows shown.',
+        'Get FORKS as entities: one entry per fork per network, grouped across ALL feeds — status pages (the network\'s and each provider\'s maintenance windows), governance/research forums, news (the project\'s own blog = primary, outlets = secondary), and client release notes (feed `release`: the client team\'s own release/changelog announcing the activation, primary evidence) where that feed is configured. A fork produces many events (each provider posts its own maintenance window), so get_chain_upgrades shows the same fork repeatedly — this collapses them. Use for "what forks are coming", "when does X fork", "is the fork still on". Only consensus forks / network upgrades are listed by default (`kind: "fork"`): ordinary software updates that merely carried a fork marker — client releases, RPC patches, provider infrastructure work — are `kind: "upgrade"` and appear only with include="upgrades"; `byKind` counts both. Each fork carries: `name` (codename such as "Protocol 28", or null when the text marked a fork without naming one), `network` (plus `networks` when one set of events covered several), `phase`, `activationAt` WITH `activationEvidence` and `activationPrecision` (`day` = only the date was given, not the time — say "on <date>", never a time of day), `activationBlock`, `state`, `sources` (which status pages, forums or outlets reported it — more than one means independent confirmation), `feeds` (status / forum / news / release) and `events`, each with its own claimed `activationAt`. The fork\'s activationAt is the strongest claim (the network or a primary source over secondary news), except that newer non-secondary sources moving the date by more than a day are treated as a reschedule; when `feeds` is only ["news"], attribute it ("CoinDesk reports…") rather than stating it as the network\'s schedule. A top-level `feeds` says which feeds answered — if one is not ok, say forks from it may be missing or out of date (`stale: true` means its forks are from an earlier fetch). NEVER read activationAt without activationEvidence: `stated` is a time a source actually gave; `observed` is derived from a block height already reached; `estimated` is a height still ahead multiplied by the average block rate, so it is an order-of-magnitude answer and must be described as approximate, never as a schedule. `phase` is upcoming / past / cancelled / unscheduled — `unscheduled` means no source has named a date (or the only stated date was implausible and dropped — see the event `implausibleActivationAt`), so say the date is not announced rather than implying one; `completed` forks are `past` even with no date, and `cancelled` only ever appears when a source said so (a quietly dropped fork stays upcoming until its date passes). Pass scheduledOnly=true for a calendar view. Returns a capped list with totalMatched/truncated plus byPhase counts over everything matched — quote byPhase for totals rather than counting the rows shown.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -481,6 +482,51 @@ export function getToolDefinitions() {
             description: 'Max articles to return (default 15, max 50)',
           },
         },
+      },
+    },
+    {
+      name: 'get_client_releases',
+      description:
+        'Get recent blockchain CLIENT software releases (geth, Nethermind, Lighthouse, op-node, …) read from their GitHub/GitLab releases and changelogs, newest first. Use for "latest version of X", "is this release mandatory", "which client release ships fork Y". `release.mandatory` = the notes say operators must upgrade; `enrichment.fork` = the hard fork the release announces (name, network, activationAt/activationBlock/activationEpoch, state). `chainsFrom: "repository"` means the chains are every network the repo serves, not ones the notes named. For fork dates across all sources prefer get_forks. Returns a capped list (default 15, max 50) with `totalMatched` (null = completeness unknown; `note` says why — tell the user it may be partial).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          client: {
+            type: 'string',
+            description: 'Case-insensitive text matched against the repo slug and client name (e.g. "geth", "lighthouse")',
+          },
+          repo: {
+            type: 'string',
+            description: 'Exact repository: "owner/repo" for GitHub (e.g. "ethereum/go-ethereum"), or prefixed "github:owner/repo" / "gitlab:owner/repo"',
+          },
+          chainId: {
+            type: 'number',
+            description: 'Only releases attributed to this chain ID',
+          },
+          fork: {
+            type: 'boolean',
+            description: 'true = only releases that announce a hard fork',
+          },
+          limit: {
+            type: 'number',
+            description: 'Max releases to return (default 15, max 50)',
+          },
+        },
+      },
+    },
+    {
+      name: 'get_network_clients',
+      description:
+        'List the node/client software repositories known to serve a chain (execution, consensus, node, sequencer, …), each with the kinds it plays on that chain, how many networks it serves (`networkCount`), its latest release and latest announced fork. Use for "which clients run X" and "what is the latest geth version for X". Different from get_clients, which reports what live RPC endpoints self-report.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          chainId: {
+            type: 'number',
+            description: 'The chain ID',
+          },
+        },
+        required: ['chainId'],
       },
     },
   ];
@@ -1176,6 +1222,115 @@ async function handleGetWeb3News(args) {
   }
 }
 
+const CLIENT_TOOL_DEFAULT_LIMIT = 15;
+const CLIENT_TOOL_MAX_LIMIT = 50;
+// A free-text client resolves to at most this many registry repositories, each queried exactly.
+const CLIENT_TOOL_MAX_REPOS = 5;
+const CLIENT_TOOL_WINDOW = 500;
+const REPO_ARG = /^((github|gitlab):)?(?!\.+\/)[A-Za-z0-9_.-]+\/(?!\.+$)[A-Za-z0-9_.-]+$/i;
+
+const byNewest = (a, b) => (Date.parse(b.publishedAt) || 0) - (Date.parse(a.publishedAt) || 0);
+const matchesClient = (needle) => (it) => [it.release.repo, it.source.name, it.source.id, it.title]
+  .some((v) => typeof v === 'string' && v.toLowerCase().includes(needle));
+
+/**
+ * Releases of the repositories the registry ties to a client name, each fetched by repo — a
+ * text match over one global page would miss a client whose latest release is older than the
+ * newest 500. Null when the registry knows no repository by that name.
+ */
+async function releasesForClient(needle, filters, limit) {
+  const registry = await getFeedClients({ q: needle, limit: CLIENT_TOOL_MAX_REPOS + 1 });
+  const ids = [...new Set(registry.clients.map((c) => c.id).filter(Boolean))];
+  if (!ids.length) return null;
+  const pages = await Promise.all(ids.slice(0, CLIENT_TOOL_MAX_REPOS).map((repo) => getClientReleases({ ...filters, repo, limit })));
+  const items = pages.flatMap((p) => p.items).sort(byNewest);
+  const totals = pages.map((p) => p.totalMatched);
+  const reposCut = ids.length > CLIENT_TOOL_MAX_REPOS || registry.truncated === true;
+  return {
+    fetchedAt: pages.map((p) => p.fetchedAt).sort()[0],
+    stale: pages.some((p) => p.stale),
+    items,
+    // Unknown when a page had no total, or when more repositories matched than were queried.
+    totalMatched: !reposCut && totals.every((t) => t != null) ? totals.reduce((a, b) => a + b, 0) : null,
+    repos: ids.slice(0, CLIENT_TOOL_MAX_REPOS),
+    ...(reposCut && { note: `More than ${CLIENT_TOOL_MAX_REPOS} repositories match "${needle}"; only the first ${CLIENT_TOOL_MAX_REPOS} were searched — pass repo for an exact one.` }),
+  };
+}
+
+async function handleGetClientReleases(args) {
+  const { client, repo, chainId, fork, limit } = args ?? {};
+  if (repo != null && !REPO_ARG.test(String(repo))) {
+    return errorResponse('Invalid repo', 'repo must be "owner/repo", "github:owner/repo" or "gitlab:owner/repo"');
+  }
+  if (chainId != null && !isValidChainId(chainId)) return errorResponse('Invalid chain ID');
+  const capped = Math.max(1, Math.min(Number(limit) || CLIENT_TOOL_DEFAULT_LIMIT, CLIENT_TOOL_MAX_LIMIT));
+  const needle = client ? String(client).toLowerCase().trim() : '';
+  const filters = { fork: typeof fork === 'boolean' ? fork : undefined, chainId: chainId ?? undefined };
+  try {
+    let result = null;
+    let matched;
+    // totalMatched null = completeness unknown; never a count passed off as the whole.
+    let totalMatched;
+    let note;
+    if (needle && repo == null) result = await releasesForClient(needle, filters, capped);
+    if (result) {
+      matched = result.items;
+      totalMatched = result.totalMatched;
+      note = result.note;
+    } else {
+      // An exact repo, no filter, or a name the registry does not know: the feed filters what it
+      // can and the name is matched over one page, which is complete only if the feed says so.
+      result = await getClientReleases({ ...filters, limit: CLIENT_TOOL_WINDOW, repo: repo ?? undefined });
+      matched = needle ? result.items.filter(matchesClient(needle)) : result.items;
+      const windowComplete = result.truncated === false;
+      if (!needle) totalMatched = result.totalMatched ?? (windowComplete ? matched.length : null);
+      else if (windowComplete) totalMatched = matched.length;
+      else {
+        totalMatched = null;
+        note = `Matched "${client}" within the newest ${result.items.length} releases only; older ones may exist — pass repo for an exact query.`;
+      }
+    }
+    const releases = matched.slice(0, capped).map((it) => ({
+      title: it.title,
+      url: it.url,
+      publishedAt: it.publishedAt,
+      repo: it.release.repo,
+      client: it.source.name,
+      tag: it.release.tag,
+      version: it.release.version,
+      prerelease: it.release.prerelease,
+      mandatory: it.release.mandatory,
+      chains: it.chains,
+      chainsFrom: it.chainsFrom,
+      summary: it.enrichment?.summary ?? null,
+      fork: it.enrichment?.fork ?? null,
+      ...(it.enrichment?.forks ? { forks: it.enrichment.forks } : {}),
+    }));
+    return compactResponse({
+      fetchedAt: result.fetchedAt,
+      ...(result.stale ? { stale: true } : {}),
+      ...(result.repos ? { repos: result.repos } : {}),
+      count: releases.length,
+      totalMatched,
+      truncated: totalMatched == null ? (matched.length > releases.length || null) : totalMatched > releases.length,
+      ...(note ? { note } : {}),
+      releases,
+    });
+  } catch (error) {
+    return errorResponse('Client release feed unavailable', error.message);
+  }
+}
+
+async function handleGetNetworkClients(args) {
+  const { chainId } = args ?? {};
+  if (!isValidChainId(chainId)) return errorResponse('Invalid chain ID');
+  try {
+    return compactResponse(await getNetworkClients(chainId));
+  } catch (error) {
+    return errorResponse('Client release feed unavailable', error.message);
+  }
+}
+
 async function handleGetLiveIncidents(args) {
   const { type, chainId, provider, ongoing, status, limit } = args ?? {};
   try {
@@ -1216,6 +1371,8 @@ const toolHandlers = {
   get_live_incidents: handleGetLiveIncidents,
   get_forum_news: handleGetForumNews,
   get_web3_news: handleGetWeb3News,
+  get_client_releases: handleGetClientReleases,
+  get_network_clients: handleGetNetworkClients,
   get_chain_upgrades: handleGetChainUpgrades,
   get_forks: handleGetForks,
   get_provider_stats: handleGetProviderStats,

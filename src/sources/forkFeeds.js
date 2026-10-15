@@ -5,6 +5,8 @@ import {
   FORUM_NEWS_FETCH_TIMEOUT_MS,
   WEB3_NEWS_URL,
   WEB3_NEWS_FETCH_TIMEOUT_MS,
+  CLIENT_FEED_URL,
+  CLIENT_FEED_FETCH_TIMEOUT_MS,
   LIVE_INCIDENTS_CACHE_TTL_MS
 } from '../../config.js';
 import { getFeed } from './feedHttp.js';
@@ -12,7 +14,8 @@ import { logger } from '../util/logger.js';
 import { forksOf } from '../domain/forks.js';
 
 /**
- * Every fork mention across the three feed services, in one shape.
+ * Every fork mention across the feed services, in one shape: status, forum and news, plus
+ * client release notes (chains-client-feed) where CLIENT_FEED_URL is set.
  *
  * Forks used to come from the status feed alone, which missed most of them: Ethereum has no
  * status page, so Glamsterdam — announced on the EF blog (chains-news), discussed on the
@@ -30,8 +33,14 @@ const FETCH_LIMIT = 500;
 const FEEDS = [
   { kind: 'status', base: () => LIVE_INCIDENTS_URL, path: '/events', listKey: 'events', timeout: () => LIVE_INCIDENTS_FETCH_TIMEOUT_MS },
   { kind: 'forum', base: () => FORUM_NEWS_URL, path: '/news', listKey: 'news', timeout: () => FORUM_NEWS_FETCH_TIMEOUT_MS },
-  { kind: 'news', base: () => WEB3_NEWS_URL, path: '/news', listKey: 'news', timeout: () => WEB3_NEWS_FETCH_TIMEOUT_MS }
+  { kind: 'news', base: () => WEB3_NEWS_URL, path: '/news', listKey: 'news', timeout: () => WEB3_NEWS_FETCH_TIMEOUT_MS },
+  // Optional: read only when CLIENT_FEED_URL is set.
+  { kind: 'release', base: () => CLIENT_FEED_URL, path: '/releases', listKey: 'items', timeout: () => CLIENT_FEED_FETCH_TIMEOUT_MS, optional: true }
 ];
+
+// A release of a client used on this many networks or more says nothing about which of them a
+// fork is on when the notes name none: Nitro's release is not a fork of each of its 25 chains.
+const MAX_REPOSITORY_CHAINS = 3;
 
 let cache = { fetchedAt: 0, failedAt: 0, mentions: null, feeds: {} };
 let inflight = null;
@@ -72,7 +81,8 @@ export async function getForkMentions() {
 }
 
 async function refresh() {
-  const results = await Promise.all(FEEDS.map(async (feed) => {
+  const active = FEEDS.filter((feed) => !feed.optional || feed.base());
+  const results = await Promise.all(active.map(async (feed) => {
     try {
       return { feed, ...(await fetchFeed(feed)) };
     } catch (err) {
@@ -129,7 +139,8 @@ function snapshot() {
 }
 
 async function fetchFeed(feed) {
-  const url = `${feed.base()}${feed.path}?limit=${FETCH_LIMIT}`;
+  // `http://feed:3000/` + `/releases` must not become `//releases`.
+  const url = `${feed.base().replace(/\/+$/, '')}${feed.path}?limit=${FETCH_LIMIT}`;
   const get = (u) => getFeed(u, feed.timeout());
   let filtered = Date.now() >= (forkParamRejectedUntil[feed.kind] ?? 0);
   let response = filtered ? await get(`${url}&fork=true`) : null;
@@ -181,6 +192,10 @@ export function toMention(kind, it) {
 function mentionOf(kind, it, fork) {
   const enrichment = it.enrichment;
   const source = kind === 'status' ? it.statusPage : kind === 'forum' ? it.forum : it.source;
+  // A client release attributed to the repository's networks rather than to ones its notes
+  // name only keeps them when they can be meant together.
+  const chains = (it.chains ?? []).filter((c) => Number.isFinite(c?.chainId));
+  const unnamed = kind === 'release' && it.chainsFrom === 'repository' && chains.length >= MAX_REPOSITORY_CHAINS;
   const strings = (list) => (Array.isArray(list) ? list.filter((n) => typeof n === 'string') : []);
   return {
     feed: kind,
@@ -189,8 +204,9 @@ function mentionOf(kind, it, fork) {
     publishedAt: it.publishedAt ?? null,
     updatedAt: it.updatedAt ?? null,
     status: it.status ?? null,
-    chains: (it.chains ?? []).filter((c) => Number.isFinite(c?.chainId)).map((c) => ({ chainId: c.chainId })),
+    chains: unnamed ? [] : chains.map((c) => ({ chainId: c.chainId })),
     statusPage: { id: source?.id ?? null, name: source?.name ?? null, kind: kind === 'status' ? (source?.kind ?? null) : kind },
+    ...(kind === 'release' && it.release ? { release: { repo: it.release.repo ?? null, version: it.release.version ?? null, mandatory: it.release.mandatory === true } } : {}),
     // Only chains-news grades its outlets (primary = the project's own channel).
     weight: kind === 'news' ? (source?.weight ?? null) : null,
     enrichment: {

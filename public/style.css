@@ -1849,3 +1849,33 @@ a.tlx-row-title:hover { color: var(--accent-hover); }
 .drawer-open .data-table thead th { position: static; z-index: auto; }
 /* Keep a scroll gesture inside the drawer from chaining to the page behind it. */
 .drawer-panel { overscroll-behavior: contain; }
+
+/* ═══ Client releases (Activity → Releases, drawer Clients section) ══════════════
+   Same card anatomy as the news/incident lists. The two release badges are the only
+   colour here and both carry data: mandatory is the warning ink with a border (an
+   operator must act), pre-release is muted with a dashed outline (not for production). */
+.pill-mandatory {
+    color: var(--warn-text); background: none;
+    border: 1px solid var(--warn); padding: 0 5px;
+}
+.pill-prerelease {
+    color: var(--ink-3); background: none;
+    border: 1px dashed var(--rule-strong); padding: 0 5px;
+}
+.release-fork {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px var(--sp-2);
+    margin-top: var(--sp-2); font-size: var(--fs-200); color: var(--ink-2);
+}
+.release-fork-name { font-weight: 600; color: var(--ink-1); }
+.release-fork-when { font-variant-numeric: tabular-nums; }
+.rel-filter select, .rel-filter input {
+    background: var(--surface-2); border: 1px solid var(--rule); border-radius: var(--r-sm);
+    color: var(--ink-1); font-size: var(--fs-200); padding: 4px var(--sp-2); outline: none;
+}
+.rel-filter select { max-width: 220px; cursor: pointer; }
+.rel-filter input { width: 180px; }
+.rel-filter select:focus-visible, .rel-filter input:focus-visible { border-color: var(--accent); outline: 2px solid var(--focus); outline-offset: 1px; }
+@media (max-width: 760px) {
+    .rel-filter { flex: 1 1 100%; }
+    .rel-filter select, .rel-filter input { flex: 1; max-width: none; width: auto; min-width: 0; }
+}

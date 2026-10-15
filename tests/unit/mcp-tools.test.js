@@ -229,10 +229,10 @@ describe('MCP Tools - Shared Module', () => {
   });
 
   describe('getToolDefinitions', () => {
-    it('should return an array of 28 tools', () => {
+    it('should return an array of 30 tools', () => {
       const tools = getToolDefinitions();
       expect(Array.isArray(tools)).toBe(true);
-      expect(tools.length).toBe(28);
+      expect(tools.length).toBe(30);
     });
 
     it('should include all expected tool names', () => {
@@ -254,6 +254,8 @@ describe('MCP Tools - Shared Module', () => {
       expect(names).toContain('get_clients');
       expect(names).toContain('get_live_incidents');
       expect(names).toContain('get_forum_news');
+      expect(names).toContain('get_client_releases');
+      expect(names).toContain('get_network_clients');
     });
 
     it('should require chainId for traverse_relations', () => {

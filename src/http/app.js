@@ -43,6 +43,8 @@ import { scalingRoutes } from './routes/scaling.js';
 import { statusPagesRoutes } from './routes/statusPages.js';
 import { upgradesRoutes } from './routes/upgrades.js';
 import { forksRoutes } from './routes/forks.js';
+import { repositoriesRoutes } from './routes/repositories.js';
+import { clientReleasesRoutes } from './routes/clientReleases.js';
 import { providersRoutes } from './routes/providers.js';
 import { feedbackRoutes } from './routes/feedback.js';
 import { adminRoutes } from './routes/admin.js';
@@ -103,6 +105,8 @@ const TAG_BY_SEGMENT = {
   slip44: 'SLIP-44',
   'rpc-monitor': 'RPC Monitor',
   clients: 'Clients',
+  repositories: 'Clients',
+  'client-releases': 'Clients',
   scaling: 'Scaling',
   'status-pages': 'Status Pages',
   keywords: 'Keywords',
@@ -317,6 +321,8 @@ export async function buildApp(options = {}) {
   await fastify.register(statusPagesRoutes);
   await fastify.register(upgradesRoutes);
   await fastify.register(forksRoutes);
+  await fastify.register(repositoriesRoutes);
+  await fastify.register(clientReleasesRoutes);
   await fastify.register(providersRoutes);
   await fastify.register(feedbackRoutes);
   await fastify.register(metricsRoute);
