@@ -311,6 +311,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initOverviewControls();
     initNewsControls();
     initReleaseControls();
+    initReleaseRefresh();
     initChainsTable();
     initAppbarHeight();
     initResizeHandling();
@@ -5466,6 +5467,9 @@ const releases = {
     loading: {},
     error: {},
     stale: {},
+    // Per query: the last answer (to redraw only on change) and when it arrived.
+    signature: {},
+    loadedAt: {},
     scope: 'all', chain: '', client: '', from: '', to: '',
     shown: null
 };
@@ -5531,13 +5535,21 @@ function initReleaseControls() {
 }
 
 function ensureReleasesView() {
-    loadReleases();
+    // An answer under a minute old is as fresh as the API's cache: show it instead of re-asking
+    // (opening the view, and the page's double URL-state pass, both land here).
+    const loadedAt = releases.loadedAt[releaseKey()] ?? 0;
+    if (Date.now() - loadedAt >= RELEASE_REFRESH_MS || releases.error[releaseKey()]) loadReleases();
     renderReleaseList();
 }
 
 // Re-entering the view, a scope or a date range revalidates (the proxy caches upstream); only
 // a request already in flight is not repeated. Cached items keep rendering meanwhile.
-async function loadReleases() {
+// While the Releases view is visible it re-asks every minute (the API caches the feed for as
+// long), so a new release appears without a reload. A refresh is quiet: it redraws only when the
+// answer changed, and a failed one keeps the list on screen.
+const RELEASE_REFRESH_MS = 60000;
+
+async function loadReleases({ quiet = false } = {}) {
     const key = releaseKey();
     if (releases.loading[key]) return;
     if (releases.from && releases.to && releases.to < releases.from) {
@@ -5546,7 +5558,8 @@ async function loadReleases() {
         return;
     }
     releases.loading[key] = true;
-    releases.error[key] = false;
+    if (!quiet) releases.error[key] = false;
+    let changed = true;
     try {
         const q = new URLSearchParams({ limit: String(RELEASE_FETCH_LIMIT) });
         if (releases.scope === 'fork') q.set('fork', 'true');
@@ -5554,19 +5567,40 @@ async function loadReleases() {
         // A bare date: the API includes that whole day.
         if (releases.to) q.set('until', releases.to);
         const d = await api(`/client-releases?${q}`);
-        releases.items[key] = (Array.isArray(d.items) ? d.items : []).map(releaseModel);
+        const raw = Array.isArray(d.items) ? d.items : [];
+        // New releases, and enrichment landing on ones already shown, both change the answer.
+        const signature = JSON.stringify([raw, d.stale === true, d.totalMatched ?? null]);
+        changed = signature !== releases.signature[key] || releases.error[key] === true;
+        releases.signature[key] = signature;
+        releases.loadedAt[key] = Date.now();
+        releases.items[key] = raw.map(releaseModel);
         releases.stale[key] = d.stale === true;
+        releases.error[key] = false;
         releases.total = releases.total || {};
         releases.total[key] = Number.isFinite(d.totalMatched) ? d.totalMatched : null;
         setClientFeedConfigured(true);
     } catch (err) {
-        if (isFeedAbsent(err)) setClientFeedConfigured(false);
+        if (quiet) changed = false;
+        else if (isFeedAbsent(err)) setClientFeedConfigured(false);
         else releases.error[key] = true;
     } finally {
         releases.loading[key] = false;
     }
+    if (!changed) return;
     rebuildReleaseChainOptions();
     if (activeView === 'releases') renderReleaseList();
+}
+
+function refreshReleasesIfDue() {
+    if (activeView !== 'releases' || document.hidden || releases.configured === false) return;
+    const loadedAt = releases.loadedAt[releaseKey()] ?? 0;
+    if (Date.now() - loadedAt >= RELEASE_REFRESH_MS - 1000) loadReleases({ quiet: true });
+}
+
+function initReleaseRefresh() {
+    setInterval(refreshReleasesIfDue, RELEASE_REFRESH_MS);
+    // A tab brought back after a while catches up at once instead of at the next tick.
+    document.addEventListener('visibilitychange', refreshReleasesIfDue);
 }
 
 function releaseModel(r) {
