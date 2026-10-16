@@ -601,6 +601,8 @@ const DEFAULT_VIEW = 'overview';
 let activeView = DEFAULT_VIEW;
 let searchQuery = '';
 let openChainId = null;
+// The client whose detail the drawer shows (registry id, e.g. github:bnb-chain/bsc), when it shows one.
+let openClientId = null;
 
 function initTabs() {
     const tabs = [...document.querySelectorAll('#tabs .tab')];
@@ -731,6 +733,7 @@ function updateUrl({ push = false } = {}) {
     set('view', activeView === DEFAULT_VIEW ? null : activeView);
     set('q', searchQuery || null);
     set('chain', openChainId);
+    set('client', openClientId);
     history[push ? 'pushState' : 'replaceState'](null, '', u);
 }
 
@@ -743,7 +746,9 @@ function applyUrlState() {
     switchView(params.get('view') || DEFAULT_VIEW, { fromUrl: true });
 
     const chain = params.get('chain');
+    const client = params.get('client');
     if (chain && state.byId.has(Number(chain))) openChainDetail(Number(chain), { fromUrl: true });
+    else if (client && clientPathOfId(client)) openClientDetail(client, { fromUrl: true });
     else closeDrawer({ fromUrl: true });
 }
 
@@ -3909,6 +3914,7 @@ function closeDrawer(opts = {}) {
     document.documentElement.classList.remove('drawer-open');
     stopBlockHead();
     openChainId = null;
+    openClientId = null;
     if (!opts.fromUrl) updateUrl();
 }
 function chainLink(id) {
@@ -3933,6 +3939,7 @@ function openChainDetail(chainId, opts = {}) {
     const c = state.byId.get(chainId);
     if (!c) return;
     openChainId = chainId;
+    openClientId = null;
     if (!opts.fromUrl) updateUrl();
 
     const body = byId('drawerBody');
@@ -5710,12 +5717,16 @@ function releaseCard(r) {
         ? el('span', { title: fmtDateTime(r.publishedMs), text: relTime(new Date(r.publishedMs).toISOString()) })
         : null;
 
+    const clientId = r.repo && r.id ? String(r.id).split('@')[0] : null;
     const main = el('div', { class: 'incident-main' }, [
         el('div', { class: 'incident-title' }, [
             el('span', { class: 'incident-title-text' }, [
-                href
-                    ? el('a', { href, target: '_blank', rel: 'noopener', text: label })
-                    : el('span', { text: label }),
+                clientId && clientPathOfId(clientId)
+                    ? clientNameButton(clientId, label)
+                    : href ? el('a', { href, target: '_blank', rel: 'noopener', text: label }) : el('span', { text: label }),
+                clientId && clientPathOfId(clientId) && href
+                    ? el('a', { href, target: '_blank', rel: 'noopener', class: 'ext-link', title: 'Open the release', 'aria-label': 'Open the release', text: '↗' })
+                    : null,
                 ver ? ' ' : null,
                 ver ? el('span', { class: 'client-ver', text: ver }) : null,
                 tagNote ? el('span', { class: 'r-note', text: ` (${tagNote})` }) : null
@@ -5879,7 +5890,11 @@ function networkClientItem(c) {
 
     const item = el('div', { class: 'r-item' }, [
         el('div', { class: 'r-main' }, [
-            href ? el('a', { href, target: '_blank', rel: 'noopener', text: label }) : el('span', { text: label }),
+            c.id && clientPathOfId(c.id) ? clientNameButton(c.id, label)
+                : href ? el('a', { href, target: '_blank', rel: 'noopener', text: label }) : el('span', { text: label }),
+            c.id && clientPathOfId(c.id) && href
+                ? el('a', { href, target: '_blank', rel: 'noopener', class: 'ext-link', title: 'Open the repository', 'aria-label': 'Open the repository', text: '↗' })
+                : null,
             ...kinds.map(k => el('span', { class: 'tag', text: k })),
             c.repo && c.names?.length ? el('span', { class: 'r-note', text: c.names.slice(0, 3).join(', ') }) : null
         ]),
@@ -5898,6 +5913,220 @@ function networkClientItem(c) {
     ]);
 
     return item;
+}
+
+// ─── drawer: one client — latest version, networks, and its lineage ───
+// The proxy route is /client-releases/clients/:host/:owner/:repo; only github/gitlab two-part
+// slugs fit it (a GitLab subgroup path does not), and anything else gets no client view.
+const CLIENT_REPO_PART = /^(?!\.+$)[A-Za-z0-9_.-]+$/;
+const CLIENT_NETWORK_CHIPS = 24;
+const LINEAGE_ROWS = 25;
+
+function clientPathOfId(id) {
+    const m = /^(github|gitlab):([^/]+)\/([^/]+)$/i.exec(String(id || ''));
+    if (!m || !CLIENT_REPO_PART.test(m[2]) || !CLIENT_REPO_PART.test(m[3])) return null;
+    return `/client-releases/clients/${m[1].toLowerCase()}/${encodeURIComponent(m[2])}/${encodeURIComponent(m[3])}`;
+}
+
+function clientNameButton(id, label) {
+    return el('button', { class: 'chip-link client-link', type: 'button', title: 'Client detail', text: label, onclick: () => openClientDetail(id) });
+}
+
+function clientChainChip(n) {
+    const name = releaseChainName(n);
+    return state.byId.has(n.chainId)
+        ? el('button', { class: 'chain-chip', type: 'button', text: name, onclick: () => openChainDetail(n.chainId) })
+        : el('span', { class: 'pill', text: name });
+}
+
+function chipsWithMore(items, shown, chip) {
+    const box = el('div', { class: 'affected-chains' }, items.slice(0, shown).map(chip));
+    if (items.length > shown) {
+        const more = el('button', {
+            class: 'btn r-more', type: 'button', text: `Show all ${fmtNum(items.length)}`,
+            onclick: () => { more.remove(); for (const x of items.slice(shown)) box.appendChild(chip(x)); }
+        });
+        box.appendChild(more);
+    }
+    return box;
+}
+
+// The full activity record -> the compact shape clientActivityLine reads.
+function compactClientActivity(a) {
+    if (!a || !a.level) return null;
+    return {
+        level: a.level,
+        attention: a.attention?.level ?? a.attention ?? null,
+        commits30: a.commits?.days30 ?? null,
+        merged30: a.mergedPullRequests?.days30 ?? null,
+        merged30AtLeast: a.mergedPullRequests?.atLeast === true,
+        openIssues: a.issues?.open ?? null,
+        criticalIssues: a.issues?.critical ?? null,
+        advisories365: a.advisories?.last365Days ?? null,
+        refreshedAt: a.refreshedAt
+    };
+}
+
+const LINEAGE_VIA_TEXT = {
+    'github-fork': ['GitHub fork', 'GitHub records this repository as forked from it'],
+    'gitlab-fork': ['GitLab fork', 'GitLab records this repository as forked from it'],
+    name: ['by name', 'Inferred from the repository or client name — a hint, not a recorded fork']
+};
+function lineageVia(via, evidence) {
+    const [text, title] = LINEAGE_VIA_TEXT[via] || LINEAGE_VIA_TEXT.name;
+    return el('span', { class: `pill sm lineage-via lineage-${via === 'name' ? 'hint' : 'fork'}`, title: evidence ? `${title} (${evidence})` : title, text });
+}
+
+function lineageNode(label, { id, current = false } = {}) {
+    return el('div', { class: `lineage-node${current ? ' is-current' : ''}` }, [
+        id && !current && clientPathOfId(id) ? clientNameButton(id, label) : el('span', { text: label })
+    ]);
+}
+
+function openClientDetail(id, opts = {}) {
+    const path = clientPathOfId(id);
+    if (!path) return;
+    openClientId = String(id).toLowerCase();
+    openChainId = null;
+    stopBlockHead();
+    if (!opts.fromUrl) updateUrl();
+    const body = byId('drawerBody');
+    clear(body);
+    const repoLabel = String(id).split(':')[1];
+    body.appendChild(el('div', { class: 'd-header' }, [
+        el('div', {}, [el('h2', { id: 'drawerTitle', text: repoLabel }), el('div', { class: 'd-badges' }, [el('span', { class: 'badge', text: 'Client' })])])
+    ]));
+    const loading = el('p', { class: 'note', text: 'Loading client…' });
+    body.appendChild(loading);
+    byId('detailDrawer').classList.remove('hidden');
+    document.documentElement.classList.add('drawer-open');
+    byId('closeDrawer')?.focus();
+    loadClientDetail(openClientId, path, body, loading);
+}
+
+async function loadClientDetail(id, path, body, loading) {
+    let d;
+    try {
+        d = await api(path, { timeoutMs: 15000 });
+    } catch (err) {
+        if (openClientId !== id) return;
+        loading.textContent = err?.status === 404 ? 'This client is not in the registry.' : 'Could not load this client — try again.';
+        return;
+    }
+    if (openClientId !== id) return;
+    loading.remove();
+    const c = d.client || {};
+    const href = safeUrl(c.url);
+
+    // ── header ──
+    const head = body.querySelector('.d-header');
+    clear(head);
+    head.appendChild(el('div', {}, [
+        el('h2', { id: 'drawerTitle' }, [
+            href ? el('a', { href, target: '_blank', rel: 'noopener', text: c.repo || id }) : el('span', { text: c.repo || id })
+        ]),
+        el('div', { class: 'd-badges' }, [
+            el('span', { class: 'badge', text: c.host === 'gitlab.com' ? 'GitLab' : 'GitHub' }),
+            ...(c.kinds || []).filter(k => k && k !== 'unknown').map(k => el('span', { class: 'tag', text: k })),
+            c.activity?.archived ? el('span', { class: 'pill pill-prerelease', text: 'archived' }) : null
+        ])
+    ]));
+    if (c.names?.length) body.appendChild(el('p', { class: 'note', text: `Known as ${c.names.slice(0, 6).join(', ')}` }));
+
+    // ── latest version ──
+    const rel = c.latestRelease;
+    const relVer = rel?.version || rel?.tag;
+    const verSec = drawerSection('Latest version');
+    if (relVer) {
+        const relHref = safeUrl(rel.url);
+        const relMs = Date.parse(rel.publishedAt || '');
+        verSec.appendChild(detailRow('Version', [
+            relHref ? el('a', { href: relHref, target: '_blank', rel: 'noopener', class: 'client-ver', text: relVer }) : el('span', { class: 'client-ver', text: relVer }),
+            rel.mandatory ? el('span', { class: 'pill pill-mandatory', text: 'mandatory' }) : null,
+            rel.prerelease ? el('span', { class: 'pill pill-prerelease', text: 'pre-release' }) : null
+        ]));
+        if (!Number.isNaN(relMs)) verSec.appendChild(detailRow('Published', el('span', { title: fmtDateTime(relMs), text: relTime(rel.publishedAt) })));
+    } else {
+        verSec.appendChild(el('p', { class: 'note', text: 'No release on record yet.' }));
+    }
+    if (c.latestFork) verSec.appendChild(detailRow('Latest fork', el('span', { text: forkSummaryText(c.latestFork) })));
+    const act = clientActivityLine(compactClientActivity(c.activity));
+    if (act) verSec.appendChild(detailRow('Development', act));
+    body.appendChild(verSec);
+
+    // ── networks ──
+    const networks = (c.networks || []).filter(n => Number.isFinite(n?.chainId));
+    const netSec = drawerSection(`Networks (${fmtNum(networks.length)})`);
+    netSec.appendChild(networks.length
+        ? chipsWithMore(networks, CLIENT_NETWORK_CHIPS, clientChainChip)
+        : el('p', { class: 'note', text: 'No networks on record.' }));
+    body.appendChild(netSec);
+
+    // ── relationships ──
+    body.appendChild(clientLineageSection(c, networks));
+}
+
+function clientLineageSection(c, networks) {
+    const sec = drawerSection('Relationships');
+    const l = c.lineage;
+    if (!l) {
+        sec.appendChild(el('p', { class: 'note', text: 'Lineage is not available from the client feed yet.' }));
+        return sec;
+    }
+    // The chain: upstream → this client → its networks.
+    const chain = el('div', { class: 'lineage' });
+    if (l.upstream.length) {
+        chain.appendChild(el('div', { class: 'lineage-step' }, l.upstream.map(u => el('div', { class: 'lineage-up' }, [
+            lineageNode(u.family ? `${u.family} · ${u.repo}` : u.repo, { id: u.id }),
+            lineageVia(u.via, u.evidence)
+        ]))));
+        chain.appendChild(el('div', { class: 'lineage-arrow', 'aria-hidden': 'true', text: '↓ customized as' }));
+    }
+    chain.appendChild(el('div', { class: 'lineage-step' }, [lineageNode(l.family ? `${c.repo} (${l.family})` : c.repo, { current: true })]));
+    if (networks.length) {
+        chain.appendChild(el('div', { class: 'lineage-arrow', 'aria-hidden': 'true', text: '↓ runs' }));
+        // The full list is in Networks above; the chain only needs to show the shape.
+        chain.appendChild(el('div', { class: 'affected-chains' }, [
+            ...networks.slice(0, 6).map(clientChainChip),
+            networks.length > 6 ? el('span', { class: 'r-note', text: `+${fmtNum(networks.length - 6)} more` }) : null
+        ]));
+    }
+    sec.appendChild(chain);
+    if (!l.upstream.length && !l.downstream.length) {
+        sec.appendChild(el('p', { class: 'note', text: 'No upstream client or customized versions on record.' }));
+        return sec;
+    }
+
+    if (l.downstream.length) {
+        const total = l.downstreamTotal || l.downstream.length;
+        const list = el('div', { class: 'rpc-list lineage-down' });
+        const row = d => el('div', { class: 'r-item' }, [
+            el('div', { class: 'r-main' }, [
+                clientNameButton(d.id, d.repo),
+                lineageVia(d.via),
+                d.names?.length ? el('span', { class: 'r-note', text: d.names.join(', ') }) : null
+            ]),
+            d.networks?.length
+                ? el('div', { class: 'affected-chains' }, [
+                    ...d.networks.map(clientChainChip),
+                    d.networkCount > d.networks.length ? el('span', { class: 'r-note', text: `+${fmtNum(d.networkCount - d.networks.length)} more` }) : null
+                ])
+                : el('span', { class: 'r-note', text: 'No networks on record' })
+        ]);
+        for (const d of l.downstream.slice(0, LINEAGE_ROWS)) list.appendChild(row(d));
+        if (l.downstream.length > LINEAGE_ROWS) {
+            const more = el('button', {
+                class: 'btn r-more', type: 'button', text: `Show all ${fmtNum(l.downstream.length)}`,
+                onclick: () => { more.remove(); for (const d of l.downstream.slice(LINEAGE_ROWS)) list.appendChild(row(d)); }
+            });
+            list.appendChild(more);
+        }
+        sec.appendChild(el('div', { class: 'd-label lineage-down-title', text: `Customized versions (${fmtNum(total)}) and the networks they run` }));
+        sec.appendChild(list);
+        if (total > l.downstream.length) sec.appendChild(el('p', { class: 'note', text: `Showing ${fmtNum(l.downstream.length)} of ${fmtNum(total)}.` }));
+    }
+    sec.appendChild(el('p', { class: 'note', text: '“GitHub fork” links are recorded by the host; “by name” links are inferred from repository and client names and can be wrong.' }));
+    return sec;
 }
 
 async function loadNetworkClients(chainId, sec) {

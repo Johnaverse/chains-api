@@ -225,6 +225,7 @@ export function normalizeActivity(a) {
       openIssues: int(a.openIssues),
       criticalIssues: int(a.criticalIssues),
       advisories365: int(a.advisories365),
+      forkOf: str(a.forkOf),
       refreshedAt: iso(a.refreshedAt)
     };
   }
@@ -236,6 +237,7 @@ export function normalizeActivity(a) {
     archived: a.archived === true,
     pushedAt: iso(a.pushedAt),
     stars: int(a.stars),
+    forkOf: str(a.forkOf),
     commits: { days30: int(a.commits?.days30), days90: int(a.commits?.days90), branch: str(a.commits?.branch) },
     mergedPullRequests: { days30: int(a.mergedPullRequests?.days30), days90: int(a.mergedPullRequests?.days90), atLeast: a.mergedPullRequests?.atLeast === true },
     openPullRequests: int(a.openPullRequests),
@@ -308,6 +310,38 @@ export function normalizeClient(entry, { includeNetworks = true } = {}) {
   };
 }
 
+const LINEAGE_VIA = new Set(['github-fork', 'gitlab-fork', 'name']);
+const MAX_LINEAGE_DOWNSTREAM = 200;
+
+/**
+ * The feed's client lineage: the upstream client this one customizes (host-recorded fork, or a
+ * family its name gives) and, for an upstream, the clients customizing it with their networks.
+ * `via` says which evidence each link rests on; `name` links are hints, not facts.
+ */
+export function normalizeLineage(l) {
+  if (!l || typeof l !== 'object') return null;
+  const via = (v) => (LINEAGE_VIA.has(v) ? v : 'name');
+  const upstream = Array.isArray(l.upstream)
+    ? l.upstream.filter((u) => str(u?.repo)).slice(0, 10).map((u) => ({
+      repo: u.repo, id: str(u.id), family: str(u.family), via: via(u.via), evidence: str(u.evidence)
+    }))
+    : [];
+  const downstream = Array.isArray(l.downstream)
+    ? l.downstream.filter((d) => str(d?.id) && str(d?.repo)).slice(0, MAX_LINEAGE_DOWNSTREAM).map((d) => ({
+      id: d.id,
+      repo: d.repo,
+      names: strList(d.names).slice(0, 3),
+      role: str(d.role),
+      networkCount: int(d.networkCount) ?? 0,
+      networks: Array.isArray(d.networks)
+        ? d.networks.filter((n) => Number.isSafeInteger(n?.chainId)).slice(0, 10).map((n) => ({ chainId: n.chainId, name: str(n.name) }))
+        : [],
+      via: via(d.via)
+    }))
+    : [];
+  return { family: str(l.family), upstream, downstream, downstreamTotal: int(l.downstreamTotal) ?? downstream.length };
+}
+
 // ─── reads ──────────────────────────────────────────────────────────────────
 
 /**
@@ -371,7 +405,12 @@ export async function getFeedClient(host, owner, repo) {
     activity: body.activity ?? entry?.activity,
     pollStatus: body.poll?.status ?? entry?.pollStatus
   };
-  return { fetchedAt: new Date(res.fetchedAt).toISOString(), stale: res.stale, client: normalizeClient(merged) };
+  return {
+    fetchedAt: new Date(res.fetchedAt).toISOString(),
+    stale: res.stale,
+    // Null from a feed that predates lineage.
+    client: { ...normalizeClient(merged), lineage: normalizeLineage(body.lineage) }
+  };
 }
 
 /**
