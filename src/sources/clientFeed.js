@@ -173,7 +173,12 @@ export function normalizeRelease(item) {
         createdAt: iso(enr.createdAt),
         summary: str(enr.summary),
         fork,
-        ...(forks.length ? { forks } : {})
+        ...(forks.length ? { forks } : {}),
+        // The feed's recall net: a possible fork or mandatory upgrade the model did not confirm.
+        // Never read its absence of `fork` as "no fork" when this is present.
+        ...(enr.review && typeof enr.review === 'object'
+          ? { review: { reasons: strList(enr.review.reasons).slice(0, 4), quotes: strList(enr.review.quotes).slice(0, 4).map((q) => q.slice(0, 200)) } }
+          : {})
       }
       : null
   };

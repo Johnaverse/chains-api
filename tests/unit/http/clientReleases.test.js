@@ -133,6 +133,13 @@ describe('GET /client-releases/clients', () => {
     expect(res.json().error).toMatch(/kind/);
   });
 
+  it('passes the review flag through, bounded', async () => {
+    const review = { reasons: ['notes mention a network upgrade the model did not confirm'], quotes: ['QIE Mainnet — Network Upgrade Release'], extra: 1 };
+    proxyFetch.mockResolvedValue(json({ totalMatched: 1, count: 1, truncated: false, items: [{ ...release, enrichment: { ...release.enrichment, fork: null, review } }] }));
+    const item = (await get('/client-releases?limit=1')).json().items[0];
+    expect(item.enrichment.review).toEqual({ reasons: review.reasons, quotes: review.quotes });
+  });
+
   it('passes until through and rejects a malformed one', async () => {
     proxyFetch.mockResolvedValue(json({ totalMatched: 0, count: 0, truncated: false, items: [] }));
     expect((await get('/client-releases?since=2026-09-01&until=2026-09-30')).statusCode).toBe(200);
