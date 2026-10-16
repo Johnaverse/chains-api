@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, it, expect, vi } from 'vitest';
 import Fastify from 'fastify';
 
@@ -116,6 +117,12 @@ describe('GET /validate/incidents', () => {
         expect(res.statusCode).toBe(401);
       }
       expect(sentinel.runIncidentSentinel).not.toHaveBeenCalled();
+    });
+
+    it('declares the optional x-diagnostics-token header, so Swagger UI can send it', () => {
+      const doc = JSON.parse(readFileSync(new URL('../../../public/openapi.json', import.meta.url), 'utf8'));
+      const header = doc.paths['/validate/incidents'].get.parameters.find(p => p.in === 'header' && p.name === 'x-diagnostics-token');
+      expect(header).toMatchObject({ required: false, schema: { type: 'string' } });
     });
 
     it('does not accept the token in the query string, which would be logged', async () => {

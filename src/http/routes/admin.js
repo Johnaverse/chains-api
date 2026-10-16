@@ -250,6 +250,14 @@ export async function adminRoutes(fastify) {
         properties: {
           refresh: { type: 'boolean', default: false }
         }
+      },
+      // Optional: cached reads are open; only ?refresh=true needs it. Declared so Swagger UI and
+      // generated clients can send it.
+      headers: {
+        type: 'object',
+        properties: {
+          'x-diagnostics-token': { type: 'string', description: 'DIAGNOSTICS_TOKEN; required with ?refresh=true' }
+        }
       }
     }
   }, async (request, reply) => {
