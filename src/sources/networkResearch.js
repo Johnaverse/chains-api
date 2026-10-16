@@ -9,6 +9,7 @@ const FORUMS_PATH = join(__dir, '..', '..', 'data', 'forum-research.json');
 const HARDWARE_PATH = join(__dir, '..', '..', 'data', 'node-hardware.json');
 const CHANNELS_PATH = join(__dir, '..', '..', 'data', 'channel-research.json');
 const REGISTRY_OVERRIDES_PATH = join(__dir, '..', '..', 'data', 'client-registry-overrides.json');
+const CLIENT_LINEAGE_PATH = join(__dir, '..', '..', 'data', 'client-lineage.json');
 
 function indexByChainId(parsed) {
   const byChainId = new Map();
@@ -72,19 +73,30 @@ export function loadClientRegistryOverrides(path = REGISTRY_OVERRIDES_PATH) {
   return parsed?.repositories && typeof parsed.repositories === 'object' && !Array.isArray(parsed.repositories) ? parsed : null;
 }
 
+// Client lineage (data/client-lineage.json): the client families (Geth, OP Geth, Erigon, the OP
+// Stack, …) and curated upstream links the feed uses to say which upstream client a repository
+// customizes. Served verbatim like the overrides; the feed builds its matchers from it. Null when
+// the file is missing or has no `families` list — the feed then shows host-recorded forks only.
+export function loadClientLineage(path = CLIENT_LINEAGE_PATH) {
+  const parsed = readStaticJson(path, 'Client lineage');
+  return Array.isArray(parsed?.families) ? parsed : null;
+}
+
 let dataset = loadNetworkResearch();
 let forums = loadForumResearch();
 let hardware = loadNodeHardware();
 let channels = loadChannelResearch();
 let registryOverrides = loadClientRegistryOverrides();
+let clientLineage = loadClientLineage();
 
 /** Test-only: swap the datasets (pass paths, or nothing to reload the checked-in files). */
-export function _setNetworkResearchForTests(path, forumsPath, hardwarePath, channelsPath, overridesPath) {
+export function _setNetworkResearchForTests(path, forumsPath, hardwarePath, channelsPath, overridesPath, lineagePath) {
   dataset = loadNetworkResearch(path);
   forums = loadForumResearch(forumsPath);
   hardware = loadNodeHardware(hardwarePath);
   channels = loadChannelResearch(channelsPath);
   registryOverrides = loadClientRegistryOverrides(overridesPath);
+  clientLineage = loadClientLineage(lineagePath);
 }
 
 /**
@@ -233,7 +245,9 @@ export function getRepositoryInputs(nameFor = () => null) {
     overridesReviewedAt: registryOverrides?.reviewedAt ?? null,
     count: networks.length,
     networks,
-    overrides: registryOverrides
+    overrides: registryOverrides,
+    lineageReviewedAt: clientLineage?.reviewedAt ?? null,
+    lineage: clientLineage
   };
 }
 

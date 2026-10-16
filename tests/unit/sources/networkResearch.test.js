@@ -11,7 +11,7 @@ import {
   getNetworkResearchInfo,
   attachNetworkResearch,
   getRepositoryInputs,
-  loadClientRegistryOverrides,
+  loadClientRegistryOverrides, loadClientLineage,
   _setNetworkResearchForTests
 } from '../../../src/sources/networkResearch.js';
 import { indexData } from '../../../src/store/indexer.js';
@@ -424,6 +424,16 @@ describe('getRepositoryInputs (chains-client-feed registry source)', () => {
     _setNetworkResearchForTests(undefined, undefined, undefined, undefined, write('bad.json', '{"repositories": []}'));
     expect(getRepositoryInputs()).toMatchObject({ overridesReviewedAt: null, overrides: null });
     expect(loadClientRegistryOverrides('/nonexistent.json')).toBeNull();
+  });
+
+  it('passes the client lineage through, and null when the file is missing or has no families list', () => {
+    const lineage = { reviewedAt: '2026-10-16', families: [{ key: 'geth', name: 'Geth', repo: 'ethereum/go-ethereum', repoWords: ['geth'] }], links: {} };
+    _setNetworkResearchForTests(write('dataset.json', JSON.stringify(DATASET)), write('forums.json', JSON.stringify(FORUMS)),
+      write('hardware.json', JSON.stringify(HARDWARE)), write('channels.json', JSON.stringify(CHANNELS)), undefined, write('lineage.json', JSON.stringify(lineage)));
+    expect(getRepositoryInputs()).toMatchObject({ lineageReviewedAt: '2026-10-16', lineage });
+    _setNetworkResearchForTests(undefined, undefined, undefined, undefined, undefined, write('bad-lineage.json', '{"families": {}}'));
+    expect(getRepositoryInputs()).toMatchObject({ lineageReviewedAt: null, lineage: null });
+    expect(loadClientLineage('/nonexistent.json')).toBeNull();
   });
 
   it('prefers the hardware name, then the registry name', () => {

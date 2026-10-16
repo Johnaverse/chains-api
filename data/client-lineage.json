@@ -1,0 +1,324 @@
+{
+ "reviewedAt": "2026-10-16",
+ "about": "Client lineage for chains-client-feed: which upstream client a repository customizes. Served verbatim as `lineage` on GET /repositories; the feed builds its matchers from it on every registry refresh. families: most specific first (an op-geth fork is OP Geth, whose parent is Geth). repo is the family's main repository; parent its well-known upstream family (shown as known lineage). repoWords match whole words of a repository name (`*-op-geth`, `*/go-ethereum`); nameWords match a single-client name (\"BSC Geth\") and only when the repository name matches no family. Omit nameWords where the word is too common to trust. links: curated upstreams for repositories the names cannot place, keyed by registry id (github:owner/repo), value {upstream: owner/repo, note}. Host-recorded forks (GitHub/GitLab) need no entry: the feed reads them itself.",
+ "families": [
+  {
+   "key": "op-geth",
+   "name": "OP Geth",
+   "repo": "ethereum-optimism/op-geth",
+   "parent": "geth",
+   "repoWords": [
+    "op-geth"
+   ],
+   "nameWords": [
+    "op-geth"
+   ]
+  },
+  {
+   "key": "core-geth",
+   "name": "Core-Geth",
+   "repo": "etclabscore/core-geth",
+   "parent": "geth",
+   "repoWords": [
+    "core-geth"
+   ],
+   "nameWords": [
+    "core-geth"
+   ]
+  },
+  {
+   "key": "bsc",
+   "name": "BSC",
+   "repo": "bnb-chain/bsc",
+   "parent": "geth",
+   "repoWords": [
+    "bsc"
+   ]
+  },
+  {
+   "key": "bor",
+   "name": "Polygon Bor",
+   "repo": "0xPolygon/bor",
+   "parent": "geth",
+   "repoWords": [
+    "bor"
+   ]
+  },
+  {
+   "key": "subnet-evm",
+   "name": "Subnet-EVM",
+   "repo": "ava-labs/subnet-evm",
+   "parent": "coreth",
+   "repoWords": [
+    "subnet-evm"
+   ],
+   "nameWords": [
+    "subnet-evm"
+   ]
+  },
+  {
+   "key": "coreth",
+   "name": "Coreth",
+   "repo": "ava-labs/coreth",
+   "parent": "geth",
+   "repoWords": [
+    "coreth"
+   ],
+   "nameWords": [
+    "coreth"
+   ]
+  },
+  {
+   "key": "geth",
+   "name": "Geth",
+   "repo": "ethereum/go-ethereum",
+   "repoWords": [
+    "go-ethereum",
+    "geth"
+   ],
+   "nameWords": [
+    "geth",
+    "go-ethereum"
+   ]
+  },
+  {
+   "key": "cdk-erigon",
+   "name": "CDK Erigon",
+   "repo": "0xPolygon/cdk-erigon",
+   "parent": "erigon",
+   "repoWords": [
+    "cdk-erigon"
+   ],
+   "nameWords": [
+    "cdk-erigon"
+   ]
+  },
+  {
+   "key": "erigon",
+   "name": "Erigon",
+   "repo": "erigontech/erigon",
+   "repoWords": [
+    "erigon"
+   ],
+   "nameWords": [
+    "erigon"
+   ]
+  },
+  {
+   "key": "reth",
+   "name": "Reth",
+   "repo": "paradigmxyz/reth",
+   "repoWords": [
+    "reth"
+   ],
+   "nameWords": [
+    "reth"
+   ]
+  },
+  {
+   "key": "nethermind",
+   "name": "Nethermind",
+   "repo": "NethermindEth/nethermind",
+   "repoWords": [
+    "nethermind"
+   ],
+   "nameWords": [
+    "nethermind"
+   ]
+  },
+  {
+   "key": "besu",
+   "name": "Besu",
+   "repo": "besu-eth/besu",
+   "repoWords": [
+    "besu"
+   ],
+   "nameWords": [
+    "besu"
+   ]
+  },
+  {
+   "key": "go-opera",
+   "name": "Opera",
+   "repo": "Fantom-foundation/go-opera",
+   "repoWords": [
+    "go-opera"
+   ]
+  },
+  {
+   "key": "kaia",
+   "name": "Kaia (Klaytn)",
+   "repo": "kaiachain/kaia",
+   "repoWords": [
+    "klaytn",
+    "kaia"
+   ]
+  },
+  {
+   "key": "optimism",
+   "name": "OP Stack",
+   "repo": "ethereum-optimism/optimism",
+   "repoWords": [
+    "optimism",
+    "op-node"
+   ],
+   "nameWords": [
+    "op-node"
+   ]
+  },
+  {
+   "key": "nitro",
+   "name": "Arbitrum Nitro",
+   "repo": "OffchainLabs/nitro",
+   "repoWords": [
+    "nitro"
+   ],
+   "nameWords": [
+    "nitro"
+   ]
+  },
+  {
+   "key": "zksync-era",
+   "name": "ZKsync Era",
+   "repo": "matter-labs/zksync-era",
+   "repoWords": [
+    "zksync-era"
+   ],
+   "nameWords": [
+    "zksync era"
+   ]
+  },
+  {
+   "key": "polygon-edge",
+   "name": "Polygon Edge",
+   "repo": "0xPolygon/polygon-edge",
+   "repoWords": [
+    "polygon-edge"
+   ],
+   "nameWords": [
+    "polygon edge"
+   ]
+  },
+  {
+   "key": "taiko",
+   "name": "Taiko",
+   "repo": "taikoxyz/taiko-mono",
+   "repoWords": [
+    "taiko-mono"
+   ]
+  },
+  {
+   "key": "avalanchego",
+   "name": "AvalancheGo",
+   "repo": "ava-labs/avalanchego",
+   "repoWords": [
+    "avalanchego"
+   ],
+   "nameWords": [
+    "avalanchego"
+   ]
+  },
+  {
+   "key": "evmos",
+   "name": "Evmos",
+   "repo": "evmos/evmos",
+   "repoWords": [
+    "evmos"
+   ],
+   "nameWords": [
+    "evmos"
+   ]
+  },
+  {
+   "key": "cosmos-evm",
+   "name": "Cosmos EVM",
+   "repo": "cosmos/evm",
+   "nameWords": [
+    "cosmos evm",
+    "cosmos-evm"
+   ]
+  },
+  {
+   "key": "cometbft",
+   "name": "CometBFT (Tendermint)",
+   "repo": "cometbft/cometbft",
+   "repoWords": [
+    "cometbft",
+    "tendermint"
+   ],
+   "nameWords": [
+    "cometbft",
+    "tendermint"
+   ]
+  },
+  {
+   "key": "polkadot-sdk",
+   "name": "Polkadot SDK (Substrate)",
+   "repo": "paritytech/polkadot-sdk",
+   "repoWords": [
+    "polkadot-sdk",
+    "substrate"
+   ],
+   "nameWords": [
+    "substrate",
+    "polkadot sdk"
+   ]
+  },
+  {
+   "key": "lighthouse",
+   "name": "Lighthouse",
+   "repo": "sigp/lighthouse",
+   "repoWords": [
+    "lighthouse"
+   ],
+   "nameWords": [
+    "lighthouse"
+   ]
+  },
+  {
+   "key": "prysm",
+   "name": "Prysm",
+   "repo": "OffchainLabs/prysm",
+   "repoWords": [
+    "prysm"
+   ],
+   "nameWords": [
+    "prysm"
+   ]
+  },
+  {
+   "key": "teku",
+   "name": "Teku",
+   "repo": "Consensys-Incorporated/teku",
+   "repoWords": [
+    "teku"
+   ],
+   "nameWords": [
+    "teku"
+   ]
+  },
+  {
+   "key": "lodestar",
+   "name": "Lodestar",
+   "repo": "ChainSafe/lodestar",
+   "repoWords": [
+    "lodestar"
+   ],
+   "nameWords": [
+    "lodestar"
+   ]
+  },
+  {
+   "key": "nimbus",
+   "name": "Nimbus",
+   "repo": "status-im/nimbus-eth2",
+   "repoWords": [
+    "nimbus"
+   ],
+   "nameWords": [
+    "nimbus"
+   ]
+  }
+ ],
+ "links": {}
+}
