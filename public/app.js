@@ -6737,6 +6737,7 @@ function initTimelineControls() {
 // A feed can be confidently wrong — the wrong chain, a stale version, a misread time
 // — and only a human reader can tell which. Every timeline and incident card
 // gets a small flag that unfolds an inline report form posting to /feedback.
+// Reports are write-only: the public API never serves them back.
 const FEEDBACK_REASONS = [
     ['wrong_chain', 'Wrong chain/network'],
     ['wrong_version', 'Wrong version'],
@@ -6761,7 +6762,8 @@ function feedbackAffordance({ kind, refId }) {
     const comment = el('input', { class: 'report-comment', type: 'text', maxlength: '500', placeholder: 'What’s wrong? (optional)' });
     const send = el('button', { class: 'report-send', text: 'Send' });
     const note = el('span', { class: 'report-note hidden' });
-    const form = el('div', { class: 'report-form hidden' }, [select, comment, send, note]);
+    const hint = el('span', { class: 'report-hint', text: 'Private — reports are not published. Don’t include personal details.' });
+    const form = el('div', { class: 'report-form hidden' }, [select, comment, send, note, hint]);
 
     btn.addEventListener('click', () => form.classList.toggle('hidden'));
     send.addEventListener('click', async () => {

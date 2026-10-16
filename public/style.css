@@ -1826,6 +1826,7 @@ a.tlx-row-title:hover { color: var(--accent-hover); }
 .report-send:disabled { opacity: .5; cursor: default; }
 .report-thanks { font-size: var(--fs-100); color: var(--good-text); }
 .report-note { font-size: var(--fs-100); color: var(--critical-text); }
+.report-hint { flex-basis: 100%; font-size: var(--fs-100); color: var(--ink-3); }
 
 
 /* ═══ Drawer open: freeze and de-layer everything behind it ═════════════
