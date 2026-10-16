@@ -5639,11 +5639,29 @@ function releaseModel(r) {
 // A publisher's own restriction ("Testnet only, don't deploy to mainnet") is shown even when an
 // AI summary exists: a summary may keep the testnet wording but lose the prohibition.
 const RELEASE_WARNING_CHAR = String.raw`(?:[^.!?\n#]|\.(?=\d))`; // a sentence character; "v1.2.0" stays whole
-const RELEASE_WARNING = new RegExp(String.raw`${RELEASE_WARNING_CHAR}*(?:\btestnets?[- ]only\b|\bfor testnets? only\b|\b(?:do not|don't|must not|should not|not for|not intended for)\b(?!\s+(?:need|have)\b)${RELEASE_WARNING_CHAR}{0,60}?\b(?:mainnet|production|deploy(?:ed)?|upgrade)\b)${RELEASE_WARNING_CHAR}*[.!?]?`, 'i');
+const RELEASE_WARNING = new RegExp(String.raw`${RELEASE_WARNING_CHAR}*(\btestnets?[- ]only\b|\bfor testnets? only\b|\b(?:do not|don't|must not|should not|not for|not intended for)\b(?!\s+(?:need|have)\b)${RELEASE_WARNING_CHAR}{0,60}?\b(?:mainnet|production|deploy(?:ed)?|upgrade)\b)${RELEASE_WARNING_CHAR}*[.!?]?`, 'id');
 
+const RELEASE_WARNING_MAX = 200;
+
+/**
+ * The sentence carrying a publisher restriction, at most RELEASE_WARNING_MAX characters. A long
+ * sentence is clipped around the restriction itself (captured group 1), never from its start —
+ * a plain truncation could keep only the introduction and drop the "do not deploy to mainnet".
+ */
 function releaseWarning(notes) {
-    const m = typeof notes === 'string' ? RELEASE_WARNING.exec(plainText(notes)) : null;
-    return m ? m[0].trim().replace(/^[#*\s>⚠️-]+/u, '').replace(/\*\*/g, '') : null;
+    const text = typeof notes === 'string' ? plainText(notes) : '';
+    const m = RELEASE_WARNING.exec(text);
+    if (!m) return null;
+    const clean = value => value.replace(/^[#*\s>⚠️-]+/u, '').replace(/\*\*/g, '').trim();
+    const sentence = m[0];
+    if (sentence.trim().length <= RELEASE_WARNING_MAX) return clean(sentence);
+    const [triggerStart, triggerEnd] = m.indices[1].map(i => i - m.index);
+    // Keep some of what follows the restriction (often the reason), then as much lead-in as fits.
+    const end = Math.min(sentence.length, Math.max(triggerEnd + 60, RELEASE_WARNING_MAX));
+    const start = Math.max(0, Math.min(triggerStart, end - RELEASE_WARNING_MAX));
+    // A very long restriction alone may exceed the budget: then it is kept whole, nothing else.
+    const stop = Math.max(triggerEnd, Math.min(end, start + RELEASE_WARNING_MAX));
+    return `${start > 0 ? '…' : ''}${clean(sentence.slice(start, stop))}${stop < sentence.length ? '…' : ''}`;
 }
 
 function releaseChainName(c) {
@@ -5804,7 +5822,7 @@ function releaseCard(r) {
         if (warning) {
             main.appendChild(el('div', { class: 'release-warning' }, [
                 el('span', { class: 'release-warning-label', text: 'From the release notes: ' }),
-                Viz.truncate(warning, 200)
+                warning
             ]));
         }
     }
