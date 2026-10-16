@@ -5699,24 +5699,33 @@ function releaseModel(r) {
 
 // A publisher's own restriction ("Testnet only, don't deploy to mainnet") is shown even when an
 // AI summary exists: a summary may keep the testnet wording but lose the prohibition.
-const RELEASE_WARNING_CHAR = String.raw`(?:[^.!?\n#]|\.(?=\d))`; // a sentence character; "v1.2.0" stays whole
-const RELEASE_WARNING = new RegExp(String.raw`${RELEASE_WARNING_CHAR}*(\btestnets?[- ]only\b|\bfor testnets? only\b|\b(?:do not|don't|must not|should not|not for|not intended for)\b(?!\s+(?:need|have)\b)${RELEASE_WARNING_CHAR}{0,60}?\b(?:mainnet|production|deploy(?:ed)?|upgrade)\b)${RELEASE_WARNING_CHAR}*[.!?]?`, 'id');
-
+// A publisher restriction ("Testnet only", "do not deploy to mainnet"). Matched on its own, then
+// widened to the sentence around it: a pattern that also consumed the sentence lead-in re-scanned
+// warning-free text from every position (quadratic on long notes).
+const RELEASE_WARNING = /\btestnets?[- ]only\b|\bfor testnets? only\b|\b(?:do not|don't|must not|should not|not for|not intended for)\b(?!\s+(?:need|have)\b)(?:[^.!?\n#]|\.(?=\d)){0,60}?\b(?:mainnet|production|deploy(?:ed)?|upgrade)\b/i;
+// A sentence ends at . ! ? newline or #, except a dot inside a version number ("v1.2.0").
+const isSentenceEnd = (text, i) => /[!?\n#]/.test(text[i]) || (text[i] === '.' && !/\d/.test(text[i + 1] ?? ''));
 const RELEASE_WARNING_MAX = 200;
 
 /**
  * The sentence carrying a publisher restriction, at most RELEASE_WARNING_MAX characters. A long
- * sentence is clipped around the restriction itself (captured group 1), never from its start —
- * a plain truncation could keep only the introduction and drop the "do not deploy to mainnet".
+ * sentence is clipped around the restriction itself, never from its start — a plain truncation
+ * could keep only the introduction and drop the "do not deploy to mainnet".
  */
 function releaseWarning(notes) {
     const text = typeof notes === 'string' ? plainText(notes) : '';
     const m = RELEASE_WARNING.exec(text);
     if (!m) return null;
+    let from = m.index;
+    while (from > 0 && !isSentenceEnd(text, from - 1)) from--;
+    let to = m.index + m[0].length;
+    while (to < text.length && !isSentenceEnd(text, to)) to++;
+    if (to < text.length && /[.!?]/.test(text[to])) to++;
     const clean = value => value.replace(/^[#*\s>⚠️-]+/u, '').replace(/\*\*/g, '').trim();
-    const sentence = m[0];
+    const sentence = text.slice(from, to);
     if (sentence.trim().length <= RELEASE_WARNING_MAX) return clean(sentence);
-    const [triggerStart, triggerEnd] = m.indices[1].map(i => i - m.index);
+    const triggerStart = m.index - from;
+    const triggerEnd = triggerStart + m[0].length;
     // Keep some of what follows the restriction (often the reason), then as much lead-in as fits.
     const end = Math.min(sentence.length, Math.max(triggerEnd + 60, RELEASE_WARNING_MAX));
     const start = Math.max(0, Math.min(triggerStart, end - RELEASE_WARNING_MAX));
