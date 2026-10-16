@@ -142,6 +142,8 @@ function normalizeChains(list) {
     : [];
 }
 
+const CHAINS_FROM = new Set(['fork', 'release', 'repository']);
+
 export function normalizeRelease(item) {
   const release = item?.release ?? {};
   const source = item?.source ?? {};
@@ -157,7 +159,9 @@ export function normalizeRelease(item) {
     summary: str(item?.summary),
     source: { id: str(source.id), name: str(source.name), kind: str(source.kind) },
     chains: normalizeChains(item?.chains),
-    chainsFrom: item?.chainsFrom === 'release' || item?.chainsFrom === 'repository' ? item.chainsFrom : null,
+    // fork: the networks of the hard fork the release announces (most specific); release: named in
+    // the notes; repository: every network the repository serves.
+    chainsFrom: CHAINS_FROM.has(item?.chainsFrom) ? item.chainsFrom : null,
     release: {
       repo: str(release.repo),
       tag: str(release.tag),

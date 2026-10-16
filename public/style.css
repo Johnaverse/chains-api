@@ -1863,6 +1863,14 @@ a.tlx-row-title:hover { color: var(--accent-hover); }
     color: var(--ink-3); background: none;
     border: 1px dashed var(--rule-strong); padding: 0 5px;
 }
+/* Unconfirmed fork/obligation wording: the warning ink, dashed — a signal to read, not a verdict. */
+.pill-review {
+    color: var(--warn-text); background: none;
+    border: 1px dashed var(--warn); padding: 0 5px;
+}
+/* The publisher's own words (a restriction, an unconfirmed obligation), labelled as such. */
+.release-warning, .release-review { font-size: var(--fs-200); color: var(--ink-2); line-height: var(--lh-snug); margin-top: var(--sp-2); }
+.release-warning-label { font-weight: 600; color: var(--warn-text); }
 /* Client activity (drawer Clients rows). Development level is plain text in a muted pill;
    attention carries colour only with its label (critical ink for high, warning for elevated),
    and its reasons are in the title and the line beside it. */

@@ -206,7 +206,7 @@ describe('getNetworkResearch / getNetworkResearchInfo', () => {
       forumsCheckedAt: '2026-10-10T15:00:00.000Z',
       channels: [channel],
       channelsCheckedAt: '2026-10-11T03:30:31.487Z',
-      hardware: { identityStatus: 'confirmed', checkedAt: '2026-10-10T09:27:13.772253+00:00', profiles: [profile] },
+      hardware: { status: 'documented', identityStatus: 'confirmed', checkedAt: '2026-10-10T09:27:13.772253+00:00', notes: null, sources: [], profiles: [profile] },
       updatedAt: '2026-10-10T07:58:00.646Z'
     });
     expect(getNetworkResearch(424242)).toBeNull();
@@ -226,8 +226,11 @@ describe('getNetworkResearch / getNetworkResearchInfo', () => {
   it('returns a hardware-only block, dated by the hardware dataset when the network has no check date', () => {
     expect(getNetworkResearch(5151)).toEqual({
       hardware: {
+        status: 'partial',
         identityStatus: 'qualified',
         checkedAt: '2026-10-10T16:20:12.747009+00:00',
+        notes: null,
+        sources: [{ url: 'https://lead.example/', title: 'Operator lead', access: 'repurposed', notes: 'Now an exchange.', relationship: 'x' }],
         profiles: [{ ...profile, scope: 'project_family', verification: 'qualified' }]
       },
       updatedAt: '2026-10-10T16:20:12.747009+00:00'
@@ -251,10 +254,16 @@ describe('getNetworkResearch / getNetworkResearchInfo', () => {
     expect(getNetworkResearchInfo()).toMatchObject({ loaded: false, hardwareLoaded: true, channelsLoaded: false, channelNetworks: 0 });
   });
 
-  it('returns null when the research lists no repositories, papers, features, forums, hardware or channels', () => {
+  it('returns null when nothing was researched or listed for the chain', () => {
     expect(getNetworkResearch(7)).toBeNull();
     expect(getNetworkResearch(327)).toBeNull();
-    expect(getNetworkResearch(777)).toBeNull();
+  });
+
+  it('keeps a hardware research that found no profile: its status says it looked (README), not that it never did', () => {
+    expect(getNetworkResearch(777)).toEqual({
+      hardware: { status: 'partial', identityStatus: 'unresolved', checkedAt: '2026-10-10T16:20:12.747009+00:00', notes: null, sources: [], profiles: [] },
+      updatedAt: '2026-10-10T16:20:12.747009+00:00'
+    });
   });
 
   it('returns a copy, so callers cannot mutate the datasets', () => {

@@ -13938,7 +13938,7 @@
         {
           "url": "https://github.com/Ault-Blockchain/ault-mining-node",
           "repo": "Ault-Blockchain/ault-mining-node",
-          "kind": "consensus",
+          "kind": "other",
           "kindLabel": "licensed VRF mining worker, not consensus node",
           "status": "partial",
           "audit": "qualified",
@@ -18398,7 +18398,7 @@
         {
           "url": "https://github.com/STOCHAINAssociation/STOC-Blockchain-Mainnet",
           "repo": "STOCHAINAssociation/STOC-Blockchain-Mainnet",
-          "kind": "sdk",
+          "kind": "node",
           "kindLabel": "Cosmos SDK / CometBFT full node with Cosmos EVM",
           "status": "checked",
           "audit": "corrected",
@@ -19781,7 +19781,7 @@
         {
           "url": "https://github.com/NVNM-Chain/nvnmchain",
           "repo": "NVNM-Chain/nvnmchain",
-          "kind": "sdk",
+          "kind": "node",
           "kindLabel": "Cosmos SDK / MANTRA EVM full node",
           "status": "partial",
           "audit": "qualified",
@@ -26745,7 +26745,7 @@
         {
           "url": "https://github.com/ethstorage/es-node",
           "repo": "ethstorage/es-node",
-          "kind": "execution",
+          "kind": "node",
           "kindLabel": "storage-provider node source, not EVM execution client",
           "status": "partial",
           "audit": "qualified",
@@ -26831,7 +26831,7 @@
         {
           "url": "https://github.com/ethstorage/es-node",
           "repo": "ethstorage/es-node",
-          "kind": "execution",
+          "kind": "node",
           "kindLabel": "storage-provider node source, not EVM execution client",
           "status": "partial",
           "audit": "qualified",
@@ -26909,7 +26909,7 @@
         {
           "url": "https://github.com/ethstorage/es-node",
           "repo": "ethstorage/es-node",
-          "kind": "execution",
+          "kind": "node",
           "kindLabel": "storage-provider node source, not EVM execution client",
           "status": "partial",
           "audit": "qualified",
@@ -31655,7 +31655,7 @@
         {
           "url": "https://github.com/aura-nw/aura",
           "repo": "aura-nw/aura",
-          "kind": "sdk",
+          "kind": "node",
           "kindLabel": "Go network daemon with Evmos EVM library",
           "status": "partial",
           "audit": "qualified",
@@ -31678,7 +31678,7 @@
         {
           "url": "https://github.com/aura-nw/aura",
           "repo": "aura-nw/aura",
-          "kind": "sdk",
+          "kind": "node",
           "kindLabel": "Go network daemon with Evmos EVM library",
           "status": "partial",
           "audit": "qualified",
@@ -32019,7 +32019,7 @@
         {
           "url": "https://github.com/irisnet/irishub",
           "repo": "irisnet/irishub",
-          "kind": "sdk",
+          "kind": "node",
           "kindLabel": "Go Cosmos SDK blockchain node",
           "status": "partial",
           "audit": "qualified",
@@ -37411,7 +37411,7 @@
         {
           "url": "https://github.com/category-labs/monad",
           "repo": "category-labs/monad",
-          "kind": "consensus",
+          "kind": "execution",
           "kindLabel": "Monad execution component source; consensus client separate",
           "status": "partial",
           "audit": "corrected",
@@ -40730,7 +40730,7 @@
         {
           "url": "https://github.com/category-labs/monad",
           "repo": "category-labs/monad",
-          "kind": "consensus",
+          "kind": "execution",
           "kindLabel": "Monad execution component source; consensus client separate",
           "status": "partial",
           "audit": "corrected",
@@ -41644,7 +41644,7 @@
         {
           "url": "https://github.com/axiosdevs/agentscoin-mcp",
           "repo": "axiosdevs/agentscoin-mcp",
-          "kind": "node",
+          "kind": "other",
           "kindLabel": "MCP integration, not node source",
           "status": "checked",
           "audit": "confirmed",
@@ -49822,7 +49822,7 @@
         {
           "url": "https://github.com/geobrowser/geogenesis",
           "repo": "geobrowser/geogenesis",
-          "kind": "node",
+          "kind": "other",
           "kindLabel": "dapp application, not node source",
           "status": "partial",
           "audit": "qualified",
@@ -51579,7 +51579,7 @@
         {
           "url": "https://github.com/d3-inc/doma-register-example",
           "repo": "d3-inc/doma-register-example",
-          "kind": "node",
+          "kind": "other",
           "kindLabel": "application example, not node source",
           "status": "checked",
           "audit": "confirmed",
@@ -60415,7 +60415,7 @@
         {
           "url": "https://github.com/NVNM-Chain/nvnmchain",
           "repo": "NVNM-Chain/nvnmchain",
-          "kind": "sdk",
+          "kind": "node",
           "kindLabel": "Cosmos SDK EVM chain node",
           "status": "partial",
           "audit": "qualified",
@@ -62571,7 +62571,7 @@
           "status": "partial",
           "audit": "qualified",
           "evidence": [
-            "https://github.com/GGPAYCOIN/WHITE-PEAPER/blob/main/ggpay_ggchain_whitepaper%20(1"
+            "https://github.com/GGPAYCOIN/WHITE-PEAPER/blob/main/ggpay_ggchain_whitepaper%20(1).md"
           ]
         }
       ],
@@ -62581,7 +62581,7 @@
           "status": "partial",
           "audit": "qualified",
           "evidence": [
-            "https://github.com/GGPAYCOIN/WHITE-PEAPER/blob/main/ggpay_ggchain_whitepaper%20(1"
+            "https://github.com/GGPAYCOIN/WHITE-PEAPER/blob/main/ggpay_ggchain_whitepaper%20(1).md"
           ]
         }
       ]

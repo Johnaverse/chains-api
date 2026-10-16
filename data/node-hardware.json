@@ -9969,7 +9969,7 @@
        "component": "network",
        "metric": "bandwidth",
        "value": 500,
-       "unit": "MBit/s",
+       "unit": "MB+it/s",
        "qualifier": "at_least",
        "notes": "Original malformed unit preserved; symmetric commercial service. No silent Mbps conversion.",
        "source": "https://docs.velas.com/running-validator/validator-reqs/"
@@ -10069,7 +10069,7 @@
        "component": "network",
        "metric": "bandwidth",
        "value": 500,
-       "unit": "MBit/s",
+       "unit": "MB+it/s",
        "qualifier": "at_least",
        "notes": "Original malformed unit preserved; symmetric commercial service. No silent Mbps conversion.",
        "source": "https://docs.velas.com/running-validator/validator-reqs/"
@@ -28109,7 +28109,7 @@
      "deployment": "unknown",
      "verification": "confirmed",
      "notes": "Messaging stream component, not 550 execution/consensus node. Separate Postgres per frontend strongly recommended. Requires Base/Towns/cross-chain RPC endpoints, not sized here.",
-     "verificationNotes": "Towns stream frontend and separate Postgres storage requirements match. Messaging infrastructure is explicitly distinguished from River/Towns execution or consensus-node hardware. 2026-10-15 source re-check: Bandwidth is an upper capability (\"up to\"), not a plain requirement.",
+     "verificationNotes": "Towns stream frontend and separate Postgres storage requirements match. Messaging infrastructure is explicitly distinguished from River/Towns execution or consensus-node hardware. 2026-10-16 audit: \"capable of handling up to 1 Gbps\" is the traffic the frontend must handle, not a link-speed ceiling.",
      "evidence": [
       "https://docs.towns.com/node-operator/contracts"
      ],
@@ -28151,7 +28151,7 @@
        "metric": "bandwidth",
        "value": 1,
        "unit": "Gbps",
-       "qualifier": "at_most",
+       "qualifier": "as_stated",
        "notes": "Capable of handling up to 1Gbps ingress/egress HTTP 1.1/2",
        "source": "https://docs.towns.com/node-operator/tutorials/system-requirements-installation"
       }
@@ -58135,9 +58135,9 @@
      "scope": "exact_network",
      "client": "op-node + reth (ronin-migration-reth-docker)",
      "clientVersion": null,
-     "deployment": "current",
+     "deployment": "deprecated",
      "verification": "qualified",
-     "notes": "Saigon testnet: CPU 2, Memory 40Gi, Disk 100Gi. Section may describe container resource settings; tier and node type not stated.",
+     "notes": "Saigon testnet: CPU 2, Memory 40Gi, Disk 100Gi. Section may describe container resource settings; tier and node type not stated. The ronin-migration-reth-docker repository was archived (2026-07-10) and its README says it is no longer the recommended source; figures are kept as published.",
      "verificationNotes": "Read 'Resource specifications' in ronin-migration-reth-docker README: Mainnet CPU 2, Memory 120Gi, Disk 800Gi.",
      "evidence": [
       "https://github.com/conduitxyz/ronin-migration-reth-docker",
@@ -71786,7 +71786,7 @@
      "deployment": "unknown",
      "verification": "qualified",
      "notes": "Recommended CPU and Docker allocation component; do not addDocker8GB as separate physicalRAMminimum. Worker guide does not supply a 2868-specific deployment configuration; shared documentation chain-info identifies 2868 but worker applicability remains family-scoped.",
-     "verificationNotes": "Host RAM >16 GB differs from the Docker allocation >=8 GB; model/VRAM inconsistency and ambiguous 5–10M network unit remain explicit. This is project_family evidence, not a verified exact-network deployment budget. Client from the publisher's own client docs (2026-10-15 review). 2026-10-15 source re-check: Memory is >16GB; 8GB appears only as Docker allocation advice.",
+     "verificationNotes": "Host RAM >16 GB differs from the Docker allocation >=8 GB; model/VRAM inconsistency and ambiguous 5–10M network unit remain explicit. This is project_family evidence, not a verified exact-network deployment budget. Client from the publisher's own client docs (2026-10-15 review). 2026-10-16 audit: this row is the Docker allocation (at least 8 GB); host >16 GB is recorded in the baseline profile.",
      "evidence": [
       "https://hyperdust-foundation.gitbook.io/hyperagi-docs/technical-info/chain-info",
       "https://hyperdust-foundation.gitbook.io/hyperagi-docs/mining/node-mining/run-a-hyper-node/deployment-guide"
@@ -71803,10 +71803,10 @@
       {
        "component": "memory",
        "metric": "capacity",
-       "value": 16,
+       "value": 8,
        "unit": "GB",
        "qualifier": "at_least",
-       "notes": "Docker allocation only, not whole-machine RAM. Page: Memory : > 16GB",
+       "notes": "Docker allocation only, not whole-machine RAM (host RAM >16 GB is in the baseline profile).",
        "source": "https://hyperdust-foundation.gitbook.io/hyperagi-docs/mining/node-mining/run-a-hyper-node/deployment-guide"
       }
      ],
@@ -80716,10 +80716,10 @@
       {
        "component": "network",
        "metric": "ports",
-       "value": "14014, 15014",
+       "value": "14014, 15014, 16014",
        "unit": null,
        "qualifier": "as_stated",
-       "notes": "14014 IoTeX native gRPC API (docs call it deprecated); 15014 Ethereum JSON API.",
+       "notes": "14014 IoTeX native gRPC API (docs call it deprecated); 15014 Ethereum JSON API; 16014 Ethereum WebSocket. Open only the interfaces you serve.",
        "source": "https://github.com/iotexproject/iotex-bootstrap/blob/master/README.md"
       }
      ]
@@ -91039,7 +91039,7 @@
      "deployment": "unknown",
      "verification": "qualified",
      "notes": "Veriscope 4.5.0 application/Nethermind relay stack, not standalone full-node or consensus sealer sizing. Primary chain-reference page maps 7341 and preparation permits fed_mainnet. Script hardware minimum uses production storage 150+ GB rather than generic 50 GB. OS recommended within minimum-hardware section. IaC instance alternatives published separately; no assumed EC2 CPU/RAM conversion. Old go-empyrean development instructions and 1+ GB Docker-image size do not size this chain.",
-     "verificationNotes": "Primary requirement text inspected; CPU count units, memory/disk units, bandwidth versus disk throughput, tier and role context checked. 2026-10-15 source re-check: Minimum storage is 50 GB; 150+ GB is the production figure. Ubuntu 20.04, 2 cores, 8+ GiB match.",
+     "verificationNotes": "Primary requirement text inspected; CPU count units, memory/disk units, bandwidth versus disk throughput, tier and role context checked. 2026-10-16 audit: production profile keeps 150+ GB; the generic 50 GB is not production sizing. Ubuntu 20.04, 2 cores, 8+ GiB match.",
      "evidence": [
       "https://docs.veriscope.network/docs/latest/references/chains-and-smart-contracts.html",
       "https://docs.veriscope.network/docs/latest/install/script/preparation.html"
@@ -91064,10 +91064,10 @@
       {
        "component": "storage",
        "metric": "capacity",
-       "value": 50,
+       "value": 150,
        "unit": "GB",
-       "qualifier": "as_stated",
-       "notes": "Production stack storage. PROD need 150+GB",
+       "qualifier": "at_least",
+       "notes": "Production stack storage. Source: \"50 GB Storage space (PROD need 150+GB)\"; 50 GB is the generic minimum, not this production profile.",
        "source": "https://docs.veriscope.network/docs/latest/install/script/overview.html"
       },
       {
@@ -107416,7 +107416,7 @@
      "clientVersion": null,
      "deployment": "current",
      "verification": "qualified",
-     "notes": "Chiado disk figures are 'Current Disk Usage' measured 2026-09-20 with Erigon + Caplin (whole datadir, node stopped, excluding temp/); usage grows. Chiado tab gives no recommended disk size or RAM. CPU, disk type and bandwidth rows are Erigon-generic (all networks).",
+     "notes": "Chiado disk figures are 'Current Disk Usage' measured 2026-09-20 with Erigon + Caplin (whole datadir, node stopped, excluding temp/); usage grows. Chiado tab gives no recommended disk size or RAM. CPU, disk type and bandwidth rows are Erigon-generic (all networks). Measured before the receipts cache was on by default; from Erigon 3.7 it adds a few GB on full and minimal nodes.",
      "verificationNotes": "Read Erigon hardware-requirements source: Chiado tab 'Full (Default)' 16.07 GB current disk usage; generic CPU, disk-type and non-staking bandwidth rows.",
      "evidence": [
       "https://docs.erigon.tech/get-started/hardware-requirements",
@@ -107482,7 +107482,7 @@
      "clientVersion": null,
      "deployment": "current",
      "verification": "qualified",
-     "notes": "Chiado disk figures are 'Current Disk Usage' measured 2026-09-20 with Erigon + Caplin (whole datadir, node stopped, excluding temp/); usage grows. Chiado tab gives no recommended disk size or RAM. CPU, disk type and bandwidth rows are Erigon-generic (all networks).",
+     "notes": "Chiado disk figures are 'Current Disk Usage' measured 2026-09-20 with Erigon + Caplin (whole datadir, node stopped, excluding temp/); usage grows. Chiado tab gives no recommended disk size or RAM. CPU, disk type and bandwidth rows are Erigon-generic (all networks). Measured before the receipts cache was on by default; from Erigon 3.7 it adds a few GB on full and minimal nodes.",
      "verificationNotes": "Read Erigon hardware-requirements source: Chiado tab 'Archive' 29.98 GB current disk usage; generic archive CPU row.",
      "evidence": [
       "https://docs.erigon.tech/get-started/hardware-requirements",
@@ -196763,6 +196763,15 @@
        "unit": "TB",
        "qualifier": "approximately",
        "notes": "Asset Hub archive state from snapshots; expected size, not capacity minimum.",
+       "source": "https://docs.polkadot.com/node-infrastructure/run-a-node/parachain-rpc/"
+      },
+      {
+       "component": "storage",
+       "metric": "capacity",
+       "value": 40,
+       "unit": "GB",
+       "qualifier": "approximately",
+       "notes": "Additional pruned Polkadot relay state using warp sync.",
        "source": "https://docs.polkadot.com/node-infrastructure/run-a-node/parachain-rpc/"
       },
       {

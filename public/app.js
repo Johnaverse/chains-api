@@ -5628,8 +5628,49 @@ function releaseModel(r) {
         forks: rawForks.filter(f => f && (f.name || f.network || f.activationAt || f.activationBlock != null
             || f.activationEpoch != null || f.activationSlot != null || f.activationTimestamp != null)),
         chains: Array.isArray(r?.chains) ? r.chains.filter(c => Number.isFinite(c?.chainId)) : [],
-        chainsFrom: r?.chainsFrom || null
+        chainsFrom: r?.chainsFrom || null,
+        // Fork or upgrade-obligation wording in the notes that the model did not confirm.
+        review: Array.isArray(enr?.review?.reasons) && enr.review.reasons.length
+            ? { reasons: enr.review.reasons.filter(x => typeof x === 'string'), quotes: Array.isArray(enr.review.quotes) ? enr.review.quotes.filter(x => typeof x === 'string') : [] }
+            : null
     };
+}
+
+// A publisher's own restriction ("Testnet only, don't deploy to mainnet") is shown even when an
+// AI summary exists: a summary may keep the testnet wording but lose the prohibition.
+// A publisher restriction ("Testnet only", "do not deploy to mainnet"). Matched on its own, then
+// widened to the sentence around it: a pattern that also consumed the sentence lead-in re-scanned
+// warning-free text from every position (quadratic on long notes).
+const RELEASE_WARNING = /\btestnets?[- ]only\b|\bfor testnets? only\b|\b(?:do not|don't|must not|should not|not for|not intended for)\b(?!\s+(?:need|have)\b)(?:[^.!?\n#]|\.(?=\d)){0,60}?\b(?:mainnet|production|deploy(?:ed)?|upgrade)\b/i;
+// A sentence ends at . ! ? newline or #, except a dot inside a version number ("v1.2.0").
+const isSentenceEnd = (text, i) => /[!?\n#]/.test(text[i]) || (text[i] === '.' && !/\d/.test(text[i + 1] ?? ''));
+const RELEASE_WARNING_MAX = 200;
+
+/**
+ * The sentence carrying a publisher restriction, at most RELEASE_WARNING_MAX characters. A long
+ * sentence is clipped around the restriction itself, never from its start — a plain truncation
+ * could keep only the introduction and drop the "do not deploy to mainnet".
+ */
+function releaseWarning(notes) {
+    const text = typeof notes === 'string' ? plainText(notes) : '';
+    const m = RELEASE_WARNING.exec(text);
+    if (!m) return null;
+    let from = m.index;
+    while (from > 0 && !isSentenceEnd(text, from - 1)) from--;
+    let to = m.index + m[0].length;
+    while (to < text.length && !isSentenceEnd(text, to)) to++;
+    if (to < text.length && /[.!?]/.test(text[to])) to++;
+    const clean = value => value.replace(/^[#*\s>⚠️-]+/u, '').replace(/\*\*/g, '').trim();
+    const sentence = text.slice(from, to);
+    if (sentence.trim().length <= RELEASE_WARNING_MAX) return clean(sentence);
+    const triggerStart = m.index - from;
+    const triggerEnd = triggerStart + m[0].length;
+    // Keep some of what follows the restriction (often the reason), then as much lead-in as fits.
+    const end = Math.min(sentence.length, Math.max(triggerEnd + 60, RELEASE_WARNING_MAX));
+    const start = Math.max(0, Math.min(triggerStart, end - RELEASE_WARNING_MAX));
+    // A very long restriction alone may exceed the budget: then it is kept whole, nothing else.
+    const stop = Math.max(triggerEnd, Math.min(end, start + RELEASE_WARNING_MAX));
+    return `${start > 0 ? '…' : ''}${clean(sentence.slice(start, stop))}${stop < sentence.length ? '…' : ''}`;
 }
 
 function releaseChainName(c) {
@@ -5785,6 +5826,22 @@ function releaseCard(r) {
     }
     if (!r.summary && r.notes) {
         main.appendChild(el('div', { class: 'ai-summary', text: Viz.truncate(plainText(r.notes), 260) }));
+    } else {
+        const warning = releaseWarning(r.notes);
+        if (warning) {
+            main.appendChild(el('div', { class: 'release-warning' }, [
+                el('span', { class: 'release-warning-label', text: 'From the release notes: ' }),
+                warning
+            ]));
+        }
+    }
+    if (r.review) {
+        main.appendChild(el('div', { class: 'release-review', title: r.review.reasons.join('; ') }, [
+            el('span', { class: 'release-warning-label', text: 'Check the notes: ' }),
+            r.review.quotes[0]
+                ? `“${Viz.truncate(plainText(r.review.quotes[0]), 160)}” — possible fork or required upgrade the AI did not confirm.`
+                : 'possible fork or required upgrade the AI did not confirm.'
+        ]));
     }
     for (const f of r.forks) main.appendChild(forkLine(f));
     const chips = releaseChainChips(r);
@@ -5792,6 +5849,7 @@ function releaseCard(r) {
 
     const side = el('div', { class: 'incident-side' }, [
         r.mandatory ? el('span', { class: 'pill pill-mandatory', title: 'The release notes say operators must upgrade', text: 'mandatory' }) : null,
+        r.review ? el('span', { class: 'pill pill-review', title: 'The notes carry fork or upgrade-obligation wording the AI did not confirm — read them', text: 'check notes' }) : null,
         r.prerelease ? el('span', { class: 'pill pill-prerelease', title: 'Marked as a pre-release by the repository', text: 'pre-release' }) : null
     ]);
     return el('div', { class: 'incident-card' }, [main, side]);
