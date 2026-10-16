@@ -5827,40 +5827,9 @@ function releaseRangeText() {
 
 // ─── drawer: clients serving a chain (+ reverse lookup of each client's networks) ───
 const CLIENTS_SHOWN = 8;
-const CLIENT_NETWORKS_SHOWN = 40;
-const REPO_PART = /^(?!\.+$)[A-Za-z0-9_.-]+$/;
-
-// The proxy route is /client-releases/clients/:host/:owner/:repo. Only github/gitlab two-part
-// slugs fit it (a GitLab subgroup path does not), and anything else gets no expander.
-function clientLookupPath(c) {
-    const host = String(c.host || c.id?.split(':')[0] || '').toLowerCase().replace(/\.com$/, '');
-    if (host !== 'github' && host !== 'gitlab') return null;
-    const parts = String(c.repo || '').split('/');
-    if (parts.length !== 2 || !parts.every(p => REPO_PART.test(p))) return null;
-    return `/client-releases/clients/${host}/${encodeURIComponent(parts[0])}/${encodeURIComponent(parts[1])}`;
-}
-
 function forkSummaryText(f) {
     return [f.name || 'Unnamed fork', f.network, ...forkActivationBits(f).map(b => b.text), f.state ? String(f.state).replace(/_/g, ' ') : null]
         .filter(Boolean).join(' · ');
-}
-
-function clientNetworksList(networks, currentChainId) {
-    const chip = n => (n.chainId === currentChainId
-        ? el('span', { class: 'pill', title: 'This network', text: releaseChainName(n) })
-        : state.byId.has(n.chainId)
-            ? el('button', { class: 'chain-chip', type: 'button', text: releaseChainName(n), onclick: () => openChainDetail(n.chainId) })
-            : el('span', { class: 'pill', text: releaseChainName(n) }));
-    const box = el('div', { class: 'affected-chains' }, networks.slice(0, CLIENT_NETWORKS_SHOWN).map(chip));
-    if (networks.length > CLIENT_NETWORKS_SHOWN) {
-        const more = el('button', {
-            class: 'btn r-more', type: 'button',
-            text: `Show all ${networks.length}`,
-            onclick: () => { more.remove(); for (const n of networks.slice(CLIENT_NETWORKS_SHOWN)) box.appendChild(chip(n)); }
-        });
-        box.appendChild(more);
-    }
-    return box;
 }
 
 const ACTIVITY_LEVEL_TEXT = {
@@ -5899,7 +5868,7 @@ function clientActivityLine(a) {
     ]);
 }
 
-function networkClientItem(c, chainId) {
+function networkClientItem(c) {
     const href = safeUrl(c.url);
     const label = c.repo || c.names?.[0] || c.id || 'Unknown client';
     const kinds = (c.kinds || []).filter(k => k && k !== 'unknown');
@@ -5928,46 +5897,6 @@ function networkClientItem(c, chainId) {
         clientActivityLine(c.activity)
     ]);
 
-    const path = clientLookupPath(c);
-    const n = Number.isFinite(c.networkCount) ? c.networkCount : null;
-    if (path && n !== 1) {
-        const text = n != null ? `Supports ${fmtNum(n)} networks` : 'Supported networks';
-        let box = null;
-        const toggle = el('button', {
-            class: 'btn r-more', type: 'button', 'aria-expanded': 'false', text,
-            onclick: async () => {
-                if (box) {
-                    const open = box.classList.toggle('hidden') === false;
-                    toggle.setAttribute('aria-expanded', String(open));
-                    return;
-                }
-                toggle.disabled = true;
-                box = el('div', { class: 'r-meta' }, [el('span', { class: 'r-note', text: 'Loading networks…' })]);
-                item.appendChild(box);
-                try {
-                    const d = await api(path, { timeoutMs: 15000 });
-                    const networks = (d.client?.networks || []).filter(x => Number.isFinite(x?.chainId));
-                    clear(box);
-                    box.appendChild(networks.length
-                        ? clientNetworksList(networks, chainId)
-                        : el('span', { class: 'r-note', text: 'No networks on record.' }));
-                    toggle.setAttribute('aria-expanded', 'true');
-                } catch {
-                    clear(box);
-                    box.appendChild(el('span', { class: 'r-note', text: 'Could not load this client’s networks.' }));
-                    // Let the next click retry.
-                    const failed = box;
-                    box = null;
-                    setTimeout(() => failed.remove(), 4000);
-                } finally {
-                    toggle.disabled = false;
-                }
-            }
-        });
-        item.appendChild(toggle);
-    } else if (n === 1) {
-        item.appendChild(el('span', { class: 'r-note', text: 'Only known on this network' }));
-    }
     return item;
 }
 
@@ -5984,7 +5913,7 @@ async function loadNetworkClients(chainId, sec) {
     const clients = (Array.isArray(d.clients) ? d.clients : []).filter(c => c && (c.repo || c.names?.length));
     if (!clients.length) return;
     while (sec.children.length > 1) sec.removeChild(sec.lastChild);
-    const items = clients.map(c => networkClientItem(c, chainId));
+    const items = clients.map(c => networkClientItem(c));
     const rest = items.slice(CLIENTS_SHOWN);
     let extra = null;
     let toggle = null;
