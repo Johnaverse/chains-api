@@ -81,6 +81,17 @@ describe('GET /client-releases', () => {
     expect(body.items[1]).toMatchObject({ id: 'x', chains: [], enrichment: null, release: { tag: null, prerelease: false } });
   });
 
+  it('keeps where the chains come from, fork included; an unknown value becomes null', async () => {
+    const items = [
+      { ...release, id: 'github:a/b@v1', chainsFrom: 'fork' },
+      { ...release, id: 'github:a/b@v2', chainsFrom: 'repository' },
+      { ...release, id: 'github:a/b@v3', chainsFrom: 'guess' }
+    ];
+    proxyFetch.mockResolvedValue(json({ totalMatched: 3, count: 3, truncated: false, items }));
+    const res = await app.inject({ method: 'GET', url: '/client-releases?limit=3' });
+    expect(res.json().items.map((i) => i.chainsFrom)).toEqual(['fork', 'repository', null]);
+  });
+
   it('serves the cache inside the TTL', async () => {
     proxyFetch.mockResolvedValue(json({ items: [release] }));
     await get('/client-releases?limit=5');

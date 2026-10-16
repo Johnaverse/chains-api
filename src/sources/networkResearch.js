@@ -143,7 +143,9 @@ export function getNetworkResearch(chainId) {
   const channelEntry = channels.byChainId.get(id);
   const hasResearch = entry != null && hasItems(entry);
   const hasForums = forumEntry?.forums?.length > 0;
-  const hasHardware = hardwareEntry?.profiles?.length > 0;
+  // Researched at all: a chain with no profile still carries the research status, notes and the
+  // sources checked (README), so "looked and found nothing" is distinct from "never looked".
+  const hasHardware = hardwareEntry != null;
   const hasChannels = channelEntry?.channels?.length > 0;
   if (!hasResearch && !hasForums && !hasHardware && !hasChannels) return null;
   const research = {};
@@ -161,9 +163,12 @@ export function getNetworkResearch(chainId) {
   }
   if (hasHardware) {
     research.hardware = {
+      status: hardwareEntry.status ?? null,
       identityStatus: hardwareEntry.identityStatus ?? null,
       checkedAt: hardwareEntry.checkedAt ?? hardware.updatedAt,
-      profiles: structuredClone(hardwareEntry.profiles)
+      notes: hardwareEntry.notes ?? null,
+      sources: structuredClone(hardwareEntry.sources ?? []),
+      profiles: structuredClone(hardwareEntry.profiles ?? [])
     };
   }
   // The block's date is the date of the dataset that produced its items — never the

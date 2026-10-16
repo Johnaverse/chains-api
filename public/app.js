@@ -5628,8 +5628,22 @@ function releaseModel(r) {
         forks: rawForks.filter(f => f && (f.name || f.network || f.activationAt || f.activationBlock != null
             || f.activationEpoch != null || f.activationSlot != null || f.activationTimestamp != null)),
         chains: Array.isArray(r?.chains) ? r.chains.filter(c => Number.isFinite(c?.chainId)) : [],
-        chainsFrom: r?.chainsFrom || null
+        chainsFrom: r?.chainsFrom || null,
+        // Fork or upgrade-obligation wording in the notes that the model did not confirm.
+        review: Array.isArray(enr?.review?.reasons) && enr.review.reasons.length
+            ? { reasons: enr.review.reasons.filter(x => typeof x === 'string'), quotes: Array.isArray(enr.review.quotes) ? enr.review.quotes.filter(x => typeof x === 'string') : [] }
+            : null
     };
+}
+
+// A publisher's own restriction ("Testnet only, don't deploy to mainnet") is shown even when an
+// AI summary exists: a summary may keep the testnet wording but lose the prohibition.
+const RELEASE_WARNING_CHAR = String.raw`(?:[^.!?\n#]|\.(?=\d))`; // a sentence character; "v1.2.0" stays whole
+const RELEASE_WARNING = new RegExp(String.raw`${RELEASE_WARNING_CHAR}*(?:\btestnets?[- ]only\b|\bfor testnets? only\b|\b(?:do not|don't|must not|should not|not for|not intended for)\b(?!\s+(?:need|have)\b)${RELEASE_WARNING_CHAR}{0,60}?\b(?:mainnet|production|deploy(?:ed)?|upgrade)\b)${RELEASE_WARNING_CHAR}*[.!?]?`, 'i');
+
+function releaseWarning(notes) {
+    const m = typeof notes === 'string' ? RELEASE_WARNING.exec(plainText(notes)) : null;
+    return m ? m[0].trim().replace(/^[#*\s>⚠️-]+/u, '').replace(/\*\*/g, '') : null;
 }
 
 function releaseChainName(c) {
@@ -5785,6 +5799,22 @@ function releaseCard(r) {
     }
     if (!r.summary && r.notes) {
         main.appendChild(el('div', { class: 'ai-summary', text: Viz.truncate(plainText(r.notes), 260) }));
+    } else {
+        const warning = releaseWarning(r.notes);
+        if (warning) {
+            main.appendChild(el('div', { class: 'release-warning' }, [
+                el('span', { class: 'release-warning-label', text: 'From the release notes: ' }),
+                Viz.truncate(warning, 200)
+            ]));
+        }
+    }
+    if (r.review) {
+        main.appendChild(el('div', { class: 'release-review', title: r.review.reasons.join('; ') }, [
+            el('span', { class: 'release-warning-label', text: 'Check the notes: ' }),
+            r.review.quotes[0]
+                ? `“${Viz.truncate(plainText(r.review.quotes[0]), 160)}” — possible fork or required upgrade the AI did not confirm.`
+                : 'possible fork or required upgrade the AI did not confirm.'
+        ]));
     }
     for (const f of r.forks) main.appendChild(forkLine(f));
     const chips = releaseChainChips(r);
@@ -5792,6 +5822,7 @@ function releaseCard(r) {
 
     const side = el('div', { class: 'incident-side' }, [
         r.mandatory ? el('span', { class: 'pill pill-mandatory', title: 'The release notes say operators must upgrade', text: 'mandatory' }) : null,
+        r.review ? el('span', { class: 'pill pill-review', title: 'The notes carry fork or upgrade-obligation wording the AI did not confirm — read them', text: 'check notes' }) : null,
         r.prerelease ? el('span', { class: 'pill pill-prerelease', title: 'Marked as a pre-release by the repository', text: 'pre-release' }) : null
     ]);
     return el('div', { class: 'incident-card' }, [main, side]);
