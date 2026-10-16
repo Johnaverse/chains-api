@@ -73,7 +73,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_chain_by_id',
-      description: 'Get detailed information about a specific blockchain chain by its chain ID. Includes a `price` object for the chain’s NATIVE currency (null when unmapped): `{usd, vol24h, marketCap, asOf, stale}`. `vol24h` is that ASSET’s 24-hour trading volume in USD — market activity, NOT chain throughput — so an L2 settling in ETH reports ETH’s volume, not its own; name the asset when quoting it. When `stale` is true the quote stopped moving at `asOf` (over a day ago): `vol24h` and `marketCap` are null and `usd` is the last known price, to be quoted as of `asOf` rather than as current. A null field is unknown, never zero. When researched, a `research` object lists the chain’s node/client `repositories` (each with a `kind` such as execution, consensus, rollup or node), whitepaper/document `papers` and short sourced `features`; every item carries a `status` (checked = fully verified, partial = evidence has gaps) and its `evidence` URLs — say when an item is only partially verified, and treat features as the project’s own claims, not tested facts. `research.forums` lists discussion boards the forum research tied to the chain, each with `relationship` (official / community_run / uncertain), `scope` (exact_network, project_family = the project’s shared board, ecosystem_shared, historical_network, uncertain = the board’s relationship to this chain could not be established) and `access` (read / inaccessible / archived when checked) — name the scope and say when a board was unreachable or archived; the chain’s `forumUrl` is the separately curated registry entry. `research.channels` lists public community / developer / support routes a primary project source links (`platform` discord / telegram / x / email / slack / gitter / matrix / wechat / contact_form / other), at most 12 (each platform gets a slot before any repeats), most specific first, with `channelsTotal` the full count and `channelsByPlatform` the full count per platform — a platform absent from `channelsByPlatform` has none listed, while one counted there but missing from `channels` was cut by the cap, so never say a chain has no Discord/Telegram/etc. unless `channelsByPlatform` lacks it: `relationship` official_operated / officially_endorsed (linked by the project, not necessarily run by it) / community_run / uncertain; `scope` as for forums; `access` = what the research could read without joining (public_preview_read, invite_unverified = invite link not validated, inaccessible, login_required, not_checked). Nobody joined or contacted these, so never promise a channel is active or that the team answers there, and name the scope when a route is project-wide or shared. Node hardware / setup requirements are NOT in this response: when `hasNodeRequirements` is true, call get_node_requirements for them.',
+      description: 'Get detailed information about a specific blockchain chain by its chain ID. Includes a `price` object for the chain’s NATIVE currency (null when unmapped): `{usd, vol24h, marketCap, asOf, stale}`. `vol24h` is that ASSET’s 24-hour trading volume in USD — market activity, NOT chain throughput — so an L2 settling in ETH reports ETH’s volume, not its own; name the asset when quoting it. When `stale` is true the quote stopped moving at `asOf` (over a day ago): `vol24h` and `marketCap` are null and `usd` is the last known price, to be quoted as of `asOf` rather than as current. A null field is unknown, never zero. When researched, a `research` object lists the chain’s node/client `repositories` (each with a `kind` such as execution, consensus, rollup or node), whitepaper/document `papers` and short sourced `features`; every item carries a `status` (checked = fully verified, partial = evidence has gaps) and its `evidence` URLs — say when an item is only partially verified, and treat features as the project’s own claims, not tested facts. `research.forums` lists discussion boards the forum research tied to the chain, each with `relationship` (official / community_run / uncertain), `scope` (exact_network, project_family = the project’s shared board, ecosystem_shared, historical_network, uncertain = the board’s relationship to this chain could not be established) and `access` (read / inaccessible / archived when checked) — name the scope and say when a board was unreachable or archived; the chain’s `forumUrl` is the separately curated registry entry. `research.channels` lists public community / developer / support routes a primary project source links (`platform` discord / telegram / x / email / slack / gitter / matrix / wechat / contact_form / other), at most 12 (each platform gets a slot before any repeats), most specific first, with `channelsTotal` the full count and `channelsByPlatform` the full count per platform — a platform absent from `channelsByPlatform` has none listed, while one counted there but missing from `channels` was cut by the cap, so never say a chain has no Discord/Telegram/etc. unless `channelsByPlatform` lacks it: `relationship` official_operated / officially_endorsed (linked by the project, not necessarily run by it) / community_run / uncertain; `scope` as for forums; `access` = what the research could read without joining (public_preview_read, invite_unverified = invite link not validated, inaccessible, login_required, not_checked). When supplied, `availability` retains the dated observed state, activity and check time; read `channelsAvailabilityNote`. Closure can be retained alongside a later failed check; `historicalStatus` alone never establishes current closure. Cached observations do not establish current activity. Nobody joined or contacted these, so never promise a channel is active or that the team answers there, and name the scope when a route is project-wide or shared. Node hardware / setup requirements are NOT in this response: when `hasNodeRequirements` is true, call get_node_requirements for them.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -88,7 +88,7 @@ export function getToolDefinitions() {
     {
       name: 'get_node_requirements',
       description:
-        'Documented hardware and system requirements for running a node on a chain (CPU, memory, storage, bandwidth, OS, GPU), from the audited node hardware research. Use it for "what do I need to run a node / validator / RPC / archive node on X", "minimum vs recommended specs", "how much disk". Resolve the chain ID first (search_chains) if the user named the network. Returns one profile per node `role` × requirement `level` (minimum / recommended / example / unspecified) × `client`, most specific first. `client` is the software the figures were published for; when it is null the profile is generic for the chain — say "generic" rather than naming a client. Each requirement is a string in the publisher’s ORIGINAL unit ("memory capacity: 16 GB", "cpu cores: at least 4 cores"): quote units exactly as given, NEVER convert GB/GiB, Mbps/MB/s, cores/vCPU/threads, and never add up or average profiles. ALWAYS read and relay two caveats. (1) `identityStatus` is how firmly the research tied the documentation to THIS chain: confirmed = established; qualified = the project is right but the exact deployment or version has limits; unresolved = the documentation could not be matched to this chain — present unresolved figures as "documentation found for the project, not confirmed to apply to chain N". (2) each profile’s `scope`: exact_network = documented for this chain; project_family = the project’s generic sizing applied to this chain, NOT verified for it; historical_network = a past deployment, read the notes before use; uncertain = applicability could not be established, do not present it as verified sizing. Also mention `deployment` historical/deprecated and `verification` qualified. A component that is absent was not documented — never say zero or unnecessary. These are published requirements, not benchmarks, and storage grows over time. `totalProfiles` is everything the research kept for the chain, `totalMatched` what survived your role/level filter, `count` what fits in this response; `truncated` true means more matched profiles exist — narrow with `role` or `level` to see them. When `totalProfiles` is 0 the research found no publishable requirements for this chain, which is not proof none exist — say that and point to the project’s own node documentation; when `totalMatched` is 0 but `totalProfiles` is not, the chain has requirements for OTHER roles or tiers — say which roles exist (`availableRoles`) rather than that none are documented. Also returns `software` (or null): `repositories` = the node/client source repositories the research tied to the chain (`kind` execution / consensus / rollup / node / packaging / sdk / contracts, `status` checked or partial), and `observedClients` = client software and versions actually seen on the chain’s live RPC endpoints (what operators run today — evidence, not a requirement, and only for chains with monitored endpoints). Combine them when asked how to set up a node: hardware from `profiles`, software from `software`, each profile’s `client` naming the software its figures were published for.',
+        'Documented hardware and system requirements for running a node on a chain (CPU, memory, storage, bandwidth, OS, GPU), from the audited node hardware research. Use it for "what do I need to run a node / validator / RPC / archive node on X", "minimum vs recommended specs", "how much disk". Resolve the chain ID first (search_chains) if the user named the network. Returns one profile per node `role` × requirement `level` (minimum / recommended / example / unspecified) × `client`, most specific first. `client` is the software the figures were published for; when it is null the profile is generic for the chain — say "generic" rather than naming a client. Each requirement is a string in the publisher’s ORIGINAL unit ("memory capacity: 16 GB", "cpu cores: at least 4 cores"): quote units exactly as given, NEVER convert GB/GiB, Mbps/MB/s, cores/vCPU/threads, and never add up or average profiles. ALWAYS read and relay two caveats. (1) `identityStatus` is how firmly the research tied the documentation to THIS chain: confirmed = established; qualified = the project is right but the exact deployment or version has limits; unresolved = the documentation could not be matched to this chain — present unresolved figures as "documentation found for the project, not confirmed to apply to chain N". (2) each profile’s `scope`: exact_network = documented for this chain; project_family = the project’s generic sizing applied to this chain, NOT verified for it; historical_network = a past deployment, read the notes before use; uncertain = applicability could not be established, do not present it as verified sizing. Also mention `deployment` historical/deprecated and `verification` qualified. A profile with `prerequisiteFor` is a sourced prerequisite for another role, returned by that role filter while keeping its original `role`; it is not dedicated sizing for the requested role. Read the relationship’s condition, sizing, notes and sources; do not count the profile twice. A component that is absent was not documented — never say zero or unnecessary. These are published requirements, not benchmarks, and storage grows over time. `totalProfiles` is everything the research kept for the chain, `totalMatched` what survived your role/level filter (including explicitly sourced prerequisites for the requested role), `count` what fits in this response; `truncated` true means more matched profiles exist — narrow with `role` or `level` to see them. When `totalProfiles` is 0 the research found no publishable requirements for this chain, which is not proof none exist — say that and point to the project’s own node documentation; when `totalMatched` is 0 but `totalProfiles` is not, the chain has requirements for OTHER roles or tiers — say which roles exist (`availableRoles`) rather than that none are documented. Also returns `software` (or null): `repositories` = the node/client source repositories the research tied to the chain (`kind` execution / consensus / rollup / node / packaging / sdk / contracts, `status` checked or partial), and `observedClients` = client software and versions actually seen on the chain’s live RPC endpoints (what operators run today — evidence, not a requirement, and only for chains with monitored endpoints). Combine them when asked how to set up a node: hardware from `profiles`, software from `software`, each profile’s `client` naming the software its figures were published for.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -98,7 +98,7 @@ export function getToolDefinitions() {
           },
           role: {
             type: 'string',
-            description: 'Optional node role filter',
+            description: 'Optional node role filter; includes explicitly sourced prerequisites while retaining their original role',
             enum: ['full_node', 'validator', 'archive', 'rpc', 'collator', 'sequencer', 'prover', 'light_node', 'other', 'unspecified'],
           },
           level: {
@@ -628,8 +628,28 @@ async function handleGetChains(args) {
 // evidence — far past the tool-result cap. The model gets the identifying fields of the
 // first few, already ordered most specific (exact network, official) first.
 const CHAIN_CHANNELS_LIMIT = 12;
-const compactChannel = ({ platform, title, url, mode, relationship, scope, access, verification }) =>
-  ({ platform, title, url, mode, relationship, scope, access, verification });
+function compactChannelAvailability(channel) {
+  const checks = Array.isArray(channel.current_availability_checks) ? channel.current_availability_checks : [];
+  const newest = entries => entries.reduce((chosen, check) => !chosen || (Date.parse(check.checked_at_utc) || 0) > (Date.parse(chosen.checked_at_utc) || 0) ? check : chosen, null);
+  const latest = newest(checks);
+  if (!latest) return null;
+  // A failed later canonical lookup cannot erase an explicit closure observation.
+  // Historical-only cache evidence (Zeniq) is never promoted to current closure.
+  const closure = newest(checks.filter(check => check.status === 'removed_or_closed_explicit'));
+  const observation = closure ?? latest;
+  return {
+    status: observation.status,
+    checkedAt: observation.checked_at_utc ?? null,
+    activity: observation.activity_status ?? 'unknown',
+    ...(observation.observed_historical_status && { historicalStatus: observation.observed_historical_status }),
+    ...(latest !== observation && { latestCheck: { status: latest.status, checkedAt: latest.checked_at_utc ?? null } })
+  };
+}
+function compactChannel(channel) {
+  const { platform, title, url, mode, relationship, scope, access, verification } = channel;
+  const availability = compactChannelAvailability(channel);
+  return { platform, title, url, mode, relationship, scope, access, verification, ...(availability && { availability }) };
+}
 
 // A plain head slice let one platform fill the cap — Algorand's first 12 were 11 regional
 // Telegram groups, so the model said it had no Discord. Taking the best remaining channel of
@@ -675,10 +695,13 @@ async function handleGetChainById(args) {
     slimResearch.channelsTotal = all.length;
     slimResearch.channelsByPlatform = Object.fromEntries([...groupByPlatform(all)].map(([p, g]) => [p, g.length]));
     slimResearch.channels = pickChannels(all, CHAIN_CHANNELS_LIMIT).map(compactChannel);
+    if (slimResearch.channels.some(channel => channel.availability)) {
+      slimResearch.channelsAvailabilityNote = 'Dated observations, not live checks: content may be cached and current status/activity remain unverified. removed_or_closed_explicit is a closure observation; a later failed lookup does not erase it. historicalStatus is historical cache evidence only. Identity verification and access are separate. Full dated evidence and cache caveats are in REST /chains/' + chainId + '.';
+    }
   }
   const payload = { ...rest, price, hasNodeRequirements: hardware?.profiles?.length > 0 };
   if (research && Object.keys(slimResearch).some((key) => key !== 'updatedAt')) payload.research = slimResearch;
-  return textResponse(payload);
+  return compactResponse(payload);
 }
 
 // Profiles that are documented for this exact chain come first, then the common roles, and
@@ -748,6 +771,10 @@ function softwareFor(chainId) {
     url: r.url,
     kind: r.kind,
     status: r.status,
+    ...(r.scope && { scope: r.scope }),
+    ...(r.deployment && { deployment: r.deployment }),
+    ...(r.notes && { notes: r.notes }),
+    ...(r.reviewedAt && { reviewedAt: r.reviewedAt }),
   }));
   const observedClients = (getClientsByChain(chainId)?.clients ?? []).map((c) => ({
     name: c.name,
@@ -800,7 +827,9 @@ function handleGetNodeRequirements(args) {
     });
   }
   let profiles = hardware.profiles;
-  if (role) profiles = profiles.filter((p) => p.role === role);
+  // A sourced prerequisite keeps its original role and occurs only once, even when
+  // both a direct role match and a prerequisite relationship would include it.
+  if (role) profiles = profiles.filter((p) => p.role === role || p.prerequisiteFor?.some((link) => link.role === role));
   if (level) profiles = profiles.filter((p) => p.level === level);
   profiles = [...profiles].sort((a, b) =>
     // Unresolved last: its source or applicability was never settled.
@@ -811,12 +840,14 @@ function handleGetNodeRequirements(args) {
   const limit = Math.max(1, Math.min(Number(args.limit) || NODE_REQUIREMENTS_DEFAULT_LIMIT, NODE_REQUIREMENTS_MAX_LIMIT));
   const shown = profiles.slice(0, limit);
   const candidates = shown.map((p) => ({
+    id: p.id,
     role: p.role,
     level: p.level,
     scope: p.scope,
     client: p.clientVersion ? `${p.client} ${p.clientVersion}` : p.client,
     deployment: p.deployment,
     verification: p.verification,
+    ...(p.prerequisiteFor?.length && { prerequisiteFor: p.prerequisiteFor }),
     ...(p.requiredWhen && { requiredWhen: p.requiredWhen }),
     ...(p.sizing && { sizing: p.sizing }),
     requirements: p.requirements.map(describeRequirement),
@@ -834,7 +865,7 @@ function handleGetNodeRequirements(args) {
     totalMatched: profiles.length,
     availableRoles: [...new Set(hardware.profiles.map((p) => p.role))].sort((a, b) => rank(ROLE_ORDER, a) - rank(ROLE_ORDER, b)),
     software,
-    note: 'Requirements are quoted in each publisher’s original units — never convert units or do arithmetic across profiles (no sums or averages). A profile that omits a component may take it, verbatim, from a sibling with the same client and scope (another tier of the same role, or the full node for an archive node) — say which profile it came from. A component no profile documents was not documented, never zero. Published requirements, not benchmarks. Cite one `sources` URL (the publisher’s documentation) per quoted profile. observedClients is what live endpoints run, not a requirement. A profile with `requiredWhen` is an extra component to run alongside the node in that case (e.g. a legacy client for pre-upgrade history): always mention it for that role; `sizing: not_established` means its hardware is undocumented — say so, and never lend it another client’s numbers. `snapshot` is a download’s size (and link, in <>), not a disk requirement. `dependencies` are other services the returned profiles need, hosted or self-run (`selfHosted` false = a hosted endpoint is fine; `sizing` as for profiles; `notes` qualify it — quote them). verification `unresolved` (sorted last) means the research could not settle the source or its applicability, often because the page could not be re-read: use it only when no confirmed/qualified profile covers the question, and say it is unverified.',
+    note: 'Requirements are quoted in each publisher’s original units — never convert units or do arithmetic across profiles (no sums or averages). A profile that omits a component may take it, verbatim, from a sibling with the same client and scope (another tier of the same role, or the full node for an archive node) — say which profile it came from. A component no profile documents was not documented, never zero. Published requirements, not benchmarks. Cite one `sources` URL (the publisher’s documentation) per quoted profile. observedClients is what live endpoints run, not a requirement. `prerequisiteFor` links this existing profile to another role: relay its condition and notes, and cite its sources for that link. It retains its original role and is not separately sized hardware for the requested role; complete sizing may remain not_established. Never count it twice. A profile with `requiredWhen` is an extra component to run alongside the node in that case (e.g. a legacy client for pre-upgrade history): always mention it for that role; `sizing: not_established` means its hardware is undocumented — say so, and never lend it another client’s numbers. `snapshot` is a download’s size (and link, in <>), not a disk requirement. `dependencies` are other services the returned profiles need, hosted or self-run (`selfHosted` false = a hosted endpoint is fine; `sizing` as for profiles; `notes` qualify it — quote them). verification `unresolved` (sorted last) means the research could not settle the source or its applicability, often because the page could not be re-read: use it only when no confirmed/qualified profile covers the question, and say it is unverified.',
   };
   if (profiles.length === 0) {
     envelope.message = `No ${[role, level].filter(Boolean).join(' ')} profile is documented for this chain, but ${hardware.profiles.length} other profile(s) are (roles: ${envelope.availableRoles.join(', ')}) — call again without the filter.`;

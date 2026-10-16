@@ -1200,6 +1200,14 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .r-note { font-size: var(--fs-100); color: var(--ink-3); }
 .r-foot { font-size: var(--fs-100); margin-top: var(--sp-2); }
 .r-more { align-self: flex-start; margin-top: var(--sp-1); font-size: var(--fs-100); }
+.r-inactive { font-size: var(--fs-100); font-weight: 600; color: var(--critical-text); background: var(--surface-3); border: 1px solid currentColor; padding: 1px 5px; border-radius: var(--r-xs); }
+.r-availability { margin: 2px 0; }
+.r-channel-details { font-size: var(--fs-100); color: var(--ink-2); overflow-wrap: anywhere; }
+.r-channel-details summary { cursor: pointer; color: var(--ink-3); }
+.r-channel-details summary:focus-visible { outline: 2px solid var(--ink-2); outline-offset: 2px; }
+.r-channel-details p { margin: var(--sp-1) 0; }
+.r-check { margin-top: var(--sp-2); padding-top: var(--sp-1); border-top: 1px solid var(--rule); }
+
 .rpc-row { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-200); width: 100%; }
 .rpc-host { font-family: var(--font-mono); font-size: var(--fs-100); overflow: hidden; text-overflow: ellipsis; }
 .rpc-meta { margin-left: auto; color: var(--ink-3); font-size: var(--fs-100); flex-shrink: 0; }

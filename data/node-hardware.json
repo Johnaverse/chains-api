@@ -87706,7 +87706,18 @@
        "source": "https://nibiru.fi/docs/run-nodes/full-nodes/full-node-mainnet.html"
       }
      ],
-     "clientVersion": null
+     "clientVersion": null,
+     "prerequisiteFor": [
+      {
+       "role": "validator",
+       "requiredWhen": "Joining this network as a validator; first join as a full node.",
+       "sizing": "not_established",
+       "notes": "These are the existing minimum full-node prerequisites, not separately documented validator sizing. Complete validator hardware requirements are not established; do not count this profile twice or add it to a validator profile.",
+       "sources": [
+        "https://nibiru.fi/docs/run-nodes/validators/validator-mainnet.html"
+       ]
+      }
+     ]
     }
    ]
   },
@@ -87787,7 +87798,18 @@
        "source": "https://nibiru.fi/docs/run-nodes/full-nodes"
       }
      ],
-     "clientVersion": null
+     "clientVersion": null,
+     "prerequisiteFor": [
+      {
+       "role": "validator",
+       "requiredWhen": "Joining this network as a validator; first join as a full node.",
+       "sizing": "not_established",
+       "notes": "These are the existing minimum full-node prerequisites, not separately documented validator sizing. Complete validator hardware requirements are not established; do not count this profile twice or add it to a validator profile.",
+       "sources": [
+        "https://nibiru.fi/docs/run-nodes/validators"
+       ]
+      }
+     ]
     }
    ]
   },

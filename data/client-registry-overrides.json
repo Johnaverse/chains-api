@@ -1,5 +1,5 @@
 {
- "reviewedAt": "2026-10-15",
+ "reviewedAt": "2026-10-16",
  "about": "Curated corrections to the client registry chains-client-feed builds from GET /repositories, from the one-by-one registry review. Served verbatim as `overrides`; the feed applies them after every build. Per repository id: exclude, keep/drop (chainIds), add ({chainId: kind}), url, role, poll, note. pending: verdicts the review was unsure of; not applied.",
  "repositories": {
   "github:0glabs/0gchain-ng": {"role": "client", "poll": true, "note": "Renamed to 0gfoundation/0gchain-NG; 16601/16602 both Galileo testnet"},
@@ -306,6 +306,7 @@
   "github:ethpandaops/withdrawals-testnet": {"role": "node-packaging", "poll": false, "keep": [], "note": "Archived testnet configs, expired"},
   "github:ethpar/ethpar-binaries": {"role": "node-packaging", "poll": true, "note": "Besu/Teku binaries; releases carry version info"},
   "github:ethpar/go-ethereum.par": {"role": "client-fork", "poll": false, "note": "No releases or tags; research kind ok"},
+  "github:ethstorage/es-node": {"role": "client", "poll": true, "keep": [3336, 3339], "note": "Storage-provider node, not an EVM execution client. Kept on the chains it is registered for: 3336 EthStorage L2 Testnet (historical alpha) and 3339 EthStorage L2 Devnet (integration-test configuration), both qualified in research. 333, 3333 and 3337 in the EthStorage docs are storage-network IDs (on Ethereum mainnet, Sepolia and the QuarkChain Beta overlay), not EVM chain IDs, so they are not linked. 3332 and 110011 remain unverified. Sources: https://docs.ethstorage.io/information ; https://github.com/ethstorage/es-node/blob/5c25e1877fcf71673d15c4f2c4caaffaca54f3e1/run-l2-it.sh#L20-L21"},
   "github:etica/core-geth": {"role": "client-fork", "poll": true, "note": "Core-geth fork with hardfork tag"},
   "github:etktoken/webchain-docs": {"role": "docs", "poll": false, "keep": []},
   "github:evanesco-labs/go-evanesco": {"role": "client-fork", "poll": false, "note": "Stale since 2023"},
@@ -604,6 +605,7 @@
   "github:numblocklab/numblock": {"role": "client", "poll": false, "note": "No releases, stale"},
   "github:numen-network/numen": {"role": "client", "poll": true},
   "github:nurachain/evm": {"role": "client-fork", "poll": false, "note": "cosmos/evm library fork, no releases"},
+  "github:nvnm-chain/nvnmchain": {"role": "client", "poll": true, "keep": [1611, 787111], "add": {"1611": "node", "787111": "node"}, "note": "Cosmos SDK/MANTRA EVM Interchain Security consumer node for legacy closed-beta L2 networks nvnm-1 (1611) and nvnm-testnet-1 (787111), directly mapped in app/config.go. Not the NEXT Reth/Commonware L1 networks 787222/787223. Legacy does not imply retired; exact current deployed binary was not independently checked. Sources: https://github.com/NVNM-Chain/nvnmchain/blob/01ac019e0730179d8cdfe7e8852e20b6316a7eba/app/config.go#L17-L20 ; https://github.com/NVNM-Chain/nvnmchain/blob/01ac019e0730179d8cdfe7e8852e20b6316a7eba/README.md#L1-L30."},
   "github:oasisprotocol/emerald-paratime": {"role": "client", "poll": false, "note": "ParaTime runtime, stale since 2023"},
   "github:oasisprotocol/oasis-core": {"url": "https://github.com/oasisprotocol/oasis-core", "role": "client", "poll": true, "add": {"23294": "node"}},
   "github:oasisprotocol/oasis-web3-gateway": {"url": "https://github.com/oasisprotocol/oasis-web3-gateway", "role": "client", "poll": true, "add": {"23294": "other"}},
@@ -995,7 +997,6 @@
   {"id": "github:eav7-sys/eav7", "note": "TypeScript lang for a Rust client; unsure"},
   {"id": "github:entangle-protocol/entangle-blockchain", "note": "TypeScript lang suspicious; unsure"},
   {"id": "github:erigontech/erigon", "note": "Missing Ethereum mainnet 1 and Gnosis 100; Polygon via bor-style support unsure"},
-  {"id": "github:ethstorage/es-node", "note": "L2 networks 3332/3336/3339 and QuarkChain 110011 questionable; unsure"},
   {"id": "github:evstack/ev-node", "note": "Rollup framework; Eden mapping fine but pair with ev-reth; unsure"},
   {"id": "github:filecoin-project/lotus", "note": "Hyperspace 3141 testnet retired; unsure"},
   {"id": "github:fluencelabs/nox", "note": "Archived Fluence peer; not an EVM chain node, mapping dubious (unsure)"},
@@ -1036,7 +1037,6 @@
   {"id": "github:nethermindeth/surge-taiko-mono", "note": "Taiko mono fork, mixed contracts/client; unsure"},
   {"id": "github:ntity-core/node", "note": "Python, no releases; unclear (unsure)"},
   {"id": "github:numen-network/numen-miner", "note": "Miner; poll unsure"},
-  {"id": "github:nvnm-chain/nvnmchain", "note": "Kind unclear (research: sdk); unsure"},
   {"id": "github:offchainlabs/nitro", "note": "Many Orbit chains; 869 and 1050 unsure"},
   {"id": "github:offchainlabs/prysm", "note": "Chain mix is odd; 8200 vs 504 id conflict (unsure)"},
   {"id": "github:open-lam/metachain", "note": "No releases/tags; unsure"},

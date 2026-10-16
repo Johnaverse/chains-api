@@ -3,7 +3,7 @@
   "info": {
     "title": "Chains API",
     "description": "Aggregated blockchain chain data from five external sources (TheGraph, Chainlist, Chain ID Network, SLIP-0044, L2BEAT): chain metadata, relations, RPC endpoints and health, L2 scaling, and operator status.",
-    "version": "1.7.61"
+    "version": "1.7.62"
   },
   "components": {
     "schemas": {}
@@ -185,6 +185,7 @@
         "tags": [
           "Chains"
         ],
+        "description": "Get chain metadata, optional static research, and native-asset price by chain ID.",
         "parameters": [
           {
             "schema": {
@@ -199,7 +200,1142 @@
         ],
         "responses": {
           "200": {
-            "description": "Default Response"
+            "description": "A single chain metadata projection, with optional static research and native-asset price. RPC endpoints and relations have separate routes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "chainId": {
+                      "type": "integer"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "shortName": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "theGraph-id": {
+                      "type": "string"
+                    },
+                    "fullName": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "caip2Id": {
+                      "type": "string"
+                    },
+                    "aliases": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "nativeCurrency": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "symbol": {
+                          "type": "string"
+                        },
+                        "decimals": {
+                          "type": "integer"
+                        }
+                      },
+                      "additionalProperties": true
+                    },
+                    "explorers": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "url": {
+                                "type": "string"
+                              },
+                              "standard": {
+                                "type": [
+                                  "null",
+                                  "string"
+                                ]
+                              },
+                              "icon": {
+                                "type": [
+                                  "null",
+                                  "string"
+                                ]
+                              }
+                            },
+                            "additionalProperties": true
+                          }
+                        ]
+                      }
+                    },
+                    "infoURL": {
+                      "type": "string"
+                    },
+                    "infoURLSource": {
+                      "type": "string"
+                    },
+                    "registryInfoURL": {
+                      "type": [
+                        "null",
+                        "string"
+                      ]
+                    },
+                    "family": {
+                      "type": "string"
+                    },
+                    "sources": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "tags": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "statusReason": {
+                      "type": "string"
+                    },
+                    "bridges": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "url": {
+                                "type": "string"
+                              }
+                            },
+                            "additionalProperties": true
+                          }
+                        ]
+                      }
+                    },
+                    "forumUrl": {
+                      "type": "string"
+                    },
+                    "l2Beat": {
+                      "type": "object",
+                      "properties": {
+                        "slug": {
+                          "type": "string"
+                        },
+                        "displayName": {
+                          "type": "string"
+                        },
+                        "stage": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "category": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "stack": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "daLayer": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "hostChainId": {
+                          "type": [
+                            "null",
+                            "integer"
+                          ]
+                        },
+                        "purposes": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "tvs": {
+                          "type": [
+                            "null",
+                            "number"
+                          ]
+                        },
+                        "tvsBreakdown": {
+                          "description": "L2BEAT value-secured breakdown, when available."
+                        },
+                        "activity": {
+                          "description": "L2BEAT activity metrics, when available."
+                        },
+                        "links": {
+                          "description": "L2BEAT project links, when available."
+                        },
+                        "riskView": {
+                          "description": "L2BEAT risk assessment, when available."
+                        },
+                        "milestones": {
+                          "description": "L2BEAT project milestones, when available."
+                        },
+                        "dataFreshness": {
+                          "type": "string"
+                        },
+                        "fetchedAt": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        }
+                      },
+                      "additionalProperties": true
+                    },
+                    "defillama": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "aliases": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "website": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "twitter": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "github": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "symbol": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "gasTokenSymbol": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "geckoId": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "gasTokenGeckoId": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "cmcId": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "categories": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
+                        },
+                        "parent": {
+                          "type": [
+                            "null",
+                            "object"
+                          ],
+                          "properties": {
+                            "chain": {
+                              "type": "string"
+                            },
+                            "types": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "da": {
+                              "type": [
+                                "null",
+                                "string"
+                              ]
+                            }
+                          },
+                          "additionalProperties": true
+                        },
+                        "deprecated": {
+                          "type": "boolean"
+                        },
+                        "deadFrom": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "dataFreshness": {
+                          "type": "string"
+                        },
+                        "fetchedAt": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        }
+                      },
+                      "additionalProperties": true
+                    },
+                    "research": {
+                      "type": "object",
+                      "properties": {
+                        "family": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "coverage": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "auditStatus": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "checkedAt": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "updatedAt": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "repositories": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "url": {
+                                "type": "string"
+                              },
+                              "repo": {
+                                "type": [
+                                  "null",
+                                  "string"
+                                ]
+                              },
+                              "kind": {
+                                "type": "string"
+                              },
+                              "kindLabel": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": [
+                                  "null",
+                                  "string"
+                                ]
+                              },
+                              "audit": {
+                                "type": [
+                                  "null",
+                                  "string"
+                                ]
+                              },
+                              "evidence": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "additionalProperties": true
+                          }
+                        },
+                        "papers": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "url": {
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": [
+                                  "null",
+                                  "string"
+                                ]
+                              },
+                              "audit": {
+                                "type": [
+                                  "null",
+                                  "string"
+                                ]
+                              },
+                              "evidence": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "additionalProperties": true
+                          }
+                        },
+                        "features": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "text": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": [
+                                  "null",
+                                  "string"
+                                ]
+                              },
+                              "audit": {
+                                "type": [
+                                  "null",
+                                  "string"
+                                ]
+                              },
+                              "evidence": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "additionalProperties": true
+                          }
+                        },
+                        "forums": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "url": {
+                                "type": "string"
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "type": {
+                                "type": "string"
+                              },
+                              "relationship": {
+                                "type": "string"
+                              },
+                              "scope": {
+                                "type": "string"
+                              },
+                              "access": {
+                                "type": "string"
+                              },
+                              "activity": {
+                                "type": "string"
+                              },
+                              "lastActivity": {
+                                "type": [
+                                  "null",
+                                  "string"
+                                ]
+                              },
+                              "verification": {
+                                "type": "string"
+                              },
+                              "notes": {
+                                "type": [
+                                  "null",
+                                  "string"
+                                ]
+                              },
+                              "evidence": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              }
+                            },
+                            "additionalProperties": true
+                          }
+                        },
+                        "forumsCheckedAt": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "channels": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "platform": {
+                                "type": "string"
+                              },
+                              "url": {
+                                "type": "string"
+                              },
+                              "canonicalUrl": {
+                                "type": [
+                                  "null",
+                                  "string"
+                                ]
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "mode": {
+                                "type": "string"
+                              },
+                              "audience": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "language": {
+                                "type": [
+                                  "null",
+                                  "string"
+                                ]
+                              },
+                              "relationship": {
+                                "type": "string"
+                              },
+                              "scope": {
+                                "type": "string"
+                              },
+                              "access": {
+                                "type": "string"
+                              },
+                              "invitation": {
+                                "type": "string"
+                              },
+                              "lastActivity": {
+                                "type": [
+                                  "null",
+                                  "string"
+                                ]
+                              },
+                              "alternateInvites": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "verification": {
+                                "type": "string"
+                              },
+                              "notes": {
+                                "type": [
+                                  "null",
+                                  "string"
+                                ]
+                              },
+                              "evidence": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "activity": {
+                                "type": [
+                                  "null",
+                                  "string"
+                                ],
+                                "description": "Research-time activity assessment, not current responsiveness."
+                              },
+                              "checkedAt": {
+                                "type": [
+                                  "null",
+                                  "string"
+                                ]
+                              },
+                              "evidenceMode": {
+                                "type": [
+                                  "null",
+                                  "string"
+                                ]
+                              },
+                              "current_availability_checks": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "platform": {
+                                      "type": "string"
+                                    },
+                                    "url": {
+                                      "type": "string"
+                                    },
+                                    "checked_at_utc": {
+                                      "type": [
+                                        "null",
+                                        "string"
+                                      ]
+                                    },
+                                    "status": {
+                                      "type": "string"
+                                    },
+                                    "observed_title": {
+                                      "type": [
+                                        "null",
+                                        "string"
+                                      ]
+                                    },
+                                    "resolved_url": {
+                                      "type": [
+                                        "null",
+                                        "string"
+                                      ]
+                                    },
+                                    "evidence_urls": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "activity_status": {
+                                      "type": [
+                                        "null",
+                                        "string"
+                                      ]
+                                    },
+                                    "latest_observed_activity": {
+                                      "type": [
+                                        "null",
+                                        "string"
+                                      ]
+                                    },
+                                    "observed_historical_status": {
+                                      "type": [
+                                        "null",
+                                        "string"
+                                      ]
+                                    },
+                                    "notes": {
+                                      "type": [
+                                        "null",
+                                        "string"
+                                      ]
+                                    },
+                                    "evidence_mode": {
+                                      "type": [
+                                        "null",
+                                        "string"
+                                      ]
+                                    }
+                                  },
+                                  "additionalProperties": true
+                                },
+                                "description": "Optional raw availability evidence, preserved verbatim; not a live probe."
+                              },
+                              "independent_verification": {
+                                "type": "object",
+                                "properties": {
+                                  "checked_at_utc": {
+                                    "type": [
+                                      "null",
+                                      "string"
+                                    ]
+                                  },
+                                  "status": {
+                                    "type": "string"
+                                  },
+                                  "source_urls": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "evidence_mode": {
+                                    "type": [
+                                      "null",
+                                      "string"
+                                    ]
+                                  },
+                                  "notes": {
+                                    "type": [
+                                      "null",
+                                      "string"
+                                    ]
+                                  }
+                                },
+                                "additionalProperties": true,
+                                "description": "Optional raw independent-verification metadata, preserved verbatim."
+                              }
+                            },
+                            "additionalProperties": true
+                          }
+                        },
+                        "channelsCheckedAt": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "hardware": {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "type": [
+                                "null",
+                                "string"
+                              ]
+                            },
+                            "identityStatus": {
+                              "type": [
+                                "null",
+                                "string"
+                              ]
+                            },
+                            "checkedAt": {
+                              "type": [
+                                "null",
+                                "string"
+                              ]
+                            },
+                            "notes": {
+                              "type": [
+                                "null",
+                                "string"
+                              ]
+                            },
+                            "sources": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "url": {
+                                    "type": "string"
+                                  },
+                                  "title": {
+                                    "type": [
+                                      "null",
+                                      "string"
+                                    ]
+                                  },
+                                  "access": {
+                                    "type": [
+                                      "null",
+                                      "string"
+                                    ]
+                                  },
+                                  "notes": {
+                                    "type": [
+                                      "null",
+                                      "string"
+                                    ]
+                                  }
+                                },
+                                "additionalProperties": true
+                              }
+                            },
+                            "profiles": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "role": {
+                                    "type": "string"
+                                  },
+                                  "level": {
+                                    "type": "string"
+                                  },
+                                  "scope": {
+                                    "type": "string"
+                                  },
+                                  "client": {
+                                    "type": [
+                                      "null",
+                                      "string"
+                                    ]
+                                  },
+                                  "clientVersion": {
+                                    "type": [
+                                      "null",
+                                      "string"
+                                    ]
+                                  },
+                                  "deployment": {
+                                    "type": "string"
+                                  },
+                                  "verification": {
+                                    "type": "string",
+                                    "description": "Includes unresolved profiles; these are unverified."
+                                  },
+                                  "notes": {
+                                    "type": [
+                                      "null",
+                                      "string"
+                                    ]
+                                  },
+                                  "verificationNotes": {
+                                    "type": [
+                                      "null",
+                                      "string"
+                                    ]
+                                  },
+                                  "evidence": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "requirements": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "component": {
+                                          "type": "string"
+                                        },
+                                        "metric": {
+                                          "type": "string"
+                                        },
+                                        "value": {
+                                          "type": [
+                                            "null",
+                                            "number",
+                                            "string",
+                                            "boolean"
+                                          ],
+                                          "description": "Publisher value, unchanged. Missing or null does not mean zero."
+                                        },
+                                        "min": {
+                                          "type": [
+                                            "null",
+                                            "number"
+                                          ]
+                                        },
+                                        "max": {
+                                          "type": [
+                                            "null",
+                                            "number"
+                                          ]
+                                        },
+                                        "unit": {
+                                          "type": [
+                                            "null",
+                                            "string"
+                                          ],
+                                          "description": "Original published unit; never converted."
+                                        },
+                                        "qualifier": {
+                                          "type": "string"
+                                        },
+                                        "notes": {
+                                          "type": [
+                                            "null",
+                                            "string"
+                                          ]
+                                        },
+                                        "source": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "additionalProperties": true
+                                    }
+                                  },
+                                  "requiredWhen": {
+                                    "type": [
+                                      "null",
+                                      "string"
+                                    ]
+                                  },
+                                  "sizing": {
+                                    "type": [
+                                      "null",
+                                      "string"
+                                    ]
+                                  },
+                                  "historicalStateEra": {
+                                    "type": [
+                                      "null",
+                                      "string"
+                                    ]
+                                  },
+                                  "prerequisiteFor": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "role": {
+                                          "type": "string"
+                                        },
+                                        "requiredWhen": {
+                                          "type": "string"
+                                        },
+                                        "sizing": {
+                                          "type": "string"
+                                        },
+                                        "notes": {
+                                          "type": [
+                                            "null",
+                                            "string"
+                                          ]
+                                        },
+                                        "sources": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
+                                        }
+                                      },
+                                      "additionalProperties": true
+                                    }
+                                  },
+                                  "snapshotArtifact": {
+                                    "type": "object",
+                                    "properties": {
+                                      "file": {
+                                        "type": "string"
+                                      },
+                                      "type": {
+                                        "type": "string"
+                                      },
+                                      "url": {
+                                        "type": "string"
+                                      },
+                                      "publishedAt": {
+                                        "type": [
+                                          "null",
+                                          "string"
+                                        ]
+                                      },
+                                      "sizes": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "value": {
+                                              "type": [
+                                                "null",
+                                                "number"
+                                              ]
+                                            },
+                                            "unit": {
+                                              "type": "string"
+                                            },
+                                            "source": {
+                                              "type": "string"
+                                            }
+                                          },
+                                          "additionalProperties": true
+                                        }
+                                      }
+                                    },
+                                    "additionalProperties": true
+                                  },
+                                  "dependencies": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "component": {
+                                          "type": "string"
+                                        },
+                                        "requiredWhen": {
+                                          "type": [
+                                            "null",
+                                            "string"
+                                          ]
+                                        },
+                                        "clientOptions": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "selfHosted": {
+                                          "type": "boolean"
+                                        },
+                                        "hosting": {
+                                          "type": [
+                                            "null",
+                                            "string"
+                                          ]
+                                        },
+                                        "sizing": {
+                                          "type": [
+                                            "null",
+                                            "string"
+                                          ]
+                                        },
+                                        "notes": {
+                                          "type": [
+                                            "null",
+                                            "string"
+                                          ]
+                                        },
+                                        "sources": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string"
+                                          }
+                                        }
+                                      },
+                                      "additionalProperties": true
+                                    }
+                                  }
+                                },
+                                "additionalProperties": true
+                              }
+                            }
+                          },
+                          "additionalProperties": true,
+                          "description": "Static research, including status, notes and sources when no sizing profile was found. All profiles are retained, including unresolved and conditionally required unsized components."
+                        }
+                      },
+                      "additionalProperties": true,
+                      "description": "Detail-only audited research. Optional source metadata is retained at every level. Absent if no research items or hardware research entry exist; omitted from list and search responses."
+                    },
+                    "price": {
+                      "type": [
+                        "null",
+                        "object"
+                      ],
+                      "properties": {
+                        "usd": {
+                          "type": "number"
+                        },
+                        "vol24h": {
+                          "type": [
+                            "null",
+                            "number"
+                          ]
+                        },
+                        "marketCap": {
+                          "type": [
+                            "null",
+                            "number"
+                          ]
+                        },
+                        "asOf": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "stale": {
+                          "type": "boolean"
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "additionalProperties": true,
+                      "description": "Native-asset USD quote, or null when unavailable. Stale quotes retain price and age but null volume and market cap."
+                    }
+                  },
+                  "additionalProperties": true,
+                  "required": [
+                    "chainId",
+                    "price"
+                  ],
+                  "description": "A single chain metadata projection, with optional static research and native-asset price. RPC endpoints and relations have separate routes."
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ]
+                }
+              }
+            }
           }
         }
       }

@@ -9087,8 +9087,16 @@
           "status": "partial",
           "audit": "qualified",
           "evidence": [
-            "https://github.com/ethstorage/es-node"
-          ]
+            "https://github.com/ethstorage/es-node",
+            "https://docs.ethstorage.io/information",
+            "https://github.com/ethstorage/es-node/blob/5c25e1877fcf71673d15c4f2c4caaffaca54f3e1/README.md#L1-L15",
+            "https://docs.ethstorage.io/storage-provider-guide/tutorials",
+            "https://github.com/ethstorage/es-node/blob/5c25e1877fcf71673d15c4f2c4caaffaca54f3e1/run-mainnet.sh#L35-L36"
+          ],
+          "scope": "exact_network",
+          "deployment": "unknown",
+          "notes": "Storage-provider node for the documented EthStorage storage network 333. This role does not establish that es-node is the associated EVM execution client. Exact current deployed binary was not independently checked.",
+          "reviewedAt": "2026-10-16"
         }
       ],
       "papers": [],
@@ -19786,8 +19794,18 @@
           "status": "partial",
           "audit": "qualified",
           "evidence": [
-            "https://github.com/NVNM-Chain/nvnmchain"
-          ]
+            "https://github.com/NVNM-Chain/nvnmchain",
+            "https://github.com/NVNM-Chain/nvnmchain/blob/01ac019e0730179d8cdfe7e8852e20b6316a7eba/app/config.go#L17-L20",
+            "https://github.com/NVNM-Chain/nvnmchain/blob/01ac019e0730179d8cdfe7e8852e20b6316a7eba/README.md#L1-L30",
+            "https://github.com/NVNM-Chain/nvnmchain/blob/01ac019e0730179d8cdfe7e8852e20b6316a7eba/chains.yaml",
+            "https://legacy.docs.nvnmchain.io/resources/network-details",
+            "https://github.com/NVNM-Chain/net/blob/2cbc374f48f6207952973ecf8bdcf4543f02d0bb/nvnm-1/genesis.json",
+            "https://github.com/NVNM-Chain/net/blob/2cbc374f48f6207952973ecf8bdcf4543f02d0bb/nvnm-1/upgrades/v1.2.0/guide.md"
+          ],
+          "scope": "exact_network",
+          "deployment": "unknown",
+          "notes": "Cosmos SDK/MANTRA EVM Interchain Security consumer node for legacy closed-beta L2 networks nvnm-1 (1611) and nvnm-testnet-1 (787111), directly mapped in app/config.go. Not the NEXT Reth/Commonware L1 networks 787222/787223. Legacy does not imply retired; exact current deployed binary was not independently checked.",
+          "reviewedAt": "2026-10-16"
         }
       ],
       "papers": [],
@@ -26750,8 +26768,16 @@
           "status": "partial",
           "audit": "qualified",
           "evidence": [
-            "https://github.com/ethstorage/es-node"
-          ]
+            "https://github.com/ethstorage/es-node",
+            "https://docs.ethstorage.io/information",
+            "https://github.com/ethstorage/es-node/blob/5c25e1877fcf71673d15c4f2c4caaffaca54f3e1/README.md#L1-L15",
+            "https://docs.ethstorage.io/storage-provider-guide/tutorials",
+            "https://github.com/ethstorage/es-node/blob/5c25e1877fcf71673d15c4f2c4caaffaca54f3e1/README.md"
+          ],
+          "scope": "project_family",
+          "deployment": "unknown",
+          "notes": "Project-family storage-provider software; exact deployment on EVM network 3332 remains unverified. Excluded from the current client-feed associations, without asserting the network does not exist.",
+          "reviewedAt": "2026-10-16"
         }
       ],
       "papers": [],
@@ -26773,8 +26799,17 @@
           "status": "partial",
           "audit": "qualified",
           "evidence": [
-            "https://github.com/ethstorage/es-node"
-          ]
+            "https://github.com/ethstorage/es-node",
+            "https://docs.ethstorage.io/information",
+            "https://github.com/ethstorage/es-node/blob/5c25e1877fcf71673d15c4f2c4caaffaca54f3e1/README.md#L1-L15",
+            "https://docs.ethstorage.io/storage-provider-guide/tutorials",
+            "https://github.com/ethstorage/es-node/blob/5c25e1877fcf71673d15c4f2c4caaffaca54f3e1/ethstorage/flags/flags.go#L70-L75",
+            "https://github.com/ethstorage/es-node/blob/5c25e1877fcf71673d15c4f2c4caaffaca54f3e1/run.sh"
+          ],
+          "scope": "exact_network",
+          "deployment": "unknown",
+          "notes": "Storage-provider node for the documented EthStorage storage network 3333. This role does not establish that es-node is the associated EVM execution client. Exact current deployed binary was not independently checked.",
+          "reviewedAt": "2026-10-16"
         }
       ],
       "papers": [],
@@ -26836,8 +26871,18 @@
           "status": "partial",
           "audit": "qualified",
           "evidence": [
-            "https://github.com/ethstorage/es-node"
-          ]
+            "https://github.com/ethstorage/es-node",
+            "https://github.com/ethstorage/es-node/blob/5c25e1877fcf71673d15c4f2c4caaffaca54f3e1/README.md#L1-L15",
+            "https://docs.ethstorage.io/storage-provider-guide/tutorials",
+            "https://github.com/ethstorage/pm/blob/1d9a7e11752e335872b5ea82884670820ef17250/L2/testnet_usage.md#L64-L87",
+            "https://github.com/ethstorage/pm/blob/1d9a7e11752e335872b5ea82884670820ef17250/L2/assets/testnet_rollup.json#L23-L24",
+            "https://github.com/ethstorage/es-node/blob/3d62b1088293935e734467f50af04cb2e1f899ae/run-l2.sh",
+            "https://github.com/ethstorage/es-node/blob/3d62b1088293935e734467f50af04cb2e1f899ae/ethstorage/flags/flags.go#L96-L101"
+          ],
+          "scope": "historical_network",
+          "deployment": "historical",
+          "notes": "Qualified historical alpha storage-network association: project planning docs list storage endpoint ID 3336 over rollup 43069, and the historical es-node script uses the same storage contract and L1 endpoint. That script does not explicitly set 3336; contemporaneous P2P storage chain ID defaults to 3333. Exact es-node version/configuration and current EVM execution-client applicability are not established. Retained as historical research; withheld from current feed associations.",
+          "reviewedAt": "2026-10-16"
         }
       ],
       "papers": [],
@@ -26859,8 +26904,17 @@
           "status": "partial",
           "audit": "qualified",
           "evidence": [
-            "https://github.com/ethstorage/es-node"
-          ]
+            "https://github.com/ethstorage/es-node",
+            "https://docs.ethstorage.io/information",
+            "https://github.com/ethstorage/es-node/blob/5c25e1877fcf71673d15c4f2c4caaffaca54f3e1/README.md#L1-L15",
+            "https://docs.ethstorage.io/storage-provider-guide/tutorials",
+            "https://github.com/ethstorage/es-node/blob/5c25e1877fcf71673d15c4f2c4caaffaca54f3e1/run-l2.sh#L3-L10",
+            "https://github.com/ethstorage/pm/blob/1d9a7e11752e335872b5ea82884670820ef17250/L2/assets/beta_testnet_rollup.json#L23-L24"
+          ],
+          "scope": "exact_network",
+          "deployment": "unknown",
+          "notes": "Storage-provider node for the documented EthStorage storage overlay 3337 on QuarkChain L2 Beta (underlying EVM rollup 3335), distinct from QuarkChain SWC Delta EVM chain 110011. A registry name of EthStorage Devnet is not current deployment evidence. This role does not establish that es-node is an EVM execution client. Exact current deployed binary was not independently checked.",
+          "reviewedAt": "2026-10-16"
         }
       ],
       "papers": [],
@@ -26914,8 +26968,18 @@
           "status": "partial",
           "audit": "qualified",
           "evidence": [
-            "https://github.com/ethstorage/es-node"
-          ]
+            "https://github.com/ethstorage/es-node",
+            "https://github.com/ethstorage/es-node/blob/5c25e1877fcf71673d15c4f2c4caaffaca54f3e1/run-l2-it.sh#L20-L21",
+            "https://github.com/ethstorage/es-node/blob/5c25e1877fcf71673d15c4f2c4caaffaca54f3e1/README.md#L1-L15",
+            "https://docs.ethstorage.io/storage-provider-guide/tutorials",
+            "https://github.com/ethstorage/es-node/blob/5c25e1877fcf71673d15c4f2c4caaffaca54f3e1/run-l2-it.sh#L14-L26",
+            "https://github.com/ethstorage/es-node/blob/5c25e1877fcf71673d15c4f2c4caaffaca54f3e1/run-l2-it-rpc.sh#L22-L29",
+            "https://github.com/ethstorage/es-node/commit/25150bf2621b2e12f02b7135947f81e9b4c27b93"
+          ],
+          "scope": "project_family",
+          "deployment": "unknown",
+          "notes": "The repository integration-test script explicitly sets chain_id 3339. This is development/test configuration evidence, not confirmation of a currently deployed public EVM execution client. Retained as qualified project-family research; withheld from current feed associations.",
+          "reviewedAt": "2026-10-16"
         }
       ],
       "papers": [],
@@ -60420,19 +60484,32 @@
           "status": "partial",
           "audit": "qualified",
           "evidence": [
-            "https://github.com/NVNM-Chain/nvnmchain"
-          ]
+            "https://github.com/NVNM-Chain/nvnmchain",
+            "https://github.com/NVNM-Chain/nvnmchain/blob/01ac019e0730179d8cdfe7e8852e20b6316a7eba/app/config.go#L17-L20",
+            "https://github.com/NVNM-Chain/nvnmchain/blob/01ac019e0730179d8cdfe7e8852e20b6316a7eba/README.md#L1-L30",
+            "https://github.com/NVNM-Chain/nvnmchain/blob/01ac019e0730179d8cdfe7e8852e20b6316a7eba/chains.yaml",
+            "https://legacy.docs.nvnmchain.io/resources/network-details",
+            "https://github.com/NVNM-Chain/nvnmchain-docs/blob/957e0aeb74a4e71bc727f6ed828f09fb9e55c0b3/content/docs/operators/node-setup-and-deployment/validator-nodes/running-a-node.mdx",
+            "https://github.com/NVNM-Chain/net/blob/2cbc374f48f6207952973ecf8bdcf4543f02d0bb/nvnm-testnet-1/genesis.json",
+            "https://github.com/NVNM-Chain/net/blob/2cbc374f48f6207952973ecf8bdcf4543f02d0bb/nvnm-testnet-1/upgrades/v1.3.0/cosmovisor.json"
+          ],
+          "scope": "exact_network",
+          "deployment": "unknown",
+          "notes": "Cosmos SDK/MANTRA EVM Interchain Security consumer node for legacy closed-beta L2 networks nvnm-1 (1611) and nvnm-testnet-1 (787111), directly mapped in app/config.go. Not the NEXT Reth/Commonware L1 networks 787222/787223. Legacy does not imply retired; exact current deployed binary was not independently checked.",
+          "reviewedAt": "2026-10-16"
         }
       ],
       "papers": [],
       "features": [
         {
-          "text": "Current NVNM repository describes Cosmos SDK/MANTRA EVM Interchain Security consumer-chain software for document-hash anchoring; applicability to legacy testnet787111 is unverified.",
+          "text": "The NVNM repository describes Cosmos SDK/MANTRA EVM Interchain Security consumer-chain software for document-hash anchoring. Its code explicitly maps legacy nvnm-testnet-1 to 787111; this is separate from NEXT L1 and does not establish the currently deployed binary.",
           "status": "partial",
           "audit": "corrected",
           "evidence": [
-            "https://github.com/NVNM-Chain/nvnmchain"
-          ]
+            "https://github.com/NVNM-Chain/nvnmchain",
+            "https://github.com/NVNM-Chain/nvnmchain/blob/01ac019e0730179d8cdfe7e8852e20b6316a7eba/app/config.go#L17-L20"
+          ],
+          "reviewedAt": "2026-10-16"
         }
       ]
     },
