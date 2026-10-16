@@ -310,13 +310,14 @@ export function normalizeClient(entry, { includeNetworks = true } = {}) {
   };
 }
 
-const LINEAGE_VIA = new Set(['github-fork', 'gitlab-fork', 'name']);
+const LINEAGE_VIA = new Set(['github-fork', 'gitlab-fork', 'known', 'name']);
 const MAX_LINEAGE_DOWNSTREAM = 200;
 
 /**
  * The feed's client lineage: the upstream client this one customizes (host-recorded fork, or a
  * family its name gives) and, for an upstream, the clients customizing it with their networks.
- * `via` says which evidence each link rests on; `name` links are hints, not facts.
+ * `via` says which evidence each link rests on (host fork, known lineage, or name); `name` links
+ * are hints, not facts.
  */
 export function normalizeLineage(l) {
   if (!l || typeof l !== 'object') return null;

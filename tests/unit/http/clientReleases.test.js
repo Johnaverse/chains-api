@@ -196,7 +196,7 @@ describe('GET /client-releases/clients/:host/:owner/:repo', () => {
     const lineage = {
       family: null,
       upstream: [{ repo: 'ethereum/go-ethereum', id: 'github:ethereum/go-ethereum', family: 'Geth', via: 'github-fork' }, { repo: 'erigontech/erigon', id: 'github:erigontech/erigon', family: 'Erigon', via: 'name', evidence: 'client name' }, { repo: '' }],
-      downstream: [{ id: 'github:x/y', repo: 'x/y', names: ['X Geth'], networkCount: 2, networks: [{ chainId: 5, name: 'Five' }, { chainId: 'bad' }], via: 'weird', extra: 1 }],
+      downstream: [{ id: 'github:x/y', repo: 'x/y', names: ['X Geth'], networkCount: 2, networks: [{ chainId: 5, name: 'Five' }, { chainId: 'bad' }], via: 'weird', extra: 1 }, { id: 'github:op/geth', repo: 'op/geth', via: 'known' }],
       downstreamTotal: 1
     };
     proxyFetch.mockResolvedValue(json({ client: geth, lineage }));
@@ -205,7 +205,10 @@ describe('GET /client-releases/clients/:host/:owner/:repo', () => {
       { repo: 'ethereum/go-ethereum', id: 'github:ethereum/go-ethereum', family: 'Geth', via: 'github-fork', evidence: null },
       { repo: 'erigontech/erigon', id: 'github:erigontech/erigon', family: 'Erigon', via: 'name', evidence: 'client name' }
     ]);
-    expect(one.lineage.downstream).toEqual([{ id: 'github:x/y', repo: 'x/y', names: ['X Geth'], role: null, networkCount: 2, networks: [{ chainId: 5, name: 'Five' }], via: 'name' }]);
+    expect(one.lineage.downstream).toEqual([
+      { id: 'github:x/y', repo: 'x/y', names: ['X Geth'], role: null, networkCount: 2, networks: [{ chainId: 5, name: 'Five' }], via: 'name' },
+      { id: 'github:op/geth', repo: 'op/geth', names: [], role: null, networkCount: 0, networks: [], via: 'known' }
+    ]);
     _resetClientFeedCacheForTests();
     proxyFetch.mockResolvedValue(json({ client: geth }));
     expect((await get('/client-releases/clients/github/bnb-chain/bsc')).json().client.lineage).toBeNull();

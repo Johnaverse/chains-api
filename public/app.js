@@ -3949,6 +3949,7 @@ function openChainDetail(chainId, opts = {}) {
     const sp = state.statusPagesByChain.get(chainId);
     const open = state.openByChain.get(chainId) || [];
     clear(body);
+    byId('detailDrawer').querySelector('.drawer-panel')?.scrollTo(0, 0);
 
     // ── header ──
     const badges = el('div', { class: 'd-badges' }, [
@@ -5970,11 +5971,13 @@ function compactClientActivity(a) {
 const LINEAGE_VIA_TEXT = {
     'github-fork': ['GitHub fork', 'GitHub records this repository as forked from it'],
     'gitlab-fork': ['GitLab fork', 'GitLab records this repository as forked from it'],
+    known: ['known lineage', 'The well-known upstream of this client family'],
     name: ['by name', 'Inferred from the repository or client name — a hint, not a recorded fork']
 };
 function lineageVia(via, evidence) {
     const [text, title] = LINEAGE_VIA_TEXT[via] || LINEAGE_VIA_TEXT.name;
-    return el('span', { class: `pill sm lineage-via lineage-${via === 'name' ? 'hint' : 'fork'}`, title: evidence ? `${title} (${evidence})` : title, text });
+    const cls = via === 'name' || !LINEAGE_VIA_TEXT[via] ? 'hint' : 'fork';
+    return el('span', { class: `pill sm lineage-via lineage-${cls}`, title: evidence ? `${title} (${evidence})` : title, text });
 }
 
 function lineageNode(label, { id, current = false } = {}) {
@@ -5983,15 +5986,22 @@ function lineageNode(label, { id, current = false } = {}) {
     ]);
 }
 
+// Bumped on every open: only the newest request may draw (the URL state is applied twice on
+// load, and a reader can click through clients faster than they answer).
+let clientDetailSeq = 0;
+
 function openClientDetail(id, opts = {}) {
     const path = clientPathOfId(id);
     if (!path) return;
+    const seq = ++clientDetailSeq;
     openClientId = String(id).toLowerCase();
     openChainId = null;
     stopBlockHead();
     if (!opts.fromUrl) updateUrl();
     const body = byId('drawerBody');
     clear(body);
+    // Moving from one client (or network) to another reuses the panel: start at its top.
+    byId('detailDrawer').querySelector('.drawer-panel')?.scrollTo(0, 0);
     const repoLabel = String(id).split(':')[1];
     body.appendChild(el('div', { class: 'd-header' }, [
         el('div', {}, [el('h2', { id: 'drawerTitle', text: repoLabel }), el('div', { class: 'd-badges' }, [el('span', { class: 'badge', text: 'Client' })])])
@@ -6001,19 +6011,20 @@ function openClientDetail(id, opts = {}) {
     byId('detailDrawer').classList.remove('hidden');
     document.documentElement.classList.add('drawer-open');
     byId('closeDrawer')?.focus();
-    loadClientDetail(openClientId, path, body, loading);
+    loadClientDetail(seq, path, body, loading);
 }
 
-async function loadClientDetail(id, path, body, loading) {
+async function loadClientDetail(seq, path, body, loading) {
+    const current = () => seq === clientDetailSeq && openClientId != null;
     let d;
     try {
         d = await api(path, { timeoutMs: 15000 });
     } catch (err) {
-        if (openClientId !== id) return;
+        if (!current()) return;
         loading.textContent = err?.status === 404 ? 'This client is not in the registry.' : 'Could not load this client — try again.';
         return;
     }
-    if (openClientId !== id) return;
+    if (!current()) return;
     loading.remove();
     const c = d.client || {};
     const href = safeUrl(c.url);
@@ -6023,7 +6034,7 @@ async function loadClientDetail(id, path, body, loading) {
     clear(head);
     head.appendChild(el('div', {}, [
         el('h2', { id: 'drawerTitle' }, [
-            href ? el('a', { href, target: '_blank', rel: 'noopener', text: c.repo || id }) : el('span', { text: c.repo || id })
+            href ? el('a', { href, target: '_blank', rel: 'noopener', text: c.repo || openClientId }) : el('span', { text: c.repo || openClientId })
         ]),
         el('div', { class: 'd-badges' }, [
             el('span', { class: 'badge', text: c.host === 'gitlab.com' ? 'GitLab' : 'GitHub' }),
@@ -6125,7 +6136,7 @@ function clientLineageSection(c, networks) {
         sec.appendChild(list);
         if (total > l.downstream.length) sec.appendChild(el('p', { class: 'note', text: `Showing ${fmtNum(l.downstream.length)} of ${fmtNum(total)}.` }));
     }
-    sec.appendChild(el('p', { class: 'note', text: '“GitHub fork” links are recorded by the host; “by name” links are inferred from repository and client names and can be wrong.' }));
+    sec.appendChild(el('p', { class: 'note', text: '“GitHub fork” links are recorded by the host and “known lineage” links are well-known upstreams; “by name” links are inferred from repository and client names and can be wrong.' }));
     return sec;
 }
 

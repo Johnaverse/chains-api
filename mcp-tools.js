@@ -525,7 +525,7 @@ export function getToolDefinitions() {
     {
       name: 'get_client_activity',
       description:
-        'How actively a node CLIENT is developed and how much of its open work is flagged as critical: default-branch commits and merged pull requests in the last 30/90 days, open issues and PRs, issues opened in 30 days, open issues labeled as bugs or as critical/security/priority (with the label names), published GitHub security advisories (count by severity, newest three), a development `level` (active / moderate / low / dormant / archived) and an `attention` level (high / elevated / normal) with its reasons. Use for "is X still maintained", "how active is X", "does X have critical open issues or recent security advisories". Label counts say what maintainers labeled, not a code audit — say so. Refreshed daily; `activity: null` means not collected yet. Give `repo` for one repository, or `client` (a name such as "lighthouse") for up to `limit` matching repositories.',
+        'How actively a node CLIENT is developed and how much of its open work is flagged as critical: default-branch commits and merged pull requests in the last 30/90 days, open issues and PRs, issues opened in 30 days, open issues labeled as bugs or as critical/security/priority (with the label names), published GitHub security advisories (count by severity, newest three), a development `level` (active / moderate / low / dormant / archived) and an `attention` level (high / elevated / normal) with its reasons. Use for "is X still maintained", "how active is X", "does X have critical open issues or recent security advisories". Label counts say what maintainers labeled, not a code audit — say so. Refreshed daily; `activity: null` means not collected yet. Also returns `lineage`: the upstream client this one customizes (e.g. a chain\'s geth fork → Geth) and the clients customizing it with their networks; `via` is `github-fork`/`gitlab-fork` (recorded by the host), `known` (well-known parent) or `name` (inferred from names — call it a likely link, not a fact). Use for "which chains run a customized geth", "what is X based on". Give `repo` for one repository, or `client` (a name such as "lighthouse") for up to `limit` matching repositories.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1432,6 +1432,13 @@ async function handleGetClientActivity(args) {
       networkCount: c.networkCount,
       latestRelease: c.latestRelease,
       activity: c.activity,
+      // Compact: the upstream it customizes, and how many clients customize it (first ten named).
+      lineage: c.lineage ? {
+        family: c.lineage.family,
+        upstream: c.lineage.upstream,
+        customizedBy: c.lineage.downstream.slice(0, 10).map((d) => ({ repo: d.repo, via: d.via, networks: d.networks.map((n) => n.name || n.chainId) })),
+        customizedByTotal: c.lineage.downstreamTotal,
+      } : null,
     }));
     return compactResponse({
       count: clients.length,
