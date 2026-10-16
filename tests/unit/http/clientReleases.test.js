@@ -214,6 +214,19 @@ describe('GET /client-releases/clients/:host/:owner/:repo', () => {
     expect((await get('/client-releases/clients/github/bnb-chain/bsc')).json().client.lineage).toBeNull();
   });
 
+  it('bounds a malformed or oversized lineage instead of passing it through', async () => {
+    const many = n => Array.from({ length: n }, (_, i) => ({ id: `github:o/r${i}`, repo: `o/r${i}`, family: 'F', via: 'name' }));
+    proxyFetch.mockResolvedValue(json({ client: geth, lineage: { family: 7, upstream: many(15), downstream: many(250), downstreamTotal: 'lots' } }));
+    const l = (await get('/client-releases/clients/github/bnb-chain/bsc')).json().client.lineage;
+    expect(l.family).toBeNull();
+    expect(l.upstream).toHaveLength(10);
+    expect(l.downstream).toHaveLength(200);
+    expect(l.downstreamTotal).toBe(200);
+    _resetClientFeedCacheForTests();
+    proxyFetch.mockResolvedValue(json({ client: geth, lineage: { upstream: 'geth', downstream: { a: 1 } } }));
+    expect((await get('/client-releases/clients/github/bnb-chain/bsc')).json().client.lineage).toEqual({ family: null, upstream: [], downstream: [], downstreamTotal: 0 });
+  });
+
   it('returns the entry with its networks', async () => {
     proxyFetch.mockResolvedValue(json(geth));
     const res = await get('/client-releases/clients/github/ethereum/go-ethereum');

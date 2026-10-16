@@ -96,6 +96,12 @@ describe('client release MCP tools', () => {
     expect(geth.lineage.customizedBy).toHaveLength(10);
     expect(geth.lineage.customizedBy.slice(0, 2)).toEqual([{ repo: 'o/g0', via: 'name', networks: ['One'] }, { repo: 'o/g1', via: 'name', networks: [2] }]);
 
+    // A customized client names what it customizes, with the evidence.
+    const upstream = [{ repo: 'ethereum/go-ethereum', id: 'github:ethereum/go-ethereum', family: 'Geth', via: 'known', evidence: null }];
+    feed.getFeedClient.mockResolvedValueOnce({ client: { id: 'github:bnb-chain/bsc', repo: 'bnb-chain/bsc', activity: null, lineage: { family: null, upstream, downstream: [], downstreamTotal: 0 } } });
+    const bsc = parse(await handleToolCall('get_client_activity', { repo: 'bnb-chain/bsc' })).clients[0];
+    expect(bsc.lineage).toMatchObject({ family: null, upstream, customizedBy: [], customizedByTotal: 0 });
+
     await handleToolCall('get_client_activity', { repo: 'gitlab:tezos/tezos' });
     expect(feed.getFeedClient).toHaveBeenLastCalledWith('gitlab', 'tezos', 'tezos');
 

@@ -6093,7 +6093,8 @@ function clientLineageSection(c, networks) {
         ]))));
         chain.appendChild(el('div', { class: 'lineage-arrow', 'aria-hidden': 'true', text: '↓ customized as' }));
     }
-    chain.appendChild(el('div', { class: 'lineage-step' }, [lineageNode(l.family ? `${c.repo} (${l.family})` : c.repo, { current: true })]));
+    const self = c.repo || c.names?.[0] || openClientId;
+    chain.appendChild(el('div', { class: 'lineage-step' }, [lineageNode(l.family ? `${self} (${l.family})` : self, { current: true })]));
     if (networks.length) {
         chain.appendChild(el('div', { class: 'lineage-arrow', 'aria-hidden': 'true', text: '↓ runs' }));
         // The full list is in Networks above; the chain only needs to show the shape.

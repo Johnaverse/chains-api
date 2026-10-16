@@ -43,6 +43,7 @@ describe('GET /repositories', () => {
     for (const f of body.lineage.families) {
       expect(f.repo).toMatch(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/);
       if (f.parent) expect(keys).toContain(f.parent);
+      for (const former of f.formerRepos ?? []) expect(former).toMatch(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/);
       for (const word of [...(f.repoWords ?? []), ...(f.nameWords ?? [])]) expect(word).toMatch(/^[a-z0-9][a-z0-9 .-]*$/);
       expect((f.repoWords?.length ?? 0) + (f.nameWords?.length ?? 0)).toBeGreaterThan(0);
     }

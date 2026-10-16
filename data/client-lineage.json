@@ -1,6 +1,6 @@
 {
  "reviewedAt": "2026-10-16",
- "about": "Client lineage for chains-client-feed: which upstream client a repository customizes. Served verbatim as `lineage` on GET /repositories; the feed builds its matchers from it on every registry refresh. families: most specific first (an op-geth fork is OP Geth, whose parent is Geth). repo is the family's main repository; parent its well-known upstream family (shown as known lineage). repoWords match whole words of a repository name (`*-op-geth`, `*/go-ethereum`); nameWords match a single-client name (\"BSC Geth\") and only when the repository name matches no family. Omit nameWords where the word is too common to trust. links: curated upstreams for repositories the names cannot place, keyed by registry id (github:owner/repo), value {upstream: owner/repo, note}. Host-recorded forks (GitHub/GitLab) need no entry: the feed reads them itself.",
+ "about": "Client lineage for chains-client-feed: which upstream client a repository customizes. Served verbatim as `lineage` on GET /repositories; the feed builds its matchers from it on every registry refresh. families: most specific first (an op-geth fork is OP Geth, whose parent is Geth). repo is the family's main repository; parent its well-known upstream family (shown as known lineage). formerRepos are the family's own earlier repositories (klaytn/klaytn for Kaia): treated as the family itself, never as a customization of it. note is for maintainers only. repoWords match whole words of a repository name (`*-op-geth`, `*/go-ethereum`); nameWords match a single-client name (\"BSC Geth\") and only when the repository name matches no family. Omit nameWords where the word is too common to trust. links: curated upstreams for repositories the names cannot place, keyed by registry id (github:owner/repo), value {upstream: owner/repo, note}. Host-recorded forks (GitHub/GitLab) need no entry: the feed reads them itself.",
  "families": [
   {
    "key": "op-geth",
@@ -54,7 +54,8 @@
    ],
    "nameWords": [
     "subnet-evm"
-   ]
+   ],
+   "note": "Archived; development continues inside ava-labs/avalanchego."
   },
   {
    "key": "coreth",
@@ -66,7 +67,8 @@
    ],
    "nameWords": [
     "coreth"
-   ]
+   ],
+   "note": "Archived; development continues inside ava-labs/avalanchego."
   },
   {
    "key": "geth",
@@ -152,7 +154,11 @@
    "repoWords": [
     "klaytn",
     "kaia"
-   ]
+   ],
+   "formerRepos": [
+    "klaytn/klaytn"
+   ],
+   "note": "klaytn/klaytn is the archived predecessor."
   },
   {
    "key": "optimism",
@@ -197,7 +203,8 @@
    ],
    "nameWords": [
     "polygon edge"
-   ]
+   ],
+   "note": "Archived by Polygon."
   },
   {
    "key": "taiko",
@@ -249,7 +256,11 @@
    "nameWords": [
     "cometbft",
     "tendermint"
-   ]
+   ],
+   "formerRepos": [
+    "tendermint/tendermint"
+   ],
+   "note": "tendermint/tendermint is the predecessor."
   },
   {
    "key": "polkadot-sdk",
@@ -262,7 +273,11 @@
    "nameWords": [
     "substrate",
     "polkadot sdk"
-   ]
+   ],
+   "formerRepos": [
+    "paritytech/substrate"
+   ],
+   "note": "paritytech/substrate is the archived predecessor."
   },
   {
    "key": "lighthouse",
