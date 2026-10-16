@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, it, expect, vi } from 'vitest';
 import Fastify from 'fastify';
 
@@ -97,7 +98,7 @@ describe('GET /validate/incidents', () => {
     it('stays 404 when unconfigured even if a caller sends a token', async () => {
       // An unset token must never be satisfiable — least of all by guessing one.
       const { app, sentinel } = await build('');
-      const res = await app.inject({ method: 'GET', url: '/validate/incidents?refresh=true&token=anything' });
+      const res = await app.inject({ method: 'GET', url: '/validate/incidents?refresh=true', headers: { 'x-diagnostics-token': 'anything' } });
       expect(res.statusCode).toBe(404);
       expect(sentinel.runIncidentSentinel).not.toHaveBeenCalled();
     });
@@ -112,21 +113,23 @@ describe('GET /validate/incidents', () => {
     it('rejects a wrong token with 401, including one of a different length', async () => {
       const { app, sentinel } = await build('s3cret');
       for (const token of ['wrong!', 'x', 's3cret-and-then-some']) {
-        const res = await app.inject({ method: 'GET', url: `/validate/incidents?refresh=true&token=${token}` });
+        const res = await app.inject({ method: 'GET', url: '/validate/incidents?refresh=true', headers: { 'x-diagnostics-token': token } });
         expect(res.statusCode).toBe(401);
       }
       expect(sentinel.runIncidentSentinel).not.toHaveBeenCalled();
     });
 
-    it('refreshes with the right token in the query string', async () => {
-      const { app, sentinel } = await build('s3cret');
-      sentinel.runIncidentSentinel.mockResolvedValue(FRESH);
+    it('declares the optional x-diagnostics-token header, so Swagger UI can send it', () => {
+      const doc = JSON.parse(readFileSync(new URL('../../../public/openapi.json', import.meta.url), 'utf8'));
+      const header = doc.paths['/validate/incidents'].get.parameters.find(p => p.in === 'header' && p.name === 'x-diagnostics-token');
+      expect(header).toMatchObject({ required: false, schema: { type: 'string' } });
+    });
 
+    it('does not accept the token in the query string, which would be logged', async () => {
+      const { app, sentinel } = await build('s3cret');
       const res = await app.inject({ method: 'GET', url: '/validate/incidents?refresh=true&token=s3cret' });
-      expect(res.statusCode).toBe(200);
-      expect(res.json().fetchedAt).toBe(FRESH.fetchedAt);
-      expect(sentinel.runIncidentSentinel).toHaveBeenCalledTimes(1);
-      expect(sentinel.inspectCachedIncidents).not.toHaveBeenCalled();
+      expect(res.statusCode).toBe(400);
+      expect(sentinel.runIncidentSentinel).not.toHaveBeenCalled();
     });
 
     it('refreshes with the right token in the x-diagnostics-token header', async () => {
@@ -139,14 +142,16 @@ describe('GET /validate/incidents', () => {
         headers: { 'x-diagnostics-token': 's3cret' }
       });
       expect(res.statusCode).toBe(200);
+      expect(res.json().fetchedAt).toBe(FRESH.fetchedAt);
       expect(sentinel.runIncidentSentinel).toHaveBeenCalledTimes(1);
+      expect(sentinel.inspectCachedIncidents).not.toHaveBeenCalled();
     });
 
     it('answers 503 when an authorized refresh cannot reach the feed', async () => {
       const { app, sentinel } = await build('s3cret');
       sentinel.runIncidentSentinel.mockRejectedValue(new Error('feed down'));
 
-      const res = await app.inject({ method: 'GET', url: '/validate/incidents?refresh=true&token=s3cret' });
+      const res = await app.inject({ method: 'GET', url: '/validate/incidents?refresh=true', headers: { 'x-diagnostics-token': 's3cret' } });
       expect(res.statusCode).toBe(503);
     });
   });

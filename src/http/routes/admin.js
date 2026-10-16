@@ -248,15 +248,23 @@ export async function adminRoutes(fastify) {
         type: 'object',
         additionalProperties: false,
         properties: {
-          refresh: { type: 'boolean', default: false },
-          token: { type: 'string' }
+          refresh: { type: 'boolean', default: false }
+        }
+      },
+      // Optional: cached reads are open; only ?refresh=true needs it. Declared so Swagger UI and
+      // generated clients can send it.
+      headers: {
+        type: 'object',
+        properties: {
+          'x-diagnostics-token': { type: 'string', description: 'DIAGNOSTICS_TOKEN; required with ?refresh=true' }
         }
       }
     }
   }, async (request, reply) => {
     if (request.query.refresh) {
       if (!DIAGNOSTICS_TOKEN) return sendError(reply, 404, 'Not found');
-      const provided = request.query.token ?? request.headers['x-diagnostics-token'];
+      // Header only: a query-string token would land in every request log line and proxy log.
+      const provided = request.headers['x-diagnostics-token'];
       if (!tokenMatches(DIAGNOSTICS_TOKEN, provided)) {
         return sendError(reply, 401, 'Invalid or missing token');
       }
@@ -272,7 +280,7 @@ export async function adminRoutes(fastify) {
     if (!report) {
       // Nothing cached yet is not a fault, and inventing a fetch to hide it is the amplification
       // this split exists to avoid. Say so, and name the authenticated way to populate it.
-      return sendError(reply, 503, 'No live incident feed cached yet; retry with ?refresh=true and a token');
+      return sendError(reply, 503, 'No live incident feed cached yet; retry with ?refresh=true and the x-diagnostics-token header');
     }
     return report;
   });

@@ -3,7 +3,7 @@
   "info": {
     "title": "Chains API",
     "description": "Aggregated blockchain chain data from five external sources (TheGraph, Chainlist, Chain ID Network, SLIP-0044, L2BEAT): chain metadata, relations, RPC endpoints and health, L2 scaling, and operator status.",
-    "version": "1.7.58"
+    "version": "1.7.59"
   },
   "components": {
     "schemas": {}
@@ -100,9 +100,10 @@
             "schema": {
               "type": "string"
             },
-            "in": "query",
-            "name": "token",
-            "required": false
+            "in": "header",
+            "name": "x-diagnostics-token",
+            "required": false,
+            "description": "DIAGNOSTICS_TOKEN; required with ?refresh=true"
           }
         ],
         "responses": {
