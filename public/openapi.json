@@ -95,6 +95,15 @@
             "in": "query",
             "name": "refresh",
             "required": false
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "in": "header",
+            "name": "x-diagnostics-token",
+            "required": false,
+            "description": "DIAGNOSTICS_TOKEN; required with ?refresh=true"
           }
         ],
         "responses": {
