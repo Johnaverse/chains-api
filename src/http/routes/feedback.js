@@ -1,11 +1,13 @@
 import { FEEDBACK_RATE_LIMIT_MAX, RATE_LIMIT_WINDOW_MS } from '../../../config.js';
-import { addFeedback, listFeedback } from '../../services/feedback.js';
+import { addFeedback } from '../../services/feedback.js';
 
 /**
  * The wrong-info feedback loop. The dashboard correlates three live feeds by
  * heuristics (network join, time windows) — inevitably some links are wrong,
  * and no automation can know which. POST lets a reader flag one ("not
- * related", "wrong version"); GET is how the owner reviews the reports.
+ * related", "wrong version"). Write-only: reports are never served back over
+ * the public API. They are kept in feedback.jsonl next to the data cache for a
+ * separate backend to review; this service has no login.
  */
 
 const FEEDBACK_KINDS = ['upgrade', 'incident', 'provider', 'forum', 'news', 'chain', 'other'];
@@ -82,18 +84,4 @@ export async function feedbackRoutes(fastify) {
     const record = await addFeedback(request.body);
     return reply.code(201).send({ received: true, id: record.id });
   });
-
-  fastify.get('/feedback', {
-    schema: {
-      description: 'Review submitted feedback reports, newest-first. Filter by kind; limit defaults to 50 (max 500).',
-      querystring: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          kind: { type: 'string', enum: FEEDBACK_KINDS, description: 'Only reports of this kind' },
-          limit: { type: 'integer', minimum: 1, maximum: 500, default: 50 }
-        }
-      }
-    }
-  }, async (request) => listFeedback(request.query));
 }

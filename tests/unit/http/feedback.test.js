@@ -77,9 +77,19 @@ describe('POST /feedback', () => {
   });
 });
 
-// GET tests seed through the store directly — going through POST would burn
-// the tight per-route rate limit long before 1000 records.
+// Reports are write-only over HTTP: nothing serves them back.
 describe('GET /feedback', () => {
+  it('is not exposed', async () => {
+    await addFeedback({ kind: 'upgrade', reason: 'other', refId: 'secret-ref' });
+    const res = await app.inject({ method: 'GET', url: '/feedback' });
+    expect(res.statusCode).toBe(404);
+    expect(res.body).not.toContain('secret-ref');
+  });
+});
+
+// The store is still what a review backend reads. Seeded directly — going
+// through POST would burn the tight per-route rate limit long before 1000 records.
+describe('listFeedback (store)', () => {
   async function seed(n, kind = 'upgrade') {
     for (let i = 0; i < n; i++) {
       await addFeedback({ kind, reason: 'other', refId: `${kind}-${i}` });
@@ -89,9 +99,7 @@ describe('GET /feedback', () => {
   it('returns the contract envelope, newest-first', async () => {
     await seed(3, 'upgrade');
     await seed(2, 'incident');
-    const res = await app.inject({ method: 'GET', url: '/feedback' });
-    expect(res.statusCode).toBe(200);
-    const body = res.json();
+    const body = await listFeedback();
     expect(body.totalMatched).toBe(5);
     expect(body.count).toBe(5);
     expect(body.truncated).toBe(false);
@@ -103,30 +111,23 @@ describe('GET /feedback', () => {
   it('filters by kind', async () => {
     await seed(3, 'upgrade');
     await seed(2, 'incident');
-    const res = await app.inject({ method: 'GET', url: '/feedback?kind=incident' });
-    const body = res.json();
+    const body = await listFeedback({ kind: 'incident' });
     expect(body.totalMatched).toBe(2);
     expect(body.feedback.every((r) => r.kind === 'incident')).toBe(true);
   });
 
-  it('rejects an unknown kind and unknown query parameters', async () => {
-    expect((await app.inject({ method: 'GET', url: '/feedback?kind=bogus' })).statusCode).toBe(400);
-    expect((await app.inject({ method: 'GET', url: '/feedback?nope=1' })).statusCode).toBe(400);
-  });
-
-  it('applies the limit (default 50, max 500) and flags truncation', async () => {
+  it('applies the limit (default 50, capped at 500) and flags truncation', async () => {
     await seed(60);
-    const def = (await app.inject({ method: 'GET', url: '/feedback' })).json();
+    const def = await listFeedback();
     expect(def.count).toBe(50);
     expect(def.totalMatched).toBe(60);
     expect(def.truncated).toBe(true);
-    expect((await app.inject({ method: 'GET', url: '/feedback?limit=501' })).statusCode).toBe(400);
+    expect((await listFeedback({ limit: 501 })).count).toBe(60);
   });
 
   it('evicts oldest at the 1000-record cap (newest kept)', async () => {
     await seed(1005);
-    const res = await app.inject({ method: 'GET', url: '/feedback?limit=500' });
-    const body = res.json();
+    const body = await listFeedback({ limit: 500 });
     expect(body.totalMatched).toBe(1000);      // ring capped, not 1005
     expect(body.count).toBe(500);
     expect(body.truncated).toBe(true);
