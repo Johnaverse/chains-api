@@ -311,6 +311,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initOverviewControls();
     initNewsControls();
     initReleaseControls();
+    initReleaseRefresh();
     initChainsTable();
     initAppbarHeight();
     initResizeHandling();
@@ -601,6 +602,8 @@ const DEFAULT_VIEW = 'overview';
 let activeView = DEFAULT_VIEW;
 let searchQuery = '';
 let openChainId = null;
+// The client whose detail the drawer shows (registry id, e.g. github:bnb-chain/bsc), when it shows one.
+let openClientId = null;
 
 function initTabs() {
     const tabs = [...document.querySelectorAll('#tabs .tab')];
@@ -731,6 +734,7 @@ function updateUrl({ push = false } = {}) {
     set('view', activeView === DEFAULT_VIEW ? null : activeView);
     set('q', searchQuery || null);
     set('chain', openChainId);
+    set('client', openClientId);
     history[push ? 'pushState' : 'replaceState'](null, '', u);
 }
 
@@ -743,7 +747,9 @@ function applyUrlState() {
     switchView(params.get('view') || DEFAULT_VIEW, { fromUrl: true });
 
     const chain = params.get('chain');
+    const client = params.get('client');
     if (chain && state.byId.has(Number(chain))) openChainDetail(Number(chain), { fromUrl: true });
+    else if (client && clientPathOfId(client)) openClientDetail(client, { fromUrl: true });
     else closeDrawer({ fromUrl: true });
 }
 
@@ -3909,6 +3915,7 @@ function closeDrawer(opts = {}) {
     document.documentElement.classList.remove('drawer-open');
     stopBlockHead();
     openChainId = null;
+    openClientId = null;
     if (!opts.fromUrl) updateUrl();
 }
 function chainLink(id) {
@@ -3933,6 +3940,7 @@ function openChainDetail(chainId, opts = {}) {
     const c = state.byId.get(chainId);
     if (!c) return;
     openChainId = chainId;
+    openClientId = null;
     if (!opts.fromUrl) updateUrl();
 
     const body = byId('drawerBody');
@@ -3942,6 +3950,7 @@ function openChainDetail(chainId, opts = {}) {
     const sp = state.statusPagesByChain.get(chainId);
     const open = state.openByChain.get(chainId) || [];
     clear(body);
+    byId('detailDrawer').querySelector('.drawer-panel')?.scrollTo(0, 0);
 
     // ── header ──
     const badges = el('div', { class: 'd-badges' }, [
@@ -5458,6 +5467,9 @@ const releases = {
     loading: {},
     error: {},
     stale: {},
+    // Per query: the last answer (to redraw only on change) and when it arrived.
+    signature: {},
+    loadedAt: {},
     scope: 'all', chain: '', client: '', from: '', to: '',
     shown: null
 };
@@ -5523,13 +5535,21 @@ function initReleaseControls() {
 }
 
 function ensureReleasesView() {
-    loadReleases();
+    // An answer under a minute old is as fresh as the API's cache: show it instead of re-asking
+    // (opening the view, and the page's double URL-state pass, both land here).
+    const loadedAt = releases.loadedAt[releaseKey()] ?? 0;
+    if (Date.now() - loadedAt >= RELEASE_REFRESH_MS || releases.error[releaseKey()]) loadReleases();
     renderReleaseList();
 }
 
 // Re-entering the view, a scope or a date range revalidates (the proxy caches upstream); only
 // a request already in flight is not repeated. Cached items keep rendering meanwhile.
-async function loadReleases() {
+// While the Releases view is visible it re-asks every minute (the API caches the feed for as
+// long), so a new release appears without a reload. A refresh is quiet: it redraws only when the
+// answer changed, and a failed one keeps the list on screen.
+const RELEASE_REFRESH_MS = 60000;
+
+async function loadReleases({ quiet = false } = {}) {
     const key = releaseKey();
     if (releases.loading[key]) return;
     if (releases.from && releases.to && releases.to < releases.from) {
@@ -5538,7 +5558,8 @@ async function loadReleases() {
         return;
     }
     releases.loading[key] = true;
-    releases.error[key] = false;
+    if (!quiet) releases.error[key] = false;
+    let changed = true;
     try {
         const q = new URLSearchParams({ limit: String(RELEASE_FETCH_LIMIT) });
         if (releases.scope === 'fork') q.set('fork', 'true');
@@ -5546,19 +5567,40 @@ async function loadReleases() {
         // A bare date: the API includes that whole day.
         if (releases.to) q.set('until', releases.to);
         const d = await api(`/client-releases?${q}`);
-        releases.items[key] = (Array.isArray(d.items) ? d.items : []).map(releaseModel);
+        const raw = Array.isArray(d.items) ? d.items : [];
+        // New releases, and enrichment landing on ones already shown, both change the answer.
+        const signature = JSON.stringify([raw, d.stale === true, d.totalMatched ?? null]);
+        changed = signature !== releases.signature[key] || releases.error[key] === true;
+        releases.signature[key] = signature;
+        releases.loadedAt[key] = Date.now();
+        releases.items[key] = raw.map(releaseModel);
         releases.stale[key] = d.stale === true;
+        releases.error[key] = false;
         releases.total = releases.total || {};
         releases.total[key] = Number.isFinite(d.totalMatched) ? d.totalMatched : null;
         setClientFeedConfigured(true);
     } catch (err) {
-        if (isFeedAbsent(err)) setClientFeedConfigured(false);
+        if (quiet) changed = false;
+        else if (isFeedAbsent(err)) setClientFeedConfigured(false);
         else releases.error[key] = true;
     } finally {
         releases.loading[key] = false;
     }
+    if (!changed) return;
     rebuildReleaseChainOptions();
     if (activeView === 'releases') renderReleaseList();
+}
+
+function refreshReleasesIfDue() {
+    if (activeView !== 'releases' || document.hidden || releases.configured === false) return;
+    const loadedAt = releases.loadedAt[releaseKey()] ?? 0;
+    if (Date.now() - loadedAt >= RELEASE_REFRESH_MS - 1000) loadReleases({ quiet: true });
+}
+
+function initReleaseRefresh() {
+    setInterval(refreshReleasesIfDue, RELEASE_REFRESH_MS);
+    // A tab brought back after a while catches up at once instead of at the next tick.
+    document.addEventListener('visibilitychange', refreshReleasesIfDue);
 }
 
 function releaseModel(r) {
@@ -5710,12 +5752,16 @@ function releaseCard(r) {
         ? el('span', { title: fmtDateTime(r.publishedMs), text: relTime(new Date(r.publishedMs).toISOString()) })
         : null;
 
+    const clientId = r.repo && r.id ? String(r.id).split('@')[0] : null;
     const main = el('div', { class: 'incident-main' }, [
         el('div', { class: 'incident-title' }, [
             el('span', { class: 'incident-title-text' }, [
-                href
-                    ? el('a', { href, target: '_blank', rel: 'noopener', text: label })
-                    : el('span', { text: label }),
+                clientId && clientPathOfId(clientId)
+                    ? clientNameButton(clientId, label)
+                    : href ? el('a', { href, target: '_blank', rel: 'noopener', text: label }) : el('span', { text: label }),
+                clientId && clientPathOfId(clientId) && href
+                    ? el('a', { href, target: '_blank', rel: 'noopener', class: 'ext-link', title: 'Open the release', 'aria-label': 'Open the release', text: '↗' })
+                    : null,
                 ver ? ' ' : null,
                 ver ? el('span', { class: 'client-ver', text: ver }) : null,
                 tagNote ? el('span', { class: 'r-note', text: ` (${tagNote})` }) : null
@@ -5827,40 +5873,9 @@ function releaseRangeText() {
 
 // ─── drawer: clients serving a chain (+ reverse lookup of each client's networks) ───
 const CLIENTS_SHOWN = 8;
-const CLIENT_NETWORKS_SHOWN = 40;
-const REPO_PART = /^(?!\.+$)[A-Za-z0-9_.-]+$/;
-
-// The proxy route is /client-releases/clients/:host/:owner/:repo. Only github/gitlab two-part
-// slugs fit it (a GitLab subgroup path does not), and anything else gets no expander.
-function clientLookupPath(c) {
-    const host = String(c.host || c.id?.split(':')[0] || '').toLowerCase().replace(/\.com$/, '');
-    if (host !== 'github' && host !== 'gitlab') return null;
-    const parts = String(c.repo || '').split('/');
-    if (parts.length !== 2 || !parts.every(p => REPO_PART.test(p))) return null;
-    return `/client-releases/clients/${host}/${encodeURIComponent(parts[0])}/${encodeURIComponent(parts[1])}`;
-}
-
 function forkSummaryText(f) {
     return [f.name || 'Unnamed fork', f.network, ...forkActivationBits(f).map(b => b.text), f.state ? String(f.state).replace(/_/g, ' ') : null]
         .filter(Boolean).join(' · ');
-}
-
-function clientNetworksList(networks, currentChainId) {
-    const chip = n => (n.chainId === currentChainId
-        ? el('span', { class: 'pill', title: 'This network', text: releaseChainName(n) })
-        : state.byId.has(n.chainId)
-            ? el('button', { class: 'chain-chip', type: 'button', text: releaseChainName(n), onclick: () => openChainDetail(n.chainId) })
-            : el('span', { class: 'pill', text: releaseChainName(n) }));
-    const box = el('div', { class: 'affected-chains' }, networks.slice(0, CLIENT_NETWORKS_SHOWN).map(chip));
-    if (networks.length > CLIENT_NETWORKS_SHOWN) {
-        const more = el('button', {
-            class: 'btn r-more', type: 'button',
-            text: `Show all ${networks.length}`,
-            onclick: () => { more.remove(); for (const n of networks.slice(CLIENT_NETWORKS_SHOWN)) box.appendChild(chip(n)); }
-        });
-        box.appendChild(more);
-    }
-    return box;
 }
 
 const ACTIVITY_LEVEL_TEXT = {
@@ -5899,7 +5914,7 @@ function clientActivityLine(a) {
     ]);
 }
 
-function networkClientItem(c, chainId) {
+function networkClientItem(c) {
     const href = safeUrl(c.url);
     const label = c.repo || c.names?.[0] || c.id || 'Unknown client';
     const kinds = (c.kinds || []).filter(k => k && k !== 'unknown');
@@ -5910,7 +5925,11 @@ function networkClientItem(c, chainId) {
 
     const item = el('div', { class: 'r-item' }, [
         el('div', { class: 'r-main' }, [
-            href ? el('a', { href, target: '_blank', rel: 'noopener', text: label }) : el('span', { text: label }),
+            c.id && clientPathOfId(c.id) ? clientNameButton(c.id, label)
+                : href ? el('a', { href, target: '_blank', rel: 'noopener', text: label }) : el('span', { text: label }),
+            c.id && clientPathOfId(c.id) && href
+                ? el('a', { href, target: '_blank', rel: 'noopener', class: 'ext-link', title: 'Open the repository', 'aria-label': 'Open the repository', text: '↗' })
+                : null,
             ...kinds.map(k => el('span', { class: 'tag', text: k })),
             c.repo && c.names?.length ? el('span', { class: 'r-note', text: c.names.slice(0, 3).join(', ') }) : null
         ]),
@@ -5928,47 +5947,234 @@ function networkClientItem(c, chainId) {
         clientActivityLine(c.activity)
     ]);
 
-    const path = clientLookupPath(c);
-    const n = Number.isFinite(c.networkCount) ? c.networkCount : null;
-    if (path && n !== 1) {
-        const text = n != null ? `Supports ${fmtNum(n)} networks` : 'Supported networks';
-        let box = null;
-        const toggle = el('button', {
-            class: 'btn r-more', type: 'button', 'aria-expanded': 'false', text,
-            onclick: async () => {
-                if (box) {
-                    const open = box.classList.toggle('hidden') === false;
-                    toggle.setAttribute('aria-expanded', String(open));
-                    return;
-                }
-                toggle.disabled = true;
-                box = el('div', { class: 'r-meta' }, [el('span', { class: 'r-note', text: 'Loading networks…' })]);
-                item.appendChild(box);
-                try {
-                    const d = await api(path, { timeoutMs: 15000 });
-                    const networks = (d.client?.networks || []).filter(x => Number.isFinite(x?.chainId));
-                    clear(box);
-                    box.appendChild(networks.length
-                        ? clientNetworksList(networks, chainId)
-                        : el('span', { class: 'r-note', text: 'No networks on record.' }));
-                    toggle.setAttribute('aria-expanded', 'true');
-                } catch {
-                    clear(box);
-                    box.appendChild(el('span', { class: 'r-note', text: 'Could not load this client’s networks.' }));
-                    // Let the next click retry.
-                    const failed = box;
-                    box = null;
-                    setTimeout(() => failed.remove(), 4000);
-                } finally {
-                    toggle.disabled = false;
-                }
-            }
-        });
-        item.appendChild(toggle);
-    } else if (n === 1) {
-        item.appendChild(el('span', { class: 'r-note', text: 'Only known on this network' }));
-    }
     return item;
+}
+
+// ─── drawer: one client — latest version, networks, and its lineage ───
+// The proxy route is /client-releases/clients/:host/:owner/:repo; only github/gitlab two-part
+// slugs fit it (a GitLab subgroup path does not), and anything else gets no client view.
+const CLIENT_REPO_PART = /^(?!\.+$)[A-Za-z0-9_.-]+$/;
+const CLIENT_NETWORK_CHIPS = 24;
+const LINEAGE_ROWS = 25;
+
+function clientPathOfId(id) {
+    const m = /^(github|gitlab):([^/]+)\/([^/]+)$/i.exec(String(id || ''));
+    if (!m || !CLIENT_REPO_PART.test(m[2]) || !CLIENT_REPO_PART.test(m[3])) return null;
+    return `/client-releases/clients/${m[1].toLowerCase()}/${encodeURIComponent(m[2])}/${encodeURIComponent(m[3])}`;
+}
+
+function clientNameButton(id, label) {
+    return el('button', { class: 'chip-link client-link', type: 'button', title: 'Client detail', text: label, onclick: () => openClientDetail(id) });
+}
+
+function clientChainChip(n) {
+    const name = releaseChainName(n);
+    return state.byId.has(n.chainId)
+        ? el('button', { class: 'chain-chip', type: 'button', text: name, onclick: () => openChainDetail(n.chainId) })
+        : el('span', { class: 'pill', text: name });
+}
+
+function chipsWithMore(items, shown, chip) {
+    const box = el('div', { class: 'affected-chains' }, items.slice(0, shown).map(chip));
+    if (items.length > shown) {
+        const more = el('button', {
+            class: 'btn r-more', type: 'button', text: `Show all ${fmtNum(items.length)}`,
+            onclick: () => { more.remove(); for (const x of items.slice(shown)) box.appendChild(chip(x)); }
+        });
+        box.appendChild(more);
+    }
+    return box;
+}
+
+// The full activity record -> the compact shape clientActivityLine reads.
+function compactClientActivity(a) {
+    if (!a || !a.level) return null;
+    return {
+        level: a.level,
+        attention: a.attention?.level ?? a.attention ?? null,
+        commits30: a.commits?.days30 ?? null,
+        merged30: a.mergedPullRequests?.days30 ?? null,
+        merged30AtLeast: a.mergedPullRequests?.atLeast === true,
+        openIssues: a.issues?.open ?? null,
+        criticalIssues: a.issues?.critical ?? null,
+        advisories365: a.advisories?.last365Days ?? null,
+        refreshedAt: a.refreshedAt
+    };
+}
+
+const LINEAGE_VIA_TEXT = {
+    'github-fork': ['GitHub fork', 'GitHub records this repository as forked from it'],
+    'gitlab-fork': ['GitLab fork', 'GitLab records this repository as forked from it'],
+    known: ['known lineage', 'The well-known upstream of this client family'],
+    name: ['by name', 'Inferred from the repository or client name — a hint, not a recorded fork']
+};
+function lineageVia(via, evidence) {
+    const [text, title] = LINEAGE_VIA_TEXT[via] || LINEAGE_VIA_TEXT.name;
+    const cls = via === 'name' || !LINEAGE_VIA_TEXT[via] ? 'hint' : 'fork';
+    return el('span', { class: `pill sm lineage-via lineage-${cls}`, title: evidence ? `${title} (${evidence})` : title, text });
+}
+
+function lineageNode(label, { id, current = false } = {}) {
+    return el('div', { class: `lineage-node${current ? ' is-current' : ''}` }, [
+        id && !current && clientPathOfId(id) ? clientNameButton(id, label) : el('span', { text: label })
+    ]);
+}
+
+// Bumped on every open: only the newest request may draw (the URL state is applied twice on
+// load, and a reader can click through clients faster than they answer).
+let clientDetailSeq = 0;
+
+function openClientDetail(id, opts = {}) {
+    const path = clientPathOfId(id);
+    if (!path) return;
+    const seq = ++clientDetailSeq;
+    openClientId = String(id).toLowerCase();
+    openChainId = null;
+    stopBlockHead();
+    if (!opts.fromUrl) updateUrl();
+    const body = byId('drawerBody');
+    clear(body);
+    // Moving from one client (or network) to another reuses the panel: start at its top.
+    byId('detailDrawer').querySelector('.drawer-panel')?.scrollTo(0, 0);
+    const repoLabel = String(id).split(':')[1];
+    body.appendChild(el('div', { class: 'd-header' }, [
+        el('div', {}, [el('h2', { id: 'drawerTitle', text: repoLabel }), el('div', { class: 'd-badges' }, [el('span', { class: 'badge', text: 'Client' })])])
+    ]));
+    const loading = el('p', { class: 'note', text: 'Loading client…' });
+    body.appendChild(loading);
+    byId('detailDrawer').classList.remove('hidden');
+    document.documentElement.classList.add('drawer-open');
+    byId('closeDrawer')?.focus();
+    loadClientDetail(seq, path, body, loading);
+}
+
+async function loadClientDetail(seq, path, body, loading) {
+    // Only the newest opening draws, and only into the panel it opened: its loading line must
+    // still be there (a later opening, a chain, or a close clears it).
+    const current = () => seq === clientDetailSeq && openClientId != null && loading.isConnected;
+    let d;
+    try {
+        d = await api(path, { timeoutMs: 15000 });
+    } catch (err) {
+        if (!current()) return;
+        loading.textContent = err?.status === 404 ? 'This client is not in the registry.' : 'Could not load this client — try again.';
+        return;
+    }
+    if (!current()) return;
+    loading.remove();
+    const c = d.client || {};
+    const href = safeUrl(c.url);
+
+    // ── header ──
+    const head = body.querySelector('.d-header');
+    clear(head);
+    head.appendChild(el('div', {}, [
+        el('h2', { id: 'drawerTitle' }, [
+            href ? el('a', { href, target: '_blank', rel: 'noopener', text: c.repo || openClientId }) : el('span', { text: c.repo || openClientId })
+        ]),
+        el('div', { class: 'd-badges' }, [
+            el('span', { class: 'badge', text: c.host === 'gitlab.com' ? 'GitLab' : 'GitHub' }),
+            ...(c.kinds || []).filter(k => k && k !== 'unknown').map(k => el('span', { class: 'tag', text: k })),
+            c.activity?.archived ? el('span', { class: 'pill pill-prerelease', text: 'archived' }) : null
+        ])
+    ]));
+    if (c.names?.length) body.appendChild(el('p', { class: 'note', text: `Known as ${c.names.slice(0, 6).join(', ')}` }));
+
+    // ── latest version ──
+    const rel = c.latestRelease;
+    const relVer = rel?.version || rel?.tag;
+    const verSec = drawerSection('Latest version');
+    if (relVer) {
+        const relHref = safeUrl(rel.url);
+        const relMs = Date.parse(rel.publishedAt || '');
+        verSec.appendChild(detailRow('Version', [
+            relHref ? el('a', { href: relHref, target: '_blank', rel: 'noopener', class: 'client-ver', text: relVer }) : el('span', { class: 'client-ver', text: relVer }),
+            rel.mandatory ? el('span', { class: 'pill pill-mandatory', text: 'mandatory' }) : null,
+            rel.prerelease ? el('span', { class: 'pill pill-prerelease', text: 'pre-release' }) : null
+        ]));
+        if (!Number.isNaN(relMs)) verSec.appendChild(detailRow('Published', el('span', { title: fmtDateTime(relMs), text: relTime(rel.publishedAt) })));
+    } else {
+        verSec.appendChild(el('p', { class: 'note', text: 'No release on record yet.' }));
+    }
+    if (c.latestFork) verSec.appendChild(detailRow('Latest fork', el('span', { text: forkSummaryText(c.latestFork) })));
+    const act = clientActivityLine(compactClientActivity(c.activity));
+    if (act) verSec.appendChild(detailRow('Development', act));
+    body.appendChild(verSec);
+
+    // ── networks ──
+    const networks = (c.networks || []).filter(n => Number.isFinite(n?.chainId));
+    const netSec = drawerSection(`Networks (${fmtNum(networks.length)})`);
+    netSec.appendChild(networks.length
+        ? chipsWithMore(networks, CLIENT_NETWORK_CHIPS, clientChainChip)
+        : el('p', { class: 'note', text: 'No networks on record.' }));
+    body.appendChild(netSec);
+
+    // ── relationships ──
+    body.appendChild(clientLineageSection(c, networks));
+}
+
+function clientLineageSection(c, networks) {
+    const sec = drawerSection('Relationships');
+    const l = c.lineage;
+    if (!l) {
+        sec.appendChild(el('p', { class: 'note', text: 'Lineage is not available from the client feed yet.' }));
+        return sec;
+    }
+    // The chain: upstream → this client → its networks.
+    const chain = el('div', { class: 'lineage' });
+    if (l.upstream.length) {
+        chain.appendChild(el('div', { class: 'lineage-step' }, l.upstream.map(u => el('div', { class: 'lineage-up' }, [
+            lineageNode(u.family ? `${u.family} · ${u.repo}` : u.repo, { id: u.id }),
+            lineageVia(u.via, u.evidence)
+        ]))));
+        chain.appendChild(el('div', { class: 'lineage-arrow', 'aria-hidden': 'true', text: '↓ customized as' }));
+    }
+    const self = c.repo || c.names?.[0] || openClientId;
+    chain.appendChild(el('div', { class: 'lineage-step' }, [lineageNode(l.family ? `${self} (${l.family})` : self, { current: true })]));
+    if (networks.length) {
+        chain.appendChild(el('div', { class: 'lineage-arrow', 'aria-hidden': 'true', text: '↓ runs' }));
+        // The full list is in Networks above; the chain only needs to show the shape.
+        chain.appendChild(el('div', { class: 'affected-chains' }, [
+            ...networks.slice(0, 6).map(clientChainChip),
+            networks.length > 6 ? el('span', { class: 'r-note', text: `+${fmtNum(networks.length - 6)} more` }) : null
+        ]));
+    }
+    sec.appendChild(chain);
+    if (!l.upstream.length && !l.downstream.length) {
+        sec.appendChild(el('p', { class: 'note', text: 'No upstream client or customized versions on record.' }));
+        return sec;
+    }
+
+    if (l.downstream.length) {
+        const total = l.downstreamTotal || l.downstream.length;
+        const list = el('div', { class: 'rpc-list lineage-down' });
+        const row = d => el('div', { class: 'r-item' }, [
+            el('div', { class: 'r-main' }, [
+                clientNameButton(d.id, d.repo),
+                lineageVia(d.via),
+                d.names?.length ? el('span', { class: 'r-note', text: d.names.join(', ') }) : null
+            ]),
+            d.networks?.length
+                ? el('div', { class: 'affected-chains' }, [
+                    ...d.networks.map(clientChainChip),
+                    d.networkCount > d.networks.length ? el('span', { class: 'r-note', text: `+${fmtNum(d.networkCount - d.networks.length)} more` }) : null
+                ])
+                : el('span', { class: 'r-note', text: 'No networks on record' })
+        ]);
+        for (const d of l.downstream.slice(0, LINEAGE_ROWS)) list.appendChild(row(d));
+        if (l.downstream.length > LINEAGE_ROWS) {
+            const more = el('button', {
+                class: 'btn r-more', type: 'button', text: `Show all ${fmtNum(l.downstream.length)}`,
+                onclick: () => { more.remove(); for (const d of l.downstream.slice(LINEAGE_ROWS)) list.appendChild(row(d)); }
+            });
+            list.appendChild(more);
+        }
+        sec.appendChild(el('div', { class: 'd-label lineage-down-title', text: `Customized versions (${fmtNum(total)}) and the networks they run` }));
+        sec.appendChild(list);
+        if (total > l.downstream.length) sec.appendChild(el('p', { class: 'note', text: `Showing ${fmtNum(l.downstream.length)} of ${fmtNum(total)}.` }));
+    }
+    sec.appendChild(el('p', { class: 'note', text: '“GitHub fork” links are recorded by the host and “known lineage” links are well-known upstreams; “by name” links are inferred from repository and client names and can be wrong.' }));
+    return sec;
 }
 
 async function loadNetworkClients(chainId, sec) {
@@ -5984,7 +6190,7 @@ async function loadNetworkClients(chainId, sec) {
     const clients = (Array.isArray(d.clients) ? d.clients : []).filter(c => c && (c.repo || c.names?.length));
     if (!clients.length) return;
     while (sec.children.length > 1) sec.removeChild(sec.lastChild);
-    const items = clients.map(c => networkClientItem(c, chainId));
+    const items = clients.map(c => networkClientItem(c));
     const rest = items.slice(CLIENTS_SHOWN);
     let extra = null;
     let toggle = null;

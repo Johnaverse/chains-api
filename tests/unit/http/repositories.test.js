@@ -31,6 +31,28 @@ describe('GET /repositories', () => {
     expect(Array.isArray(body.overrides.pending)).toBe(true);
   });
 
+  it('serves the client lineage the feed builds its family matchers from', async () => {
+    const body = (await app.inject({ method: 'GET', url: '/repositories' })).json();
+    expect(body.lineageReviewedAt).toMatch(/^\d{4}-\d{2}-\d{2}/);
+    const keys = body.lineage.families.map(f => f.key);
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(keys).toEqual(expect.arrayContaining(['geth', 'op-geth', 'erigon', 'reth', 'optimism', 'zksync-era', 'lighthouse']));
+    // A more specific line must come before the family it customizes, so it wins the match.
+    expect(keys.indexOf('op-geth')).toBeLessThan(keys.indexOf('geth'));
+    expect(keys.indexOf('cdk-erigon')).toBeLessThan(keys.indexOf('erigon'));
+    for (const f of body.lineage.families) {
+      expect(f.repo).toMatch(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/);
+      if (f.parent) expect(keys).toContain(f.parent);
+      for (const former of f.formerRepos ?? []) expect(former).toMatch(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/);
+      for (const word of [...(f.repoWords ?? []), ...(f.nameWords ?? [])]) expect(word).toMatch(/^[a-z0-9][a-z0-9 .-]*$/);
+      expect((f.repoWords?.length ?? 0) + (f.nameWords?.length ?? 0)).toBeGreaterThan(0);
+    }
+    for (const [id, link] of Object.entries(body.lineage.links)) {
+      expect(id).toMatch(/^(github|gitlab):[a-z0-9_.-]+\/[a-z0-9_.-]+$/);
+      expect(link.upstream).toMatch(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/);
+    }
+  });
+
   it('rejects a filter it does not support instead of returning everything', async () => {
     const res = await app.inject({ method: 'GET', url: '/repositories?chainId=1' });
     expect(res.statusCode).toBe(400);

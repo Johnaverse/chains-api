@@ -166,7 +166,7 @@ describe('GET /client-releases/clients', () => {
     _resetClientFeedCacheForTests();
     proxyFetch.mockResolvedValue(json({ totalMatched: 1, count: 1, truncated: false, clients: [{ ...geth, activity: { level: 'active', attention: 'high', commits30: 40, merged30: 30, openIssues: 211, criticalIssues: 2, advisories365: 1, refreshedAt: '2026-10-15T00:00:00Z' } }] }));
     const row = (await get('/client-releases/clients?q=geth')).json().clients[0];
-    expect(row.activity).toEqual({ level: 'active', attention: 'high', commits30: 40, merged30: 30, merged30AtLeast: false, openIssues: 211, criticalIssues: 2, advisories365: 1, refreshedAt: '2026-10-15T00:00:00Z' });
+    expect(row.activity).toEqual({ level: 'active', attention: 'high', commits30: 40, merged30: 30, merged30AtLeast: false, openIssues: 211, criticalIssues: 2, advisories365: 1, forkOf: null, refreshedAt: '2026-10-15T00:00:00Z' });
     _resetClientFeedCacheForTests();
     proxyFetch.mockResolvedValue(json({ clients: [geth] }));
     expect((await get('/client-releases/clients?q=geth')).json().clients[0].activity).toBeNull();
@@ -192,6 +192,41 @@ describe('GET /client-releases/clients', () => {
 });
 
 describe('GET /client-releases/clients/:host/:owner/:repo', () => {
+  it('carries the lineage: upstream with its evidence, customized clients with their networks', async () => {
+    const lineage = {
+      family: null,
+      upstream: [{ repo: 'ethereum/go-ethereum', id: 'github:ethereum/go-ethereum', family: 'Geth', via: 'github-fork' }, { repo: 'erigontech/erigon', id: 'github:erigontech/erigon', family: 'Erigon', via: 'name', evidence: 'client name' }, { repo: '' }],
+      downstream: [{ id: 'github:x/y', repo: 'x/y', names: ['X Geth'], networkCount: 2, networks: [{ chainId: 5, name: 'Five' }, { chainId: 'bad' }], via: 'weird', extra: 1 }, { id: 'github:op/geth', repo: 'op/geth', via: 'known' }],
+      downstreamTotal: 1
+    };
+    proxyFetch.mockResolvedValue(json({ client: geth, lineage }));
+    const one = (await get('/client-releases/clients/github/bnb-chain/bsc')).json().client;
+    expect(one.lineage.upstream).toEqual([
+      { repo: 'ethereum/go-ethereum', id: 'github:ethereum/go-ethereum', family: 'Geth', via: 'github-fork', evidence: null },
+      { repo: 'erigontech/erigon', id: 'github:erigontech/erigon', family: 'Erigon', via: 'name', evidence: 'client name' }
+    ]);
+    expect(one.lineage.downstream).toEqual([
+      { id: 'github:x/y', repo: 'x/y', names: ['X Geth'], role: null, networkCount: 2, networks: [{ chainId: 5, name: 'Five' }], via: 'name' },
+      { id: 'github:op/geth', repo: 'op/geth', names: [], role: null, networkCount: 0, networks: [], via: 'known' }
+    ]);
+    _resetClientFeedCacheForTests();
+    proxyFetch.mockResolvedValue(json({ client: geth }));
+    expect((await get('/client-releases/clients/github/bnb-chain/bsc')).json().client.lineage).toBeNull();
+  });
+
+  it('bounds a malformed or oversized lineage instead of passing it through', async () => {
+    const many = n => Array.from({ length: n }, (_, i) => ({ id: `github:o/r${i}`, repo: `o/r${i}`, family: 'F', via: 'name' }));
+    proxyFetch.mockResolvedValue(json({ client: geth, lineage: { family: 7, upstream: many(15), downstream: many(250), downstreamTotal: 'lots' } }));
+    const l = (await get('/client-releases/clients/github/bnb-chain/bsc')).json().client.lineage;
+    expect(l.family).toBeNull();
+    expect(l.upstream).toHaveLength(10);
+    expect(l.downstream).toHaveLength(200);
+    expect(l.downstreamTotal).toBe(200);
+    _resetClientFeedCacheForTests();
+    proxyFetch.mockResolvedValue(json({ client: geth, lineage: { upstream: 'geth', downstream: { a: 1 } } }));
+    expect((await get('/client-releases/clients/github/bnb-chain/bsc')).json().client.lineage).toEqual({ family: null, upstream: [], downstream: [], downstreamTotal: 0 });
+  });
+
   it('returns the entry with its networks', async () => {
     proxyFetch.mockResolvedValue(json(geth));
     const res = await get('/client-releases/clients/github/ethereum/go-ethereum');
