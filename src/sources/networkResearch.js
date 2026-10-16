@@ -155,10 +155,16 @@ export function getNetworkResearch(chainId) {
   if (hasForums) {
     research.forums = structuredClone(forumEntry.forums);
     research.forumsCheckedAt = forumEntry.checkedAt ?? forums.updatedAt;
+    // The research's own outcome for this network (found / partial), beside the boards it kept.
+    research.forumsStatus = forumEntry.status ?? null;
   }
   if (hasChannels) {
     research.channels = structuredClone(channelEntry.channels);
     research.channelsCheckedAt = channelEntry.checkedAt ?? channels.updatedAt;
+    // How firmly the channel research tied the venues to this exact network (confirmed /
+    // qualified / unresolved), and its outcome (found / partial).
+    research.channelsIdentityStatus = channelEntry.identityStatus ?? null;
+    research.channelsStatus = channelEntry.status ?? null;
   }
   if (hasHardware) {
     const { chainId: _ignored, name: _name, ...rest } = structuredClone(hardwareEntry);
