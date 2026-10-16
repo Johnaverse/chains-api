@@ -6049,7 +6049,9 @@ function openClientDetail(id, opts = {}) {
 }
 
 async function loadClientDetail(seq, path, body, loading) {
-    const current = () => seq === clientDetailSeq && openClientId != null;
+    // Only the newest opening draws, and only into the panel it opened: its loading line must
+    // still be there (a later opening, a chain, or a close clears it).
+    const current = () => seq === clientDetailSeq && openClientId != null && loading.isConnected;
     let d;
     try {
         d = await api(path, { timeoutMs: 15000 });

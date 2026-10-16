@@ -89,12 +89,19 @@ describe('client release MCP tools', () => {
     expect(out.clients[0].lineage).toBeNull();
 
     // Lineage, compacted: the upstream as is, the customizing clients named (first ten) with their networks.
-    const downstream = Array.from({ length: 12 }, (_, i) => ({ id: `github:o/g${i}`, repo: `o/g${i}`, via: 'name', networks: [{ chainId: i + 1, name: i ? null : 'One' }] }));
+    const downstream = Array.from({ length: 12 }, (_, i) => ({ id: `github:o/g${i}`, repo: `o/g${i}`, via: 'name', networkCount: 1, networks: [{ chainId: i + 1, name: i ? null : 'One' }] }));
     feed.getFeedClient.mockResolvedValueOnce({ client: { id: 'github:ethereum/go-ethereum', repo: 'ethereum/go-ethereum', activity: null, lineage: { family: 'Geth', upstream: [], downstream, downstreamTotal: 40 } } });
     const geth = parse(await handleToolCall('get_client_activity', { repo: 'ethereum/go-ethereum' })).clients[0];
     expect(geth.lineage).toMatchObject({ family: 'Geth', upstream: [], customizedByTotal: 40 });
     expect(geth.lineage.customizedBy).toHaveLength(10);
-    expect(geth.lineage.customizedBy.slice(0, 2)).toEqual([{ repo: 'o/g0', via: 'name', networks: ['One'] }, { repo: 'o/g1', via: 'name', networks: [2] }]);
+    expect(geth.lineage.customizedBy.slice(0, 2)).toEqual([{ repo: 'o/g0', via: 'name', networkCount: 1, networks: ['One'] }, { repo: 'o/g1', via: 'name', networkCount: 1, networks: [2] }]);
+
+    // A client serving more networks than the sample says how many.
+    const wide = { id: 'github:o/wide', repo: 'o/wide', via: 'known', networkCount: 12, networks: Array.from({ length: 10 }, (_, i) => ({ chainId: i + 1, name: `N${i}` })) };
+    feed.getFeedClient.mockResolvedValueOnce({ client: { id: 'github:ethereum/go-ethereum', repo: 'ethereum/go-ethereum', activity: null, lineage: { family: 'Geth', upstream: [], downstream: [wide], downstreamTotal: 1 } } });
+    const one = parse(await handleToolCall('get_client_activity', { repo: 'ethereum/go-ethereum' })).clients[0].lineage.customizedBy[0];
+    expect(one).toMatchObject({ repo: 'o/wide', networkCount: 12 });
+    expect(one.networks).toHaveLength(10);
 
     // A customized client names what it customizes, with the evidence.
     const upstream = [{ repo: 'ethereum/go-ethereum', id: 'github:ethereum/go-ethereum', family: 'Geth', via: 'known', evidence: null }];
