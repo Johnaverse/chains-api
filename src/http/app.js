@@ -13,6 +13,7 @@ import pkg from '../../package.json' with { type: 'json' };
 import { initializeDataOnStartup } from '../services/loader.js';
 import { startRpcHealthCheck } from '../services/rpcHealth.js';
 import { startL2BeatRefresh } from '../services/l2beatRefresher.js';
+import { startGrowthepieRefresh } from '../sources/growthepie.js';
 import { startSourceRefresher } from '../services/sourceRefresher.js';
 import {
   BODY_LIMIT,
@@ -40,6 +41,7 @@ import { slip44Routes } from './routes/slip44.js';
 import { rpcMonitorRoutes } from './routes/rpcMonitor.js';
 import { clientsRoutes } from './routes/clients.js';
 import { scalingRoutes } from './routes/scaling.js';
+import { l2MetricsRoutes } from './routes/l2Metrics.js';
 import { statusPagesRoutes } from './routes/statusPages.js';
 import { upgradesRoutes } from './routes/upgrades.js';
 import { forksRoutes } from './routes/forks.js';
@@ -308,6 +310,8 @@ export async function buildApp(options = {}) {
       logger.warn({ err: err.message }, 'Initial price prefetch failed');
     });
     startPriceRefresh();
+    // growthepie L2 data: each file on its own cadence, snapshot until the first live read.
+    startGrowthepieRefresh();
   }
 
   await fastify.register(adminRoutes);
@@ -318,6 +322,7 @@ export async function buildApp(options = {}) {
   await fastify.register(rpcMonitorRoutes);
   await fastify.register(clientsRoutes);
   await fastify.register(scalingRoutes);
+  await fastify.register(l2MetricsRoutes);
   await fastify.register(statusPagesRoutes);
   await fastify.register(upgradesRoutes);
   await fastify.register(forksRoutes);

@@ -213,6 +213,15 @@ export const CLIENT_FEED_URL = parseStringEnv('CLIENT_FEED_URL', '');
 export const CLIENT_FEED_FETCH_TIMEOUT_MS = parseIntEnv('CLIENT_FEED_FETCH_TIMEOUT_MS', 10000);
 // How long the /client-releases proxy holds one upstream answer before re-reading it.
 export const CLIENT_FEED_CACHE_TTL_MS = parseIntEnv('CLIENT_FEED_CACHE_TTL_MS', 60000);
+// growthepie (https://www.growthepie.com): Ethereum L2 fundamentals, fees, economics, blockspace and
+// DA usage. Public, chain-level ("Basic") data; attribution to growthepie is required wherever it
+// is shown. Each file is re-read on its own cadence (src/sources/growthepie.js); a checked-in
+// snapshot answers when the API is unreachable or gated. GROWTHEPIE_ENABLED=false turns it off.
+export const GROWTHEPIE_ENABLED = parseBooleanEnv('GROWTHEPIE_ENABLED', true);
+export const GROWTHEPIE_API_URL = parseStringEnv('GROWTHEPIE_API_URL', 'https://api.growthepie.com/v1');
+export const GROWTHEPIE_FETCH_TIMEOUT_MS = parseIntEnv('GROWTHEPIE_FETCH_TIMEOUT_MS', 30000);
+// How often the background timer looks for files that are due (each has its own max age).
+export const GROWTHEPIE_REFRESH_TICK_MS = parseIntEnv('GROWTHEPIE_REFRESH_TICK_MS', 15 * 60 * 1000);
 export const WEB3_NEWS_CACHE_TTL_MS = parseIntEnv('WEB3_NEWS_CACHE_TTL_MS', 60000);
 export const WEB3_NEWS_FETCH_TIMEOUT_MS = parseIntEnv('WEB3_NEWS_FETCH_TIMEOUT_MS', 10000);
 

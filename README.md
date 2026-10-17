@@ -307,6 +307,7 @@ The MCP server provides the following tools for querying blockchain chain data:
 - **get_client_releases**: Recent node/client software releases from chains-client-feed (via `CLIENT_FEED_URL`), newest first — version/tag, `prerelease`, `mandatory`, the AI summary and any hard fork the notes announce (`fork`: name, network, activationAt/Block/Epoch/Slot, state). Filters: `client` (resolved to its registry repositories), `repo` (`owner/repo` or `github:` / `gitlab:` prefixed), `chainId`, `fork`, `since` / `until` (inclusive ISO dates; a bare `until` covers that day); capped (default 15, max 50) with `totalMatched` / `truncated`
 - **get_network_clients**: Client repositories known to serve a chain, each with the kinds it plays there, `networkCount`, latest release, latest fork and a compact development `activity` (chains-client-feed's client → networks index)
 - **get_client_activity**: How actively a client is developed (default-branch commits and merged PRs in 30/90 days), its open issues and PRs, open issues labeled bug or critical/security, published GitHub security advisories, and an activity and attention level with reasons — by `repo` or by `client` name (refreshed daily by chains-client-feed; GitHub needs the feed's `GITHUB_TOKEN`)
+- **get_l2_metrics**: Ethereum L2 data from [growthepie](https://www.growthepie.com) (~26 chains): rank chains by any metric (`daa`, `txcount`, `tvl`, `stables_mcap`, `fees_paid_usd`, `profit_usd`, `rent_paid_usd`, `costs_blobs_usd`, `txcosts_median_usd`, …) with 7-day change and the all-L2 total; one chain in full (`chainId`: profile, every metric with 7d/30d change, current fees, users, revenue/costs/profit, blockspace by category, DA layers used, optional daily history via `metric` + `days`); `view: "da"` for data-availability layers; `view: "eth_supply"`. Every answer carries `attribution`
 - **get_relations**: Get chain relationships (testnet/mainnet, L2/L1, etc.) for a specific chain or all chains
 - **get_slip44**: Get SLIP-0044 coin type information by coin type ID or all coin types
 
@@ -781,6 +782,19 @@ Get a specific SLIP-0044 coin type by its coin type ID.
   "coin": "Ether"
 }
 ```
+
+### `GET /l2-metrics`
+Ethereum L2 data from [growthepie](https://www.growthepie.com) (chain-level, public "Basic" tier). **growthepie must be credited wherever this data is shown**; every response carries `attribution`. Covers ~26 chains (Base, Arbitrum One, OP Mainnet, zkSync Era, Scroll, Linea, Unichain, Mantle, Celo, MegaETH, Robinhood Chain, Polygon PoS, Starknet, Ethereum, …), joined by EVM chain ID; a chain it does not track is absent, not zero.
+
+Read from eight growthepie files, each on its own cadence: `master.json` (profiles, daily), `fundamentals.json` (17 daily metrics, 90 days, hourly), `fees/table.json` (current fees, hourly), `landing_page.json` (users, ranks, all-L2 series, hourly), `economics.json`, `blockspace/overview.json`, `da_overview.json` (6-hourly) and `eim/eth_supply.json` (daily). A file that fails keeps its previous copy; one never read live is answered from `data/growthepie-fallback.json` (regenerate with `node scripts/update-growthepie-fallback.mjs`). `dataSource` is `live`, `partial`, `fallback` or `unavailable`.
+
+- `GET /l2-metrics` — every chain, compact: `profile` headline (stack, DA layer, L2BEAT stage, chain type), latest value / date / `change7d` of `daa`, `txcount`, `tvl`, `stables_mcap`, `fees_paid_usd`, `profit_usd`, `rent_paid_usd`, `txcosts_median_usd`, `gas_per_second`, `throughput`, `market_cap_usd`, the median transaction fee, users and 30-day economics; plus the all-L2 `aggregate`, `metricsInfo` labels and blockspace `categories`.
+- `GET /l2-metrics/:chainId?series=` — one chain in full: `profile` (company, technology, purpose, launch date, stack, DA layer, RaaS, maturity, L2BEAT stage/id/link, explorers, website), every fundamental metric with `change7d` / `change30d` (single day vs 7 / 30 days before — spiky on event days), `avg7d` and `avg7dChange` (7-day average vs the week before — the steadier trend) and the 90-day daily `series` (`?series=false` drops it), `fees` (median, native-transfer, swap and average transaction cost, TPS, throughput — newest hourly reading), `activity` (users, user share, cross-chain activity, rank per metric), `economics` per span (`1d` … `max`: revenue, total / L1 / blob costs, profit, margin, data posted), `blockspace` (gas fees and transactions by category per span), `daLayersUsed`; chain 1 also carries `ethSupply`.
+- `GET /l2-metrics/da` — data-availability layers (Ethereum blobs, Celestia, EigenDA): fees, data posted, fee per MB and consumers per span, and the top consumers.
+- `GET /l2-metrics/eth-supply` — ETH supply and issuance rate (latest and the last year daily) and the supply events.
+- `GET /l2-metrics/status` — each file's `source` (`live` / `fallback`), fetch time and last error.
+
+`/chains/:id` (and `get_chain_by_id`) carries the compact block as `l2Metrics` for covered chains. Configuration: `GROWTHEPIE_ENABLED` (default `true`), `GROWTHEPIE_API_URL` (default `https://api.growthepie.com/v1`), `GROWTHEPIE_FETCH_TIMEOUT_MS` (30000), `GROWTHEPIE_REFRESH_TICK_MS` (900000: how often due files are looked for).
 
 ### `GET /client-releases`
 Proxy for chains-client-feed (the feed has no public host, so the dashboard reads it through here). Releases and changelog entries, newest first.

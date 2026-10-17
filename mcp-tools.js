@@ -17,6 +17,7 @@ import {
   getRpcMonitoringStatus,
 } from './dataService.js';
 import { getL2BeatRefreshStatus } from './src/services/l2beatRefresher.js';
+import { getL2Metrics, getL2MetricsForChain, getDaLayers, getEthSupply, ATTRIBUTION as GROWTHEPIE_ATTRIBUTION } from './src/sources/growthepie.js';
 import { ensureChainRpcResults } from './src/services/chainRefresher.js';
 import { getClientsByChain } from './clientsView.js';
 import { getPricesForChains, getPriceForChain } from './priceService.js';
@@ -35,7 +36,7 @@ import { getForks } from './src/services/forks.js';
 import { getProviderStats } from './src/services/providerStats.js';
 import { checkChainHalt } from './src/services/chainHalt.js';
 import { getNodeHardware, getNetworkResearch } from './src/sources/networkResearch.js';
-import { ASSISTANT_TOOL_RESULT_MAX_CHARS } from './config.js';
+import { ASSISTANT_TOOL_RESULT_MAX_CHARS, GROWTHEPIE_ENABLED } from './config.js';
 
 /**
  * Get the list of MCP tool definitions (schemas)
@@ -252,6 +253,20 @@ export function getToolDefinitions() {
           },
         },
         required: ['chainId'],
+      },
+    },
+    {
+      name: 'get_l2_metrics',
+      description: 'Ethereum L2 data from growthepie (about 26 chains: Base, Arbitrum, OP Mainnet, zkSync Era, Scroll, Linea, Unichain, Mantle, Celo, MegaETH, Robinhood Chain, Polygon PoS, Ethereum itself…). Use for activity, fees, revenue/profit, costs paid to Ethereum, TVL, stablecoins, blockspace use and DA questions ("which L2 has the most active addresses", "how much does Base pay for blobs", "is Arbitrum profitable"). Views: `chains` (default) ranks every covered chain by `metric` with its latest value and 7-day change; give `chainId` for one chain in full (profile, every metric with 7d/30d change, current median/swap/transfer fees, users, revenue/costs/profit per period, blockspace share by category, DA layers used; add `metric` + `days` for its daily history); `da` compares data-availability layers (Ethereum blobs, Celestia, EigenDA: fees, data posted, consumers); `eth_supply` gives ETH supply and issuance. Metric keys: daa (daily active addresses), aa_last7d, txcount, tvl, stables_mcap, fees_paid_usd (revenue = fees users paid), profit_usd, rent_paid_usd (paid to Ethereum L1), costs_total_usd, costs_l1_usd, costs_blobs_usd, txcosts_median_usd, gas_per_second, market_cap_usd, fdv_usd, app_fees_usd, blob_size_bytes. Values are daily; USD unless the key says otherwise. `change7d` compares two single days and swings on event days; for a trend use `avg7dChange` (7-day average vs the week before). Always credit growthepie (`attribution`) when you use these numbers. Only these chains are covered: an absent chain means growthepie does not track it, not zero activity.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          view: { type: 'string', enum: ['chains', 'chain', 'da', 'eth_supply'], description: 'Default `chains` (or `chain` when chainId is given).' },
+          chainId: { type: 'number', description: 'EVM chain ID for one chain in full (e.g. 8453 for Base, 1 for Ethereum).' },
+          metric: { type: 'string', description: 'Metric to rank by (chains view, default txcount) or whose daily history to include (chain view).' },
+          days: { type: 'number', description: 'Days of daily history for `metric` in the chain view (default 30, max 90).' },
+          limit: { type: 'number', description: 'Chains to return in the chains view (default 15, max 30).' },
+        },
       },
     },
     {
@@ -560,6 +575,71 @@ export function getToolDefinitions() {
       },
     },
   ];
+}
+
+// --- growthepie L2 data ---
+
+const L2_SPANS_SHOWN = ['7d', '30d'];
+const round = (v, digits = 4) => (typeof v === 'number' && Number.isFinite(v) ? Number(v.toPrecision(digits)) : v ?? null);
+
+async function handleGetL2Metrics(args = {}) {
+  if (!GROWTHEPIE_ENABLED) return errorResponse('growthepie data is disabled', 'GROWTHEPIE_ENABLED=false');
+  const view = args.view ?? (args.chainId != null ? 'chain' : 'chains');
+  if (view === 'chain') {
+    if (!isValidChainId(args.chainId)) return errorResponse('chainId is required for the chain view');
+    const c = await getL2MetricsForChain(args.chainId, { series: true });
+    if (!c) return compactResponse({ chainId: args.chainId, covered: false, message: 'growthepie does not track this chain; that is not evidence of zero activity.', attribution: GROWTHEPIE_ATTRIBUTION });
+    const days = Math.min(90, Math.max(1, Number.isFinite(args.days) ? Math.floor(args.days) : 30));
+    const metrics = Object.fromEntries(Object.entries(c.metrics).map(([k, m]) => [k, { value: round(m.value, 6), date: m.date, change7d: round(m.change7d, 3), change30d: round(m.change30d, 3), avg7d: round(m.avg7d, 6), avg7dChange: round(m.avg7dChange, 3) }]));
+    const history = args.metric && c.metrics[args.metric]?.series ? c.metrics[args.metric].series.slice(-days).map(([d, v]) => [d, round(v, 6)]) : undefined;
+    const p = c.profile ?? {};
+    return compactResponse({
+      chainId: c.chainId, name: c.name, attribution: c.attribution, dataSource: c.dataSource, fetchedAt: c.fetchedAt,
+      profile: { chainType: p.chainType, technology: p.technology, stack: p.stack?.label ?? null, daLayer: p.daLayer, l2beatStage: p.l2beat?.stage ?? null, company: p.company, raas: p.raas, launchDate: p.launchDate, gasToken: p.gasToken, url: p.url },
+      metrics,
+      ...(history ? { history: { metric: args.metric, days: history.length, points: history } } : {}),
+      fees: c.fees,
+      activity: c.activity ? { users: c.activity.users, userShare: c.activity.userShare, crossChainActivity: c.activity.crossChainActivity, ranking: c.activity.ranking } : null,
+      economics: c.economics ? Object.fromEntries(L2_SPANS_SHOWN.filter(span => c.economics[span]).map(span => [span, Object.fromEntries(Object.entries(c.economics[span]).map(([k, v]) => [k, round(v, 6)]))])) : null,
+      blockspace30d: c.blockspace?.['30d'] ? Object.fromEntries(Object.entries(c.blockspace['30d']).map(([cat, v]) => [cat, { txcountShare: round(v.txcountShare, 3), gasFeesShareUsd: round(v.gasFeesShareUsd, 3) }])) : null,
+      daLayersUsed: c.daLayersUsed,
+      ...(c.ethSupply ? { ethSupply: { supply: c.ethSupply.supply, issuanceRate: c.ethSupply.issuanceRate } } : {}),
+    });
+  }
+  if (view === 'da') {
+    const da = await getDaLayers();
+    const layers = Object.fromEntries(Object.entries(da.layers).map(([id, spans]) => {
+      const s = spans['30d'] ?? spans['7d'] ?? {};
+      return [id, { period: spans['30d'] ? '30d' : '7d', feesUsd: round(s.feesUsd), dataPostedBytes: s.dataPostedBytes, feesPerMbUsd: round(s.feesPerMbUsd), consumerCount: s.consumerCount, consumers: (s.consumers ?? []).slice(0, 12).map(x => x.name) }];
+    }));
+    return compactResponse({ attribution: da.attribution, dataSource: da.dataSource, fetchedAt: da.fetchedAt, layers, topConsumers30d: (da.topConsumers['30d'] ?? []).slice(0, 10) });
+  }
+  if (view === 'eth_supply') {
+    const e = await getEthSupply();
+    return compactResponse({ attribution: e.attribution, dataSource: e.dataSource, fetchedAt: e.fetchedAt, supply: e.supply, issuanceRate: e.issuanceRate, recentEvents: e.events.slice(-5) });
+  }
+  const list = await getL2Metrics();
+  const metric = args.metric ?? 'txcount';
+  const limit = Math.min(30, Math.max(1, Number.isFinite(args.limit) ? Math.floor(args.limit) : 15));
+  const ranked = list.chains
+    .map(c => ({ chainId: c.chainId, name: c.name, value: c.metrics[metric]?.value ?? null, date: c.metrics[metric]?.date ?? null, change7d: round(c.metrics[metric]?.change7d, 3), avg7dChange: round(c.metrics[metric]?.avg7dChange, 3), stack: c.stack, daLayer: c.daLayer, l2beatStage: c.l2beatStage }));
+  // The compact list carries only the headline metrics; any other key is read per chain.
+  if (ranked.every(r => r.value == null)) {
+    for (const r of ranked) {
+      if (r.chainId == null) continue;
+      const full = await getL2MetricsForChain(r.chainId, { series: false });
+      const m = full?.metrics?.[metric];
+      if (m) Object.assign(r, { value: m.value, date: m.date, change7d: round(m.change7d, 3), avg7dChange: round(m.avg7dChange, 3) });
+    }
+  }
+  const withValue = ranked.filter(r => r.value != null).sort((a, b) => b.value - a.value);
+  return compactResponse({
+    attribution: list.attribution, dataSource: list.dataSource, fetchedAt: list.fetchedAt,
+    metric, metricInfo: Object.values(list.metricsInfo).find(m => m.metricKeys?.includes(metric)) ?? null,
+    totalMatched: withValue.length, count: Math.min(limit, withValue.length), truncated: withValue.length > limit,
+    allL2s: list.aggregate?.metrics?.[metric] ? { value: list.aggregate.metrics[metric].value, date: list.aggregate.metrics[metric].date, change7d: round(list.aggregate.metrics[metric].change7d, 3) } : null,
+    chains: withValue.slice(0, limit).map(r => ({ ...r, value: round(r.value, 6) })),
+  });
 }
 
 // --- Response helpers ---
@@ -1524,6 +1604,7 @@ const toolHandlers = {
   get_rpc_monitor_by_id: handleGetRpcMonitorById,
   check_chain_halt: handleCheckChainHalt,
   get_scaling_chains: handleGetScalingChains,
+  get_l2_metrics: handleGetL2Metrics,
   get_l2beat_by_id: handleGetL2BeatById,
   get_refresher_status: handleGetRefresherStatus,
   get_clients: handleGetClients,
