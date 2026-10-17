@@ -3,7 +3,7 @@
   "info": {
     "title": "Chains API",
     "description": "Aggregated blockchain chain data from five external sources (TheGraph, Chainlist, Chain ID Network, SLIP-0044, L2BEAT): chain metadata, relations, RPC endpoints and health, L2 scaling, and operator status.",
-    "version": "1.7.65"
+    "version": "1.7.66"
   },
   "components": {
     "schemas": {}
@@ -1977,6 +1977,58 @@
             "name": "until",
             "required": false,
             "description": "Only releases published at or before this ISO date/time (inclusive; a bare date covers that whole UTC day)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/client-releases/latest": {
+      "get": {
+        "tags": [
+          "Clients"
+        ],
+        "description": "The latest release of one client repository: version, release link, whether it ships a hard fork, whether the upgrade is mandatory, whether it is a security release (a GitHub advisory naming this version as patched, or the notes) and which CLI flags / config keys it changes, each with the line of the notes that says so. `null` means unknown (not classified yet, no notes), never \"no\". Stable releases only unless `prerelease=true`; a monorepo lists the newest release of each component in `components`.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 300,
+              "errorMessage": {
+                "minLength": "repo must be owner/repo"
+              }
+            },
+            "in": "query",
+            "name": "repo",
+            "required": true,
+            "description": "`owner/repo` (GitHub), `github:owner/repo`, `gitlab:owner/repo`, or the repository URL"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.@/-]{1,100}$",
+              "errorMessage": {
+                "pattern": "Invalid component"
+              }
+            },
+            "in": "query",
+            "name": "component",
+            "required": false,
+            "description": "For a monorepo, the component whose latest release to return (e.g. `op-node`)"
+          },
+          {
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "in": "query",
+            "name": "prerelease",
+            "required": false,
+            "description": "true = the newest release even if it is a prerelease"
           }
         ],
         "responses": {

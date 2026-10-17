@@ -31,6 +31,7 @@ const ENDPOINTS = {
   '/upgrades': 'Cross-feed upgrade timeline: scheduled upgrades with required software, urgency, follow-on incidents, and forum/news context',
   '/forks': 'Forks as entities: one per fork per network, with every provider window attached, activation evidence and lifecycle phase (?chainId, ?phase, ?scheduledOnly, ?include=upgrades)',
   '/timeline': 'Hardforks, software updates and maintenance as events, each grouping its client releases, provider rollout windows, news and fallout incidents; a chain\'s hardfork history with ?chainId&type=hardfork (?chainId, ?type, ?phase, ?since, ?until, ?limit)',
+  '/client-releases/latest': 'Latest release of one client repository (?repo=owner/repo or URL): version, release link, hard fork included, mandatory, security release, CLI flag / config changes (?component, ?prerelease)',
   '/providers/stats': 'Per-RPC-provider quality indicators: incidents/resolution/availability derived from the provider\'s own status page (self-reported), plus registry-endpoint reachability (optional ?provider=)',
   '/feedback': 'Report wrong or misattributed info (POST only; reports are not served back)',
   '/summary': 'Slim dashboard projection: all chains (id, name, tags, relations, RPC count) + L2BEAT headline data, with ETag revalidation',

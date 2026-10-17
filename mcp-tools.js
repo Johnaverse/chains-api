@@ -33,6 +33,7 @@ import { getClientReleases, getFeedClient, getFeedClients, getNetworkClients, Cl
 import { getChainUpgrades } from './src/services/upgrades.js';
 import { getForks } from './src/services/forks.js';
 import { getTimeline } from './src/services/timeline.js';
+import { getLatestRelease, parseRepo } from './src/services/latestRelease.js';
 import { getProviderStats } from './src/services/providerStats.js';
 import { checkChainHalt } from './src/services/chainHalt.js';
 import { getNodeHardware, getNetworkResearch } from './src/sources/networkResearch.js';
@@ -544,6 +545,29 @@ export function getToolDefinitions() {
             description: 'Max releases to return (default 15, max 50)',
           },
         },
+      },
+    },
+    {
+      name: 'get_latest_release',
+      description:
+        'The LATEST release of one client repository, answered field by field: `latest.version` and `latest.url` (the release link), `hardfork.included` (the release schedules a hard fork; `forks` lists each with network, state and activation), `mandatory` (operators must upgrade), `security.update` (a security release: `source: advisory` = a published GitHub advisory names this version as patched, with severity; `source: notes` = the notes say so, `quote` is the line; `scope: dependency` = only a library/toolchain bump), and `flags.changed` (CLI flags or config keys added/removed/deprecated/renamed/default changed, each with its `quote`). Use for "what is the latest version of X", "is the latest X release mandatory / a security update / a hard fork", "does it change any flags". `null` = UNKNOWN (not classified yet, or no notes) — say it is unknown, never "no". `hardfork.review` = possible fork wording the model did not confirm: report it as a possible fork to verify. Stable releases unless includePrerelease; `newerPrerelease` names a newer prerelease. A monorepo returns `components` (newest release of each): ask which one, or pass `component`. For many releases or a date range use get_client_releases.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          repo: {
+            type: 'string',
+            description: 'The repository: "owner/repo" for GitHub (e.g. "ethereum/go-ethereum"), "github:owner/repo" / "gitlab:owner/repo", or its URL',
+          },
+          component: {
+            type: 'string',
+            description: 'For a monorepo, the component (e.g. "op-node" in ethereum-optimism/optimism)',
+          },
+          includePrerelease: {
+            type: 'boolean',
+            description: 'true = the newest release even if it is a prerelease/RC (default false)',
+          },
+        },
+        required: ['repo'],
       },
     },
     {
@@ -1448,6 +1472,9 @@ async function handleGetClientReleases(args) {
       version: it.release.version,
       prerelease: it.release.prerelease,
       mandatory: it.release.mandatory,
+      // null = unknown (no notes, or a feed that predates the field); get_latest_release has the evidence.
+      security: it.release.security,
+      flagsChanged: it.release.flagsChanged,
       chains: it.chains,
       chainsFrom: it.chainsFrom,
       summary: it.enrichment?.summary ?? null,
@@ -1466,6 +1493,29 @@ async function handleGetClientReleases(args) {
       releases,
     });
   } catch (error) {
+    return errorResponse('Client release feed unavailable', error.message);
+  }
+}
+
+const LATEST_RELEASE_MAX_CHAINS = 10;
+
+async function handleGetLatestRelease(args) {
+  const { repo, component, includePrerelease } = args ?? {};
+  if (!parseRepo(repo)) {
+    return errorResponse('Invalid repo', 'repo must be "owner/repo", "github:owner/repo", "gitlab:owner/repo" or a GitHub/GitLab repository URL');
+  }
+  if (component != null && !/^[A-Za-z0-9_.@/-]{1,100}$/.test(String(component))) return errorResponse('Invalid component');
+  try {
+    const out = await getLatestRelease({ repo, component: component ?? undefined, includePrerelease: includePrerelease === true });
+    const latest = out.latest;
+    if (latest && latest.chains.length > LATEST_RELEASE_MAX_CHAINS) {
+      // A repo that serves dozens of networks would spend the result budget on chain names.
+      latest.chainsTotal = latest.chains.length;
+      latest.chains = latest.chains.slice(0, LATEST_RELEASE_MAX_CHAINS);
+    }
+    return compactResponse(out);
+  } catch (error) {
+    if (error instanceof ClientFeedNotFoundError) return errorResponse('No releases found', error.message);
     return errorResponse('Client release feed unavailable', error.message);
   }
 }
@@ -1591,6 +1641,7 @@ const toolHandlers = {
   get_forum_news: handleGetForumNews,
   get_web3_news: handleGetWeb3News,
   get_client_releases: handleGetClientReleases,
+  get_latest_release: handleGetLatestRelease,
   get_network_clients: handleGetNetworkClients,
   get_client_activity: handleGetClientActivity,
   get_chain_upgrades: handleGetChainUpgrades,
