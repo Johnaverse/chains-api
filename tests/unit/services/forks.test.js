@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { getForks, _resetForksMemoForTests } from '../../../src/services/forks.js';
+import { getForks, _resetForksMemoForTests, qualifyBareNetwork } from '../../../src/services/forks.js';
 import { getForkMentions } from '../../../src/sources/forkFeeds.js';
 import { getExplorerTip } from '../../../src/sources/blockscout.js';
 import { getAllChains } from '../../../src/store/queries.js';
@@ -154,7 +154,7 @@ describe('getForks', () => {
     const out = await getForks();
     const [member] = out.forks[0].events;
 
-    expect(Object.keys(member).sort()).toEqual(['activationAt', 'feed', 'provider', 'publishedAt', 'status', 'title', 'url']);
+    expect(Object.keys(member).sort()).toEqual(['activationAt', 'class', 'feed', 'provider', 'publishedAt', 'status', 'title', 'url']);
     // publishedMs is an internal sort key; get_live_incidents already strips it for this reason.
     expect(member.publishedMs).toBeUndefined();
     expect(member.enrichment).toBeUndefined();
@@ -301,5 +301,56 @@ describe('getForks', () => {
       expect(f).toMatchObject({ activationAt: null, phase: 'unscheduled', networks: ['solana'] });
       expect(f.events[0]).toMatchObject({ activationAt: null, implausibleActivationAt: '2024-10-21T00:00:00Z', lowConfidence: true });
     });
+  });
+});
+
+describe('bare "Mainnet" / "Testnet" fork networks', () => {
+  const chains = [
+    { chainId: 1, name: 'Ethereum Mainnet', theGraph: { id: 'mainnet' }, 'theGraph-id': 'mainnet', tags: [] },
+    { chainId: 314, name: 'Filecoin - Mainnet', tags: [] },
+    { chainId: 314159, name: 'Filecoin - Calibration testnet', tags: ['Testnet'] },
+    { chainId: 80002, name: 'Amoy', tags: ['Testnet', 'L2'] }
+  ];
+  const byId = new Map(chains.map((c) => [c.chainId, c]));
+  const releaseMention = (network, chainIds) => ({
+    feed: 'release', title: 'v1', url: 'u', publishedAt: '2026-09-01T00:00:00Z',
+    chains: chainIds.map((chainId) => ({ chainId })), statusPage: { id: 'repo', kind: 'release' },
+    enrichment: { class: 'planned_hard_fork', chains: [], affectedChains: [], fork: fork({ name: 'Solstice', network, activationAt: '2099-10-19T12:59:30Z' }) }
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    _resetForksMemoForTests();
+    getAllChains.mockReturnValue(chains);
+    fetchedAt = '2026-08-15T00:00:00.000Z';
+  });
+
+  it('reads "Mainnet" as the one mainnet chain the release names, not as Ethereum', async () => {
+    // Forest's notes put Filecoin's Solstice on "Mainnet"; "mainnet" is The Graph's id for chain 1.
+    serveMentions([releaseMention('Mainnet', [314, 314159])]);
+
+    const out = await getForks();
+
+    expect(out.forks[0].chains).toEqual([314]);
+  });
+
+  it('drops the chains when none is of the stated kind', async () => {
+    // Heimdall's "Mainnet" Lugano release names only Amoy, a testnet.
+    serveMentions([releaseMention('Mainnet', [80002])]);
+
+    const out = await getForks();
+
+    expect(out.forks[0].chains).toEqual([]);
+  });
+
+  it('leaves a named network alone', () => {
+    const m = releaseMention('Filecoin Calibration', [314159]);
+    expect(qualifyBareNetwork(m, byId)).toBe(m);
+  });
+
+  it('reads "Testnet" as the one testnet chain', () => {
+    const out = qualifyBareNetwork(releaseMention('Testnet', [314, 314159]), byId);
+    expect(out.enrichment.fork.network).toBe('Filecoin - Calibration testnet');
+    expect(out.chains).toEqual([{ chainId: 314159 }]);
   });
 });

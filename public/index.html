@@ -438,12 +438,13 @@
     </section>
 
     <!-- ═══ View: News (chains-news ecosystem relay) ═══════════════════ -->
-    <!-- ─── View: Timeline — upgrade windows linked to their fallout ───────── -->
-    <section id="view-timeline" class="view scroll-view" role="tabpanel" aria-label="Upgrade timeline" tabindex="0">
+    <!-- ─── View: Timeline — hardforks, software updates and maintenance, each with its
+         client releases, provider rollouts, news and fallout grouped under it ───────── -->
+    <section id="view-timeline" class="view scroll-view" role="tabpanel" aria-label="Event timeline" tabindex="0">
         <div class="view-inner">
             <div class="view-head">
-                <h2 class="view-title">Upgrade timeline <span class="pill-meta" id="timelineMeta"></span></h2>
-                <p class="view-lead">Everything right of <em>now</em> is scheduled, not done.</p>
+                <h2 class="view-title">Event timeline <span class="pill-meta" id="timelineMeta"></span></h2>
+                <p class="view-lead">Hardforks, software updates and maintenance — each with its client releases, provider rollouts, news and fallout. Software updates are planned work, never incidents. Everything right of <em>now</em> is scheduled, not done.</p>
             </div>
 
             <!-- Pending-window banner: the one fact a visitor most often wants ("is anything about
@@ -476,6 +477,7 @@
             <!-- Both controls are built by JS and their listeners are attached at build time,
                  so neither may be pre-rendered here or they would render and do nothing. -->
             <div class="tlx-toolbar">
+                <div class="tlx-range" id="timelineType" role="group" aria-label="Event type"></div>
                 <div class="tlx-range" id="timelineRange"></div>
                 <span class="toolbar-count" id="timelineCount"></span>
                 <label class="tlx-sort">Sort by
@@ -483,7 +485,7 @@
                 </label>
             </div>
 
-            <div id="timelineRows" class="tlx-rows"><div class="feed-empty">Loading upgrade timeline…</div></div>
+            <div id="timelineRows" class="tlx-rows"><div class="feed-empty">Loading event timeline…</div></div>
         </div>
     </section>
 

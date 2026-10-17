@@ -34,9 +34,17 @@ const FEEDS = [
   { kind: 'status', base: () => LIVE_INCIDENTS_URL, path: '/events', listKey: 'events', timeout: () => LIVE_INCIDENTS_FETCH_TIMEOUT_MS },
   { kind: 'forum', base: () => FORUM_NEWS_URL, path: '/news', listKey: 'news', timeout: () => FORUM_NEWS_FETCH_TIMEOUT_MS },
   { kind: 'news', base: () => WEB3_NEWS_URL, path: '/news', listKey: 'news', timeout: () => WEB3_NEWS_FETCH_TIMEOUT_MS },
-  // Optional: read only when CLIENT_FEED_URL is set.
-  { kind: 'release', base: () => CLIENT_FEED_URL, path: '/releases', listKey: 'items', timeout: () => CLIENT_FEED_FETCH_TIMEOUT_MS, optional: true }
+  // Optional: read only when CLIENT_FEED_URL is set. `history`: the feed answers `?until=`, so
+  // pages past the newest FETCH_LIMIT are read too (see fetchHistory).
+  { kind: 'release', base: () => CLIENT_FEED_URL, path: '/releases', listKey: 'items', timeout: () => CLIENT_FEED_FETCH_TIMEOUT_MS, optional: true, history: true }
 ];
+
+// A chain's fork HISTORY is whatever the feeds still hold — chains-api keeps no store of its own.
+// The client feed's archive reaches back to 2019, but one page of 500 fork-tagged releases only
+// reached July 2025, so every older fork (Dencun, Shanghai, Luban, Bedrock…) was invisible.
+// Older pages hardly change, so they are re-read hourly while the newest page follows the TTL.
+const HISTORY_MAX_PAGES = 10;
+const HISTORY_TTL_MS = 60 * 60 * 1000;
 
 // A release of a client used on this many networks or more says nothing about which of them a
 // fork is on when the notes name none: Nitro's release is not a fork of each of its 25 chains.
@@ -44,6 +52,8 @@ const MAX_REPOSITORY_CHAINS = 3;
 
 let cache = { fetchedAt: 0, failedAt: 0, mentions: null, feeds: {} };
 let inflight = null;
+// Per feed, the pages older than the newest one: { items, oldest, fetchedAt }.
+let history = {};
 // Per feed, until when `?fork=true` is known to be rejected. Every deployment answered 400 to
 // it, so each refresh paid six requests — the filtered one wasted — and fell back anyway.
 let forkParamRejectedUntil = {};
@@ -60,6 +70,7 @@ export function _resetForkFeedsForTests() {
   cache = { fetchedAt: 0, failedAt: 0, mentions: null, feeds: {} };
   inflight = null;
   forkParamRejectedUntil = {};
+  history = {};
 }
 
 /**
@@ -158,7 +169,68 @@ async function fetchFeed(feed) {
   if (!response.ok) throw new Error(`responded ${response.status}`);
   const body = await response.json();
   const list = Array.isArray(body?.[feed.listKey]) ? body[feed.listKey] : [];
-  return { items: list.filter((it) => forksOf(it?.enrichment).length > 0), filtered, oldest: oldestTime(list) };
+  const items = list.filter((it) => forksOf(it?.enrichment).length > 0);
+  // History only behind a filtered page: unfiltered, older pages would be mostly not forks,
+  // and a full page is what says there is more to read.
+  if (feed.history && filtered && list.length >= FETCH_LIMIT) {
+    const older = await fetchHistory(feed, url, oldestTime(list));
+    if (older) {
+      const merged = mergeItems(items, older.items);
+      return { items: merged, filtered, oldest: older.oldest ?? oldestTime(list) };
+    }
+  }
+  return { items, filtered, oldest: oldestTime(list) };
+}
+
+/**
+ * The fork-tagged pages older than the newest one, paged by `until` and kept for an hour.
+ *
+ * Read from where the newest page ends. New releases push that boundary forward, so for up to
+ * an hour the releases that slid off the newest page are in neither part; at about one fork
+ * release a day (500 since July 2025) that is rarely more than one, back on the next read. A
+ * failure keeps the last good pages rather than dropping the history the hour before had.
+ */
+async function fetchHistory(feed, url, newestPageOldest) {
+  const prior = history[feed.kind];
+  if (prior && Date.now() - prior.fetchedAt < HISTORY_TTL_MS) return prior;
+  const items = [];
+  let until = newestPageOldest;
+  let oldest = newestPageOldest;
+  try {
+    for (let page = 0; page < HISTORY_MAX_PAGES && until; page += 1) {
+      const response = await getFeed(`${url}&fork=true&until=${encodeURIComponent(until)}`, feed.timeout());
+      if (!response.ok) throw new Error(`history page responded ${response.status}`);
+      const body = await response.json();
+      const list = Array.isArray(body?.[feed.listKey]) ? body[feed.listKey] : [];
+      items.push(...list.filter((it) => forksOf(it?.enrichment).length > 0));
+      const next = oldestTime(list);
+      // `until` is inclusive, so a page whose oldest item did not move would be read forever.
+      if (list.length < FETCH_LIMIT || !next || next === until) { oldest = next ?? oldest; break; }
+      until = next;
+      oldest = next;
+    }
+  } catch (err) {
+    logger.warn({ feed: feed.kind, err: err.message }, 'fork history unavailable');
+    if (prior) return prior;
+    return null;
+  }
+  history[feed.kind] = { items, oldest, fetchedAt: Date.now() };
+  return history[feed.kind];
+}
+
+/** Newest page first, then history, one copy per item (`until` overlaps by design). */
+function mergeItems(newest, older) {
+  const seen = new Set();
+  const out = [];
+  for (const it of [...newest, ...older]) {
+    const id = it?.id ?? it?.url ?? null;
+    if (id != null) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+    }
+    out.push(it);
+  }
+  return out;
 }
 
 /** The oldest publication time in a raw feed page, ISO, or null. */

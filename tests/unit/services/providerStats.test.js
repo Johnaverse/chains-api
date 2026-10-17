@@ -465,3 +465,19 @@ describe('buildProviderStats — coverage (self-declared)', () => {
     expect(providers.find((p) => p.id === 'quicknode').name).toBe('QuickNode');
   });
 });
+
+describe('buildProviderStats — planned work posted under an incident status', () => {
+  it('counts a classed software update as maintenance, not as an incident', () => {
+    // Chainstack posted "Scheduled protocol upgrade (Polygon mainnet)" as `monitoring`.
+    const events = [
+      anchor(),
+      ev({ incidentId: 'quicknode:upg', title: 'Scheduled protocol upgrade (Polygon mainnet)', status: 'monitoring', ongoing: true, enrichment: { class: 'planned_software_update' } })
+    ];
+    const { providers } = buildProviderStats(events, { now: NOW });
+    const q = providers.find((p) => p.id === 'quicknode');
+    expect(q.incidents30d).toBe(0);
+    expect(q.ongoingNow).toBe(0);
+    expect(q.ongoingMaintenance).toBe(1);
+    expect(q.maintenance30d).toBe(1);
+  });
+});

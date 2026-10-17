@@ -1,4 +1,5 @@
 import { resolveIncidentChain } from '../domain/incidentChains.js';
+import { isPlannedClass } from '../domain/plannedWork.js';
 
 /**
  * Promote agreement between independent RPC providers into a CHAIN-level event.
@@ -27,8 +28,11 @@ export const MIN_PROVIDERS = 2;
 // across two providers ("Sui - Mainnet - Upgrade to v1.76.1" at quicknode and
 // blockdaemon) is a chain-level MAINTENANCE, and folding it in with an outage
 // would report planned work as a failure.
+//
+// Planned work by class as well as by status (src/domain/plannedWork.js): a provider that
+// posts its upgrade as `monitoring` is still upgrading, not failing.
 function kindOf(incident) {
-  return String(incident?.status ?? '').startsWith('maintenance') ? 'maintenance' : 'incident';
+  return String(incident?.status ?? '').startsWith('maintenance') || isPlannedClass(incident?.enrichment) ? 'maintenance' : 'incident';
 }
 
 /**
