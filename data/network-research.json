@@ -4848,7 +4848,16 @@
           ]
         }
       ],
-      "features": []
+      "features": [
+        {
+          "text": "Shibarium EVM test network using BONE; official documentation explicitly identifies chain 157.",
+          "status": "partial",
+          "audit": "confirmed",
+          "evidence": [
+            "https://docs.shib.io/get-started/shibarium"
+          ]
+        }
+      ]
     },
     {
       "chainId": 158,
