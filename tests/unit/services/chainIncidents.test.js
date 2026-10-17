@@ -125,3 +125,15 @@ describe('correlateChainIncidents', () => {
     expect(correlateChainIncidents([null, {}, { isProvider: true }], { resolve })).toEqual([]);
   });
 });
+
+describe('correlateChainIncidents — planned work by class', () => {
+  it('files a classed software update under maintenance whatever its status', () => {
+    const events = correlate(ROBINHOOD.map((r) => incident(r, { enrichment: { class: 'planned_software_update' } })));
+    expect(events[0].kind).toBe('maintenance');
+  });
+
+  it('keeps a low-confidence class an incident', () => {
+    const events = correlate(ROBINHOOD.map((r) => incident(r, { enrichment: { class: 'planned_software_update', lowConfidence: true } })));
+    expect(events[0].kind).toBe('incident');
+  });
+});

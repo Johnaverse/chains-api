@@ -1,5 +1,6 @@
 import { getLiveEvents, getLiveEventsFetchedAt, peekLiveEvents } from '../sources/liveIncidents.js';
 import { MAINTENANCE_STATUSES, INCIDENT_STATUSES } from './upgrades.js';
+import { PLANNED_WORK_CLASSES } from '../domain/plannedWork.js';
 
 /**
  * Incident-feed sentinel: contradictions in what the feed and its LLM enrichment assert.
@@ -35,12 +36,15 @@ const LIVE_INCIDENT_STATUSES = new Set(
   [...INCIDENT_STATUSES].filter((s) => s !== 'resolved')
 );
 
-// ONLY the class names docs/SERVICE-CONTRACT.md §8 states verbatim. §8 records that the two
-// feeds do not share a vocabulary and lists each with a trailing "…", so the full set is not
-// knowable from the contract — and guessing at the remainder is how a rule invents findings.
-// Anything outside these is counted as drift (S5) rather than forced into a bucket.
-const PLANNED_CLASSES = new Set(['planned_hard_fork', 'scheduled_maintenance']);
-const INCIDENT_CLASSES = new Set(['chain_halt', 'provider_incident', 'chain_incident']);
+// The class names §8 of docs/SERVICE-CONTRACT.md states, plus the operational classes of the
+// feeds' shared taxonomy (chains-news/src/taxonomy.js) — before those were added, every
+// `planned_software_update` event, a third of the feed, was reported as S5 drift. Anything
+// outside these is still counted as drift rather than forced into a bucket.
+//
+// The planned side is the same set every surface now uses to keep planned work out of the
+// incident counts (src/domain/plannedWork.js), so S2 lists exactly the events that rule moved.
+const PLANNED_CLASSES = PLANNED_WORK_CLASSES;
+const INCIDENT_CLASSES = new Set(['chain_halt', 'provider_incident', 'chain_incident', 'known_chain_issue']);
 // Documented, but not assignable to either side without guessing. `chain_hardfork` does not
 // say whether the fork was planned or an emergency response, and `other` is the model's own
 // "I don't know" (providerStats.js records upstream flagging roughly a third of enrichments
@@ -93,8 +97,8 @@ export function buildIncidentSentinel(events = []) {
     s2_model_says_planned: rule(
       'S2', 'Model classified planned work, operator reports a live incident',
       'The enrichment class names planned work while the operator\'s own status says an '
-      + 'incident is live. Published state outranks the model, so the classification is the '
-      + 'suspect side.'
+      + 'incident is live. Every surface now counts these as planned work rather than as an '
+      + 'outage, so this is the list to check for a misclassification hiding a real one.'
     ),
     s3_model_says_incident: rule(
       'S3', 'Model classified an incident, operator reports maintenance',
