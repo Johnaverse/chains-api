@@ -4273,21 +4273,82 @@ function channelHandle(c) {
         return /^[A-Za-z0-9_]{2,64}$/.test(name) && !NOT_HANDLES.has(name.toLowerCase()) ? `@${name}` : null;
     } catch { return null; }
 }
+const CHANNEL_AVAILABILITY_TEXT = {
+    removed_or_closed_explicit: 'Explicit closure observed',
+    unable_to_verify: 'Availability unverified',
+    reachable_landing_only: 'Landing page only; invite unverified',
+    accessible_public_preview: 'Public preview observed; activity unknown',
+    accessible_public_content: 'Public content observed; current activity unverified',
+    login_required: 'Login required; availability unverified',
+    non_web_contact: 'Contact route not tested'
+};
+function channelObservedAt(value) {
+    const date = typeof value === 'string' ? new Date(value) : null;
+    return date && Number.isFinite(date.getTime()) ? date.toISOString().replace('T', ' ').slice(0, 19) + ' UTC' : 'date unknown';
+}
+function channelAvailability(c) {
+    const checks = Array.isArray(c.current_availability_checks) ? c.current_availability_checks : [];
+    const newest = entries => entries.reduce((chosen, check) => !chosen || (Date.parse(check.checked_at_utc) || 0) > (Date.parse(chosen.checked_at_utc) || 0) ? check : chosen, null);
+    // Explicit closure survives a later failed canonical-URL retrieval. Reachability,
+    // preview/member counts and fetch failures cannot establish activity or reopening.
+    // observed_historical_status is deliberately excluded (e.g. Zeniq's old suspension).
+    const closure = newest(checks.filter(check => check.status === 'removed_or_closed_explicit'));
+    const latest = newest(checks);
+    if (closure) {
+        const laterUnknown = latest !== closure && latest?.status === 'unable_to_verify';
+        return {
+            inactive: true,
+            text: `Closure observed ${channelObservedAt(closure.checked_at_utc)}. Cached content possible; current status not rechecked.${laterUnknown ? ' Later retrieval was unverified; closure observation retained.' : ''}`
+        };
+    }
+    if (!latest) return { inactive: false, text: 'Current availability and activity unverified; no availability check recorded.' };
+    return {
+        inactive: false,
+        text: `${CHANNEL_AVAILABILITY_TEXT[latest.status] || 'Availability unverified'} · checked ${channelObservedAt(latest.checked_at_utc)}. Point-in-time observation; content may be cached.`
+    };
+}
+function channelEvidenceDetails(c) {
+    const checks = Array.isArray(c.current_availability_checks) ? c.current_availability_checks : [];
+    const verification = c.independent_verification;
+    const paragraphs = [
+        c.notes ? el('p', { text: c.notes }) : null,
+        el('p', { text: `Original research: ${channelObservedAt(c.checkedAt)}; activity: ${c.activity || 'unknown'}${c.lastActivity ? `; latest observed date: ${c.lastActivity}` : ''}${c.evidenceMode ? `; evidence mode: ${c.evidenceMode}` : ''}.` }),
+        ...checks.map(check => el('div', { class: 'r-check' }, [
+            el('p', { text: `${CHANNEL_AVAILABILITY_TEXT[check.status] || check.status || 'Availability unverified'} · ${channelObservedAt(check.checked_at_utc)}${check.observed_title ? ` · ${check.observed_title}` : ''}` }),
+            el('p', { text: `Activity: ${check.activity_status || 'unknown'}${check.latest_observed_activity ? `; latest observed date: ${check.latest_observed_activity}` : ''}.${check.observed_historical_status ? ' Historical closure evidence only; current status unverified.' : ''}` }),
+            check.notes ? el('p', { text: check.notes }) : null,
+            el('div', { class: 'r-meta' }, evidenceLinks({ evidence: check.evidence_urls || [check.url].filter(Boolean) }))
+        ].filter(Boolean))),
+        verification ? el('div', { class: 'r-check' }, [
+            el('p', { text: `Independent attribution review: ${verification.status || 'unknown'} · ${channelObservedAt(verification.checked_at_utc)}${verification.evidence_mode ? ` · ${verification.evidence_mode}` : ''}` }),
+            verification.notes ? el('p', { text: verification.notes }) : null,
+            el('div', { class: 'r-meta' }, evidenceLinks({ evidence: verification.source_urls || [] }))
+        ].filter(Boolean)) : null
+    ].filter(Boolean);
+    // Native details/summary is keyboard- and touch-accessible; evidence is not hover-only.
+    return el('details', { class: 'r-channel-details' }, [
+        el('summary', { text: 'Availability evidence and notes' }), ...paragraphs
+    ]);
+}
 function channelItem(c) {
     const href = channelHref(c.url);
     const label = c.url.startsWith('mailto:') ? c.url.slice(7) : (c.title || safeHost(c.url) || c.url);
     const handle = channelHandle(c);
     const note = channelNote(c);
-    return el('div', { class: 'r-item', title: c.notes || null }, [
+    const availability = channelAvailability(c);
+    return el('div', { class: 'r-item' }, [
         el('div', { class: 'r-main' }, [
             el('span', { class: 'chip-link', text: CHANNEL_PLATFORM_TEXT[c.platform] || c.platform }),
             href ? el('a', { href, target: '_blank', rel: 'noopener', text: label }) : el('span', { text: label }),
-            handle ? el('span', { class: 'r-note', text: handle }) : null
+            handle ? el('span', { class: 'r-note', text: handle }) : null,
+            availability.inactive ? el('span', { class: 'r-inactive', text: 'Inactive' }) : null
         ].filter(Boolean)),
         el('div', { class: 'r-meta' }, [
             note ? el('span', { class: 'r-note', text: note }) : null,
             ...evidenceLinks(c)
-        ].filter(Boolean))
+        ].filter(Boolean)),
+        el('p', { class: 'r-availability r-note', text: availability.text }),
+        channelEvidenceDetails(c)
     ]);
 }
 function renderChannels(channels, sec) {
@@ -4344,7 +4405,7 @@ function renderResearch(research, sec) {
     const caveats = [];
     if (research.features?.length) caveats.push('Features are the project\u2019s own statements, not tested facts.');
     if (research.forums?.length) caveats.push('Forum posts are user-generated and not endorsed.');
-    if (research.channels?.length) caveats.push('Channels are linked by the project; none were joined, so activity and replies are unknown.');
+    if (research.channels?.length) caveats.push('Channels are linked by the project; none were joined or contacted. Availability observations are dated and may use cached content; reachable previews do not prove current activity or replies.');
     sec.appendChild(el('div', { class: 'r-foot dim',
         text: [`Audited research${when ? `, checked ${relTime(when)}` : ''}.`, ...caveats].join(' ') }));
     sec.classList.remove('hidden');

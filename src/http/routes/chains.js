@@ -3,6 +3,7 @@ import { getPricesForChains, getPriceForChain } from '../../../priceService.js';
 import { MAX_SEARCH_QUERY_LENGTH, RATE_LIMIT_WINDOW_MS, SEARCH_RATE_LIMIT_MAX } from '../../../config.js';
 import { parseIntParam } from '../util/parseIntParam.js';
 import { sendError } from '../util/sendError.js';
+import { chainDetailSchema, chainErrorSchema } from '../schemas/chainDetail.js';
 
 const VALID_TAGS = ['Testnet', 'L2', 'Beacon', 'ZK', 'Validium', 'Optimium'];
 
@@ -40,6 +41,8 @@ export async function chainsRoutes(fastify) {
 
   fastify.get('/chains/:id', {
     schema: {
+      description: 'Get chain metadata, optional static research, and native-asset price by chain ID.',
+      response: { 200: chainDetailSchema, 400: chainErrorSchema, 404: chainErrorSchema },
       params: {
         type: 'object',
         properties: {

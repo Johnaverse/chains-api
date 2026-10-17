@@ -129,8 +129,8 @@ export function getNetworkResearchInfo() {
 const hasItems = entry => entry.repositories?.length > 0 || entry.papers?.length > 0 || entry.features?.length > 0;
 
 /**
- * The research block for one chain, or null when the research found nothing to list for
- * it (family alone is stamped on the chain itself). Served on single-chain lookups only,
+ * The research block for one chain, or null when there are no research items or hardware
+ * research entry (family alone is stamped on the chain itself). Served on single-chain lookups only,
  * so the /chains list (and its in-memory projection) doesn't carry several MB of
  * repositories, papers, features, forums, channels and hardware profiles. A copy: callers may
  * mutate it without touching the datasets.
@@ -143,8 +143,7 @@ export function getNetworkResearch(chainId) {
   const channelEntry = channels.byChainId.get(id);
   const hasResearch = entry != null && hasItems(entry);
   const hasForums = forumEntry?.forums?.length > 0;
-  // Researched at all: a chain with no profile still carries the research status, notes and the
-  // sources checked (README), so "looked and found nothing" is distinct from "never looked".
+  // A researched chain with no profile still has useful status and source context.
   const hasHardware = hardwareEntry != null;
   const hasChannels = channelEntry?.channels?.length > 0;
   if (!hasResearch && !hasForums && !hasHardware && !hasChannels) return null;
@@ -162,13 +161,15 @@ export function getNetworkResearch(chainId) {
     research.channelsCheckedAt = channelEntry.checkedAt ?? channels.updatedAt;
   }
   if (hasHardware) {
+    const { chainId: _ignored, name: _name, ...rest } = structuredClone(hardwareEntry);
     research.hardware = {
-      status: hardwareEntry.status ?? null,
-      identityStatus: hardwareEntry.identityStatus ?? null,
-      checkedAt: hardwareEntry.checkedAt ?? hardware.updatedAt,
-      notes: hardwareEntry.notes ?? null,
-      sources: structuredClone(hardwareEntry.sources ?? []),
-      profiles: structuredClone(hardwareEntry.profiles ?? [])
+      ...rest,
+      status: rest.status ?? null,
+      identityStatus: rest.identityStatus ?? null,
+      checkedAt: rest.checkedAt ?? hardware.updatedAt,
+      notes: rest.notes ?? null,
+      sources: rest.sources ?? [],
+      profiles: rest.profiles ?? []
     };
   }
   // The block's date is the date of the dataset that produced its items — never the

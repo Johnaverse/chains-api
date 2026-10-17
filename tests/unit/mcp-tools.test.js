@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { readFileSync } from 'node:fs';
 
 // Mock dataService before importing. getChainDetail delegates to getChainById so tests
 // that stub a chain through getChainById also cover get_chain_by_id.
@@ -1222,6 +1223,45 @@ describe('MCP Tools - Shared Module', () => {
       expect(data.profiles[0]).toMatchObject({ role: 'validator', level: 'recommended' });
     });
 
+    it.each([6900, 6911])('returns Nibiru %s full-node prerequisites for validator lookups without inventing validator sizing', async (chainId) => {
+      const dataset = JSON.parse(readFileSync(new URL('../../data/node-hardware.json', import.meta.url), 'utf8'));
+      const nibiru = dataset.networks.find((network) => network.chainId === chainId);
+      mockGetNodeHardware.mockReturnValue(nibiru);
+      vi.mocked(dataService.getChainById).mockReturnValue({ chainId, name: nibiru.name });
+      for (const filter of [{ role: 'validator' }, { role: 'validator', level: 'minimum' }, {}, { role: 'full_node' }]) {
+        const data = JSON.parse((await handleToolCall('get_node_requirements', { chainId, ...filter })).content[0].text);
+        expect(data).toMatchObject({ totalProfiles: 1, totalMatched: 1, count: 1, truncated: false });
+        expect(data.availableRoles).toEqual(['full_node']);
+        expect(data.profiles).toHaveLength(1);
+        const profile = data.profiles[0];
+        expect(profile).toMatchObject({ id: 'full_node-minimum', role: 'full_node', level: 'minimum', scope: 'exact_network', verification: 'qualified' });
+        expect(profile.requirements).toEqual([
+          'cpu other: 4 CPU (Source says 4CPU; cores versus vCPUs not specified.)',
+          'memory capacity: 16 GB', 'storage capacity: 1 TB', 'storage storage type: SSD'
+        ]);
+        expect(profile.prerequisiteFor).toHaveLength(1);
+        expect(profile.prerequisiteFor[0]).toMatchObject({ role: 'validator', sizing: 'not_established' });
+        expect(profile.prerequisiteFor[0].notes).toMatch(/Complete validator hardware requirements are not established/);
+        expect(profile.prerequisiteFor[0].sources).toEqual([`https://nibiru.fi/docs/run-nodes/validators${chainId === 6900 ? '/validator-mainnet.html' : ''}`]);
+        expect(profile.sources.some((source) => source.includes('/full-nodes'))).toBe(true);
+        expect(data.note).toMatch(/Never count it twice/);
+        expect(data).not.toHaveProperty('message');
+      }
+      const unmatched = JSON.parse((await handleToolCall('get_node_requirements', { chainId, role: 'validator', level: 'recommended' })).content[0].text);
+      expect(unmatched).toMatchObject({ totalProfiles: 1, totalMatched: 0, count: 0 });
+    });
+
+    it('does not infer prerequisites from role or prose and preserves an explicit condition', async () => {
+      const prerequisite = { role: 'validator', requiredWhen: 'Only for this documented deployment.', sizing: 'not_established', sources: ['https://docs.example/validator'] };
+      mockGetNodeHardware.mockReturnValue({ ...hardware, profiles: [
+        profile({ id: 'linked', prerequisiteFor: [prerequisite] }),
+        profile({ id: 'unlinked', notes: 'A full node might be a validator.' })
+      ] });
+      const data = JSON.parse((await handleToolCall('get_node_requirements', { chainId: 1, role: 'validator' })).content[0].text);
+      expect(data).toMatchObject({ totalProfiles: 2, totalMatched: 1, count: 1 });
+      expect(data.profiles[0]).toMatchObject({ id: 'linked', role: 'full_node', prerequisiteFor: [prerequisite] });
+    });
+
     it('tells a filter that matched nothing apart from a chain with no research', async () => {
       const data = JSON.parse((await handleToolCall('get_node_requirements', { chainId: 1, role: 'archive', level: 'minimum' })).content[0].text);
       expect(data).toMatchObject({ totalProfiles: 3, totalMatched: 0, count: 0, truncated: false, profiles: [] });
@@ -1347,6 +1387,53 @@ describe('MCP Tools - Shared Module', () => {
         relationship: 'officially_endorsed', scope: 'project_family', access: 'invite_unverified', verification: 'qualified'
       });
       expect(data.research.channelsByPlatform).toEqual({ telegram: 20 });
+    });
+
+    it('keeps dated channel closure and unknown states separate from attribution in compact MCP responses', async () => {
+      const dataset = JSON.parse(readFileSync(new URL('../../data/channel-research.json', import.meta.url), 'utf8'));
+      const find = (id, url) => dataset.networks.find(network => network.chainId === id).channels.find(channel => channel.url === url);
+      const vaulta = find(17777, 'https://bit.ly/VaultaTG');
+      const zeniq = find(383414847825, 'https://twitter.com/Zeniq_corp');
+      const discord = find(2031, 'https://discord.com/invite/yEzyUq5gxF');
+      const centrifuge = find(2031, 'https://t.me/centrifuge_chat');
+      vi.mocked(dataService.getChainDetail).mockReturnValueOnce({ chainId: 17777, name: 'Availability fixtures', research: { channels: [vaulta, zeniq, discord, centrifuge] } });
+      const data = JSON.parse((await handleToolCall('get_chain_by_id', { chainId: 17777 })).content[0].text);
+      const channels = data.research.channels;
+      expect(channels[0]).toMatchObject({ access: vaulta.access, verification: vaulta.verification, availability: {
+        status: 'removed_or_closed_explicit', checkedAt: '2026-10-11T15:55:22.385Z', activity: 'explicitly_closed',
+        latestCheck: { status: 'unable_to_verify', checkedAt: '2026-10-11T15:55:35.925Z' }
+      } });
+      expect(channels[1].availability).toMatchObject({ status: 'unable_to_verify', activity: 'unknown', historicalStatus: 'removed_or_closed_explicit' });
+      expect(channels[2].availability).toMatchObject({ status: 'unable_to_verify', activity: 'unknown' });
+      expect(channels[3].availability.status).toBe('removed_or_closed_explicit');
+      expect(channels.every(channel => !Object.hasOwn(channel, 'current_availability_checks'))).toBe(true);
+      expect(data.research.channelsAvailabilityNote).toMatch(/content may be cached/);
+      expect(data.research.channelsAvailabilityNote).toMatch(/current status\/activity remain unverified/);
+      expect(data.research.channelsAvailabilityNote).toMatch(/historicalStatus is historical cache evidence only/);
+      expect(data.research.channelsAvailabilityNote).toContain('/chains/17777');
+    });
+
+    it('bounds added MCP availability metadata with twelve real channels and preserves the platform cap', async () => {
+      const dataset = JSON.parse(readFileSync(new URL('../../data/channel-research.json', import.meta.url), 'utf8'));
+      const channels = dataset.networks.find(network => network.chainId === 4160).channels;
+      expect(channels.length).toBeGreaterThan(12);
+      vi.mocked(dataService.getChainDetail).mockReturnValueOnce({ chainId: 4160, name: 'Algorand', research: { channels } });
+      const text = (await handleToolCall('get_chain_by_id', { chainId: 4160 })).content[0].text;
+      const data = JSON.parse(text);
+      expect(data.research.channels).toHaveLength(12);
+      expect(data.research.channelsTotal).toBe(channels.length);
+      expect(data.research.channels.every(channel => channel.availability)).toBe(true);
+      expect(text.length).toBeLessThanOrEqual(8000);
+    });
+
+    it('relays scoped repository caveats through the setup software projection', async () => {
+      const dataset = JSON.parse(readFileSync(new URL('../../data/network-research.json', import.meta.url), 'utf8'));
+      const research = dataset.networks.find(network => network.chainId === 3336);
+      mockGetNetworkResearch.mockReturnValue(research);
+      const data = JSON.parse((await handleToolCall('get_node_requirements', { chainId: 3336 })).content[0].text);
+      const repository = data.software.repositories.find(repository => repository.repo === 'ethstorage/es-node');
+      expect(repository).toMatchObject({ kind: 'node', scope: 'historical_network', deployment: 'historical', reviewedAt: '2026-10-16' });
+      expect(repository.notes).toMatch(/does not explicitly set 3336/);
     });
 
     it('get_chain_by_id gives every platform a slot before one fills the cap', async () => {
