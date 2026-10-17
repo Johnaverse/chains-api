@@ -233,7 +233,7 @@ describe('MCP Tools - Shared Module', () => {
     it('should return an array of 30 tools', () => {
       const tools = getToolDefinitions();
       expect(Array.isArray(tools)).toBe(true);
-      expect(tools.length).toBe(32);
+      expect(tools.length).toBe(33);
     });
 
     it('should include all expected tool names', () => {
