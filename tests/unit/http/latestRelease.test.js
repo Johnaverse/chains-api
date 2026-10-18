@@ -124,8 +124,30 @@ describe('GET /client-releases/latest', () => {
     const fork = { name: 'Glamsterdam', network: 'Ethereum Sepolia', activationAt: null, activationBlock: null, state: 'scheduled', activationTimestamp: 1791000000 };
     proxyFetch.mockResolvedValue(page([rel('v1.18.0', {}, { mandatory: true }, { class: 'planned_hard_fork', fork })]));
     const latest = (await get('/client-releases/latest?repo=ethereum/go-ethereum')).json().latest;
-    expect(latest.hardfork).toEqual({ included: true, forks: [{ name: 'Glamsterdam', network: 'Ethereum Sepolia', state: 'scheduled', activationAt: null, activationBlock: null, activationTimestamp: 1791000000 }] });
+    expect(latest.hardfork).toEqual({ included: true, forks: [{ name: 'Glamsterdam', network: 'Ethereum Sepolia', state: 'scheduled', phase: 'past', activationAt: null, activationBlock: null, activationTimestamp: 1791000000 }] });
     expect(latest.mandatory).toBe(true);
+  });
+
+  it('gives each fork its phase now, whatever state the notes gave', async () => {
+    const forks = [
+      { name: 'Glamsterdam', network: 'Ethereum Sepolia', activationAt: '2026-10-06T13:53:36.000Z', state: 'scheduled' },
+      { name: 'Jenner', network: 'BSC Chapel testnet', activationAt: '2099-10-29T02:30:00.000Z', state: 'scheduled' },
+      { name: 'Denim', network: 'Base Sepolia', activationAt: new Date().toISOString().slice(0, 10), state: 'scheduled' },
+      { name: 'Rex6', network: 'MegaETH Mainnet', activationAt: null, state: 'scheduled' },
+      { name: 'Zanzibar', network: 'IoTeX', activationAt: null, state: 'completed' },
+      { name: 'Fortuna', network: 'Metal', activationAt: '2099-01-01T00:00:00.000Z', state: 'cancelled' }
+    ];
+    proxyFetch.mockResolvedValue(page([rel('v2.7.0', {}, {}, { class: 'planned_hard_fork', forks })]));
+    const { forks: out } = (await get('/client-releases/latest?repo=ethereum/go-ethereum')).json().latest.hardfork;
+    expect(out.map((f) => [f.name, f.state, f.phase])).toEqual([
+      ['Glamsterdam', 'scheduled', 'past'],
+      ['Jenner', 'scheduled', 'upcoming'],
+      // A date-only activation is upcoming until that UTC day ends.
+      ['Denim', 'scheduled', 'upcoming'],
+      ['Rex6', 'scheduled', 'unscheduled'],
+      ['Zanzibar', 'completed', 'past'],
+      ['Fortuna', 'cancelled', 'cancelled']
+    ]);
   });
 
   it('lists one fork per activation, under its combined Ethereum name and the release chain', async () => {
@@ -239,6 +261,16 @@ describe('GET /client-releases/latest', () => {
     expect((await get('/client-releases/latest')).statusCode).toBe(400);
     expect((await get('/client-releases/latest?repo=o/r&chainId=1')).statusCode).toBe(400);
     expect((await get('/client-releases/latest?repo=o/r&component=a%20b')).statusCode).toBe(400);
+  });
+
+  it('looks on GitLab for a bare owner/repo GitHub has no releases of, never for a stated host', async () => {
+    proxyFetch.mockImplementation(async (url) => (String(url).includes('gitlab%3Atezos') || String(url).includes('gitlab:tezos')
+      ? page([rel('octez-evm-node-v0.67', { source: { id: 'gitlab:tezos/tezos' } })])
+      : page([])));
+    const body = (await get('/client-releases/latest?repo=tezos/tezos')).json();
+    expect(body).toMatchObject({ repo: 'gitlab:tezos/tezos', latest: { tag: 'octez-evm-node-v0.67' } });
+    expect((await get('/client-releases/latest?repo=github:tezos/tezos')).statusCode).toBe(404);
+    expect((await get('/client-releases/latest?repo=https://github.com/tezos/tezos')).statusCode).toBe(404);
   });
 
   it('503s when the feed is not configured', async () => {

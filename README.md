@@ -816,7 +816,7 @@ Errors: **503** `{error: "Client release feed not configured"}` when `CLIENT_FEE
 ### `GET /client-releases/latest`
 The latest release of one client repository, answering the questions an operator asks of it. MCP: `get_latest_release`.
 
-**Query:** `repo` (required: `owner/repo` for GitHub, `github:owner/repo`, `gitlab:owner/repo`, or the repository URL), `component` (a monorepo's component, e.g. `op-node`), `prerelease` (`true` = the newest release even when it is a prerelease; default stable only).
+**Query:** `repo` (required: `owner/repo` — GitHub, or GitLab when GitHub has no releases of it, e.g. `tezos/tezos` — `github:owner/repo`, `gitlab:owner/repo`, or the repository URL), `component` (a monorepo's component, e.g. `op-node`), `prerelease` (`true` = the newest release even when it is a prerelease; default stable only).
 
 **Response:**
 ```json
@@ -832,7 +832,7 @@ The latest release of one client repository, answering the questions an operator
   "newerPrerelease": null }
 ```
 
-- `hardfork.included`: the release schedules a fork (class `planned_hard_fork`, or a fork in state `scheduled` / `rescheduled`). `forks` lists every fork the notes name, completed ones included, with network, state and activation — one entry per fork and network: a fork named per layer is listed under its combined name (`Amsterdam` / `Gloas` → `Glamsterdam`, `layerName` keeps the client's), and a network that is one of the release's chains carries its registry name and `chainId` (`Hoodi` → `Ethereum Hoodi`, 560048). `review` appears when the notes carry fork or obligation wording the model did not confirm: a *possible* fork, never a "no".
+- `hardfork.included`: the release schedules a fork (class `planned_hard_fork`, or a fork in state `scheduled` / `rescheduled`). `forks` lists every fork the notes name, completed ones included, with network, state and activation — `state` is what the notes said (a `scheduled` fork stays `scheduled` after its date), `phase` is where it stands now (`upcoming` / `past` / `cancelled` / `unscheduled`, as on `/forks`; a date-only activation stays `upcoming` until that UTC day ends) — one entry per fork and network: a fork named per layer is listed under its combined name (`Amsterdam` / `Gloas` → `Glamsterdam`, `layerName` keeps the client's), and a network that is one of the release's chains carries its registry name and `chainId` (`Hoodi` → `Ethereum Hoodi`, 560048). `review` appears when the notes carry fork or obligation wording the model did not confirm: a *possible* fork, never a "no".
 - `mandatory`: the notes oblige operators to upgrade (or the release schedules a fork activation).
 - `security.update`: `source: "advisory"` when a published GitHub advisory of the repository names this version as the first patched one (retroactive, with `advisories[]` and severity); `source: "notes"` when the notes state a security fix (security wording, a Security section, CVE / GHSA ids). `scope: "dependency"` marks a fix that only bumps a library or toolchain.
 - `flags.changes[]`: `{flag, change, quote}` with `change` one of `added`, `removed`, `deprecated`, `renamed`, `default_changed`, `changed`. Changes the previous release already stated (standing deprecation lists) are dropped and counted in `carriedOver`.

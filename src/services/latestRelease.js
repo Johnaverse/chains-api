@@ -1,5 +1,5 @@
 import { getClientReleases, ClientFeedNotFoundError, MAX_RELEASE_LIMIT } from '../sources/clientFeed.js';
-import { forkIdentity } from '../domain/forks.js';
+import { forkIdentity, forkPhase, isDateOnly } from '../domain/forks.js';
 import { networkSlug } from '../domain/networkSlug.js';
 import { forkAliases } from './timeline.js';
 import { searchChains } from '../store/queries.js';
@@ -106,7 +106,7 @@ function chainOfNetwork(network, chains) {
  * say "Amsterdam", Prysm's "Gloas", Erigon's "Glamsterdam" — and the classifier may list the
  * same activation under two of them; the combined name leads, the layer name is kept.
  */
-function forksOf(forks, chains) {
+function forksOf(forks, chains, now) {
   const out = [];
   const byKey = new Map();
   for (const f of forks) {
@@ -120,6 +120,9 @@ function forksOf(forks, chains) {
       network: chain?.name ?? f.network ?? null,
       ...(chain ? { chainId: chain.chainId } : {}),
       state: typeof f.state === 'string' ? f.state.toLowerCase() : null,
+      // `state` is what the notes said when the release came out ("scheduled" stays scheduled
+      // after the date passes); `phase` is where the fork stands now.
+      phase: null,
       activationAt: f.activationAt ?? null,
       activationBlock: f.activationBlock ?? null,
       ...(f.activationEpoch != null ? { activationEpoch: f.activationEpoch } : {}),
@@ -135,6 +138,16 @@ function forksOf(forks, chains) {
     // The same activation twice: keep what either entry knows.
     for (const [k, v] of Object.entries(entry)) if (k !== 'layerName' && into[k] == null && v != null) into[k] = v;
   }
+  for (const entry of out) {
+    // Ethereum-style forks activate at a unix timestamp the notes may give without a date.
+    const ts = Number(entry.activationTimestamp);
+    const at = entry.activationAt ?? (Number.isFinite(ts) && ts > 0 ? new Date(ts * 1000).toISOString() : null);
+    entry.phase = forkPhase({
+      activationAt: at,
+      state: entry.state,
+      activationPrecision: entry.activationAt && isDateOnly(entry.activationAt) ? 'day' : null
+    }, now);
+  }
   return out;
 }
 
@@ -142,7 +155,7 @@ function forksOf(forks, chains) {
 const isClassified = (item) => typeof item.enrichment?.class === 'string';
 
 /** Whether the release ships a fork: true, false, or null when it is not classified yet. */
-function hardforkOf(item) {
+function hardforkOf(item, now) {
   const enr = item.enrichment;
   const forks = enr ? (enr.forks?.length ? enr.forks : enr.fork ? [enr.fork] : []) : [];
   const ahead = forks.some((f) => FORK_AHEAD.has(String(f.state ?? '').toLowerCase()));
@@ -150,14 +163,14 @@ function hardforkOf(item) {
   const included = enr?.class === 'planned_hard_fork' || ahead ? true : (isClassified(item) ? false : null);
   return {
     included,
-    forks: forksOf(forks, item.chains).slice(0, MAX_FORKS),
+    forks: forksOf(forks, item.chains, now).slice(0, MAX_FORKS),
     // The feed's recall net: wording the model did not confirm. "Possibly", never "no".
     ...(enr?.review ? { review: enr.review } : {})
   };
 }
 
 /** One release as the latest-release answer. */
-export function describeRelease(item) {
+export function describeRelease(item, now = Date.now()) {
   const rel = item.release;
   const enr = item.enrichment;
   return {
@@ -169,7 +182,7 @@ export function describeRelease(item) {
     publishedAt: item.publishedAt,
     prerelease: rel.prerelease,
     client: item.source.name,
-    hardfork: hardforkOf(item),
+    hardfork: hardforkOf(item, now),
     // Unclassified -> unknown. The normalizer folds a missing flag into false, which is right for a
     // list but would answer "not mandatory" for a release nobody has read; a stated "yes" stands.
     mandatory: rel.mandatory === true ? true : (isClassified(item) ? false : null),
@@ -200,12 +213,28 @@ const brief = (item) => ({
 });
 
 /**
- * @param {{repo: string, component?: string, includePrerelease?: boolean}} options
+ * @param {{repo: string, component?: string, includePrerelease?: boolean, now?: number}} options
  * @returns {Promise<object>} the answer; throws ClientFeedNotFoundError when the repo has no releases
  */
-export async function getLatestRelease({ repo, component, includePrerelease = false } = {}) {
+export async function getLatestRelease({ repo, component, includePrerelease = false, now = Date.now() } = {}) {
   const repoId = parseRepo(repo);
   if (!repoId) throw new TypeError('repo must be owner/repo, github:owner/repo, gitlab:owner/repo or a GitHub/GitLab URL');
+  try {
+    return await latestOf(repoId, { component, includePrerelease, now });
+  } catch (err) {
+    // A bare "owner/repo" means GitHub, but the feed tracks GitLab projects too (tezos/tezos):
+    // look there before answering "no releases". A stated host is never second-guessed.
+    if (!(err instanceof ClientFeedNotFoundError) || !/^[^/:]+\/[^/:]+$/.test(String(repo).trim())) throw err;
+    try {
+      return await latestOf(repoId.replace(/^github:/, 'gitlab:'), { component, includePrerelease, now });
+    } catch (gitlabErr) {
+      if (gitlabErr instanceof ClientFeedNotFoundError) throw err;
+      throw gitlabErr;
+    }
+  }
+}
+
+async function latestOf(repoId, { component, includePrerelease, now }) {
   const wanted = component ? String(component).toLowerCase() : null;
   const pick = (items) => items.filter((it) => !wanted || (it.release.component ?? '').toLowerCase() === wanted);
   let result = await getClientReleases({ repo: repoId, limit: PAGE });
@@ -241,7 +270,7 @@ export async function getLatestRelease({ repo, component, includePrerelease = fa
     ...(result.stale ? { stale: true } : {}),
     repo: repoId,
     component: wanted ? (latest?.release.component ?? all[0].release.component) : (latest?.release.component ?? null),
-    latest: latest ? describeRelease(latest) : null,
+    latest: latest ? describeRelease(latest, now) : null,
     // Only prereleases on record: say so rather than answer "none".
     ...(latest ? {} : { note: 'Only prereleases are recorded for this repository; ask for prereleases (prerelease=true on the API, includePrerelease on MCP) to see the newest one.' }),
     newerPrerelease: !includePrerelease && newestPre && newestPre !== latest ? brief(newestPre) : null,
