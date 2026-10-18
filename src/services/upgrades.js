@@ -4,6 +4,7 @@ import { getWeb3News } from '../sources/web3News.js';
 import { networkSlug, networkSlugs } from '../domain/networkSlug.js';
 import { downtimeEnd } from './providerStats.js';
 import { logger } from '../util/logger.js';
+import { MAINTENANCE_STATUSES, isPlannedGroup } from '../domain/plannedWork.js';
 
 /**
  * The correlation layer: one UpgradeEvent per scheduled upgrade/maintenance window,
@@ -40,8 +41,10 @@ const MAX_LIMIT = 200;
 const DEFAULT_LIMIT = 20;
 
 // Shared with providerStats.js: both layers must classify a group as maintenance vs
-// incident identically or the provider scorecard would disagree with the timeline.
-export const MAINTENANCE_STATUSES = new Set(['maintenance_scheduled', 'maintenance_in_progress', 'maintenance_completed']);
+// incident identically or the provider scorecard would disagree with the timeline. Which
+// groups are planned work is decided by isPlannedGroup (src/domain/plannedWork.js), not by
+// these statuses alone.
+export { MAINTENANCE_STATUSES };
 export const INCIDENT_STATUSES = new Set(['investigating', 'identified', 'monitoring', 'resolved', 'degraded', 'partial_outage', 'major_outage']);
 
 /**
@@ -52,22 +55,7 @@ export const INCIDENT_STATUSES = new Set(['investigating', 'identified', 'monito
  * @returns {Promise<{fetchedAt: string, totalMatched: number, count: number, truncated: boolean, upgrades: object[]}>}
  */
 export async function getChainUpgrades({ chainId, network, limit = DEFAULT_LIMIT } = {}) {
-  const events = await getLiveEvents();
-
-  // Forum/news context is supplementary: if either sibling feed is down, upgrades still
-  // answer — an empty context beats a failed call.
-  const [forum, news] = await Promise.all([
-    getForumNews({ limit: 50 }).catch((err) => {
-      logger.warn({ err: err.message }, 'forum context unavailable for upgrades');
-      return { news: [] };
-    }),
-    getWeb3News({ limit: 50 }).catch((err) => {
-      logger.warn({ err: err.message }, 'news context unavailable for upgrades');
-      return { news: [] };
-    })
-  ]);
-
-  const upgrades = buildUpgradeEvents(events, { forumPosts: forum.news ?? [], newsItems: news.news ?? [] });
+  const { upgrades } = await getUpgradeTimeline();
 
   let filtered = upgrades;
   if (chainId != null) filtered = filtered.filter((u) => u.chainIds.includes(Number(chainId)));
@@ -88,24 +76,55 @@ export async function getChainUpgrades({ chainId, network, limit = DEFAULT_LIMIT
 }
 
 /**
+ * Every provider window, correlated, plus the incident groups behind its fallout — the
+ * unfiltered input of both getChainUpgrades and the timeline.
+ */
+export async function getUpgradeTimeline() {
+  const events = await getLiveEvents();
+
+  // Forum/news context is supplementary: if either sibling feed is down, upgrades still
+  // answer — an empty context beats a failed call.
+  const [forum, news] = await Promise.all([
+    getForumNews({ limit: 50 }).catch((err) => {
+      logger.warn({ err: err.message }, 'forum context unavailable for upgrades');
+      return { news: [] };
+    }),
+    getWeb3News({ limit: 50 }).catch((err) => {
+      logger.warn({ err: err.message }, 'news context unavailable for upgrades');
+      return { news: [] };
+    })
+  ]);
+
+  return buildUpgradeTimeline(events, { forumPosts: forum.news ?? [], newsItems: news.news ?? [] });
+}
+
+/**
  * Pure correlation over normalized events (exported for tests).
  * @param {object[]} events full update stream from getLiveEvents()
  * @param {{forumPosts?: object[], newsItems?: object[]}} [context]
  */
 export function buildUpgradeEvents(events, { forumPosts = [], newsItems = [], now = Date.now() } = {}) {
+  return buildUpgradeTimeline(events, { forumPosts, newsItems, now }).upgrades;
+}
+
+/**
+ * buildUpgradeEvents plus the incident groups it correlated against, which the timeline needs
+ * for the fallout of forks that no provider window covers.
+ */
+export function buildUpgradeTimeline(events, { forumPosts = [], newsItems = [], now = Date.now() } = {}) {
   const groups = groupEventsByIncident(events);
 
   const upgradeGroups = [];
   const incidentGroups = [];
   for (const group of groups) {
-    if (MAINTENANCE_STATUSES.has(group.latest.status)) upgradeGroups.push(group);
+    if (isPlannedGroup(group)) upgradeGroups.push(group);
     else if (INCIDENT_STATUSES.has(group.latest.status)) incidentGroups.push(group);
   }
 
   // Soonest-first for what hasn't happened, most-recent-first for what has, and an
   // undated-but-still-open rollout sits with what is coming rather than under history — a
   // reader planning for a fork cares that it is pending even before the day is named.
-  return upgradeGroups
+  const upgrades = upgradeGroups
     .map((group) => toUpgradeEvent(group, incidentGroups, forumPosts, newsItems, now))
     .sort((a, b) => {
       const bucketA = orderBucket(a, now);
@@ -118,6 +137,7 @@ export function buildUpgradeEvents(events, { forumPosts = [], newsItems = [], no
       // Undated: the announcement is the only thing left to order by.
       return (Date.parse(b.announcedAt ?? '') || 0) - (Date.parse(a.announcedAt ?? '') || 0);
     });
+  return { upgrades, incidentGroups };
 }
 
 /**
@@ -188,7 +208,7 @@ export function groupEventsByIncident(events) {
   const rollouts = new Map();
   const out = [];
   for (const group of groups) {
-    if (!MAINTENANCE_STATUSES.has(group.latest.status)) { out.push(group); continue; }
+    if (!isPlannedGroup(group)) { out.push(group); continue; }
     const key = `${group.latest.statusPage?.id ?? 'unknown'}|${normalizeIncidentTitle(group.latest.title)}`;
     const existing = rollouts.get(key);
     if (existing) existing.push(...group.updates);
@@ -279,36 +299,7 @@ function toUpgradeEvent(group, incidentGroups, forumPosts, newsItems, now) {
   const chainIds = uniqueChainIds(updates);
   const slugs = collectSlugs(updates);
 
-  const followedBy = incidentGroups
-    .filter((inc) => {
-      const incMs = inc.first.publishedMs;
-      if (activationMs == null || incMs == null) return false;
-      const delta = incMs - activationMs;
-      if (delta <= 0 || delta > FOLLOW_WINDOW_MS) return false;
-      return sharesNetwork(chainIds, slugs, uniqueChainIds(inc.updates), collectSlugs(inc.updates));
-    })
-    .map((inc) => {
-      // Same evidence rule the provider board uses, so "how long did it last" gets one
-      // answer across surfaces: observed = a resolution was posted, ongoing = still live,
-      // unpublished = the page said it once and never said when it ended.
-      const { ms: endMs, evidence } = downtimeEnd(inc, now);
-      return {
-        title: inc.latest.title,
-        url: inc.latest.url,
-        status: inc.latest.status,
-        startedAt: inc.first.publishedAt,
-        hoursAfterActivation: Math.round((inc.first.publishedMs - activationMs) / 3600000 * 10) / 10,
-        // null unless a resolution was actually observed — never "now" standing in for it.
-        resolvedAt: evidence === 'observed' && endMs != null ? new Date(endMs).toISOString() : null,
-        ongoing: evidence === 'ongoing',
-        durationEvidence: evidence,
-        chainIds: uniqueChainIds(inc.updates),
-        // Temporal correlation on the same network — never asserted as causation. The honest
-        // label is what makes the field trustworthy.
-        suspectedCause: 'upgrade'
-      };
-    })
-    .sort((a, b) => a.hoursAfterActivation - b.hoursAfterActivation);
+  const followedBy = followingIncidents(incidentGroups, { chainIds, slugs, activationMs, now });
 
   const inContext = (item) => {
     const ms = Date.parse(item.publishedAt ?? '');
@@ -359,13 +350,51 @@ function toUpgradeEvent(group, incidentGroups, forumPosts, newsItems, now) {
   };
 }
 
+/**
+ * Incidents on the same network that started within FOLLOW_WINDOW_MS after an activation —
+ * suspected fallout, never asserted causation. Shared with the timeline, which asks the same
+ * question of a fork's activation.
+ */
+export function followingIncidents(incidentGroups, { chainIds = [], slugs = [], activationMs, now = Date.now() }) {
+  return incidentGroups
+    .filter((inc) => {
+      const incMs = inc.first.publishedMs;
+      if (activationMs == null || incMs == null) return false;
+      const delta = incMs - activationMs;
+      if (delta <= 0 || delta > FOLLOW_WINDOW_MS) return false;
+      return sharesNetwork(chainIds, slugs, uniqueChainIds(inc.updates), collectSlugs(inc.updates));
+    })
+    .map((inc) => {
+      // Same evidence rule the provider board uses, so "how long did it last" gets one
+      // answer across surfaces: observed = a resolution was posted, ongoing = still live,
+      // unpublished = the page said it once and never said when it ended.
+      const { ms: endMs, evidence } = downtimeEnd(inc, now);
+      return {
+        title: inc.latest.title,
+        url: inc.latest.url,
+        status: inc.latest.status,
+        startedAt: inc.first.publishedAt,
+        hoursAfterActivation: Math.round((inc.first.publishedMs - activationMs) / 3600000 * 10) / 10,
+        // null unless a resolution was actually observed — never "now" standing in for it.
+        resolvedAt: evidence === 'observed' && endMs != null ? new Date(endMs).toISOString() : null,
+        ongoing: evidence === 'ongoing',
+        durationEvidence: evidence,
+        chainIds: uniqueChainIds(inc.updates),
+        // Temporal correlation on the same network — never asserted as causation. The honest
+        // label is what makes the field trustworthy.
+        suspectedCause: 'upgrade'
+      };
+    })
+    .sort((a, b) => a.hoursAfterActivation - b.hoursAfterActivation);
+}
+
 function uniqueChainIds(updates) {
   const ids = new Set();
   for (const u of updates) for (const c of u.chains ?? []) if (c?.chainId != null) ids.add(c.chainId);
   return [...ids];
 }
 
-function collectSlugs(updates) {
+export function collectSlugs(updates) {
   const slugs = new Set();
   for (const u of updates) {
     for (const s of u.networkSlugs ?? []) slugs.add(s);
@@ -377,7 +406,7 @@ function collectSlugs(updates) {
   return [...slugs];
 }
 
-function sharesNetwork(chainIdsA, slugsA, chainIdsB, slugsB) {
+export function sharesNetwork(chainIdsA, slugsA, chainIdsB, slugsB) {
   if (chainIdsA.length && chainIdsB.length && chainIdsB.some((id) => chainIdsA.includes(id))) return true;
   return slugsA.length > 0 && slugsB.some((s) => slugsA.includes(s));
 }

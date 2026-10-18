@@ -1796,7 +1796,23 @@ a.tlx-row-title:hover { color: var(--accent-hover); }
 .tl-fallout a, .tl-context a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tl-fallout .muted, .tl-context .muted { flex-shrink: 0; font-size: var(--fs-100); }
 .tl-fallout-arrow { color: var(--critical-text); flex-shrink: 0; }
+/* Drawer: a chain's hardfork history, one line each. */
+.fork-list { display: flex; flex-direction: column; gap: 5px; margin-bottom: 6px; }
+.fork-row { display: flex; align-items: baseline; gap: 8px; font-size: var(--fs-200); min-width: 0; flex-wrap: wrap; }
+.fork-row a { font-weight: 600; }
+.fork-when { flex-shrink: 0; width: 96px; font-size: var(--fs-100); color: var(--ink-3); }
+.fork-row.pending .fork-when { color: var(--good-text); font-weight: 600; }
+.fork-meta { font-size: var(--fs-100); }
 .tl-context-kind { flex-shrink: 0; font-size: var(--fs-100); font-weight: 500; color: var(--ink-3); }
+/* Group labels inside a row's detail: Client releases / Provider rollouts / News. */
+.tl-group-head { margin-top: 9px; font-size: var(--fs-100); font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--ink-3); }
+.tl-group-head:first-child { margin-top: 2px; }
+/* The event's kind. Neutral on purpose: colour in this view already means urgency or evidence. */
+.tlx-type {
+    flex-shrink: 0; font-size: var(--fs-100); font-weight: 500; padding: 0 6px; border-radius: var(--r-xs);
+    border: 1px solid var(--rule); color: var(--ink-3); white-space: nowrap;
+}
+.tlx-type-hardfork { border-color: var(--rule-strong); color: var(--ink-1); font-weight: 600; }
 
 /* At the shared phone breakpoint the row collapses to two lines: time + title, then meta.
    The chart keeps its full width — it is the part that benefits most from it. */

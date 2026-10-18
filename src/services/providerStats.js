@@ -1,7 +1,8 @@
 import { getLiveEvents } from '../sources/liveIncidents.js';
 import { getStatusNewsPages } from '../sources/statusNewsPages.js';
 import { getRpcMonitoringResults } from '../store/queries.js';
-import { groupEventsByIncident, MAINTENANCE_STATUSES, INCIDENT_STATUSES } from './upgrades.js';
+import { groupEventsByIncident, INCIDENT_STATUSES } from './upgrades.js';
+import { isPlannedGroup } from '../domain/plannedWork.js';
 
 /**
  * Per-RPC-provider quality indicators. Two metrics that must never be
@@ -128,9 +129,9 @@ export function buildProviderStats(events, { statusPages = [], rpcResults = [], 
     const inWindow = (group) => group.first.publishedMs != null && group.first.publishedMs >= windowStart;
     // ALL incident-class groups feed availability (each availability window
     // clips intervals itself); the 30d counters keep the retention-honest window.
-    const allIncidentGroups = groups.filter((g) => INCIDENT_STATUSES.has(g.latest.status) && g.first.publishedMs != null);
+    const allIncidentGroups = groups.filter((g) => !isPlannedGroup(g) && INCIDENT_STATUSES.has(g.latest.status) && g.first.publishedMs != null);
     const incidentGroups = allIncidentGroups.filter(inWindow);
-    const maintenanceGroups = groups.filter((g) => MAINTENANCE_STATUSES.has(g.latest.status) && inWindow(g));
+    const maintenanceGroups = groups.filter((g) => isPlannedGroup(g) && inWindow(g));
 
     // Ongoing is a NOW question, not a window question: an incident opened
     // before the window that is still burning must not disappear.
@@ -148,8 +149,8 @@ export function buildProviderStats(events, { statusPages = [], rpcResults = [], 
     // it. Anything not clearly labelled maintenance counts as an incident: planned work is
     // reliably labelled, so the unlabelled case is more likely an incident, and surfacing
     // it in red is the safer failure.
-    const ongoingMaintenanceGroups = ongoing.filter((g) => MAINTENANCE_STATUSES.has(g.latest.status));
-    const ongoingIncidents = ongoing.filter((g) => !MAINTENANCE_STATUSES.has(g.latest.status));
+    const ongoingMaintenanceGroups = ongoing.filter((g) => isPlannedGroup(g));
+    const ongoingIncidents = ongoing.filter((g) => !isPlannedGroup(g));
     const ongoingNow = ongoingIncidents.length;
     const ongoingMaintenance = ongoingMaintenanceGroups.length;
     // When the longest-running open INCIDENT started. With resolution times

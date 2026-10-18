@@ -66,3 +66,75 @@ describe('client release feed', () => {
     expect(single.chains).toEqual([{ chainId: 1 }]);
   });
 });
+
+describe('client release history', () => {
+  // `n` releases, one an hour back from `from`, ids prefixed so pages can overlap on purpose.
+  const page = (n, from, prefix) => Array.from({ length: n }, (_, i) => release({
+    id: `${prefix}-${i}`, url: `https://r/${prefix}-${i}`,
+    publishedAt: new Date(Date.parse(from) - i * 3600_000).toISOString()
+  }));
+  const newest = page(500, '2026-10-01T00:00:00Z', 'new');
+  const oldestOfNewest = newest[499].publishedAt;
+  // `until` is inclusive: the history page repeats the boundary release.
+  const older = [newest[499], ...page(120, '2019-03-07T13:45:17Z', 'old')];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    _resetForkFeedsForTests();
+    cfg.clientFeedUrl = 'https://clients.test';
+  });
+
+  function serve() {
+    proxyFetch.mockImplementation(async (url) => {
+      const u = new URL(url);
+      if (u.host !== 'clients.test') return ok(u.host === 'status.test' ? 'events' : 'news', []);
+      return ok('items', u.searchParams.get('until') ? older : newest);
+    });
+  }
+
+  it('pages back past the newest 500 with ?until=, one copy of each release', async () => {
+    serve();
+    const out = await getForkMentions();
+    const historyCall = proxyFetch.mock.calls.map(([u]) => u).find((u) => u.includes('until='));
+    expect(new URL(historyCall).searchParams.get('until')).toBe(oldestOfNewest);
+    expect(out.feeds.release).toMatchObject({ ok: true, count: 620, oldest: older[older.length - 1].publishedAt });
+    expect(new Set(out.mentions.map((m) => m.url)).size).toBe(620);
+  });
+
+  it('reads the history once an hour, not on every refresh', async () => {
+    serve();
+    vi.useFakeTimers({ now: Date.parse('2026-10-17T00:00:00Z'), toFake: ['Date'] });
+    try {
+      await getForkMentions();
+      vi.setSystemTime(Date.parse('2026-10-17T00:02:00Z'));
+      await getForkMentions();
+      const historyCalls = proxyFetch.mock.calls.filter(([u]) => u.includes('until='));
+      expect(historyCalls).toHaveLength(1);
+      expect(proxyFetch.mock.calls.filter(([u]) => new URL(u).host === 'clients.test' && !u.includes('until='))).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the newest page when the history read fails', async () => {
+    proxyFetch.mockImplementation(async (url) => {
+      const u = new URL(url);
+      if (u.host !== 'clients.test') return ok(u.host === 'status.test' ? 'events' : 'news', []);
+      if (u.searchParams.get('until')) return { ok: false, status: 502, json: async () => ({}) };
+      return ok('items', newest);
+    });
+    const out = await getForkMentions();
+    expect(out.feeds.release).toMatchObject({ ok: true, count: 500 });
+  });
+
+  it('does not page a feed that ignored ?fork=true', async () => {
+    proxyFetch.mockImplementation(async (url) => {
+      const u = new URL(url);
+      if (u.host !== 'clients.test') return ok(u.host === 'status.test' ? 'events' : 'news', []);
+      if (u.searchParams.get('fork')) return { ok: false, status: 400, json: async () => ({}) };
+      return ok('items', newest);
+    });
+    await getForkMentions();
+    expect(proxyFetch.mock.calls.some(([u]) => u.includes('until='))).toBe(false);
+  });
+});

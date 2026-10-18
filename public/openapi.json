@@ -3,7 +3,7 @@
   "info": {
     "title": "Chains API",
     "description": "Aggregated blockchain chain data from five external sources (TheGraph, Chainlist, Chain ID Network, SLIP-0044, L2BEAT): chain metadata, relations, RPC endpoints and health, L2 scaling, and operator status.",
-    "version": "1.7.63"
+    "version": "1.7.65"
   },
   "components": {
     "schemas": {}
@@ -1880,6 +1880,86 @@
               "minimum": 1,
               "maximum": 200,
               "default": 50
+            },
+            "in": "query",
+            "name": "limit",
+            "required": false
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/timeline": {
+      "get": {
+        "tags": [
+          "Meta"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer"
+            },
+            "in": "query",
+            "name": "chainId",
+            "required": false,
+            "description": "Only events touching this chain ID — with type=hardfork, its hardfork history"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 60,
+              "pattern": "^(hardfork|software_update|maintenance)(,(hardfork|software_update|maintenance))*$"
+            },
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "description": "Comma list of hardfork (a consensus fork / network upgrade), software_update (a client version rolled out with no fork, never an incident), maintenance (a provider window naming no software)"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "upcoming",
+                "past",
+                "cancelled",
+                "unscheduled"
+              ]
+            },
+            "in": "query",
+            "name": "phase",
+            "required": false,
+            "description": "upcoming, past, cancelled, or unscheduled (no date known)"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 40
+            },
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "description": "Only events activating at/after this time (drops undated events)"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "maxLength": 40
+            },
+            "in": "query",
+            "name": "until",
+            "required": false,
+            "description": "Only events activating at/before this time; a bare date (YYYY-MM-DD) includes that whole UTC day (drops undated events)"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 100
             },
             "in": "query",
             "name": "limit",
