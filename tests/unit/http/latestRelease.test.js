@@ -74,12 +74,14 @@ describe('parseRepo', () => {
     ['gitlab:o/r', 'gitlab:o/r'],
     ['https://github.com/ethereum/go-ethereum', 'github:ethereum/go-ethereum'],
     ['github.com/sigp/lighthouse/releases/tag/v8.0.0', 'github:sigp/lighthouse'],
-    ['https://gitlab.com/o/r.git', 'gitlab:o/r']
+    ['https://gitlab.com/o/r.git', 'gitlab:o/r'],
+    ['https://gitlab.com/o/r/-/releases', 'gitlab:o/r'],
+    ['o/r.git', 'github:o/r']
   ])('%s -> %s', (input, out) => {
     expect(parseRepo(input)).toBe(out);
   });
 
-  it.each(['', 'geth', 'a/b/c', '../x', 'https://example.com/o/r', '../..', null])('rejects %s', (input) => {
+  it.each(['', 'geth', 'a/b/c', '../x', 'https://example.com/o/r', '../..', null, 'https://gitlab.com/group/sub/repo', 'github.com/ethereum', 'example.com/o'])('rejects %s', (input) => {
     expect(parseRepo(input)).toBeNull();
   });
 });
@@ -150,6 +152,51 @@ describe('GET /client-releases/latest', () => {
     expect(fork).toMatchObject({ name: 'Glamsterdam', layerName: 'Gloas', network: 'Ethereum Hoodi', chainId: 560048 });
   });
 
+  it('keeps another network\'s Sepolia and a bare "Mainnet" on the right chain', async () => {
+    const chains = [{ chainId: 1, name: 'Ethereum Mainnet' }, { chainId: 11155111, name: 'Sepolia' }, { chainId: 560048, name: 'Ethereum Hoodi' }];
+    const forks = [
+      { name: 'Jovian', network: 'Base Sepolia', state: 'scheduled' },
+      { name: 'Glamsterdam', network: 'Mainnet', state: 'Scheduled' },
+      { name: 'Glamsterdam', network: 'Ethereum Mainnet', activationAt: '2027-01-01T00:00:00.000Z', state: 'scheduled' }
+    ];
+    proxyFetch.mockResolvedValue(page([rel('v1.18.0', { chains }, {}, { class: 'routine_release', forks })]));
+    const { hardfork } = (await get('/client-releases/latest?repo=ethereum/go-ethereum')).json().latest;
+    expect(hardfork.included).toBe(true);
+    expect(hardfork.forks.map((f) => [f.name, f.network, f.chainId ?? null, f.state, f.activationAt])).toEqual([
+      ['Jovian', 'Base Sepolia', null, 'scheduled', null],
+      ['Glamsterdam', 'Ethereum Mainnet', 1, 'scheduled', '2027-01-01T00:00:00.000Z']
+    ]);
+  });
+
+  it('reads an enrichment without a class as unknown, and keeps a stated mandatory', async () => {
+    proxyFetch.mockResolvedValue(page([rel('v1.17.9', {}, { mandatory: true }, { class: null, review: { fork: 'possible' } })]));
+    const latest = (await get('/client-releases/latest?repo=ethereum/go-ethereum')).json().latest;
+    expect(latest.hardfork.included).toBeNull();
+    expect(latest.mandatory).toBe(true);
+  });
+
+  it('reads past the first page for a component or a stable release behind it', async () => {
+    const rcs = Array.from({ length: 100 }, (_, i) => rel(`v2.0.0-rc${100 - i}`, {}, { prerelease: true }));
+    proxyFetch
+      .mockResolvedValueOnce(json({ totalMatched: 101, count: 100, truncated: true, items: rcs }))
+      .mockResolvedValueOnce(page([...rcs, rel('v1.9.0', { publishedAt: '2026-01-01T00:00:00Z' })]));
+    const out = (await get('/client-releases/latest?repo=ethereum/go-ethereum')).json();
+    expect(proxyFetch.mock.calls[1][0]).toContain('limit=500');
+    expect(out.latest.version).toBe('1.9.0');
+    expect(out.newerPrerelease.version).toBe('2.0.0-rc100');
+  });
+
+  it('names a newer prerelease of the same component only', async () => {
+    const opRel = (component, tag, pre, publishedAt) => rel(`${component}/${tag}`, { publishedAt }, { component, version: tag.slice(1), prerelease: pre });
+    proxyFetch.mockResolvedValue(page([
+      opRel('op-batcher', 'v1.18.0-rc.1', true, '2026-10-10T00:00:00Z'),
+      opRel('op-node', 'v1.16.0', false, '2026-10-08T00:00:00Z')
+    ]));
+    const out = (await get('/client-releases/latest?repo=ethereum-optimism/optimism')).json();
+    expect(out.latest.tag).toBe('op-node/v1.16.0');
+    expect(out.newerPrerelease).toBeNull();
+  });
+
   it('answers null, not false, for what the feed cannot say', async () => {
     proxyFetch.mockResolvedValue(page([rel('v1.17.9', {}, {}, null)]));
     const latest = (await get('/client-releases/latest?repo=ethereum/go-ethereum')).json().latest;
@@ -178,7 +225,7 @@ describe('GET /client-releases/latest', () => {
     proxyFetch.mockResolvedValue(page([rel('v0.1.0-rc1', {}, { prerelease: true })]));
     const stable = (await get('/client-releases/latest?repo=o/r')).json();
     expect(stable.latest).toBeNull();
-    expect(stable.note).toMatch(/Only prereleases/);
+    expect(stable.note).toMatch(/Only prereleases.*prerelease=true/);
     const pre = (await get('/client-releases/latest?repo=o/r&prerelease=true')).json();
     expect(pre.latest.tag).toBe('v0.1.0-rc1');
     expect(pre.newerPrerelease).toBeNull();
@@ -219,6 +266,25 @@ describe('get_latest_release (MCP)', () => {
     _resetClientFeedCacheForTests();
     proxyFetch.mockRejectedValue(new Error('down'));
     expect(parse(await handleToolCall('get_latest_release', { repo: 'o/r' })).error).toBe('Client release feed unavailable');
+  });
+
+  it('drops feed evidence that contradicts or overruns the answer', async () => {
+    const odd = rel('v1.17.9', {}, {
+      security: false,
+      securityEvidence: securityRelease.release.securityEvidence,
+      flagsChanged: true,
+      flagChanges: [{ flag: 'x'.repeat(500), change: 'added', quote: 'q' }, { flag: null, change: 'removed', quote: 'flags removed' }],
+      flagChangesCarriedOver: -3
+    });
+    const bad = rel('v1.17.8', {}, { ...securityRelease.release, securityEvidence: { ...securityRelease.release.securityEvidence, advisories: [{ id: 'GHSA-x', url: 'javascript:alert(1)' }] } });
+    proxyFetch.mockResolvedValue(page([odd]));
+    const a = parse(await handleToolCall('get_latest_release', { repo: 'ethereum/go-ethereum' })).latest;
+    expect(a.security).toMatchObject({ update: false, source: null });
+    expect(a.flags).toEqual({ changed: true, changes: [{ flag: null, change: 'removed', quote: 'flags removed' }], carriedOver: null });
+    _resetClientFeedCacheForTests();
+    proxyFetch.mockResolvedValue(page([bad]));
+    const b = parse(await handleToolCall('get_latest_release', { repo: 'ethereum/go-ethereum' })).latest;
+    expect(b.security.advisories[0]).toMatchObject({ id: 'GHSA-x', url: null });
   });
 
   it('get_client_releases carries security and flagsChanged per release', async () => {

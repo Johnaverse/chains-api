@@ -1,4 +1,4 @@
-import { getClientReleases, ClientFeedNotFoundError } from '../sources/clientFeed.js';
+import { getClientReleases, ClientFeedNotFoundError, MAX_RELEASE_LIMIT } from '../sources/clientFeed.js';
 import { forkIdentity } from '../domain/forks.js';
 import { networkSlug } from '../domain/networkSlug.js';
 import { forkAliases } from './timeline.js';
@@ -20,17 +20,39 @@ const PAGE = 100;
 const MAX_COMPONENTS = 20;
 
 const FORK_AHEAD = new Set(['scheduled', 'rescheduled']);
+// Forks listed per release, at most; the classifier rarely names more than three.
+const MAX_FORKS = 10;
 
-/** "https://github.com/o/r", "github.com/o/r/releases", "github:o/r", "o/r" -> "github:o/r" (lowercase). */
+/**
+ * "https://github.com/o/r", "github.com/o/r/releases", "github:o/r", "o/r" -> "github:o/r" (lowercase).
+ * A GitLab URL's project path ends at "/-/"; a subgroup path ("group/sub/repo") is not an
+ * owner/repo the feed tracks and is refused rather than read as "group/sub".
+ */
 export function parseRepo(input) {
   const raw = typeof input === 'string' ? input.trim() : '';
   if (!raw) return null;
-  const url = /^(?:https?:\/\/)?(?:www\.)?(github|gitlab)\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?(?:[/?#].*)?$/i.exec(raw);
-  const prefixed = /^(?:(github|gitlab):)?([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/i.exec(raw);
-  const m = url ?? prefixed;
-  if (!m) return null;
-  const [, host = 'github', owner, repo] = m;
-  if (/^\.+$/.test(owner) || /^\.+$/.test(repo)) return null;
+  const url = /^(?:https?:\/\/)?(?:www\.)?(github|gitlab)\.com\/([^?#]*)/i.exec(raw);
+  let host;
+  let segments;
+  if (url) {
+    host = url[1];
+    const path = url[2].split('/-/')[0].replace(/\/+$/, '');
+    segments = path.split('/');
+    // GitHub: owner/repo, then anything (releases/tag/v1). GitLab: the project path is all of it.
+    if (host.toLowerCase() === 'github') segments = segments.slice(0, 2);
+    else if (segments.length > 2) return null;
+  } else {
+    const prefixed = /^(?:(github|gitlab):)?([^/]+)\/([^/]+)$/i.exec(raw);
+    if (!prefixed) return null;
+    host = prefixed[1] ?? 'github';
+    segments = [prefixed[2], prefixed[3]];
+  }
+  if (segments.length !== 2) return null;
+  const [owner, repo] = [segments[0], segments[1].replace(/\.git$/i, '')];
+  if (![owner, repo].every((x) => /^[A-Za-z0-9_.-]+$/.test(x) && !/^\.+$/.test(x))) return null;
+  // "github.com/ethereum" is a host and an owner, not an owner and a repo; a GitHub owner has no dots.
+  if (/^(?:www\.)?(?:github|gitlab)\.com$/i.test(owner)) return null;
+  if (host.toLowerCase() === 'github' && !/^[A-Za-z0-9-]+$/.test(owner)) return null;
   return `${host.toLowerCase()}:${owner}/${repo}`.toLowerCase();
 }
 
@@ -42,10 +64,22 @@ const titleCase = (s) => s.replace(/\b[a-z]/g, (c) => c.toUpperCase());
  * Sepolia Testnet"). Client notes name Ethereum's testnets bare, so between "Ethereum Hoodi" and
  * "Status Network Hoodi" the Ethereum one is meant.
  */
+// A slug for a test network: the registry tags these, but a release's chain list carries names only.
+const TEST_SLUG = /(?:^|-)(?:testnet|devnet|sepolia|holesky|hoodi|goerli|amoy|chapel|fuji|calibration)(?:-|$)/;
+
 function pickChain(slug, chains) {
+  // "Mainnet" names the one main network among the release's chains ("Ethereum Mainnet" slugs
+  // to "ethereum", so no name rule reaches it).
+  if (slug === 'mainnet') {
+    const mains = chains.filter((c) => { const s = networkSlug(c?.name); return s && !TEST_SLUG.test(s); });
+    return mains.length === 1 ? mains[0] : null;
+  }
+  // The chain's name may put the ecosystem in front ("Ethereum Hoodi" for "Hoodi") or "Testnet"
+  // behind; the network's name may say "Ethereum" where the registry does not ("Ethereum
+  // Sepolia" for "Sepolia"). Any other prefix is another network: "Base Sepolia" is not Sepolia.
   const matches = chains.filter((c) => {
     const s = networkSlug(c?.name);
-    return s && (s === slug || s.endsWith(`-${slug}`) || slug.endsWith(`-${s}`) || s === `${slug}-testnet`);
+    return s && (s === slug || s.endsWith(`-${slug}`) || slug === `ethereum-${s}` || s === `${slug}-testnet`);
   });
   if (matches.length <= 1) return matches[0] ?? null;
   const exact = matches.filter((c) => networkSlug(c.name) === slug || networkSlug(c.name) === `ethereum-${slug}`);
@@ -83,7 +117,7 @@ function forksOf(forks, chains) {
       ...(combined ? { layerName: name } : {}),
       network: chain?.name ?? f.network ?? null,
       ...(chain ? { chainId: chain.chainId } : {}),
-      state: f.state ?? null,
+      state: typeof f.state === 'string' ? f.state.toLowerCase() : null,
       activationAt: f.activationAt ?? null,
       activationBlock: f.activationBlock ?? null,
       ...(f.activationEpoch != null ? { activationEpoch: f.activationEpoch } : {}),
@@ -102,16 +136,19 @@ function forksOf(forks, chains) {
   return out;
 }
 
+/** Whether the classifier has read the release: an enrichment with a class. */
+const isClassified = (item) => typeof item.enrichment?.class === 'string';
+
 /** Whether the release ships a fork: true, false, or null when it is not classified yet. */
 function hardforkOf(item) {
   const enr = item.enrichment;
   const forks = enr ? (enr.forks?.length ? enr.forks : enr.fork ? [enr.fork] : []) : [];
-  const included = enr
-    ? enr.class === 'planned_hard_fork' || forks.some((f) => FORK_AHEAD.has(f.state))
-    : null;
+  const ahead = forks.some((f) => FORK_AHEAD.has(String(f.state ?? '').toLowerCase()));
+  // A scheduled fork answers "yes" whatever else is known; "no" needs a classification.
+  const included = enr?.class === 'planned_hard_fork' || ahead ? true : (isClassified(item) ? false : null);
   return {
     included,
-    forks: forksOf(forks, item.chains),
+    forks: forksOf(forks, item.chains).slice(0, MAX_FORKS),
     // The feed's recall net: wording the model did not confirm. "Possibly", never "no".
     ...(enr?.review ? { review: enr.review } : {})
   };
@@ -132,8 +169,8 @@ export function describeRelease(item) {
     client: item.source.name,
     hardfork: hardforkOf(item),
     // Unclassified -> unknown. The normalizer folds a missing flag into false, which is right for a
-    // list but would answer "not mandatory" for a release nobody has read.
-    mandatory: enr ? rel.mandatory === true : null,
+    // list but would answer "not mandatory" for a release nobody has read; a stated "yes" stands.
+    mandatory: rel.mandatory === true ? true : (isClassified(item) ? false : null),
     security: {
       update: rel.security,
       ...(rel.securityEvidence ?? { source: null, scope: null, ids: [], advisories: [], quote: null })
@@ -144,7 +181,8 @@ export function describeRelease(item) {
       carriedOver: rel.flagChangesCarriedOver
     },
     class: enr?.class ?? null,
-    summary: enr?.summary ?? null,
+    // The model's summary is a few sentences; bounded so one odd record cannot fill an MCP result.
+    summary: typeof enr?.summary === 'string' ? enr.summary.slice(0, 600) : null,
     chains: item.chains,
     chainsFrom: item.chainsFrom
   };
@@ -166,9 +204,16 @@ const brief = (item) => ({
 export async function getLatestRelease({ repo, component, includePrerelease = false } = {}) {
   const repoId = parseRepo(repo);
   if (!repoId) throw new TypeError('repo must be owner/repo, github:owner/repo, gitlab:owner/repo or a GitHub/GitLab URL');
-  const result = await getClientReleases({ repo: repoId, limit: PAGE });
   const wanted = component ? String(component).toLowerCase() : null;
-  const all = result.items.filter((it) => !wanted || (it.release.component ?? '').toLowerCase() === wanted);
+  const pick = (items) => items.filter((it) => !wanted || (it.release.component ?? '').toLowerCase() === wanted);
+  let result = await getClientReleases({ repo: repoId, limit: PAGE });
+  let all = pick(result.items);
+  // A component that last released 100 releases ago, or a stable release behind 100 candidates,
+  // is past the first page: read the deepest one before answering "none".
+  if (result.truncated && (!all.length || (!includePrerelease && !all.some((it) => !it.release.prerelease)))) {
+    result = await getClientReleases({ repo: repoId, limit: MAX_RELEASE_LIMIT });
+    all = pick(result.items);
+  }
   if (!all.length) {
     throw new ClientFeedNotFoundError(wanted
       ? `No releases of component "${component}" recorded for ${repoId}`
@@ -177,7 +222,9 @@ export async function getLatestRelease({ repo, component, includePrerelease = fa
   // Newest first from the feed; an undated release sorts last there and stays last here.
   const stable = all.find((it) => !it.release.prerelease) ?? null;
   const latest = includePrerelease ? all[0] : stable;
-  const newestPre = all[0].release.prerelease ? all[0] : null;
+  // A newer prerelease of the SAME component: an op-batcher RC is not newer than op-node.
+  const sameComponent = latest ? all.filter((it) => it.release.component === latest.release.component) : all;
+  const newestPre = sameComponent[0]?.release.prerelease ? sameComponent[0] : null;
   // A monorepo (op-node/v…, op-geth/v… in one repo) has no single "latest version": the newest
   // release overall may be any component. List each one's newest so the caller can pick.
   const seen = new Map();
@@ -194,7 +241,7 @@ export async function getLatestRelease({ repo, component, includePrerelease = fa
     component: wanted ? (latest?.release.component ?? all[0].release.component) : (latest?.release.component ?? null),
     latest: latest ? describeRelease(latest) : null,
     // Only prereleases on record: say so rather than answer "none".
-    ...(latest ? {} : { note: 'Only prereleases are recorded for this repository; pass includePrerelease=true to see the newest one.' }),
+    ...(latest ? {} : { note: 'Only prereleases are recorded for this repository; ask for prereleases (prerelease=true on the API, includePrerelease on MCP) to see the newest one.' }),
     newerPrerelease: !includePrerelease && newestPre && newestPre !== latest ? brief(newestPre) : null,
     ...(components ? { components } : {})
   };
