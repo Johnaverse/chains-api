@@ -3,7 +3,7 @@
   "info": {
     "title": "Chains API",
     "description": "Aggregated blockchain chain data from five external sources (TheGraph, Chainlist, Chain ID Network, SLIP-0044, L2BEAT): chain metadata, relations, RPC endpoints and health, L2 scaling, and operator status.",
-    "version": "1.7.65"
+    "version": "1.7.66"
   },
   "components": {
     "schemas": {}
@@ -724,6 +724,12 @@
                             "string"
                           ]
                         },
+                        "forumsStatus": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
                         "channels": {
                           "type": "array",
                           "items": {
@@ -929,6 +935,18 @@
                           }
                         },
                         "channelsCheckedAt": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "channelsIdentityStatus": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "channelsStatus": {
                           "type": [
                             "null",
                             "string"

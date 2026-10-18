@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { buildApp } from '../../../index.js';
+import { aliasesOf } from '../../../src/http/routes/repositories.js';
 
 // Static research data only, so the app is built without loading chain data.
 let app;
@@ -20,6 +21,15 @@ describe('GET /repositories', () => {
     const eth = body.networks.find(n => n.chainId === 1);
     expect(eth.repositories.some(r => r.repo === 'ethereum/go-ethereum')).toBe(true);
     expect(eth.hardware).toHaveProperty('profiles');
+    // Without registry data loaded, every network still carries an (empty) alias list.
+    expect(body.networks.every(n => Array.isArray(n.aliases))).toBe(true);
+  });
+
+  it('gives each network the other names the registry knows it by, for the feed\'s fork matching', () => {
+    expect(aliasesOf({ 'theGraph-id': 'chapel', aliases: ['bnb-chapel', 'BNB-Testnet', 'bsc-testnet', 'evm-97', 'chapel', ' '] }))
+      .toEqual(['chapel', 'bnb-chapel', 'bnb-testnet', 'bsc-testnet']);
+    expect(aliasesOf({ name: 'No aliases' })).toEqual([]);
+    expect(aliasesOf(null)).toEqual([]);
   });
 
   it('serves the curated registry corrections for the feed to apply', async () => {
