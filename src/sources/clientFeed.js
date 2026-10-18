@@ -143,6 +143,43 @@ function normalizeChains(list) {
 }
 
 const CHAINS_FROM = new Set(['fork', 'release', 'repository']);
+const bool = (v) => (typeof v === 'boolean' ? v : null);
+const FLAG_CHANGE_KINDS = new Set(['added', 'removed', 'deprecated', 'renamed', 'default_changed', 'changed']);
+const SECURITY_SOURCES = new Set(['advisory', 'notes']);
+const SECURITY_SCOPES = new Set(['client', 'dependency']);
+const MAX_FLAG_CHANGES = 20;
+const clipQuote = (v) => (str(v) ? v.slice(0, 200) : null);
+// Identifiers and links from the feed are bounded and, for links, http(s) only: they are relayed
+// to API and MCP consumers as-is.
+const shortStr = (v, max = 100) => (str(v) && v.length <= max ? v : null);
+const httpUrl = (v) => (str(v) && v.length <= 500 && /^https?:\/\//i.test(v) ? v : null);
+
+/** Why the feed calls a release a security release (chains-client-feed releaseSignals.js), or null. */
+export function normalizeSecurityEvidence(e) {
+  if (!e || typeof e !== 'object' || !SECURITY_SOURCES.has(e.source)) return null;
+  return {
+    source: e.source,
+    scope: SECURITY_SCOPES.has(e.scope) ? e.scope : null,
+    ids: strList(e.ids).filter((id) => id.length <= 100).slice(0, 20),
+    advisories: (Array.isArray(e.advisories) ? e.advisories : []).slice(0, 10).map((a) => ({
+      id: shortStr(a?.id),
+      cve: shortStr(a?.cve),
+      severity: shortStr(a?.severity, 20),
+      url: httpUrl(a?.url),
+      summary: clipQuote(a?.summary)
+    })),
+    quote: clipQuote(e.quote)
+  };
+}
+
+/** Flag / config-key changes the notes state, each with its quoted line. */
+export function normalizeFlagChanges(list) {
+  return (Array.isArray(list) ? list : [])
+    // A named flag must be a short token; an unnamed change ("flags have been removed") is null.
+    .filter((c) => FLAG_CHANGE_KINDS.has(c?.change) && (c.flag == null || shortStr(c.flag, 120)))
+    .slice(0, MAX_FLAG_CHANGES)
+    .map((c) => ({ flag: shortStr(c.flag, 120), change: c.change, quote: clipQuote(c.quote) }));
+}
 
 export function normalizeRelease(item) {
   const release = item?.release ?? {};
@@ -169,7 +206,15 @@ export function normalizeRelease(item) {
       component: str(release.component),
       origin: str(release.origin),
       prerelease: release.prerelease === true,
-      mandatory: release.mandatory === true || enr?.mandatory === true
+      mandatory: release.mandatory === true || enr?.mandatory === true,
+      // Read by the feed from the full notes. null = no notes, or a feed that predates the
+      // fields: unknown, never "no".
+      security: bool(release.security),
+      // Evidence only backs a "yes": with security unknown or false it would contradict it.
+      securityEvidence: release.security === true ? normalizeSecurityEvidence(release.securityEvidence) : null,
+      flagsChanged: bool(release.flagsChanged),
+      flagChanges: normalizeFlagChanges(release.flagChanges),
+      flagChangesCarriedOver: Number.isSafeInteger(release.flagChangesCarriedOver) && release.flagChangesCarriedOver >= 0 ? release.flagChangesCarriedOver : null
     },
     enrichment: enr
       ? {

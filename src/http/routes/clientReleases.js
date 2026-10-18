@@ -9,6 +9,7 @@ import {
   ClientFeedBadRequestError,
   MAX_RELEASE_LIMIT
 } from '../../sources/clientFeed.js';
+import { getLatestRelease, parseRepo } from '../../services/latestRelease.js';
 import { sendError } from '../util/sendError.js';
 
 /**
@@ -75,6 +76,41 @@ export async function clientReleasesRoutes(fastify) {
       }
     }
   }, (request, reply) => proxy(reply, () => getClientReleases(request.query)));
+
+  fastify.get('/client-releases/latest', {
+    schema: {
+      description: 'The latest release of one client repository: version, release link, whether it ships a hard fork, '
+        + 'whether the upgrade is mandatory, whether it is a security release (a GitHub advisory naming this version as '
+        + 'patched, or the notes) and which CLI flags / config keys it changes, each with the line of the notes that says '
+        + 'so. `null` means unknown (not classified yet, no notes), never "no". Stable releases only unless '
+        + '`prerelease=true`; a monorepo lists the newest release of each component in `components`.',
+      querystring: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['repo'],
+        properties: {
+          repo: {
+            type: 'string',
+            minLength: 3,
+            maxLength: 300,
+            description: '`owner/repo` (GitHub), `github:owner/repo`, `gitlab:owner/repo`, or the repository URL',
+            errorMessage: { minLength: 'repo must be owner/repo' }
+          },
+          component: {
+            type: 'string',
+            pattern: '^[A-Za-z0-9_.@/-]{1,100}$',
+            description: 'For a monorepo, the component whose latest release to return (e.g. `op-node`)',
+            errorMessage: { pattern: 'Invalid component' }
+          },
+          prerelease: { type: 'boolean', default: false, description: 'true = the newest release even if it is a prerelease' }
+        }
+      }
+    }
+  }, (request, reply) => {
+    const { repo, component, prerelease } = request.query;
+    if (!parseRepo(repo)) return sendError(reply, 400, 'repo must be owner/repo, github:owner/repo, gitlab:owner/repo or a GitHub/GitLab repository URL');
+    return proxy(reply, () => getLatestRelease({ repo, component, includePrerelease: prerelease }));
+  });
 
   fastify.get('/client-releases/clients', {
     schema: {

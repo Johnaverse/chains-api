@@ -803,14 +803,43 @@ Proxy for chains-client-feed (the feed has no public host, so the dashboard read
 
 **Query:** `limit` (1–500, default 100), `fork` (`true` = only releases announcing a hard fork), `chainId`, `repo` (`owner/repo`, optionally `github:`/`gitlab:`-prefixed), `since` (ISO date or date-time). All passed through to the feed.
 
-**Response:** `{fetchedAt, stale, count, items:[{id, url, title, publishedAt, source:{id, name, kind}, chains:[{chainId, name}], chainsFrom: "release"|"repository", release:{repo, tag, version, prerelease, mandatory}, enrichment:{class, createdAt, summary, fork, forks?}}]}`. `fork` is `{name, network, activationAt, activationBlock, state}` plus `activationEpoch` / `activationSlot` / `activationTimestamp` when the notes state them. Missing upstream fields come back as `null` / `[]`.
+**Response:** `{fetchedAt, stale, count, items:[{id, url, title, publishedAt, source:{id, name, kind}, chains:[{chainId, name}], chainsFrom: "release"|"repository", release:{repo, tag, version, prerelease, mandatory, security, securityEvidence, flagsChanged, flagChanges, flagChangesCarriedOver}, enrichment:{class, createdAt, summary, fork, forks?}}]}`. `security` / `flagsChanged` are read by the feed from the full notes (see `GET /client-releases/latest`); `null` = no notes or a feed that predates them. `fork` is `{name, network, activationAt, activationBlock, state}` plus `activationEpoch` / `activationSlot` / `activationTimestamp` when the notes state them. Missing upstream fields come back as `null` / `[]`.
 
 Related routes:
+- `GET /client-releases/latest?repo=` — see below.
 - `GET /client-releases/clients?q=&kind=&chainId=` — the client registry (repositories and name-only clients), each with `kinds`, `names`, `networkCount`, `latestRelease`, `latestFork`.
 - `GET /client-releases/clients/:host/:owner/:repo` — one repository (`host` = `github` | `gitlab`; `owner` / `repo` = `[A-Za-z0-9_.-]+`, never only dots) with every network it serves (`networks:[{chainId, name, kinds, source}]`) — the reverse lookup. 404 when the feed does not know it.
 - `GET /client-releases/networks/:chainId` — clients serving a chain, with the kinds each plays on that chain.
 
 Errors: **503** `{error: "Client release feed not configured"}` when `CLIENT_FEED_URL` is unset; **502** when the feed fails and nothing is cached. Responses are cached per upstream URL for `CLIENT_FEED_CACHE_TTL_MS`.
+
+### `GET /client-releases/latest`
+The latest release of one client repository, answering the questions an operator asks of it. MCP: `get_latest_release`.
+
+**Query:** `repo` (required: `owner/repo` for GitHub, `github:owner/repo`, `gitlab:owner/repo`, or the repository URL), `component` (a monorepo's component, e.g. `op-node`), `prerelease` (`true` = the newest release even when it is a prerelease; default stable only).
+
+**Response:**
+```json
+{ "repo": "github:ethereum/go-ethereum", "component": null,
+  "latest": {
+    "version": "1.17.8", "tag": "v1.17.8", "url": "https://github.com/ethereum/go-ethereum/releases/tag/v1.17.8",
+    "publishedAt": "…", "prerelease": false, "client": "ethereum/go-ethereum",
+    "hardfork": { "included": false, "forks": [] },
+    "mandatory": false,
+    "security": { "update": true, "source": "notes", "scope": "client", "ids": [], "advisories": [], "quote": "This is a security-focused release, …" },
+    "flags": { "changed": false, "changes": [], "carriedOver": 0 },
+    "class": "urgent_software_fix", "summary": "…", "chains": [ … ], "chainsFrom": "repository" },
+  "newerPrerelease": null }
+```
+
+- `hardfork.included`: the release schedules a fork (class `planned_hard_fork`, or a fork in state `scheduled` / `rescheduled`). `forks` lists every fork the notes name, completed ones included, with network, state and activation — one entry per fork and network: a fork named per layer is listed under its combined name (`Amsterdam` / `Gloas` → `Glamsterdam`, `layerName` keeps the client's), and a network that is one of the release's chains carries its registry name and `chainId` (`Hoodi` → `Ethereum Hoodi`, 560048). `review` appears when the notes carry fork or obligation wording the model did not confirm: a *possible* fork, never a "no".
+- `mandatory`: the notes oblige operators to upgrade (or the release schedules a fork activation).
+- `security.update`: `source: "advisory"` when a published GitHub advisory of the repository names this version as the first patched one (retroactive, with `advisories[]` and severity); `source: "notes"` when the notes state a security fix (security wording, a Security section, CVE / GHSA ids). `scope: "dependency"` marks a fix that only bumps a library or toolchain.
+- `flags.changes[]`: `{flag, change, quote}` with `change` one of `added`, `removed`, `deprecated`, `renamed`, `default_changed`, `changed`. Changes the previous release already stated (standing deprecation lists) are dropped and counted in `carriedOver`.
+- **`null` is unknown, never "no"**: `hardfork.included` / `mandatory` before the release is classified; `security.update` / `flags.changed` for a release without notes or a feed that predates the fields.
+- A monorepo (several components in one repository) adds `components[]`, the newest release of each, so the caller can pick one with `component`. `newerPrerelease` names a prerelease newer than the stable answer.
+
+Errors: **400** for a repo that is not `owner/repo` or a GitHub/GitLab URL; **404** when the feed records no release for the repository (or component); 502/503 as above.
 
 **Dashboard:** Activity → **Releases** lists `/client-releases?limit=200` (the *Forks only* toggle re-reads with `fork=true`) with chain and client filters; each card shows the repo linked to its release, version/tag, `pre-release` / `mandatory` badges, published time, the AI summary, a fork line (name, network, activation — a time only when one was stated, plus block/epoch/slot/timestamp — and state) and its chains (labelled *Repository networks* when the notes named none). The chain drawer gains a **Clients** section from `/client-releases/networks/:chainId`, where *Supports N networks* expands the client's other networks (each opens that chain). Both stay hidden when the API answers 503.
 
