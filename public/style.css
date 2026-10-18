@@ -1791,6 +1791,7 @@ a.tlx-row-title:hover { color: var(--accent-hover); }
 .tlx-row-toggle:hover { color: var(--ink-1); border-color: var(--rule-strong); }
 .tlx-row-detail { padding: 0 var(--sp-4) 11px 46px; }
 .tlx-row .report-wrap { flex-shrink: 0; margin-top: 0; }
+.tlx-row .report-wrap.open { flex: 1 1 100%; min-width: 0; }
 
 .tl-fallout, .tl-context { display: flex; align-items: baseline; gap: 7px; margin-top: 4px; font-size: var(--fs-200); min-width: 0; }
 .tl-fallout a, .tl-context a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1839,7 +1840,8 @@ a.tlx-row-title:hover { color: var(--accent-hover); }
     background: var(--surface-2); border: 1px solid var(--rule); border-radius: var(--r-sm);
     color: var(--ink-1); font-size: var(--fs-100); padding: 4px 7px; outline: none;
 }
-.report-form input { flex: 1; min-width: 140px; }
+.report-form input { flex: 1 1 140px; min-width: 0; }
+.report-form select { max-width: 100%; }
 .report-form select:focus-visible, .report-form input:focus-visible { border-color: var(--accent); outline: 2px solid var(--focus); outline-offset: 1px; }
 .report-send {
     background: var(--surface-2); border: 1px solid var(--rule-strong);

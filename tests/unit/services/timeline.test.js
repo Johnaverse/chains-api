@@ -48,6 +48,18 @@ function window(o = {}) {
 const build = (inputs) => buildTimeline({ now: NOW, chainName: () => null, ...inputs });
 
 describe('buildTimeline — hardforks', () => {
+  it('keeps a monorepo\'s components that share a version as separate releases', () => {
+    const lotus = (tag, component, version) => releaseEvent({
+      title: tag, url: `https://github.com/filecoin-project/lotus/releases/tag/${tag}`, provider: 'github:filecoin-project/lotus',
+      release: { repo: 'filecoin-project/lotus', component, version, mandatory: true }
+    });
+    const [entry] = build({
+      forks: [fork({ name: 'Solstice', events: [lotus('v1.38.0', null, '1.38.0'), lotus('miner/v1.38.0', 'miner', '1.38.0'), lotus('v1.38.0', null, '1.38.0')] })]
+    });
+    expect(entry.releases.map((r) => [r.component ?? null, r.version])).toEqual([[null, '1.38.0'], ['miner', '1.38.0']]);
+    expect(entry.counts.releases).toBe(2);
+  });
+
   it('groups a fork\'s release, provider window and news under it', () => {
     const entries = build({
       forks: [fork({

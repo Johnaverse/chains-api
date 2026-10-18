@@ -596,10 +596,15 @@ function addProviderUpdate(entry, update) {
 function addRelease(entry, release) {
   const r = release.release ?? {};
   const version = r.version ?? r.tag ?? null;
-  const key = `${r.repo}@${version}`;
-  if (entry.releases.some((x) => `${x.repo}@${x.version}` === key)) return;
+  // A monorepo ships one version per component (Lotus: v1.38.0 and miner/v1.38.0): both are
+  // releases of the fork, not one release twice.
+  const component = typeof r.component === 'string' && r.component ? r.component : null;
+  const keyOf = (x) => `${x.repo}|${(x.component ?? '').toLowerCase()}@${x.version}`;
+  const key = keyOf({ repo: r.repo, component, version });
+  if (entry.releases.some((x) => keyOf(x) === key)) return;
   entry.releases.push({
     repo: r.repo ?? null,
+    ...(component ? { component } : {}),
     version,
     mandatory: r.mandatory === true,
     class: release.enrichment?.class ?? null,

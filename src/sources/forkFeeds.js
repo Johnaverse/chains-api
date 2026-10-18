@@ -278,7 +278,7 @@ function mentionOf(kind, it, fork) {
     status: it.status ?? null,
     chains: unnamed ? [] : chains.map((c) => ({ chainId: c.chainId })),
     statusPage: { id: source?.id ?? null, name: source?.name ?? null, kind: kind === 'status' ? (source?.kind ?? null) : kind },
-    ...(kind === 'release' && it.release ? { release: { repo: it.release.repo ?? null, version: it.release.version ?? null, mandatory: it.release.mandatory === true } } : {}),
+    ...(kind === 'release' && it.release ? { release: { repo: it.release.repo ?? null, ...(it.release.component ? { component: it.release.component } : {}), version: it.release.version ?? null, mandatory: it.release.mandatory === true } } : {}),
     // Only chains-news grades its outlets (primary = the project's own channel).
     weight: kind === 'news' ? (source?.weight ?? null) : null,
     enrichment: {
