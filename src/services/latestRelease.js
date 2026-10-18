@@ -1,4 +1,8 @@
 import { getClientReleases, ClientFeedNotFoundError } from '../sources/clientFeed.js';
+import { forkIdentity } from '../domain/forks.js';
+import { networkSlug } from '../domain/networkSlug.js';
+import { forkAliases } from './timeline.js';
+import { searchChains } from '../store/queries.js';
 
 /**
  * The latest release of one client repository, answered as the questions an operator asks:
@@ -30,6 +34,74 @@ export function parseRepo(input) {
   return `${host.toLowerCase()}:${owner}/${repo}`.toLowerCase();
 }
 
+const titleCase = (s) => s.replace(/\b[a-z]/g, (c) => c.toUpperCase());
+
+/**
+ * The one chain among `chains` a network name names: the same slug, or the name with its
+ * ecosystem in front or "Testnet" behind ("Hoodi" → "Ethereum Hoodi", "Base Sepolia" → "Base
+ * Sepolia Testnet"). Client notes name Ethereum's testnets bare, so between "Ethereum Hoodi" and
+ * "Status Network Hoodi" the Ethereum one is meant.
+ */
+function pickChain(slug, chains) {
+  const matches = chains.filter((c) => {
+    const s = networkSlug(c?.name);
+    return s && (s === slug || s.endsWith(`-${slug}`) || slug.endsWith(`-${s}`) || s === `${slug}-testnet`);
+  });
+  if (matches.length <= 1) return matches[0] ?? null;
+  const exact = matches.filter((c) => networkSlug(c.name) === slug || networkSlug(c.name) === `ethereum-${slug}`);
+  return exact.length === 1 ? exact[0] : null;
+}
+
+/**
+ * The chain a fork's network names: the release's own chains first, then the registry for a
+ * network they leave out (a release tagged with Holesky that schedules the fork on Hoodi).
+ */
+function chainOfNetwork(network, chains) {
+  const slug = networkSlug(network);
+  if (!slug) return null;
+  const own = pickChain(slug, chains ?? []);
+  if (own) return own;
+  const hit = pickChain(slug, searchChains(network).filter(Boolean));
+  return hit ? { chainId: hit.chainId, name: hit.name } : null;
+}
+
+/**
+ * One entry per fork and network. Ethereum names a fork per layer and combined — geth's notes
+ * say "Amsterdam", Prysm's "Gloas", Erigon's "Glamsterdam" — and the classifier may list the
+ * same activation under two of them; the combined name leads, the layer name is kept.
+ */
+function forksOf(forks, chains) {
+  const out = [];
+  const byKey = new Map();
+  for (const f of forks) {
+    const name = f.name ?? null;
+    const aliases = forkAliases(name);
+    const combined = aliases.length === 1 && aliases[0] !== forkIdentity(name)?.replace(/ hf$/, '') ? aliases[0] : null;
+    const chain = f.network ? chainOfNetwork(f.network, chains) : null;
+    const entry = {
+      name: combined ? titleCase(combined) : name,
+      ...(combined ? { layerName: name } : {}),
+      network: chain?.name ?? f.network ?? null,
+      ...(chain ? { chainId: chain.chainId } : {}),
+      state: f.state ?? null,
+      activationAt: f.activationAt ?? null,
+      activationBlock: f.activationBlock ?? null,
+      ...(f.activationEpoch != null ? { activationEpoch: f.activationEpoch } : {}),
+      ...(f.activationTimestamp != null ? { activationTimestamp: f.activationTimestamp } : {})
+    };
+    const key = `${aliases[0] ?? name}|${chain?.chainId ?? networkSlug(f.network) ?? ''}`;
+    const into = byKey.get(key);
+    if (!into) {
+      byKey.set(key, entry);
+      out.push(entry);
+      continue;
+    }
+    // The same activation twice: keep what either entry knows.
+    for (const [k, v] of Object.entries(entry)) if (k !== 'layerName' && into[k] == null && v != null) into[k] = v;
+  }
+  return out;
+}
+
 /** Whether the release ships a fork: true, false, or null when it is not classified yet. */
 function hardforkOf(item) {
   const enr = item.enrichment;
@@ -39,15 +111,7 @@ function hardforkOf(item) {
     : null;
   return {
     included,
-    forks: forks.map((f) => ({
-      name: f.name ?? null,
-      network: f.network ?? null,
-      state: f.state ?? null,
-      activationAt: f.activationAt ?? null,
-      activationBlock: f.activationBlock ?? null,
-      ...(f.activationEpoch != null ? { activationEpoch: f.activationEpoch } : {}),
-      ...(f.activationTimestamp != null ? { activationTimestamp: f.activationTimestamp } : {})
-    })),
+    forks: forksOf(forks, item.chains),
     // The feed's recall net: wording the model did not confirm. "Possibly", never "no".
     ...(enr?.review ? { review: enr.review } : {})
   };

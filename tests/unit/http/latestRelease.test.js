@@ -16,6 +16,12 @@ vi.mock('../../../config.js', async (importOriginal) => {
   };
 });
 
+const registry = vi.hoisted(() => ({ chains: null }));
+vi.mock('../../../src/store/queries.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, searchChains: (q) => registry.chains ?? actual.searchChains(q) };
+});
+
 const { buildApp } = await import('../../../index.js');
 const { _resetClientFeedCacheForTests } = await import('../../../src/sources/clientFeed.js');
 const { parseRepo } = await import('../../../src/services/latestRelease.js');
@@ -54,6 +60,7 @@ beforeAll(async () => { app = await buildApp({ logger: false, loadDataOnStartup:
 afterAll(async () => { await app.close(); });
 beforeEach(() => {
   cfg.url = 'http://client-feed.test/';
+  registry.chains = null;
   proxyFetch.mockReset();
   _resetClientFeedCacheForTests();
 });
@@ -116,6 +123,31 @@ describe('GET /client-releases/latest', () => {
     const latest = (await get('/client-releases/latest?repo=ethereum/go-ethereum')).json().latest;
     expect(latest.hardfork).toEqual({ included: true, forks: [{ name: 'Glamsterdam', network: 'Ethereum Sepolia', state: 'scheduled', activationAt: null, activationBlock: null, activationTimestamp: 1791000000 }] });
     expect(latest.mandatory).toBe(true);
+  });
+
+  it('lists one fork per activation, under its combined Ethereum name and the release chain', async () => {
+    const forks = [
+      { name: 'Glamsterdam', network: 'Ethereum Sepolia', activationAt: '2026-10-06T13:53:36.000Z', state: 'scheduled' },
+      { name: 'Amsterdam', network: 'Ethereum Sepolia', activationAt: null, state: 'scheduled' },
+      { name: 'Gloas', network: 'Hoodi', activationAt: null, state: 'scheduled' },
+      { name: 'Jenner', network: 'BSC Chapel testnet', activationAt: null, state: 'scheduled' }
+    ];
+    const chains = [{ chainId: 11155111, name: 'Ethereum Sepolia' }, { chainId: 560048, name: 'Ethereum Hoodi' }];
+    proxyFetch.mockResolvedValue(page([rel('v2.7.0', { chains }, { mandatory: true }, { class: 'planned_hard_fork', forks })]));
+    const { forks: out } = (await get('/client-releases/latest?repo=ethereum/go-ethereum')).json().latest.hardfork;
+    expect(out.map((f) => [f.name, f.layerName ?? null, f.network, f.chainId ?? null, f.activationAt])).toEqual([
+      ['Glamsterdam', null, 'Ethereum Sepolia', 11155111, '2026-10-06T13:53:36.000Z'],
+      ['Glamsterdam', 'Gloas', 'Ethereum Hoodi', 560048, null],
+      ['Jenner', null, 'BSC Chapel testnet', null, null]
+    ]);
+  });
+
+  it('names a fork network the release chains leave out from the registry, Ethereum first for a bare testnet name', async () => {
+    registry.chains = [{ chainId: 374, name: 'Status Network Hoodi' }, { chainId: 560048, name: 'Ethereum Hoodi' }, { chainId: 2910, name: 'Morph Hoodi' }];
+    const forks = [{ name: 'Gloas', network: 'Hoodi', activationAt: '2026-10-26T17:42:48.000Z', state: 'scheduled' }];
+    proxyFetch.mockResolvedValue(page([rel('v7.3.0', { chains: [{ chainId: 17000, name: 'Holesky' }] }, { mandatory: true }, { class: 'planned_hard_fork', forks })]));
+    const [fork] = (await get('/client-releases/latest?repo=OffchainLabs/prysm')).json().latest.hardfork.forks;
+    expect(fork).toMatchObject({ name: 'Glamsterdam', layerName: 'Gloas', network: 'Ethereum Hoodi', chainId: 560048 });
   });
 
   it('answers null, not false, for what the feed cannot say', async () => {
