@@ -76,12 +76,13 @@ describe('parseRepo', () => {
     ['github.com/sigp/lighthouse/releases/tag/v8.0.0', 'github:sigp/lighthouse'],
     ['https://gitlab.com/o/r.git', 'gitlab:o/r'],
     ['https://gitlab.com/o/r/-/releases', 'gitlab:o/r'],
-    ['o/r.git', 'github:o/r']
+    ['o/r.git', 'github:o/r'],
+    ['https://gitlab.com/o/r//', 'gitlab:o/r']
   ])('%s -> %s', (input, out) => {
     expect(parseRepo(input)).toBe(out);
   });
 
-  it.each(['', 'geth', 'a/b/c', '../x', 'https://example.com/o/r', '../..', null, 'https://gitlab.com/group/sub/repo', 'github.com/ethereum', 'example.com/o'])('rejects %s', (input) => {
+  it.each(['', 'geth', 'a/b/c', '../x', 'https://example.com/o/r', '../..', null, 'https://gitlab.com/group/sub/repo', 'github.com/ethereum', 'example.com/o', `github.com/${'/'.repeat(5000)}x`, `${'x'.repeat(301)}/r`])('rejects %s', (input) => {
     expect(parseRepo(input)).toBeNull();
   });
 });

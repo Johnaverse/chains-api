@@ -724,6 +724,12 @@
                             "string"
                           ]
                         },
+                        "forumsStatus": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
                         "channels": {
                           "type": "array",
                           "items": {
@@ -929,6 +935,18 @@
                           }
                         },
                         "channelsCheckedAt": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "channelsIdentityStatus": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
+                        },
+                        "channelsStatus": {
                           "type": [
                             "null",
                             "string"

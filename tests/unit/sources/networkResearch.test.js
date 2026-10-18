@@ -204,8 +204,11 @@ describe('getNetworkResearch / getNetworkResearchInfo', () => {
       features: [],
       forums: [{ ...forum, url: 'https://github.com/base/web/discussions', access: 'archived' }],
       forumsCheckedAt: '2026-10-10T15:00:00.000Z',
+      forumsStatus: 'found',
       channels: [channel],
       channelsCheckedAt: '2026-10-11T03:30:31.487Z',
+      channelsIdentityStatus: 'confirmed',
+      channelsStatus: 'found',
       hardware: { status: 'documented', identityStatus: 'confirmed', checkedAt: '2026-10-10T09:27:13.772253+00:00', notes: null, sources: [], profiles: [profile] },
       updatedAt: '2026-10-10T07:58:00.646Z'
     });
@@ -220,7 +223,7 @@ describe('getNetworkResearch / getNetworkResearchInfo', () => {
   });
 
   it('returns a forums-only block for a chain the network research did not cover, dated by the forum dataset', () => {
-    expect(getNetworkResearch(4242)).toEqual({ forums: [forum], forumsCheckedAt: '2026-10-10T15:07:54.328Z', updatedAt: '2026-10-10T15:51:28.230185+00:00' });
+    expect(getNetworkResearch(4242)).toEqual({ forums: [forum], forumsCheckedAt: '2026-10-10T15:07:54.328Z', forumsStatus: 'found', updatedAt: '2026-10-10T15:51:28.230185+00:00' });
   });
 
   it('returns a hardware-only block, dated by the hardware dataset when the network has no check date', () => {
@@ -241,6 +244,8 @@ describe('getNetworkResearch / getNetworkResearchInfo', () => {
     expect(getNetworkResearch(6262)).toEqual({
       channels: [{ ...channel, platform: 'email', url: 'mailto:info@example.org' }],
       channelsCheckedAt: '2026-10-11T05:34:45.013198+00:00',
+      channelsIdentityStatus: 'qualified',
+      channelsStatus: 'partial',
       updatedAt: '2026-10-11T05:34:45.013198+00:00'
     });
   });

@@ -8,6 +8,17 @@ import { getChainById } from '../../store/queries.js';
  */
 let cached = null;
 
+// `evm-56`-style ids carry no name, so they can never identify a network in release text.
+const NAMELESS = /^evm-\d+$/i;
+
+export function aliasesOf(chain) {
+  if (!chain) return [];
+  const names = [chain['theGraph-id'], ...(Array.isArray(chain.aliases) ? chain.aliases : [])]
+    .filter(name => typeof name === 'string' && name.trim() && !NAMELESS.test(name.trim()))
+    .map(name => name.trim().toLowerCase());
+  return [...new Set(names)];
+}
+
 export async function repositoriesRoutes(fastify) {
   fastify.get('/repositories', {
     schema: {
@@ -17,8 +28,12 @@ export async function repositoriesRoutes(fastify) {
   }, async () => {
     if (cached) return cached;
     const inputs = getRepositoryInputs(chainId => getChainById(chainId)?.name ?? null);
-    // Before the registry loads only the hardware names exist; don't pin that.
-    if (inputs.networks.every(n => n.name)) cached = inputs;
+    // Other names the registry knows a network by (The Graph's id, its aliases): the feed matches
+    // a release's fork network ("BSC Chapel testnet") against them, not only the display name.
+    for (const network of inputs.networks) network.aliases = aliasesOf(getChainById(network.chainId));
+    // Before the registry loads, names come from the hardware research alone and every alias
+    // list is empty; pinning that would cost the feed its alias matches until a restart.
+    if (inputs.networks.some(n => getChainById(n.chainId))) cached = inputs;
     return inputs;
   });
 }

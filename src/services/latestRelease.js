@@ -30,14 +30,16 @@ const MAX_FORKS = 10;
  */
 export function parseRepo(input) {
   const raw = typeof input === 'string' ? input.trim() : '';
-  if (!raw) return null;
+  // Bounded before any pattern runs: the MCP tool passes the caller's string through as-is.
+  if (!raw || raw.length > 300) return null;
   const url = /^(?:https?:\/\/)?(?:www\.)?(github|gitlab)\.com\/([^?#]*)/i.exec(raw);
   let host;
   let segments;
   if (url) {
     host = url[1];
-    const path = url[2].split('/-/')[0].replace(/\/+$/, '');
-    segments = path.split('/');
+    // Split, then drop the empty segments a trailing slash leaves (no backtracking pattern on input).
+    segments = url[2].split('/-/')[0].split('/');
+    while (segments.length && segments[segments.length - 1] === '') segments.pop();
     // GitHub: owner/repo, then anything (releases/tag/v1). GitLab: the project path is all of it.
     if (host.toLowerCase() === 'github') segments = segments.slice(0, 2);
     else if (segments.length > 2) return null;

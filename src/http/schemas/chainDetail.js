@@ -93,6 +93,7 @@ const research = {
       evidence: strings
     })),
     forumsCheckedAt: nullableString,
+    forumsStatus: nullableString,
     channels: array(object({
       platform: string,
       url: string,
@@ -136,6 +137,8 @@ const research = {
       }
     })),
     channelsCheckedAt: nullableString,
+    channelsIdentityStatus: nullableString,
+    channelsStatus: nullableString,
     hardware: {
       ...object({
         status: nullableString,
