@@ -86,6 +86,14 @@ function isTestChain(chain) {
   return Array.isArray(chain?.tags) && chain.tags.includes('Testnet');
 }
 
+const TEST_NAME = /\b(testnet|test|devnet|sepolia|holesky|hoodi|goerli|amoy|mumbai|chapel|fuji|futurenet|preview|preprod|staging|signet)\b/i;
+
+/** Whether a named network is a test network: by its registry tag, else by its name. */
+function isTestName(name, byName) {
+  const chain = byName.get(normalizeForkName(name)) ?? byName.get(normalizeForkName(name).replace(/ testnet$/, ''));
+  return chain ? isTestChain(chain) : TEST_NAME.test(name);
+}
+
 /**
  * A mention whose fork network is a bare qualifier, with the network read from its own chains:
  * the one chain of that kind it names ("Mainnet" + chains 314 and 314159 → "Filecoin -
@@ -103,12 +111,22 @@ export function qualifyBareNetwork(mention, byId) {
   const matching = ids.filter((id) => byId.has(id) && (anyKind || isTestChain(byId.get(id)) === wantTest));
   const network = matching.length === 1 ? byId.get(matching[0]).name : null;
   const keepChains = matching.length > 0;
+  // The named networks are scopes too (forkScopes), and resolve back to chains: a "Mainnet"
+  // fork naming only Amoy would come back as an Amoy fork through them. Same qualifier rule.
+  let byName = null;
+  const affectedChains = Array.isArray(mention.enrichment.affectedChains) && !anyKind
+    ? mention.enrichment.affectedChains.filter((name) => {
+      byName ??= new Map([...byId.values()].filter((c) => c?.name).map((c) => [normalizeForkName(c.name).replace(/ testnet$/, ''), c]));
+      return typeof name === 'string' && isTestName(name, byName) === wantTest;
+    })
+    : mention.enrichment.affectedChains;
   return {
     ...mention,
     chains: keepChains ? (mention.chains ?? []).filter((c) => matching.includes(c.chainId)) : [],
     enrichment: {
       ...mention.enrichment,
       chains: keepChains ? (mention.enrichment.chains ?? []).filter((id) => matching.includes(id)) : [],
+      ...(affectedChains !== undefined ? { affectedChains } : {}),
       fork: { ...fork, network }
     }
   };

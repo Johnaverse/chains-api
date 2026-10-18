@@ -108,6 +108,29 @@ describe('buildTimeline — hardforks', () => {
     expect(entries[0].chainIds).toEqual([97]);
   });
 
+  it('attaches a window covering two networks to the fork on each', () => {
+    const sepolia = fork({ key: 'name:glamsterdam@sepolia', name: 'Glamsterdam', network: 'ethereum sepolia', chains: [11155111], activationAt: '2026-10-06T00:00:00.000Z', events: [releaseEvent({ release: { repo: 'ethereum/go-ethereum', version: 'v1.17.6' } })] });
+    const hoodi = fork({ key: 'name:glamsterdam@hoodi', name: 'Glamsterdam', network: 'ethereum hoodi', chains: [560048], activationAt: '2026-10-26T00:00:00.000Z', events: [releaseEvent({ release: { repo: 'ethereum/go-ethereum', version: 'v1.17.6' } })] });
+    const entries = build({
+      forks: [sepolia, hoodi],
+      upgrades: [window({ title: 'Ethereum - Sepolia/Hoodi - Upgrade to Geth-v1.17.6', software: [{ client: 'geth', version: 'v1.17.6' }], chainIds: [11155111, 560048], networkSlugs: ['ethereum-sepolia', 'ethereum-hoodi'] })]
+    });
+    expect(entries.map((e) => [e.chainIds[0], e.providerUpdates.length]).sort()).toEqual([[11155111, 1], [560048, 1]]);
+  });
+
+  it('does not copy a window\'s fallout or news onto a fork', () => {
+    const entries = build({
+      forks: [fork({ events: [releaseEvent()] })],
+      upgrades: [window({
+        followedByIncidents: [{ title: 'Other chain outage', url: 'https://status/x', hoursAfterActivation: 1 }],
+        coverage: [{ title: 'Unrelated proposal', url: 'https://news/x' }]
+      })]
+    });
+    expect(entries[0].providerUpdates).toHaveLength(1);
+    expect(entries[0].followedByIncidents).toEqual([]);
+    expect(entries[0].news).toEqual([]);
+  });
+
   it('adds incidents on the fork\'s network in the day after activation as fallout', () => {
     const activationMs = Date.parse('2026-10-01T00:00:00Z');
     const inc = {
@@ -222,6 +245,27 @@ describe('buildTimeline — software updates and maintenance', () => {
     // The strongest evidence wins: a stated window over a scheduled entry.
     expect(entries[0]).toMatchObject({ activationAt: '2026-10-19T06:00:00.000Z', activationEvidence: 'window', phase: 'upcoming' });
     expect(entries[0].releases).toEqual([expect.objectContaining({ repo: 'base/node' })]);
+  });
+
+  it('keeps two clients at the same version apart', () => {
+    const entries = build({
+      upgrades: [
+        window({ incidentId: 'a', title: 'Base - Upgrade op-geth to v1.0.0', software: [{ client: 'op-geth', version: 'v1.0.0' }], chainIds: [8453], networkSlugs: ['base'] }),
+        window({ incidentId: 'b', title: 'Base - Upgrade op-reth to v1.0.0', software: [{ client: 'op-reth', version: 'v1.0.0' }], chainIds: [8453], networkSlugs: ['base'] }),
+        window({ incidentId: 'c', provider: 'blockdaemon', title: 'Base op-geth v1.0.0', software: [{ client: null, version: '1.0.0' }], chainIds: [8453], networkSlugs: ['base'] })
+      ],
+      releases: [{ title: 'v1.0.0', url: 'u', publishedAt: '2026-10-14T00:00:00Z', chains: [{ chainId: 8453, name: 'Base' }], chainsFrom: 'release', release: { repo: 'paradigmxyz/reth', version: 'v1.0.0', mandatory: true }, enrichment: { class: 'urgent_software_fix' } }]
+    });
+    const updates = entries.filter((e) => e.type === 'software_update');
+    // op-geth with the unnamed window; op-reth alone — the reth release joins it, not op-geth.
+    expect(updates.map((u) => u.providerUpdates.length).sort()).toEqual([1, 2]);
+    expect(updates.find((u) => u.software.some((x) => x.client === 'op-reth')).releases).toHaveLength(1);
+    expect(updates.find((u) => u.software.some((x) => x.client === 'op-geth')).releases).toHaveLength(0);
+  });
+
+  it('files planned work closed as resolved, with no date, as history', () => {
+    const entries = build({ upgrades: [window({ status: 'resolved', activationAt: null, activationEvidence: null })] });
+    expect(entries[0]).toMatchObject({ type: 'software_update', phase: 'past' });
   });
 
   it('lists a window naming no software as maintenance', () => {
