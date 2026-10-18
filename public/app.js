@@ -7097,7 +7097,8 @@ function timelineGroupRows(u) {
         for (const r of releases.slice(0, TL_GROUP_ROWS)) {
             rows.push(el('div', { class: 'tl-context' }, [
                 el('span', { class: 'tl-context-kind mono', text: r.repo || 'release' }),
-                link(r, r.version || r.title || 'release'),
+                // A monorepo's components share versions (Lotus v1.38.0 and miner/v1.38.0).
+                link(r, [r.component, r.version].filter(Boolean).join(' ') || r.title || 'release'),
                 r.mandatory ? el('span', { class: 'tlx-chip-dim', text: 'mandatory' }) : null,
                 r.publishedAt ? el('span', { class: 'muted', text: relTime(r.publishedAt) }) : null
             ]));
@@ -7295,7 +7296,9 @@ function feedbackAffordance({ kind, refId }) {
     const hint = el('span', { class: 'report-hint', text: 'Private — reports are not published. Don’t include personal details.' });
     const form = el('div', { class: 'report-form hidden' }, [select, comment, send, note, hint]);
 
-    btn.addEventListener('click', () => form.classList.toggle('hidden'));
+    // `open` lets the wrap take a full line of its own: in a timeline row it sits in a flex
+    // row with flex-shrink:0, and an open form kept on that line widened the whole page.
+    btn.addEventListener('click', () => wrap.classList.toggle('open', !form.classList.toggle('hidden')));
     send.addEventListener('click', async () => {
         send.disabled = true;
         note.classList.add('hidden');

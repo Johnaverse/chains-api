@@ -57,6 +57,13 @@ describe('client release feed', () => {
     });
   });
 
+  it('keeps a monorepo release\'s component', () => {
+    const [miner] = toMentions('release', release({ release: { repo: 'filecoin-project/lotus', tag: 'miner/v1.38.0', component: 'miner', version: '1.38.0', mandatory: true } }));
+    expect(miner.release).toEqual({ repo: 'filecoin-project/lotus', component: 'miner', version: '1.38.0', mandatory: true });
+    const [node] = toMentions('release', release({ release: { repo: 'filecoin-project/lotus', tag: 'v1.38.0', component: null, version: '1.38.0', mandatory: true } }));
+    expect(node.release).not.toHaveProperty('component');
+  });
+
   it('drops repository-wide chains when the notes named no network among many', () => {
     const many = Array.from({ length: 25 }, (_, i) => ({ chainId: 42161 + i }));
     const [unnamed] = toMentions('release', release({ chains: many, chainsFrom: 'repository', enrichment: { class: 'planned_hard_fork', fork: { ...fusaka, network: null } } }));
