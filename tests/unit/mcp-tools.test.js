@@ -230,7 +230,7 @@ describe('MCP Tools - Shared Module', () => {
   });
 
   describe('getToolDefinitions', () => {
-    it('should return an array of 30 tools', () => {
+    it('should return an array of 33 tools', () => {
       const tools = getToolDefinitions();
       expect(Array.isArray(tools)).toBe(true);
       expect(tools.length).toBe(33);
@@ -1485,6 +1485,7 @@ describe('MCP Tools - Shared Module', () => {
     it('exposes the three L2BEAT/scaling/refresher tools', () => {
       const names = getToolDefinitions().map((t) => t.name);
       expect(names).toContain('get_scaling_chains');
+      expect(names).toContain('get_l2_metrics');
       expect(names).toContain('get_l2beat_by_id');
       expect(names).toContain('get_refresher_status');
     });

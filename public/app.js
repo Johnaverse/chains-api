@@ -995,7 +995,7 @@ function isPlannedClass(enr) {
 // The enrichment arrives on its own (inline on the backfill, or as a later WS frame), so the
 // kind is settled from both once they are in, not at ingest.
 function settleKind(it) {
-    it.kind = SCHEDULED_STATUSES.has(it.rawStatus) || isPlannedClass(enrichmentOf(it)) ? 'scheduled' : 'incident';
+    it.kind = SCHEDULED_STATUSES.has(it.rawStatus) || isPlannedClass(incidents.enrichByKey.get(it.key)?.confident) ? 'scheduled' : 'incident';
 }
 // No impact/urgency escalation here, deliberately — an earlier attempt at one was wrong twice
 // over. `urgency` grades PLANNED work (standard/urgent/mandatory), and providers bolt "[Urgent]"
@@ -1187,8 +1187,21 @@ function applyEnrichment(key, enr, atMs) {
     incidents.enrichmentAvailable = true;
     const at = enrichmentStamp(enr, atMs);
     const prev = incidents.enrichByKey.get(key);
-    if (prev && prev.at > at) return false;
-    incidents.enrichByKey.set(key, { data: enr, at });
+    // The newest CONFIDENT classification is kept on its own: it decides planned work vs
+    // incident (settleKind), as isPlannedGroup does on the API, and a later low-confidence
+    // reading of another update must not undo it. The newest one of any confidence is shown.
+    const confident = enr.lowConfidence !== true && (!prev?.confident || prev.confidentAt <= at);
+    if (prev && prev.at > at) {
+        if (!confident) return false;
+        incidents.enrichByKey.set(key, { ...prev, confident: enr, confidentAt: at });
+        return true;
+    }
+    incidents.enrichByKey.set(key, {
+        data: enr,
+        at,
+        confident: confident ? enr : prev?.confident ?? null,
+        confidentAt: confident ? at : prev?.confidentAt ?? null
+    });
     return true;
 }
 function scheduleEnrichmentRerender() {
@@ -6534,14 +6547,25 @@ function timelineMatchesSearch(u, q) {
     return (u.chainIds || []).some(id => String(id).includes(q) || state.byId.get(id)?.name?.toLowerCase().includes(q));
 }
 
+// Whether an event is still to come — the API's forkPhase rule, on the live clock: a cancelled
+// fork never is, whatever its date, and a date-only activation stays pending until that UTC
+// day is over (it is not "done" at midnight it began).
+function timelinePending(u, now) {
+    if (u.phase === 'cancelled') return false;
+    const ms = timelineActivationMs(u);
+    if (ms == null) return false;
+    return (u.activationPrecision === 'day' ? ms + 864e5 : ms) > now;
+}
+
 // Which stream tab an upgrade belongs to. Pending is decided by the clock, not
 // by status: providers leave a window labelled "scheduled" long after it ran.
 function timelineStreamOf(u, now) {
     const ms = timelineActivationMs(u);
+    if (u.phase === 'cancelled') return 'done';
     // Undated but not finished: announced, day unknown. Calling this 'done' would file a
     // pending fork under history purely because nobody has named the date yet.
     if (ms == null) return u.status === 'maintenance_completed' || u.phase === 'past' ? 'done' : 'undated';
-    if (ms > now) return 'upcoming';
+    if (timelinePending(u, now)) return 'upcoming';
     if (u.status === 'maintenance_in_progress' || (u.providerUpdates || []).some(p => p.status === 'maintenance_in_progress')) return 'active';
     return 'done';
 }
@@ -6617,12 +6641,14 @@ function renderTimeline() {
     if (meta) meta.textContent = `${timeline.upgrades.length} tracked`;
     // Only a DATED window can be counted down to. An undated announcement must never
     // produce a "next window in ..." headline.
-    const nextUp = searched.filter(isDated).map(timelineActivationMs).filter(t => t > now).sort((a, b) => a - b)[0];
+    // A cancelled fork is never counted down to.
+    const u = searched.filter(x => isDated(x) && x.phase !== 'cancelled' && timelineActivationMs(x) > now)
+        .sort((a, b) => timelineActivationMs(a) - timelineActivationMs(b))[0];
+    const nextUp = u ? timelineActivationMs(u) : null;
     const notice = byId('timelineNextNotice');
     if (notice) {
         notice.textContent = '';
         if (nextUp != null) {
-            const u = searched.find(x => timelineActivationMs(x) === nextUp);
             notice.appendChild(el('span', { class: 'tlx-next-label', text: u.type === 'hardfork' ? 'Next hardfork' : 'Next event' }));
             notice.appendChild(el('span', { class: 'tlx-next-count mono tl-countdown', 'data-at': String(nextUp), text: countdownText(nextUp - now) }));
             // A software update's title already leads with its network ("Base · 1.5.0").
@@ -6634,7 +6660,7 @@ function renderTimeline() {
         }
     }
 
-    if (searched.some(u => (timelineActivationMs(u) ?? 0) > now)) startTimelineTicker(); else stopTimelineTicker();
+    if (searched.some(u => timelinePending(u, now))) startTimelineTicker(); else stopTimelineTicker();
 }
 
 function renderTimelineTabs(inRange, now) {
@@ -6752,7 +6778,7 @@ function renderTimelinePins(inRange, selected, x, now) {
     host.textContent = '';
     const weight = (u) => (u.followedByIncidents?.length ? 100 : 0)
         + (/urgent|critical|mandatory/i.test(u.urgency || '') ? 40 : 0)
-        + ((timelineActivationMs(u) ?? 0) > now ? 20 : 0);
+        + (timelinePending(u, now) ? 20 : 0);
     const picked = [...inRange].sort((a, b) => weight(b) - weight(a) || (timelineActivationMs(b) ?? 0) - (timelineActivationMs(a) ?? 0))
         .filter(u => weight(u) > 0).slice(0, 8)
         .sort((a, b) => (timelineActivationMs(a) ?? 0) - (timelineActivationMs(b) ?? 0));
@@ -6884,7 +6910,7 @@ function renderTimelineTooltip(tip, items, at, spanMs) {
     const now = Date.now();
     for (const u of items.slice(0, TL_TOOLTIP_ROWS)) {
         const ms = timelineActivationMs(u);
-        const pending = ms != null && ms > now;
+        const pending = timelinePending(u, now);
         tip.appendChild(el('div', { class: 'tlx-tip-row' }, [
             el('span', { class: `tlx-tip-dot ${urgencyClass(u.urgency)}` }),
             el('span', {
@@ -6945,7 +6971,7 @@ function renderTimelineRows(items, now) {
         // Default and tiebreak: pending soonest-first, then history newest-first.
         const ta = timelineActivationMs(a) ?? 0;
         const tb = timelineActivationMs(b) ?? 0;
-        const aP = ta > now, bP = tb > now;
+        const aP = timelinePending(a, now), bP = timelinePending(b, now);
         if (aP !== bP) return aP ? -1 : 1;
         return aP ? ta - tb : tb - ta;
     });
@@ -6959,7 +6985,7 @@ function renderTimelineRows(items, now) {
             // Qualify the pending one or the two runs read as a rendering bug.
             const actMs = timelineActivationMs(u);
             const day = timelineDayBucket(actMs, now);
-            const bucket = actMs != null && actMs > now ? `${day} · scheduled` : day;
+            const bucket = timelinePending(u, now) ? `${day} · scheduled` : day;
             if (bucket !== lastBucket) {
                 lastBucket = bucket;
                 wrap.appendChild(el('div', { class: 'tlx-daybreak', text: bucket }));

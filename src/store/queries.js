@@ -1,5 +1,6 @@
 import { cachedData } from './cache.js';
 import { getNetworkResearch } from '../sources/networkResearch.js';
+import { getL2MetricsBlock } from '../sources/growthepie.js';
 
 function getChainByIdRaw(chainId) {
   if (!cachedData.indexed) return null;
@@ -66,7 +67,9 @@ export function getChainDetail(chainId) {
   const chain = getChainById(chainId);
   if (!chain) return null;
   const research = getNetworkResearch(chain.chainId);
-  return research ? { ...chain, research } : chain;
+  // growthepie's headline L2 metrics (compact; full detail at /l2-metrics/:chainId).
+  const l2Metrics = getL2MetricsBlock(chain.chainId);
+  return { ...chain, ...(research ? { research } : {}), ...(l2Metrics ? { l2Metrics } : {}) };
 }
 
 // Memoize getAllChains() so /chains, /scaling, /stats, etc. can hit the same

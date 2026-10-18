@@ -1632,6 +1632,92 @@
         }
       }
     },
+    "/l2-metrics": {
+      "get": {
+        "tags": [
+          "Meta"
+        ],
+        "description": "Ethereum L2 metrics from growthepie for every covered chain (compact), with the all-L2 aggregate.",
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/l2-metrics/status": {
+      "get": {
+        "tags": [
+          "Meta"
+        ],
+        "description": "Freshness of each growthepie file: live or fallback snapshot, fetch time and last error.",
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/l2-metrics/da": {
+      "get": {
+        "tags": [
+          "Meta"
+        ],
+        "description": "Data-availability layers (Ethereum blobs, Celestia, EigenDA): fees, data posted and consumers per span, from growthepie.",
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/l2-metrics/eth-supply": {
+      "get": {
+        "tags": [
+          "Meta"
+        ],
+        "description": "ETH supply and issuance rate (latest and last year daily), with supply events, from growthepie.",
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
+    "/l2-metrics/{chainId}": {
+      "get": {
+        "tags": [
+          "Meta"
+        ],
+        "description": "One chain from growthepie: profile, every fundamental metric (latest, 7d/30d change, daily history), fees, activity, economics, blockspace by category and DA layers used.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "boolean",
+              "default": true
+            },
+            "in": "query",
+            "name": "series",
+            "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^\\d+$",
+              "errorMessage": "Invalid chain ID"
+            },
+            "in": "path",
+            "name": "chainId",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
+          }
+        }
+      }
+    },
     "/status-pages": {
       "get": {
         "tags": [

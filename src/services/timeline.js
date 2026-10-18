@@ -99,9 +99,9 @@ export function buildTimeline({ forks = [], upgrades = [], incidentGroups = [], 
   const forkEntries = foldSupportReleases(mergeDuplicateForks(forks.map((fork) => forkEntry(fork))), isTestnet);
   const unmatchedWindows = [];
   for (const window of upgrades) {
-    const target = bestFork(forkEntries, window, windowMatch);
-    if (target) attachWindow(target, window);
-    else unmatchedWindows.push(window);
+    const targets = bestForkPerNetwork(forkEntries, window, windowMatch);
+    for (const target of targets) attachWindow(target, window);
+    if (!targets.length) unmatchedWindows.push(window);
   }
 
   // Provider windows that name a version, grouped per version and network across providers.
@@ -110,7 +110,7 @@ export function buildTimeline({ forks = [], upgrades = [], incidentGroups = [], 
   for (const window of unmatchedWindows) {
     const versions = windowVersions(window);
     if (!versions.length) { maintenance.push(maintenanceEntry(window, chainName)); continue; }
-    const existing = updates.find((u) => u.versions.some((v) => versions.includes(v)) && sharesNetwork(u.chainIds, u.networkSlugs, window.chainIds ?? [], window.networkSlugs ?? []));
+    const existing = updates.find((u) => shipsWindowSoftware(u, window) && sharesNetwork(u.chainIds, u.networkSlugs, window.chainIds ?? [], window.networkSlugs ?? []));
     if (existing) attachWindow(existing, window);
     else {
       const entry = updateEntry(window, chainName);
@@ -126,8 +126,9 @@ export function buildTimeline({ forks = [], upgrades = [], incidentGroups = [], 
     if (!GROUPED_RELEASE_CLASSES.has(cls) && release.release?.mandatory !== true) continue;
     const version = normalizeVersion(release.release?.version ?? release.release?.tag);
     const chainIds = releaseChainIds(release);
-    const update = updates.find((u) => version && u.versions.includes(version) && sharesNetwork(u.chainIds, u.networkSlugs, chainIds, []))
-      ?? [...forkEntries].find((f) => f.type === TIMELINE_TYPES.SOFTWARE_UPDATE && version && f.versions.includes(version) && sharesNetwork(f.chainIds, f.networkSlugs, chainIds, []))
+    const repo = release.release?.repo ?? null;
+    const update = updates.find((u) => version && shipsVersion(u, version, repo) && sharesNetwork(u.chainIds, u.networkSlugs, chainIds, []))
+      ?? [...forkEntries].find((f) => f.type === TIMELINE_TYPES.SOFTWARE_UPDATE && version && shipsVersion(f, version, repo) && sharesNetwork(f.chainIds, f.networkSlugs, chainIds, []))
       ?? bestFork(forkEntries.filter((f) => f.type === TIMELINE_TYPES.HARDFORK), { chainIds, networkSlugs: [], title: `${release.title ?? ''}`, at: ms(release.publishedAt) }, nameMatch);
     if (update) { addRelease(update, release); continue; }
     if (!STANDALONE_RELEASE_CLASSES.has(cls) && release.release?.mandatory !== true) continue;
@@ -437,6 +438,42 @@ function windowVersions(window) {
   return [...new Set((window.software ?? []).map((s) => normalizeVersion(s?.version)).filter(Boolean))];
 }
 
+// Version numbers are not unique on a network: geth and Erigon can both be at 3.7.0. A join on
+// a version therefore also requires the software to be compatible — the same client, or one
+// side not saying which. Names are compared loosely ("op-geth" holds "geth", the repository
+// "erigontech/erigon" is "erigon"), so only two clients known to differ are kept apart.
+const CLIENT_ALIASES = { goethereum: 'geth' };
+
+function clientKey(name) {
+  if (typeof name !== 'string' || !name.trim()) return null;
+  const key = name.toLowerCase().split('/').pop().replace(/[^a-z0-9]+/g, '');
+  return CLIENT_ALIASES[key] ?? (key || null);
+}
+
+function sameClient(a, b) {
+  const x = clientKey(a);
+  const y = clientKey(b);
+  return !x || !y || x === y || x.includes(y) || y.includes(x);
+}
+
+/** Whether an entry ships `version` of a client compatible with `client` (null: any). */
+function shipsVersion(entry, version, client) {
+  if (!entry.versions.includes(version)) return false;
+  const known = [
+    ...entry.software.map((s) => ({ client: s.client, version: normalizeVersion(s.version) })),
+    ...entry.releases.map((r) => ({ client: r.repo, version: normalizeVersion(r.version) }))
+  ].filter((s) => s.version === version && clientKey(s.client));
+  // An unnamed window merged in says nothing; the named clients decide.
+  return !known.length || known.some((s) => sameClient(s.client, client));
+}
+
+function shipsWindowSoftware(entry, window) {
+  return (window.software ?? []).some((s) => {
+    const version = normalizeVersion(s?.version);
+    return version && shipsVersion(entry, version, s.client ?? null);
+  });
+}
+
 function releaseChainIds(release) {
   // A release attributed to every network its repository serves names none of them.
   if (release.chainsFrom === 'repository' && (release.chains ?? []).length >= 3) return [];
@@ -448,8 +485,7 @@ function windowMatch(entry, window) {
   if (!sharesNetwork(entry.chainIds, entry.networkSlugs, window.chainIds ?? [], window.networkSlugs ?? [])) return 0;
   const title = normalizeIncidentTitle(window.title);
   if (entry.providerUpdates.some((p) => p.provider === window.provider && normalizeIncidentTitle(p.title) === title)) return 3;
-  const versions = windowVersions(window);
-  if (versions.some((v) => entry.versions.includes(v))) return 2;
+  if (shipsWindowSoftware(entry, window)) return 2;
   return entry.identities?.some((id) => namesFork(window.title, id)) ? 1 : 0;
 }
 
@@ -488,6 +524,22 @@ function bestFork(entries, item, score) {
   return tied.reduce((a, b) => (distance(a, at) <= distance(b, at) ? a : b));
 }
 
+/**
+ * The fork entries a provider window belongs to: the strongest join on each network it covers.
+ * One QuickNode window for "Sepolia/Hoodi" rolls out both activations, and each network's
+ * hardfork history should list it; two forks competing on one network still get one.
+ */
+function bestForkPerNetwork(entries, window, score) {
+  const byNetwork = new Map();
+  for (const entry of entries) {
+    if (!score(entry, window)) continue;
+    const key = entry.chainIds.length ? [...entry.chainIds].sort((a, b) => a - b).join(',') : entry.networkSlugs.join(',');
+    if (!byNetwork.has(key)) byNetwork.set(key, []);
+    byNetwork.get(key).push(entry);
+  }
+  return [...byNetwork.values()].map((candidates) => bestFork(candidates, window, score)).filter(Boolean);
+}
+
 function distance(entry, at) {
   const t = ms(entry.activationAt);
   return t == null ? Infinity : Math.abs(t - at);
@@ -518,10 +570,18 @@ function attachWindow(entry, window) {
     for (const slug of window.networkSlugs ?? []) if (!entry.networkSlugs.includes(slug)) entry.networkSlugs.push(slug);
     for (const name of (window.networkNames ?? []).map(cleanNetworkName).filter(Boolean)) if (!entry.networkNames.includes(name)) entry.networkNames.push(name);
   }
-  for (const inc of window.followedByIncidents ?? []) addFallout(entry, inc);
-  for (const d of window.discussion ?? []) addNews(entry, { ...d, feed: 'forum' });
-  for (const c of window.coverage ?? []) addNews(entry, { ...c, feed: 'news' });
+  // A window's fallout is timed from the rollout and covers every network the window does, and
+  // its news was picked by network and time proximity alone. A fork gets neither: its fallout is
+  // measured from its own activation on its own networks (buildTimeline), and its news by name.
+  if (entry.type !== TIMELINE_TYPES.HARDFORK) {
+    for (const inc of window.followedByIncidents ?? []) addFallout(entry, inc);
+    for (const d of window.discussion ?? []) addNews(entry, { ...d, feed: 'forum' });
+    for (const c of window.coverage ?? []) addNews(entry, { ...c, feed: 'news' });
+  }
   if (window.status === 'maintenance_completed') entry.completed = true;
+  // Planned work is also posted under incident statuses (src/domain/plannedWork.js); one closed
+  // as `resolved` ran, dated or not. A provider's finished rollout says nothing about the fork.
+  if (window.status === 'resolved' && entry.type !== TIMELINE_TYPES.HARDFORK) entry.completed = true;
   if ((URGENCY_RANK[window.urgency] ?? 0) > (URGENCY_RANK[entry.urgency] ?? 0)) entry.urgency = window.urgency;
 }
 

@@ -343,6 +343,16 @@ describe('bare "Mainnet" / "Testnet" fork networks', () => {
     expect(out.forks[0].chains).toEqual([]);
   });
 
+  it('does not let a named testnet bring back the chains the qualifier dropped', async () => {
+    // "Mainnet" + chain 80002 + affectedChains ["Amoy"]: the named scope would resolve to Amoy.
+    const m = releaseMention('Mainnet', [80002]);
+    m.enrichment.affectedChains = ['Amoy', 'Polygon Mainnet'];
+    expect(qualifyBareNetwork(m, byId).enrichment.affectedChains).toEqual(['Polygon Mainnet']);
+    serveMentions([{ ...m, enrichment: { ...m.enrichment, affectedChains: ['Amoy'] } }]);
+    const [f] = (await getForks()).forks;
+    expect(f.chains).toEqual([]);
+  });
+
   it('leaves a named network alone', () => {
     const m = releaseMention('Filecoin Calibration', [314159]);
     expect(qualifyBareNetwork(m, byId)).toBe(m);
