@@ -154,16 +154,28 @@ async function fetchIncidents() {
  * per incident. Grouping prefers the feed's stable `incidentId` (survives
  * retitles) and falls back to statusPage+title while deployed feeds predate
  * that field.
+ *
+ * The classifier often reads only some of an incident's updates, and rarely the newest
+ * (`monitoring`, `resolved`). When the newest carries no confident class it inherits the newest
+ * confident one of its earlier updates — the rule isPlannedGroup (src/domain/plannedWork.js)
+ * applies on the grouped view — or planned work posted under an incident status would be read
+ * as an outage here (chain-level correlation) and as maintenance there (/upgrades, provider stats).
  */
+const confidentClass = (ev) => Boolean(ev?.enrichment?.class) && ev.enrichment.lowConfidence !== true;
+
 function dedupeEvents(normalized) {
   const byKey = new Map();
+  const classified = new Map();
   for (const ev of normalized) {
     const key = ev.incidentId ?? `${ev.statusPage.id || 'unknown'}|${ev.title.toLowerCase().trim()}`;
+    if (confidentClass(ev) && (classified.get(key)?.publishedMs ?? -Infinity) < (ev.publishedMs ?? 0)) classified.set(key, ev);
     const existing = byKey.get(key);
     if (existing && (existing.publishedMs ?? 0) >= (ev.publishedMs ?? 0)) continue;
     byKey.set(key, ev);
   }
-  return [...byKey.values()].sort((a, b) => (b.publishedMs ?? 0) - (a.publishedMs ?? 0));
+  return [...byKey.entries()]
+    .map(([key, ev]) => (confidentClass(ev) || !classified.has(key) ? ev : { ...ev, enrichment: classified.get(key).enrichment }))
+    .sort((a, b) => (b.publishedMs ?? 0) - (a.publishedMs ?? 0));
 }
 
 /** One raw feed event -> the compact, token-cheap record the tools serve. */

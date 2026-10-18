@@ -33,6 +33,7 @@ import { getWeb3News } from './src/sources/web3News.js';
 import { getClientReleases, getFeedClient, getFeedClients, getNetworkClients, ClientFeedNotFoundError } from './src/sources/clientFeed.js';
 import { getChainUpgrades } from './src/services/upgrades.js';
 import { getForks } from './src/services/forks.js';
+import { getTimeline } from './src/services/timeline.js';
 import { getProviderStats } from './src/services/providerStats.js';
 import { checkChainHalt } from './src/services/chainHalt.js';
 import { getNodeHardware, getNetworkResearch } from './src/sources/networkResearch.js';
@@ -455,6 +456,29 @@ export function getToolDefinitions() {
             description: 'Pass "upgrades" to also list ordinary software updates that carried a fork marker (kind "upgrade"). Omit for real forks only.'
           },
           limit: { type: 'number', description: 'Max forks to return (default 50, max 200)' }
+        },
+      },
+    },
+    {
+      name: 'get_timeline',
+      description:
+        'Get the EVENT TIMELINE: hardforks, software updates and maintenance as events, each with everything the feeds say about it grouped under it — `releases` (the client releases that ship it: repo, version, mandatory), `providerUpdates` (every RPC provider\'s rollout window for it, with status and activation evidence), `news` (articles and forum posts about it) and `followedByIncidents` (incidents on the same network within 24h after activation: suspected, never asserted causation). Use for a chain\'s HARDFORK HISTORY (chainId + type="hardfork": every fork the feeds know for that chain, newest first after any upcoming one), for "what happened around the X fork" (which clients shipped it, which providers rolled it out, what broke after), and for "what software updates are coming for X". `type`: `hardfork` = a consensus fork / network upgrade; `software_update` = a client version rolled out with no fork behind it (provider windows for one version are grouped across providers) — planned work, NEVER an incident, so do not report it as an outage; `maintenance` = a provider window naming no software. History reaches as far back as the feeds\' archives: client releases go back years, provider status posts only weeks — a fork with no `providerUpdates` before that window is not evidence that no provider rolled it out. `activationEvidence`: `stated`/`window`/`scheduled` = a time a source gave; `observed`/`started`/`completed` = seen happening (approximate); `estimated` = derived from a block height ahead (approximate); `released` = only the release date is known; null with `phase: "unscheduled"` = no date announced — say so rather than implying one. `layerName` is the name a client used when it differs from the combined one (Glamsterdam = Amsterdam + Gloas). `counts` gives the full size of each group; the lists are capped at 2 here. `sources` says which feeds answered — a missing release feed means most fork history is missing. Returns totalMatched/truncated with byType and byPhase over everything matched — quote those for totals.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          chainId: { type: 'number', description: 'Only events touching this chain ID — with type="hardfork", its hardfork history' },
+          type: {
+            type: 'string',
+            description: 'Comma list of hardfork, software_update, maintenance. Omit for all three.'
+          },
+          phase: {
+            type: 'string',
+            enum: ['upcoming', 'past', 'cancelled', 'unscheduled'],
+            description: 'Filter by phase'
+          },
+          since: { type: 'string', description: 'ISO time; only events activating at/after it (drops undated)' },
+          until: { type: 'string', description: 'ISO time or YYYY-MM-DD; only events activating at/before it (drops undated)' },
+          limit: { type: 'number', description: 'Max events to return (default 5, max 100). Results over ~8000 characters are cut off, so ask for more only with a chainId or type filter.' }
         },
       },
     },
@@ -1232,6 +1256,39 @@ async function handleGetForks(args) {
   }
 }
 
+// Grouped items shown per event. With full lists Sepolia's Glamsterdam alone was 6 KB; the assistant
+// truncates a tool result at 8000 chars, so `counts` carries the totals and these a sample.
+const TIMELINE_GROUP_SAMPLE = 2;
+const TIMELINE_DEFAULT_LIMIT = 5;
+const TIMELINE_MAX_LIMIT = 100;
+
+function withoutNullFields(obj) {
+  return Object.fromEntries(Object.entries(obj).filter(([, v]) => v != null));
+}
+
+async function handleGetTimeline(args) {
+  const { chainId, type, phase, since, until, limit } = args ?? {};
+  const capped = Math.max(1, Math.min(Number(limit) || TIMELINE_DEFAULT_LIMIT, TIMELINE_MAX_LIMIT));
+  try {
+    const result = await getTimeline({ chainId, type, phase, since, until, limit: capped });
+    const sample = (list) => (list ?? []).slice(0, TIMELINE_GROUP_SAMPLE);
+    return textResponse({
+      ...result,
+      // Ids, slugs and source lists are for joining and keying rows, not for reading; nulls
+      // say nothing. Each dropped field is ~5% of an entry, and the cap is per character.
+      entries: result.entries.map(({ id, networkSlugs, networkNames, sources, feeds, providers, ...e }) => ({
+        ...withoutNullFields(e),
+        releases: sample(e.releases).map(({ repo, version, mandatory, url, publishedAt }) => ({ repo, version, mandatory, url, publishedAt })),
+        providerUpdates: sample(e.providerUpdates).map(({ provider, title, status, activationAt, activationEvidence }) => ({ provider, title, status, activationAt, activationEvidence })),
+        news: sample(e.news).map(({ feed, source, title, url, publishedAt }) => ({ feed, source, title, url, publishedAt })),
+        followedByIncidents: sample(e.followedByIncidents).map(({ title, url, startedAt, hoursAfterActivation, durationEvidence }) => ({ title, url, startedAt, hoursAfterActivation, durationEvidence }))
+      }))
+    });
+  } catch (error) {
+    return errorResponse('Timeline unavailable', error.message);
+  }
+}
+
 function handleGetClients(args) {
   if (args.chainId === undefined) {
     const results = getRpcMonitoringResults();
@@ -1619,6 +1676,7 @@ const toolHandlers = {
   get_client_activity: handleGetClientActivity,
   get_chain_upgrades: handleGetChainUpgrades,
   get_forks: handleGetForks,
+  get_timeline: handleGetTimeline,
   get_provider_stats: handleGetProviderStats,
 };
 

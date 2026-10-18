@@ -119,6 +119,18 @@ describe('getLiveIncidents', () => {
     expect(rpc.url).toBe('https://new');
   });
 
+  it('keeps the newest confident classification when the newest update has none', async () => {
+    const planned = { class: 'planned_software_update' };
+    proxyFetch.mockResolvedValue(okResponse([
+      feedEvent({ publishedAt: '2026-07-05T09:00:00Z', enrichment: { class: 'other' } }),
+      feedEvent({ publishedAt: '2026-07-05T10:00:00Z', enrichment: planned }),
+      feedEvent({ publishedAt: '2026-07-05T11:00:00Z', enrichment: { class: 'other', lowConfidence: true } }),
+      feedEvent({ publishedAt: '2026-07-05T12:00:00Z', url: 'https://new', status: 'monitoring' })
+    ]));
+    const [rpc] = (await getLiveIncidents()).incidents;
+    expect(rpc).toMatchObject({ url: 'https://new', status: 'monitoring', enrichment: planned });
+  });
+
   it('filters by type, chainId and provider', async () => {
     proxyFetch.mockResolvedValue(okResponse([
       feedEvent(),

@@ -980,6 +980,23 @@ function classifyKind(ev) {
     if (SCHEDULED_STATUSES.has(ev.status)) return 'scheduled';
     return 'incident';
 }
+// Planned work by the feed's classification as well as by status — the same rule the API applies
+// (src/domain/plannedWork.js). Providers post upgrades under incident statuses ("Scheduled
+// protocol upgrade (Polygon mainnet)" as `monitoring`, "Alpenglow Regenesis" through
+// `monitoring`), and status alone listed each as an open outage. A low-confidence class does
+// not override the status.
+const PLANNED_WORK_CLASSES = new Set([
+    'planned_hard_fork', 'planned_software_update', 'urgent_software_fix',
+    'scheduled_maintenance', 'hard_fork', 'software_update'
+]);
+function isPlannedClass(enr) {
+    return Boolean(enr) && enr.lowConfidence !== true && PLANNED_WORK_CLASSES.has(enr.class);
+}
+// The enrichment arrives on its own (inline on the backfill, or as a later WS frame), so the
+// kind is settled from both once they are in, not at ingest.
+function settleKind(it) {
+    it.kind = SCHEDULED_STATUSES.has(it.rawStatus) || isPlannedClass(incidents.enrichByKey.get(it.key)?.confident) ? 'scheduled' : 'incident';
+}
 // No impact/urgency escalation here, deliberately — an earlier attempt at one was wrong twice
 // over. `urgency` grades PLANNED work (standard/urgent/mandatory), and providers bolt "[Urgent]"
 // onto ordinary upgrade titles and add or drop it between updates of the same window, so
@@ -1110,6 +1127,7 @@ function scheduleIncidentRepaint() {
     if (incidentRepaintTimer) return;
     incidentRepaintTimer = setTimeout(() => {
         incidentRepaintTimer = null;
+        for (const it of incidents.items) settleKind(it);
         buildOpenIncidentIndex();
         repaintIncidentSurfaces();
     }, 120);
@@ -1169,8 +1187,21 @@ function applyEnrichment(key, enr, atMs) {
     incidents.enrichmentAvailable = true;
     const at = enrichmentStamp(enr, atMs);
     const prev = incidents.enrichByKey.get(key);
-    if (prev && prev.at > at) return false;
-    incidents.enrichByKey.set(key, { data: enr, at });
+    // The newest CONFIDENT classification is kept on its own: it decides planned work vs
+    // incident (settleKind), as isPlannedGroup does on the API, and a later low-confidence
+    // reading of another update must not undo it. The newest one of any confidence is shown.
+    const confident = enr.lowConfidence !== true && (!prev?.confident || prev.confidentAt <= at);
+    if (prev && prev.at > at) {
+        if (!confident) return false;
+        incidents.enrichByKey.set(key, { ...prev, confident: enr, confidentAt: at });
+        return true;
+    }
+    incidents.enrichByKey.set(key, {
+        data: enr,
+        at,
+        confident: confident ? enr : prev?.confident ?? null,
+        confidentAt: confident ? at : prev?.confidentAt ?? null
+    });
     return true;
 }
 function scheduleEnrichmentRerender() {
@@ -4055,6 +4086,11 @@ function openChainDetail(chainId, opts = {}) {
     clientSec.classList.add('hidden');
     body.appendChild(clientSec);
 
+    // ── hardfork history (/timeline) — hidden until it answers with at least one ──
+    const forkSec = drawerSection('Hardforks');
+    forkSec.classList.add('hidden');
+    body.appendChild(forkSec);
+
     // ── forum ──
     const forumBox = el('div', { class: 'rpc-list' });
     const forumSec = drawerSection('Recent forum posts');
@@ -4075,6 +4111,7 @@ function openChainDetail(chainId, opts = {}) {
     loadChainDetail(chainId, extraBox, researchSec);
     loadForumNews(chainId, forumBox, forumSec);
     loadNetworkClients(chainId, clientSec);
+    loadChainHardforks(chainId, forkSec);
     loadLiveRpc(chainId, rpcBox, headCell);
     loadLiveClients(chainId, clientBox);
 }
@@ -4432,6 +4469,50 @@ async function loadForumNews(chainId, box, section) {
         section.classList.remove('hidden');
     } catch { /* section stays hidden */ }
     finally { clearTimeout(timer); }
+}
+
+// The chain's hardforks from /timeline: what is coming, then history newest first, each with how
+// many client releases and provider rollouts the feeds tie to it. History reaches as far back
+// as the feeds' archives do — client releases go back years, provider posts only weeks.
+const DRAWER_FORK_ROWS = 8;
+async function loadChainHardforks(chainId, section) {
+    let d;
+    try { d = await api(`/timeline?chainId=${chainId}&type=hardfork&limit=100`); } catch { return; }
+    if (openChainId !== chainId) return;
+    const forks = d.entries || [];
+    if (!forks.length) return;
+    const list = el('div', { class: 'fork-list' });
+    const row = (f) => {
+        const at = Date.parse(f.activationAt || '');
+        const ev = evidenceOf(f);
+        const when = Number.isFinite(at)
+            ? new Date(at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+            : 'date TBA';
+        const counts = [
+            f.counts?.releases ? `${f.counts.releases} release${f.counts.releases === 1 ? '' : 's'}` : null,
+            f.counts?.providerUpdates ? `${f.counts.providerUpdates} provider${f.counts.providerUpdates === 1 ? '' : 's'}` : null,
+            f.counts?.followedByIncidents ? `↯ ${f.counts.followedByIncidents} after` : null
+        ].filter(Boolean).join(' · ');
+        return el('div', { class: `fork-row${f.phase === 'upcoming' ? ' pending' : ''}` }, [
+            el('span', { class: 'fork-when mono', title: ev.title, text: when }),
+            f.url ? el('a', { href: safeUrl(f.url), target: '_blank', rel: 'noopener', text: f.name || f.title })
+                : el('span', { text: f.name || f.title }),
+            f.layerName ? el('span', { class: 'dim', text: `(${f.layerName})` }) : null,
+            el('span', { class: 'fork-meta dim', text: [f.phase === 'upcoming' ? 'upcoming' : null, counts].filter(Boolean).join(' · ') })
+        ]);
+    };
+    for (const f of forks.slice(0, DRAWER_FORK_ROWS)) list.appendChild(row(f));
+    if (forks.length > DRAWER_FORK_ROWS) {
+        const more = el('button', {
+            class: 'btn r-more', type: 'button', text: `Show all ${forks.length}`,
+            onclick: () => { for (const f of forks.slice(DRAWER_FORK_ROWS)) list.appendChild(row(f)); more.remove(); }
+        });
+        section.appendChild(list);
+        section.appendChild(more);
+    } else {
+        section.appendChild(list);
+    }
+    section.classList.remove('hidden');
 }
 
 function clientNameVersion(cv) {
@@ -6351,8 +6432,10 @@ async function loadNetworkClients(chainId, sec) {
 // point is that ten upgrades are pending — and the future half is drawn hatched
 // so "scheduled" never reads as "happened".
 const timeline = {
+    // Events from /timeline: hardforks, software updates and maintenance, each carrying its
+    // grouped releases, provider rollouts, news and fallout.
     upgrades: [], loaded: false, loading: false, error: null, ticker: null,
-    stream: 'all', rangeDays: 7, sort: 'time',
+    stream: 'all', type: 'all', rangeDays: 7, sort: 'time',
     // Domain + bucketing of the chart as last drawn, read by the hover layer.
     hover: null
 };
@@ -6371,13 +6454,26 @@ const TL_EVIDENCE = {
     scheduled: { label: 'scheduled', cls: 'ev-exact', title: 'A scheduled entry set the start time.' },
     started: { label: 'observed start', cls: 'ev-approx', title: 'Seen in progress — the run had begun by this time.' },
     completed: { label: 'completed by', cls: 'ev-approx', title: 'Only a completion post exists: an upper bound on the run, not its start.' },
-    announced: { label: 'date not announced', cls: 'ev-unknown', title: 'Announced with no date. The provider has not said when it runs.' }
+    announced: { label: 'date not announced', cls: 'ev-unknown', title: 'Announced with no date. The provider has not said when it runs.' },
+    // Fork activations (see /forks).
+    stated: { label: 'stated', cls: 'ev-exact', title: 'A source stated the activation time — the network, a client release or a provider.' },
+    observed: { label: 'observed', cls: 'ev-approx', title: 'Derived from a block height the chain has already reached.' },
+    estimated: { label: 'estimated', cls: 'ev-approx', title: 'A block height still ahead, times the average block rate — approximate.' },
+    released: { label: 'release date', cls: 'ev-exact', title: 'No rollout window was posted; this is when the client released it.' }
 };
+// What kind of event a row is. Software updates are planned work, never incidents.
+const TL_TYPES = [
+    ['all', 'All'],
+    ['hardfork', 'Hardforks'],
+    ['software_update', 'Software updates'],
+    ['maintenance', 'Maintenance']
+];
+const TL_TYPE_LABEL = { hardfork: 'hardfork', software_update: 'software update', maintenance: 'maintenance' };
 function evidenceOf(u) { return TL_EVIDENCE[u.activationEvidence] ?? TL_EVIDENCE.announced; }
 function isDated(u) { return timelineActivationMs(u) != null; }
 
 const TL_STREAMS = [
-    ['all', 'All windows'],
+    ['all', 'All events'],
     ['upcoming', 'Upcoming'],
     ['undated', 'Date TBA'],
     ['active', 'In progress'],
@@ -6397,19 +6493,43 @@ function ensureTimelineView() {
 
 async function loadTimeline() {
     try {
-        const d = await api('/upgrades?limit=200');
-        timeline.upgrades = d.upgrades || [];
+        try {
+            const d = await api('/timeline?limit=1000');
+            timeline.upgrades = d.entries || [];
+        } catch (err) {
+            // An older chains-api has no /timeline — the Pages dashboard can front-run the API
+            // rollout — so fall back to its provider windows rather than showing nothing.
+            if (!/→ 404$/.test(err?.message || '')) throw err;
+            const d = await api('/upgrades?limit=200');
+            timeline.upgrades = (d.upgrades || []).map(upgradeAsEvent);
+        }
         timeline.loaded = true;
         timeline.error = null;
     } catch (err) {
-        // A 404 means an older chains-api deployment — the Pages dashboard
-        // can front-run the API rollout — so say that instead of a generic
-        // failure. Anything else is retried on the next visit to the tab.
+        // A 404 on both means an API older still; say that instead of a generic failure.
+        // Anything else is retried on the next visit to the tab.
         timeline.error = /→ 404$/.test(err?.message || '') ? 'old-api' : 'down';
     } finally {
         timeline.loading = false;
     }
     renderTimeline();
+}
+
+// A provider window from /upgrades in the /timeline event shape.
+function upgradeAsEvent(u) {
+    return {
+        ...u,
+        id: u.incidentId || u.title,
+        type: (u.software || []).length ? 'software_update' : 'maintenance',
+        providers: u.provider ? [u.provider] : [],
+        releases: [],
+        providerUpdates: [{ provider: u.provider, title: u.title, url: u.url, status: u.status, activationAt: u.activationAt, activationEvidence: u.activationEvidence }],
+        news: [
+            ...(u.discussion || []).map(d => ({ ...d, feed: 'forum' })),
+            ...(u.coverage || []).map(c => ({ ...c, feed: 'news' }))
+        ],
+        phase: null
+    };
 }
 
 function timelineActivationMs(u) {
@@ -6419,20 +6539,34 @@ function timelineActivationMs(u) {
 
 function timelineMatchesSearch(u, q) {
     if ((u.title || '').toLowerCase().includes(q) || (u.provider || '').toLowerCase().includes(q)) return true;
+    if ([u.name, u.layerName].some(n => (n || '').toLowerCase().includes(q))) return true;
+    if ((u.providers || []).some(p => p.toLowerCase().includes(q))) return true;
+    if ((u.releases || []).some(r => `${r.repo || ''} ${r.version || ''}`.toLowerCase().includes(q))) return true;
     if ((u.networkNames || []).some(n => n.toLowerCase().includes(q))) return true;
     if ((u.software || []).some(s => `${s.client || ''} ${s.version || ''}`.toLowerCase().includes(q))) return true;
     return (u.chainIds || []).some(id => String(id).includes(q) || state.byId.get(id)?.name?.toLowerCase().includes(q));
+}
+
+// Whether an event is still to come — the API's forkPhase rule, on the live clock: a cancelled
+// fork never is, whatever its date, and a date-only activation stays pending until that UTC
+// day is over (it is not "done" at midnight it began).
+function timelinePending(u, now) {
+    if (u.phase === 'cancelled') return false;
+    const ms = timelineActivationMs(u);
+    if (ms == null) return false;
+    return (u.activationPrecision === 'day' ? ms + 864e5 : ms) > now;
 }
 
 // Which stream tab an upgrade belongs to. Pending is decided by the clock, not
 // by status: providers leave a window labelled "scheduled" long after it ran.
 function timelineStreamOf(u, now) {
     const ms = timelineActivationMs(u);
+    if (u.phase === 'cancelled') return 'done';
     // Undated but not finished: announced, day unknown. Calling this 'done' would file a
     // pending fork under history purely because nobody has named the date yet.
-    if (ms == null) return u.status === 'maintenance_completed' ? 'done' : 'undated';
-    if (ms > now) return 'upcoming';
-    if (u.status === 'maintenance_in_progress') return 'active';
+    if (ms == null) return u.status === 'maintenance_completed' || u.phase === 'past' ? 'done' : 'undated';
+    if (timelinePending(u, now)) return 'upcoming';
+    if (u.status === 'maintenance_in_progress' || (u.providerUpdates || []).some(p => p.status === 'maintenance_in_progress')) return 'active';
     return 'done';
 }
 
@@ -6469,8 +6603,8 @@ function renderTimeline() {
 
     if (timeline.error) {
         const msg = timeline.error === 'old-api'
-            ? 'Timeline requires a newer chains-api — the API this dashboard points at doesn’t serve /upgrades yet.'
-            : 'Upgrade timeline unavailable — the /upgrades feed didn’t answer. Revisit the tab to retry.';
+            ? 'Timeline requires a newer chains-api — the API this dashboard points at doesn’t serve /timeline yet.'
+            : 'Event timeline unavailable — the API didn’t answer. Revisit the tab to retry.';
         rowsWrap.textContent = '';
         rowsWrap.appendChild(el('div', { class: 'feed-empty', text: msg }));
         timeline.hover = null;
@@ -6481,13 +6615,14 @@ function renderTimeline() {
     }
     if (!timeline.loaded) {
         rowsWrap.textContent = '';
-        rowsWrap.appendChild(el('div', { class: 'feed-empty', text: 'Loading upgrade timeline…' }));
+        rowsWrap.appendChild(el('div', { class: 'feed-empty', text: 'Loading event timeline…' }));
         return;
     }
     byId('timelineChartWrap')?.removeAttribute('hidden');
 
     const now = Date.now();
-    const searched = searchQuery ? timeline.upgrades.filter(u => timelineMatchesSearch(u, searchQuery)) : timeline.upgrades;
+    const typed = timeline.type === 'all' ? timeline.upgrades : timeline.upgrades.filter(u => u.type === timeline.type);
+    const searched = searchQuery ? typed.filter(u => timelineMatchesSearch(u, searchQuery)) : typed;
     const [lo, hi] = timelineDomain(searched, now);
     // The chart shows everything the search matched inside the window; the tabs
     // then slice that set, so tab counts always describe what the chart draws.
@@ -6506,22 +6641,26 @@ function renderTimeline() {
     if (meta) meta.textContent = `${timeline.upgrades.length} tracked`;
     // Only a DATED window can be counted down to. An undated announcement must never
     // produce a "next window in ..." headline.
-    const nextUp = searched.filter(isDated).map(timelineActivationMs).filter(t => t > now).sort((a, b) => a - b)[0];
+    // A cancelled fork is never counted down to.
+    const u = searched.filter(x => isDated(x) && x.phase !== 'cancelled' && timelineActivationMs(x) > now)
+        .sort((a, b) => timelineActivationMs(a) - timelineActivationMs(b))[0];
+    const nextUp = u ? timelineActivationMs(u) : null;
     const notice = byId('timelineNextNotice');
     if (notice) {
         notice.textContent = '';
         if (nextUp != null) {
-            const u = searched.find(x => timelineActivationMs(x) === nextUp);
-            notice.appendChild(el('span', { class: 'tlx-next-label', text: 'Next window' }));
+            notice.appendChild(el('span', { class: 'tlx-next-label', text: u.type === 'hardfork' ? 'Next hardfork' : 'Next event' }));
             notice.appendChild(el('span', { class: 'tlx-next-count mono tl-countdown', 'data-at': String(nextUp), text: countdownText(nextUp - now) }));
-            notice.appendChild(el('span', { class: 'tlx-next-title', text: `${timelineNetworkLabel(u)} · ${u.title}` }));
+            // A software update's title already leads with its network ("Base · 1.5.0").
+            const label = timelineNetworkLabel(u);
+            notice.appendChild(el('span', { class: 'tlx-next-title', text: u.title.startsWith(label) ? u.title : `${label} · ${u.title}` }));
             notice.hidden = false;
         } else {
             notice.hidden = true;
         }
     }
 
-    if (searched.some(u => (timelineActivationMs(u) ?? 0) > now)) startTimelineTicker(); else stopTimelineTicker();
+    if (searched.some(u => timelinePending(u, now))) startTimelineTicker(); else stopTimelineTicker();
 }
 
 function renderTimelineTabs(inRange, now) {
@@ -6639,7 +6778,7 @@ function renderTimelinePins(inRange, selected, x, now) {
     host.textContent = '';
     const weight = (u) => (u.followedByIncidents?.length ? 100 : 0)
         + (/urgent|critical|mandatory/i.test(u.urgency || '') ? 40 : 0)
-        + ((timelineActivationMs(u) ?? 0) > now ? 20 : 0);
+        + (timelinePending(u, now) ? 20 : 0);
     const picked = [...inRange].sort((a, b) => weight(b) - weight(a) || (timelineActivationMs(b) ?? 0) - (timelineActivationMs(a) ?? 0))
         .filter(u => weight(u) > 0).slice(0, 8)
         .sort((a, b) => (timelineActivationMs(a) ?? 0) - (timelineActivationMs(b) ?? 0));
@@ -6771,7 +6910,7 @@ function renderTimelineTooltip(tip, items, at, spanMs) {
     const now = Date.now();
     for (const u of items.slice(0, TL_TOOLTIP_ROWS)) {
         const ms = timelineActivationMs(u);
-        const pending = ms != null && ms > now;
+        const pending = timelinePending(u, now);
         tip.appendChild(el('div', { class: 'tlx-tip-row' }, [
             el('span', { class: `tlx-tip-dot ${urgencyClass(u.urgency)}` }),
             el('span', {
@@ -6814,7 +6953,7 @@ function renderTimelineRows(items, now) {
     if (count) count.textContent = `${items.length} in range${searchQuery ? ` · “${searchQuery}”` : ''}`;
 
     if (!items.length) {
-        wrap.appendChild(el('div', { class: 'feed-empty', text: searchQuery ? 'Nothing matches.' : 'No windows in this range.' }));
+        wrap.appendChild(el('div', { class: 'feed-empty', text: searchQuery ? 'Nothing matches.' : 'No events in this range.' }));
         return;
     }
 
@@ -6832,7 +6971,7 @@ function renderTimelineRows(items, now) {
         // Default and tiebreak: pending soonest-first, then history newest-first.
         const ta = timelineActivationMs(a) ?? 0;
         const tb = timelineActivationMs(b) ?? 0;
-        const aP = ta > now, bP = tb > now;
+        const aP = timelinePending(a, now), bP = timelinePending(b, now);
         if (aP !== bP) return aP ? -1 : 1;
         return aP ? ta - tb : tb - ta;
     });
@@ -6846,7 +6985,7 @@ function renderTimelineRows(items, now) {
             // Qualify the pending one or the two runs read as a rendering bug.
             const actMs = timelineActivationMs(u);
             const day = timelineDayBucket(actMs, now);
-            const bucket = actMs != null && actMs > now ? `${day} · scheduled` : day;
+            const bucket = timelinePending(u, now) ? `${day} · scheduled` : day;
             if (bucket !== lastBucket) {
                 lastBucket = bucket;
                 wrap.appendChild(el('div', { class: 'tlx-daybreak', text: bucket }));
@@ -6864,13 +7003,18 @@ function timelineDayBucket(ms, now) {
     if (days === 0) return 'Today';
     if (days === 1) return 'Tomorrow';
     if (days === -1) return 'Yesterday';
-    return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    // Fork history reaches back years; a bare "Tue, Dec 3" would not say which.
+    const year = d.getFullYear() !== today.getFullYear() ? { year: 'numeric' } : {};
+    return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', ...year });
 }
 
 function timelineNetworkLabel(u) {
-    const names = u.networkNames?.length ? u.networkNames
-        : (u.chainIds || []).map(id => state.byId.get(id)?.name).filter(Boolean);
-    return names[0] || u.provider || 'Unknown';
+    // A fork's network names are grouping scopes ("ethereum sepolia"); the registry's name for
+    // its chain reads better wherever there is one.
+    const registry = (u.chainIds || []).map(id => state.byId.get(id)?.name).filter(Boolean);
+    const names = u.type === 'hardfork' && registry.length ? registry
+        : u.networkNames?.length ? u.networkNames : registry;
+    return names[0] || u.network || u.provider || 'Unknown';
 }
 
 // "in 2d 4h" / "in 35m" — the live part of a pending row.
@@ -6936,26 +7080,62 @@ function timelineFalloutRows(u) {
         ]));
 }
 
-// Context: governance discussion (forum) and editorial coverage (news) around
-// the window. Deduped by URL — the same ACD call is often carried by both
-// feeds, and two identical links under one window reads as a bug.
-function timelineContextRows(u) {
-    const row = (label, item) => el('div', { class: 'tl-context' }, [
-        el('span', { class: 'tl-context-kind', text: label }),
-        el('a', { href: safeUrl(item.url), target: '_blank', rel: 'noopener', text: item.title }),
-        item.publishedAt ? el('span', { class: 'muted', text: relTime(item.publishedAt) }) : null
-    ]);
+// What the feeds say about the event, grouped: the client releases that ship it, each
+// provider's rollout, and the news and forum posts about it. Deduped by URL — the same ACD call
+// is often carried by both news feeds, and two identical links read as a bug.
+const TL_GROUP_ROWS = 4;
+function timelineGroupRows(u) {
+    const link = (item, text) => item.url
+        ? el('a', { href: safeUrl(item.url), target: '_blank', rel: 'noopener', text })
+        : el('span', { text });
+    const head = (label, total) => el('div', { class: 'tl-group-head', text: total > TL_GROUP_ROWS ? `${label} · ${total}` : label });
+    const rows = [];
+
+    const releases = u.releases || [];
+    if (releases.length) {
+        rows.push(head('Client releases', u.counts?.releases ?? releases.length));
+        for (const r of releases.slice(0, TL_GROUP_ROWS)) {
+            rows.push(el('div', { class: 'tl-context' }, [
+                el('span', { class: 'tl-context-kind mono', text: r.repo || 'release' }),
+                link(r, r.version || r.title || 'release'),
+                r.mandatory ? el('span', { class: 'tlx-chip-dim', text: 'mandatory' }) : null,
+                r.publishedAt ? el('span', { class: 'muted', text: relTime(r.publishedAt) }) : null
+            ]));
+        }
+    }
+
+    // A window that IS the row (a maintenance entry) is not repeated under itself.
+    const rollouts = (u.providerUpdates || []).filter(p => !(u.type === 'maintenance' && p.title === u.title));
+    if (rollouts.length) {
+        rows.push(head('Provider rollouts', u.counts?.providerUpdates ?? rollouts.length));
+        for (const p of rollouts.slice(0, TL_GROUP_ROWS)) {
+            const at = Date.parse(p.activationAt || '');
+            rows.push(el('div', { class: 'tl-context' }, [
+                el('span', { class: 'tl-context-kind', text: p.provider || 'provider' }),
+                link(p, p.title || 'window'),
+                Number.isFinite(at) ? el('span', { class: 'muted', text: new Date(at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }) : null
+            ]));
+        }
+    }
+
     const seen = new Set();
-    const fresh = (list) => (list || []).filter(i => {
-        const k = (i.url || i.title || '').toLowerCase();
+    const news = (u.news || []).filter(n => {
+        const k = (n.url || n.title || '').toLowerCase();
         if (seen.has(k)) return false;
         seen.add(k);
         return true;
     });
-    return [
-        ...fresh(u.discussion).slice(0, 2).map(d => row('discussion', d)),
-        ...fresh(u.coverage).slice(0, 2).map(c => row('coverage', c))
-    ];
+    if (news.length) {
+        rows.push(head('News & discussion', u.counts?.news ?? news.length));
+        for (const n of news.slice(-TL_GROUP_ROWS).reverse()) {
+            rows.push(el('div', { class: 'tl-context' }, [
+                el('span', { class: 'tl-context-kind', text: n.source || (n.feed === 'forum' ? 'forum' : 'news') }),
+                link(n, n.title || n.url),
+                n.publishedAt ? el('span', { class: 'muted', text: relTime(n.publishedAt) }) : null
+            ]));
+        }
+    }
+    return rows;
 }
 
 // One row. Time leads (this is a timeline), then network + title, then the
@@ -6986,20 +7166,31 @@ function timelineRow(u, now) {
     for (const s of (u.software || []).slice(0, 3)) {
         chips.push(el('span', { class: 'sw-chip mono', text: [s.client, s.version].filter(Boolean).join(' ') }));
     }
+    const releaseCount = u.counts?.releases ?? (u.releases || []).length;
+    if (releaseCount) chips.push(el('span', { class: 'tlx-chip-dim', text: `${releaseCount} release${releaseCount === 1 ? '' : 's'}` }));
+    const providerCount = (u.providers || []).length;
+    if (providerCount > 1) chips.push(el('span', { class: 'tlx-chip-dim', text: `${providerCount} providers` }));
     if (u.windowMinutes) chips.push(el('span', { class: 'tlx-chip-dim mono', text: fmtDuration(u.windowMinutes * 60000) }));
     // How well the time is known, on every row — the reader should never have to guess
     // whether "02:36 PM" is a stated window or the moment someone posted a notice.
     chips.push(el('span', { class: `tlx-chip-ev ${ev.cls}`, title: ev.title, text: ev.label }));
     if (fallout) chips.push(el('span', { class: 'tlx-chip-fallout', text: `↯ ${fallout} incident${fallout === 1 ? '' : 's'} after` }));
 
-    const detail = [...timelineFalloutRows(u), ...timelineContextRows(u)];
+    const fallRows = timelineFalloutRows(u);
+    const detail = [
+        ...(fallRows.length ? [el('div', { class: 'tl-group-head', text: 'Incidents after activation' }), ...fallRows] : []),
+        ...timelineGroupRows(u)
+    ];
 
     const head = el('div', { class: 'tlx-row-head' }, [
         el('span', { class: `tlx-row-dot ${urgencyClass(u.urgency)}` }),
         when,
         el('span', { class: 'tlx-row-main' }, [
+            u.type ? el('span', { class: `tlx-type tlx-type-${u.type}`, text: TL_TYPE_LABEL[u.type] || u.type }) : null,
             u.url ? el('a', { class: 'tlx-row-title', href: safeUrl(u.url), target: '_blank', rel: 'noopener', text: u.title })
                 : el('span', { class: 'tlx-row-title', text: u.title }),
+            // The name the client used when it differs from the combined one: Glamsterdam (Gloas).
+            u.layerName ? el('span', { class: 'tlx-row-sub muted', text: `(${u.layerName})` }) : null,
             // The network resolves to a registry chain often enough to be worth a link, and a
             // chip here behaves like the affected-chain chips on incident cards. When it does
             // not resolve it stays plain text rather than becoming a dead control.
@@ -7012,7 +7203,7 @@ function timelineRow(u, now) {
         ]),
         el('span', { class: 'tlx-row-chips' }, chips),
         urgencyPill(u.urgency),
-        feedbackAffordance({ kind: 'upgrade', refId: u.incidentId || u.title })
+        feedbackAffordance({ kind: 'upgrade', refId: u.id || u.incidentId || u.title })
     ]);
 
     if (!detail.length) return el('div', { class: `tlx-row${pending ? ' pending' : ''}` }, [head]);
@@ -7045,6 +7236,20 @@ function initTimelineControls() {
                 onclick: () => {
                     timeline.rangeDays = days;
                     rangeBar.querySelectorAll('.tlx-range-btn').forEach(b => b.classList.toggle('active', Number(b.dataset.days) === days));
+                    renderTimeline();
+                }
+            }));
+        }
+    }
+    const typeBar = byId('timelineType');
+    if (typeBar && !typeBar.childElementCount) {
+        for (const [key, label] of TL_TYPES) {
+            typeBar.appendChild(el('button', {
+                class: `tlx-range-btn${timeline.type === key ? ' active' : ''}`,
+                'data-type': key, text: label,
+                onclick: () => {
+                    timeline.type = key;
+                    typeBar.querySelectorAll('.tlx-range-btn').forEach(b => b.classList.toggle('active', b.dataset.type === key));
                     renderTimeline();
                 }
             }));

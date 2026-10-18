@@ -1,6 +1,6 @@
 import { getForkMentions } from '../sources/forkFeeds.js';
 import { getExplorerTip } from '../sources/blockscout.js';
-import { buildForks, forkPhase, sortForks, FORK_PHASE, FORK_KIND, registryScopes, scopeLookups } from '../domain/forks.js';
+import { buildForks, forkPhase, sortForks, FORK_PHASE, FORK_KIND, registryScopes, scopeLookups, normalizeForkName } from '../domain/forks.js';
 import { getAllChains } from '../store/queries.js';
 import { logger } from '../util/logger.js';
 
@@ -64,12 +64,71 @@ function chainResolver(chains) {
     }
   }
   return (scope) => {
+    // "mainnet" is The Graph's id for Ethereum, not a name a fork notice means Ethereum by.
+    if (BARE_NETWORK.test(scope ?? '')) return [];
     // Most specific first: "ethereum sepolia", then "sepolia" (the registry's name for 11155111).
     for (const candidate of scopeLookups(scope)) {
       const ids = [...(byScope.get(candidate) ?? [])];
       if (ids.length) return ids.length <= MAX_CHAINS_PER_SCOPE ? ids : [];
     }
     return [];
+  };
+}
+
+// A fork network that is only a qualifier: "Mainnet", "Testnet". Release notes write it
+// because the repository already says which network — Forest's notes put Filecoin's Solstice
+// on "Mainnet", Heimdall's put Polygon's Lugano there — and as a scope it resolved through the
+// registry's graph id for Ethereum (`mainnet`), filing both under chain 1.
+const BARE_NETWORK = /^(main ?net|main|test ?net|devnet|l1|l2)$/;
+const TEST_QUALIFIER = /^(test ?net|devnet)$/;
+
+function isTestChain(chain) {
+  return Array.isArray(chain?.tags) && chain.tags.includes('Testnet');
+}
+
+const TEST_NAME = /\b(testnet|test|devnet|sepolia|holesky|hoodi|goerli|amoy|mumbai|chapel|fuji|futurenet|preview|preprod|staging|signet)\b/i;
+
+/** Whether a named network is a test network: by its registry tag, else by its name. */
+function isTestName(name, byName) {
+  const chain = byName.get(normalizeForkName(name)) ?? byName.get(normalizeForkName(name).replace(/ testnet$/, ''));
+  return chain ? isTestChain(chain) : TEST_NAME.test(name);
+}
+
+/**
+ * A mention whose fork network is a bare qualifier, with the network read from its own chains:
+ * the one chain of that kind it names ("Mainnet" + chains 314 and 314159 → "Filecoin -
+ * Mainnet"). When none or several qualify, the network is dropped, and with no chain of the
+ * stated kind at all the chains go too — Heimdall's "Mainnet" Lugano release names only Amoy,
+ * and keeping it would put Polygon mainnet's fork under the testnet.
+ */
+export function qualifyBareNetwork(mention, byId) {
+  const fork = mention?.enrichment?.fork;
+  const bare = normalizeForkName(fork?.network ?? '');
+  if (!bare || !BARE_NETWORK.test(bare)) return mention;
+  const wantTest = TEST_QUALIFIER.test(bare);
+  const anyKind = bare === 'l1' || bare === 'l2';
+  const ids = [...new Set([...(mention.chains ?? []).map((c) => c.chainId), ...(mention.enrichment.chains ?? [])])];
+  const matching = ids.filter((id) => byId.has(id) && (anyKind || isTestChain(byId.get(id)) === wantTest));
+  const network = matching.length === 1 ? byId.get(matching[0]).name : null;
+  const keepChains = matching.length > 0;
+  // The named networks are scopes too (forkScopes), and resolve back to chains: a "Mainnet"
+  // fork naming only Amoy would come back as an Amoy fork through them. Same qualifier rule.
+  let byName = null;
+  const affectedChains = Array.isArray(mention.enrichment.affectedChains) && !anyKind
+    ? mention.enrichment.affectedChains.filter((name) => {
+      byName ??= new Map([...byId.values()].filter((c) => c?.name).map((c) => [normalizeForkName(c.name).replace(/ testnet$/, ''), c]));
+      return typeof name === 'string' && isTestName(name, byName) === wantTest;
+    })
+    : mention.enrichment.affectedChains;
+  return {
+    ...mention,
+    chains: keepChains ? (mention.chains ?? []).filter((c) => matching.includes(c.chainId)) : [],
+    enrichment: {
+      ...mention.enrichment,
+      chains: keepChains ? (mention.enrichment.chains ?? []).filter((id) => matching.includes(id)) : [],
+      ...(affectedChains !== undefined ? { affectedChains } : {}),
+      fork: { ...fork, network }
+    }
   };
 }
 
@@ -88,7 +147,8 @@ export function _resetForksMemoForTests() {
 async function builtForks(mentions, fetchedAt) {
   const chains = getAllChains();
   if (memo.forks && memo.mentions === mentions && memo.fetchedAt === fetchedAt && memo.chains === chains) return memo.forks;
-  const forks = (await buildForks(mentions, { tipFor, chainIdsFor: chainResolver(chains) })).map(present);
+  const byId = new Map(chains.map((c) => [c.chainId, c]));
+  const forks = (await buildForks(mentions.map((m) => qualifyBareNetwork(m, byId)), { tipFor, chainIdsFor: chainResolver(chains) })).map(present);
   memo = { mentions, fetchedAt, chains, forks };
   return forks;
 }
@@ -105,12 +165,7 @@ async function builtForks(mentions, fetchedAt) {
  * @param {number} [opts.limit]
  */
 export async function getForks({ chainId, phase, scheduledOnly = false, include, limit = DEFAULT_LIMIT } = {}) {
-  const { mentions, fetchedAt, feeds } = await getForkMentions();
-  const now = Date.now();
-  const forks = sortForks((await builtForks(mentions, fetchedAt)).map((f) => ({
-    ...f,
-    phase: forkPhase({ activationAt: f.activationAt, state: f.state, activationPrecision: f.activationPrecision }, now)
-  })));
+  const { forks, fetchedAt, feeds } = await getAllForks();
 
   let filtered = forks;
   if (chainId != null) filtered = filtered.filter((f) => f.chains.includes(Number(chainId)));
@@ -155,6 +210,20 @@ export async function getForks({ chainId, phase, scheduledOnly = false, include,
   };
 }
 
+/**
+ * Every fork entity, unfiltered and uncapped, phase current as of now — for the timeline,
+ * which joins provider windows and releases onto them and must see all of them to do it.
+ */
+export async function getAllForks() {
+  const { mentions, fetchedAt, feeds } = await getForkMentions();
+  const now = Date.now();
+  const forks = sortForks((await builtForks(mentions, fetchedAt)).map((f) => ({
+    ...f,
+    phase: forkPhase({ activationAt: f.activationAt, state: f.state, activationPrecision: f.activationPrecision }, now)
+  })));
+  return { forks, fetchedAt, feeds };
+}
+
 function includesUpgrades(include) {
   const list = Array.isArray(include) ? include : String(include ?? '').split(',');
   return list.some((v) => String(v).trim() === 'upgrades');
@@ -193,6 +262,11 @@ function present(fork) {
       publishedAt: e.publishedAt,
       status: e.status,
       provider: e.statusPage?.id ?? null,
+      // What the item is about, by the feed's classifier: a client release, a provider's
+      // software update, a fork announcement. The timeline groups a fork's events on it.
+      class: e.enrichment?.class ?? null,
+      // A client release names the version operators run for this fork.
+      ...(e.release ? { release: e.release } : {}),
       // What THIS source claimed. The fork's activationAt is the strongest claim; sources can
       // disagree, and a reader checking a date needs to see who said what.
       activationAt: e.enrichment?.fork?.activationAt ?? null,

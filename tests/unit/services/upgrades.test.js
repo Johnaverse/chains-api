@@ -386,3 +386,17 @@ describe('grouping across retitles', () => {
     expect(groupEventsByIncident(events)).toHaveLength(2);
   });
 });
+
+describe('buildUpgradeEvents — planned work posted under an incident status', () => {
+  it('lists a classed software update as an upgrade, not as fallout', () => {
+    // QuickNode closed "Ethereum - Sepolia/Hoodi - Upgrade to Geth-v1.17.6" as `resolved`.
+    const window = ev({ incidentId: 'q:win', publishedAt: '2026-07-27T13:00:00.000Z' });
+    const update = ev({
+      incidentId: 'q:upd', title: 'Gnosis - Upgrade to nethermind v1.39.3', status: 'resolved', isWindowEntry: false,
+      publishedAt: '2026-07-27T15:00:00.000Z', enrichment: { class: 'planned_software_update' }
+    });
+    const upgrades = buildUpgradeEvents([window, update], { now: Date.parse('2026-07-28T00:00:00Z') });
+    expect(upgrades.map((u) => u.incidentId).sort()).toEqual(['q:upd', 'q:win']);
+    expect(upgrades.find((u) => u.incidentId === 'q:win').followedByIncidents).toEqual([]);
+  });
+});
