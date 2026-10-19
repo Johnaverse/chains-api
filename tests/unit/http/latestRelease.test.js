@@ -19,7 +19,14 @@ vi.mock('../../../config.js', async (importOriginal) => {
 const registry = vi.hoisted(() => ({ chains: null }));
 vi.mock('../../../src/store/queries.js', async (importOriginal) => {
   const actual = await importOriginal();
-  return { ...actual, searchChains: (q) => registry.chains ?? actual.searchChains(q) };
+  const { TESTNET_REGISTRY } = await import('../../fixtures/testnetRegistry.js');
+  return {
+    ...actual,
+    searchChains: (q) => registry.chains ?? actual.searchChains(q),
+    // The registry is what says which chains and words are test networks.
+    getAllChains: () => TESTNET_REGISTRY,
+    getChainById: (id) => TESTNET_REGISTRY.find((c) => c.chainId === Number(id)) ?? actual.getChainById(id)
+  };
 });
 
 const known = vi.hoisted(() => ({ forks: null }));

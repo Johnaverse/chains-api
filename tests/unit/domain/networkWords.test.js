@@ -1,0 +1,42 @@
+import { describe, it, expect, beforeEach } from 'vitest';
+import { learnNetworkWords, isTestNetworkWord, mentionsTestNetwork, isNetworkName, chainOfBareName } from '../../../src/domain/networkWords.js';
+import { TESTNET_REGISTRY } from '../../fixtures/testnetRegistry.js';
+
+const test = (chainId, name, extra = {}) => ({ chainId, name, tags: ['Testnet'], ...extra });
+
+describe('test-network words, learned from the registry', () => {
+  beforeEach(() => learnNetworkWords([...TESTNET_REGISTRY]));
+
+  it('reads the words that qualify test networks, and no ecosystem name', () => {
+    for (const w of ['sepolia', 'hoodi', 'holesky', 'chapel', 'amoy', 'fuji', 'testnet']) expect(isTestNetworkWord(w)).toBe(true);
+    for (const w of ['ethereum', 'base', 'bnb', 'avalanche', 'mainnet']) expect(isTestNetworkWord(w)).toBe(false);
+    expect(mentionsTestNetwork('Base Sepolia')).toBe(true);
+    expect(mentionsTestNetwork('BNB Smart Chain')).toBe(false);
+  });
+
+  it('calls a name a network only on several test networks', () => {
+    expect(isNetworkName('Hoodi')).toBe(true);
+    expect(isNetworkName('Sepolia testnet')).toBe(true);
+    // One testnet qualifies Chapel: enough to read "BSC Chapel" as a testnet, not to call a fork named so a network.
+    expect(isNetworkName('Chapel')).toBe(false);
+  });
+
+  it('is not misled by a project whose chains are mostly testnets, or a testnet named like a fork', () => {
+    learnNetworkWords([
+      ...TESTNET_REGISTRY,
+      { chainId: 314, name: 'Filecoin - Mainnet', tags: [] },
+      test(314159, 'Filecoin - Calibration testnet'), test(3141, 'Filecoin - Hyperspace testnet'), test(31415926, 'Filecoin Local testnet'),
+      test(9999, 'Foo Istanbul')
+    ]);
+    expect(isTestNetworkWord('filecoin')).toBe(false);
+    expect(isTestNetworkWord('calibration')).toBe(true);
+    // A single testnet named "Istanbul" reads a mention as a testnet, but never makes the fork a network.
+    expect(isNetworkName('Istanbul')).toBe(false);
+  });
+
+  it('finds the chain a bare network name is the registry id of', () => {
+    expect(chainOfBareName('hoodi')?.chainId).toBe(560048);
+    expect(chainOfBareName('chapel')?.chainId).toBe(97);
+    expect(chainOfBareName('nowhere')).toBeNull();
+  });
+});

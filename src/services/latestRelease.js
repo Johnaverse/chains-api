@@ -2,7 +2,8 @@ import { getClientReleases, ClientFeedNotFoundError, MAX_RELEASE_LIMIT } from '.
 import { forkIdentity, forkPhase, isDateOnly, FORK_PHASE } from '../domain/forks.js';
 import { networkSlug } from '../domain/networkSlug.js';
 import { forkAliases } from './timeline.js';
-import { searchChains } from '../store/queries.js';
+import { searchChains, getChainById, getAllChains } from '../store/queries.js';
+import { learnNetworkWords, mentionsTestNetwork, chainOfBareName } from '../domain/networkWords.js';
 import { getAllForks } from './forks.js';
 import { forkDisplayName } from '../domain/forkNames.js';
 
@@ -68,25 +69,31 @@ const titleCase = (s) => s.replace(/\b[a-z]/g, (c) => c.toUpperCase());
  * Sepolia Testnet"). Client notes name Ethereum's testnets bare, so between "Ethereum Hoodi" and
  * "Status Network Hoodi" the Ethereum one is meant.
  */
-// A slug for a test network: the registry tags these, but a release's chain list carries names only.
-const TEST_SLUG = /(?:^|-)(?:testnet|devnet|sepolia|holesky|hoodi|goerli|amoy|chapel|fuji|calibration)(?:-|$)/;
+/** Whether a chain is a test network: its registry tag, else a test-network word in its name. */
+function isTestChain(c) {
+  const known = Number.isFinite(c?.chainId) ? getChainById(c.chainId) : null;
+  return known ? Boolean(known.tags?.includes('Testnet')) : mentionsTestNetwork(c?.name);
+}
 
 function pickChain(slug, chains) {
   // "Mainnet" names the one main network among the release's chains ("Ethereum Mainnet" slugs
   // to "ethereum", so no name rule reaches it).
   if (slug === 'mainnet') {
-    const mains = chains.filter((c) => { const s = networkSlug(c?.name); return s && !TEST_SLUG.test(s); });
+    const mains = chains.filter((c) => networkSlug(c?.name) && !isTestChain(c));
     return mains.length === 1 ? mains[0] : null;
   }
-  // The chain's name may put the ecosystem in front ("Ethereum Hoodi" for "Hoodi") or "Testnet"
-  // behind; the network's name may say "Ethereum" where the registry does not ("Ethereum
-  // Sepolia" for "Sepolia"). Any other prefix is another network: "Base Sepolia" is not Sepolia.
+  // A network named bare is the chain the registry knows by that id or alias ("hoodi" is
+  // Ethereum Hoodi's TheGraph id, "chapel" BSC testnet's), not any chain ending in the word.
+  const bare = chainOfBareName(slug);
+  const isBare = (c) => Boolean(bare) && (c?.chainId === bare.chainId || networkSlug(c?.name) === networkSlug(bare.name));
+  // Otherwise the chain's name may put the ecosystem in front or "Testnet" behind. Any other
+  // prefix is another network: "Base Sepolia" is not Sepolia.
   const matches = chains.filter((c) => {
     const s = networkSlug(c?.name);
-    return s && (s === slug || s.endsWith(`-${slug}`) || slug === `ethereum-${s}` || s === `${slug}-testnet`);
+    return s && (s === slug || s.endsWith(`-${slug}`) || s === `${slug}-testnet` || isBare(c));
   });
   if (matches.length <= 1) return matches[0] ?? null;
-  const exact = matches.filter((c) => networkSlug(c.name) === slug || networkSlug(c.name) === `ethereum-${slug}`);
+  const exact = matches.filter((c) => networkSlug(c.name) === slug || isBare(c));
   return exact.length === 1 ? exact[0] : null;
 }
 
@@ -97,6 +104,7 @@ function pickChain(slug, chains) {
 function chainOfNetwork(network, chains) {
   const slug = networkSlug(network);
   if (!slug) return null;
+  learnNetworkWords(getAllChains());
   const own = pickChain(slug, chains ?? []);
   if (own) return own;
   const hit = pickChain(slug, searchChains(network).filter(Boolean));

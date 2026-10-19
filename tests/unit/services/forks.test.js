@@ -3,6 +3,7 @@ import { getForks, _resetForksMemoForTests, qualifyBareNetwork } from '../../../
 import { getForkMentions } from '../../../src/sources/forkFeeds.js';
 import { getExplorerTip } from '../../../src/sources/blockscout.js';
 import { getAllChains } from '../../../src/store/queries.js';
+import { TESTNET_REGISTRY } from '../../fixtures/testnetRegistry.js';
 
 vi.mock('../../../src/store/queries.js', () => ({ getAllChains: vi.fn(() => []) }));
 
@@ -229,11 +230,13 @@ describe('getForks', () => {
     expect((await getForks({ chainId: 1 })).forks.map(f => f.name)).toEqual(['Glamsterdam']);
   });
   it('resolves a Sepolia fork to the registry\'s Sepolia chain', async () => {
-    getAllChains.mockReturnValue([
+    const own = [
       { chainId: 1, name: 'Ethereum Mainnet' },
-      { chainId: 11155111, name: 'Sepolia' },
-      { chainId: 84532, name: 'Base Sepolia Testnet' }
-    ]);
+      { chainId: 11155111, name: 'Sepolia', tags: ['Testnet'] },
+      { chainId: 84532, name: 'Base Sepolia Testnet', tags: ['Testnet'] }
+    ];
+    // The rest of the registry is what says "Sepolia" names test networks.
+    getAllChains.mockReturnValue([...own, ...TESTNET_REGISTRY.filter(c => !own.some(o => o.chainId === c.chainId))]);
     serveMentions([
       { ...event('ef', { fork: fork({ name: 'Glamsterdam', network: 'Ethereum Sepolia', activationAt: '2099-10-06T13:53:36Z' }), affectedChains: ['Ethereum'], chains: [1] }), feed: 'news' },
       { ...event('base', { fork: fork({ name: 'Jovian', network: 'Base Sepolia', activationAt: '2099-10-07T00:00:00Z' }), affectedChains: ['Base Sepolia'] }), feed: 'forum' }
