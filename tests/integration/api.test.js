@@ -225,9 +225,9 @@ function installMockDefaults() {
       rule1_relation_conflicts: [{ rule: 1, chainId: 137, chainName: 'Polygon', message: 'Example validation error' }],
       rule2_slip44_testnet_mismatch: [],
       rule3_name_testnet_mismatch: [{ rule: 3, chainId: 11155111, chainName: 'Sepolia', message: 'Name contains testnet keyword' }],
-      rule4_sepolia_hoodie_issues: [],
+      rule4_test_network_no_relation: [],
       rule5_status_conflicts: [],
-      rule6_goerli_not_deprecated: []
+      rule6_deprecated_not_upstream: []
     },
     summary: { rule1: 1, rule2: 0, rule3: 1, rule4: 0, rule5: 0, rule6: 0 },
     allErrors: [
@@ -1078,17 +1078,17 @@ describe('API Endpoints', () => {
       expect(data.errorsByRule).toHaveProperty('rule1_relation_conflicts');
       expect(data.errorsByRule).toHaveProperty('rule2_slip44_testnet_mismatch');
       expect(data.errorsByRule).toHaveProperty('rule3_name_testnet_mismatch');
-      expect(data.errorsByRule).toHaveProperty('rule4_sepolia_hoodie_issues');
+      expect(data.errorsByRule).toHaveProperty('rule4_test_network_no_relation');
       expect(data.errorsByRule).toHaveProperty('rule5_status_conflicts');
-      expect(data.errorsByRule).toHaveProperty('rule6_goerli_not_deprecated');
+      expect(data.errorsByRule).toHaveProperty('rule6_deprecated_not_upstream');
 
       // Check all arrays
       expect(Array.isArray(data.errorsByRule.rule1_relation_conflicts)).toBe(true);
       expect(Array.isArray(data.errorsByRule.rule2_slip44_testnet_mismatch)).toBe(true);
       expect(Array.isArray(data.errorsByRule.rule3_name_testnet_mismatch)).toBe(true);
-      expect(Array.isArray(data.errorsByRule.rule4_sepolia_hoodie_issues)).toBe(true);
+      expect(Array.isArray(data.errorsByRule.rule4_test_network_no_relation)).toBe(true);
       expect(Array.isArray(data.errorsByRule.rule5_status_conflicts)).toBe(true);
-      expect(Array.isArray(data.errorsByRule.rule6_goerli_not_deprecated)).toBe(true);
+      expect(Array.isArray(data.errorsByRule.rule6_deprecated_not_upstream)).toBe(true);
     });
 
     it('should have summary with counts for each rule', async () => {

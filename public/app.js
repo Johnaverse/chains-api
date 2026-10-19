@@ -1862,9 +1862,9 @@ const RULE_LABELS = {
     rule1: 'Conflicting relations between sources',
     rule2: 'SLIP-44 coin type on a testnet',
     rule3: 'Name says testnet but the tag disagrees',
-    rule4: 'Sepolia / Hoodi naming problems',
+    rule4: 'Test-network chain with no relation',
     rule5: 'Lifecycle status conflicts',
-    rule6: 'Goerli chains not marked deprecated',
+    rule6: 'Deprecated here, not upstream',
     rule7: 'L2BEAT project missing a classification',
     rule8: 'L2BEAT host chain with no relation',
     rule9: 'L2BEAT category disagrees with the name',
@@ -1875,7 +1875,9 @@ const RULE_LABELS = {
     rule14: 'Native currency mismatch',
     rule15: 'SLIP-44 symbol vs native symbol mismatch',
     rule16: 'RPC URL present in only one source',
-    rule17: 'Active chain under a deprecated parent'
+    rule17: 'Active chain under a deprecated parent',
+    rule18: 'No RPC endpoint answers, not deprecated',
+    rule19: 'Deprecated, but an RPC still answers'
 };
 
 function renderDataQuality() {

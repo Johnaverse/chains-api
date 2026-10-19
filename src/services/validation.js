@@ -1,3 +1,4 @@
+import { learnNetworkWords, chainOfBareName } from '../domain/networkWords.js';
 import { cachedData } from '../store/cache.js';
 
 function getChainFromSource(chainId, source) {
@@ -108,27 +109,36 @@ function validateRule3NameTestnetMismatch(chain, errors) {
   }
 }
 
-function validateRule4SepoliaHoodie(chain, errors) {
-  const fullName = chain.theGraph?.fullName || chain.name || '';
-  const nameLower = fullName.toLowerCase();
-
-  if (nameLower.includes('sepolia') || nameLower.includes('hoodie')) {
-    const hasL2Tag = chain.tags.includes('L2');
-    const hasRelations = chain.relations && chain.relations.length > 0;
-
-    if (!hasL2Tag && !hasRelations) {
-      errors.push({
-        rule: 4,
-        chainId: chain.chainId,
-        chainName: chain.name,
-        type: 'sepolia_hoodie_no_l2_or_relations',
-        message: `Chain ${chain.chainId} (${chain.name}) contains "sepolia" or "hoodie" but not tagged as L2 and has no relations`,
-        fullName,
-        tags: chain.tags,
-        relations: chain.relations
-      });
-    }
+// A chain named after another chain's test network ("Base Sepolia", "Morph Hoodi") is built on or
+// for that network and should say so. "Named after" is read from the registry: a word in the name
+// that is another testnet's own id or alias ("sepolia" is Ethereum Sepolia's) — never a list of
+// names here, and never the generic "testnet", which names no network.
+function testNetworkNamedIn(chain, fullName) {
+  for (const word of fullName.toLowerCase().split(/[^a-z0-9]+/)) {
+    const named = chainOfBareName(word);
+    if (named && named.chainId !== chain.chainId && named.tags?.includes('Testnet')) return named;
   }
+  return null;
+}
+
+function validateRule4TestNetworkNoRelation(chain, errors) {
+  const fullName = chain.theGraph?.fullName || chain.name || '';
+  const named = testNetworkNamedIn(chain, fullName);
+  if (!named) return;
+  const hasL2Tag = chain.tags.includes('L2');
+  const hasRelations = chain.relations && chain.relations.length > 0;
+  if (hasL2Tag || hasRelations) return;
+  errors.push({
+    rule: 4,
+    chainId: chain.chainId,
+    chainName: chain.name,
+    type: 'test_network_no_l2_or_relations',
+    message: `Chain ${chain.chainId} (${chain.name}) is named after ${named.name} (${named.chainId}) but not tagged as L2 and has no relations`,
+    fullName,
+    namedNetwork: { chainId: named.chainId, name: named.name },
+    tags: chain.tags,
+    relations: chain.relations
+  });
 }
 
 function validateRule5StatusConflicts(chain, errors) {
@@ -156,31 +166,24 @@ function validateRule5StatusConflicts(chain, errors) {
   return statuses;
 }
 
-function validateRule6GoerliDeprecated(chain, statuses, errors) {
-  const fullName = chain.theGraph?.fullName || chain.name || '';
-  const nameLower = fullName.toLowerCase();
-
-  if (!nameLower.includes('goerli')) return;
-
-  const chainlistChain = getChainFromSource(chain.chainId, 'chainlist');
-  const chainsChain = getChainFromSource(chain.chainId, 'chains');
-
-  const isDeprecated = chain.status === 'deprecated' ||
-    chainlistChain?.status === 'deprecated' ||
-    chainsChain?.status === 'deprecated';
-
-  if (!isDeprecated) {
-    errors.push({
-      rule: 6,
-      chainId: chain.chainId,
-      chainName: chain.name,
-      type: 'goerli_not_deprecated',
-      message: `Chain ${chain.chainId} (${chain.name}) contains "Goerli" but is not marked as deprecated`,
-      fullName,
-      status: chain.status,
-      statusInSources: statuses
-    });
-  }
+// Upstream should say a network is dead. When only chains-api does — its end-of-life seed or a
+// deprecated parent — the upstream entry needs the status; the error names the file to fix.
+function validateRule6DeprecatedNotUpstream(chain, statuses, errors) {
+  if (chain.status !== 'deprecated') return;
+  if (statuses.some(s => s.status === 'deprecated')) return;
+  const inChains = Boolean(getChainFromSource(chain.chainId, 'chains'));
+  errors.push({
+    rule: 6,
+    chainId: chain.chainId,
+    chainName: chain.name,
+    type: 'deprecated_not_upstream',
+    message: `Chain ${chain.chainId} (${chain.name}) is deprecated here (${chain.statusReason || 'no reason recorded'}) but no upstream source marks it deprecated`,
+    statusReason: chain.statusReason ?? null,
+    statusInSources: statuses,
+    fix: inChains
+      ? { source: 'ethereum-lists/chains', file: `_data/chains/eip155-${chain.chainId}.json`, set: { status: 'deprecated' } }
+      : null
+  });
 }
 
 function validateRule7L2BeatMissingClassification(chain, errors) {
@@ -238,7 +241,7 @@ function validateRule9L2BeatCategoryNameMismatch(chain, errors) {
   const category = chain.l2Beat.category.toLowerCase();
 
   const nameLooksZk = fullName.includes('zk') || fullName.includes('zero-knowledge');
-  const nameLooksOptimistic = fullName.includes('optimistic') || fullName.includes('optimism');
+  const nameLooksOptimistic = fullName.includes('optimistic');
 
   let mismatchReason = null;
   if (category.includes('zk') && nameLooksOptimistic && !nameLooksZk) {
@@ -497,13 +500,53 @@ function validateRule17ActiveChildOfDeprecatedParent(chain, errors, byChainId) {
   }
 }
 
+// How an endpoint failed (chainRefresher.js): these mean nothing answered at all.
+const NO_ANSWER = new Set(['unreachable', 'timeout', 'tls_error', 'connection_error']);
+
+// Every listed RPC endpoint is gone — its name no longer resolves, nothing listens, or it never
+// answers — and no source calls the network dead. Either the network is dead and upstream should
+// mark it, or it moved and upstream lists stale endpoints. An endpoint that answered at all (a
+// rate limit, an error, a method it refuses) is not counted as gone.
+function validateRule18NoReachableRpc(chain, errors) {
+  if (chain.status === 'deprecated') return;
+  const results = cachedData.rpcHealth?.[chain.chainId];
+  if (!Array.isArray(results) || results.length === 0) return;
+  if (!results.every(r => !r.ok && NO_ANSWER.has(r.failure))) return;
+  errors.push({
+    rule: 18,
+    chainId: chain.chainId,
+    chainName: chain.name,
+    type: 'no_reachable_rpc',
+    message: `Chain ${chain.chainId} (${chain.name}) is ${chain.status || 'active'} but none of its ${results.length} RPC endpoints answers — dead and unmarked upstream, or its endpoints moved`,
+    status: chain.status ?? null,
+    endpoints: results.map(r => ({ url: r.url, failure: r.failure, error: r.error }))
+  });
+}
+
+// Deprecated, yet an endpoint still serves blocks: the network may live on, or the endpoint is a
+// leftover. Either way the status deserves a second look.
+function validateRule19DeprecatedRpcAnswers(chain, errors) {
+  if (chain.status !== 'deprecated') return;
+  const working = (cachedData.rpcHealth?.[chain.chainId] ?? []).filter(r => r.ok);
+  if (working.length === 0) return;
+  errors.push({
+    rule: 19,
+    chainId: chain.chainId,
+    chainName: chain.name,
+    type: 'deprecated_rpc_answers',
+    message: `Chain ${chain.chainId} (${chain.name}) is deprecated but ${working.length} RPC endpoint(s) still serve blocks`,
+    statusReason: chain.statusReason ?? null,
+    endpoints: working.map(r => ({ url: r.url, blockHeight: r.blockHeight }))
+  });
+}
+
 function validateChain(chain, errors) {
   validateRule1RelationConflicts(chain, errors);
   validateRule2Slip44Mismatch(chain, errors);
   validateRule3NameTestnetMismatch(chain, errors);
-  validateRule4SepoliaHoodie(chain, errors);
+  validateRule4TestNetworkNoRelation(chain, errors);
   const statuses = validateRule5StatusConflicts(chain, errors);
-  validateRule6GoerliDeprecated(chain, statuses, errors);
+  validateRule6DeprecatedNotUpstream(chain, statuses, errors);
   validateRule7L2BeatMissingClassification(chain, errors);
   validateRule8L2BeatHostChainNoRelation(chain, errors);
   validateRule9L2BeatCategoryNameMismatch(chain, errors);
@@ -514,6 +557,8 @@ function validateChain(chain, errors) {
   validateRule15Slip44NativeSymbolMismatch(chain, errors);
   validateRule16RpcUrlInOneSourceOnly(chain, errors);
   validateRule17ActiveChildOfDeprecatedParent(chain, errors, cachedData.indexed.byChainId);
+  validateRule18NoReachableRpc(chain, errors);
+  validateRule19DeprecatedRpcAnswers(chain, errors);
 }
 
 export function validateChainData() {
@@ -525,6 +570,8 @@ export function validateChainData() {
   }
 
   const errors = [];
+  // Which names are test networks comes from the registry itself.
+  learnNetworkWords(cachedData.indexed.all ?? Object.values(cachedData.indexed.byChainId));
 
   Object.values(cachedData.indexed.byChainId).forEach(chain => {
     validateChain(chain, errors);
@@ -537,9 +584,9 @@ export function validateChainData() {
     rule1_relation_conflicts: errors.filter(e => e.rule === 1),
     rule2_slip44_testnet_mismatch: errors.filter(e => e.rule === 2),
     rule3_name_testnet_mismatch: errors.filter(e => e.rule === 3),
-    rule4_sepolia_hoodie_issues: errors.filter(e => e.rule === 4),
+    rule4_test_network_no_relation: errors.filter(e => e.rule === 4),
     rule5_status_conflicts: errors.filter(e => e.rule === 5),
-    rule6_goerli_not_deprecated: errors.filter(e => e.rule === 6),
+    rule6_deprecated_not_upstream: errors.filter(e => e.rule === 6),
     rule7_l2beat_missing_classification: errors.filter(e => e.rule === 7),
     rule8_l2beat_hostchain_no_relation: errors.filter(e => e.rule === 8),
     rule9_l2beat_category_name_mismatch: errors.filter(e => e.rule === 9),
@@ -550,7 +597,9 @@ export function validateChainData() {
     rule14_native_currency_mismatch: errors.filter(e => e.rule === 14),
     rule15_slip44_native_symbol_mismatch: errors.filter(e => e.rule === 15),
     rule16_rpc_url_in_one_source_only: errors.filter(e => e.rule === 16),
-    rule17_active_child_of_deprecated_parent: errors.filter(e => e.rule === 17)
+    rule17_active_child_of_deprecated_parent: errors.filter(e => e.rule === 17),
+    rule18_no_reachable_rpc: errors.filter(e => e.rule === 18),
+    rule19_deprecated_rpc_answers: errors.filter(e => e.rule === 19)
   };
 
   return {
@@ -560,9 +609,9 @@ export function validateChainData() {
       rule1: errorsByRule.rule1_relation_conflicts.length,
       rule2: errorsByRule.rule2_slip44_testnet_mismatch.length,
       rule3: errorsByRule.rule3_name_testnet_mismatch.length,
-      rule4: errorsByRule.rule4_sepolia_hoodie_issues.length,
+      rule4: errorsByRule.rule4_test_network_no_relation.length,
       rule5: errorsByRule.rule5_status_conflicts.length,
-      rule6: errorsByRule.rule6_goerli_not_deprecated.length,
+      rule6: errorsByRule.rule6_deprecated_not_upstream.length,
       rule7: errorsByRule.rule7_l2beat_missing_classification.length,
       rule8: errorsByRule.rule8_l2beat_hostchain_no_relation.length,
       rule9: errorsByRule.rule9_l2beat_category_name_mismatch.length,
@@ -573,7 +622,9 @@ export function validateChainData() {
       rule14: errorsByRule.rule14_native_currency_mismatch.length,
       rule15: errorsByRule.rule15_slip44_native_symbol_mismatch.length,
       rule16: errorsByRule.rule16_rpc_url_in_one_source_only.length,
-      rule17: errorsByRule.rule17_active_child_of_deprecated_parent.length
+      rule17: errorsByRule.rule17_active_child_of_deprecated_parent.length,
+      rule18: errorsByRule.rule18_no_reachable_rpc.length,
+      rule19: errorsByRule.rule19_deprecated_rpc_answers.length
     },
     allErrors: errors
   };

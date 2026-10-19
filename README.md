@@ -863,9 +863,14 @@ This endpoint analyzes the chain data and identifies potential inconsistencies o
 1. **Rule 1 - Relation Conflicts**: Assumes graph relations are always true and finds conflicts with other sources
 2. **Rule 2 - slip44/Testnet Mismatch**: Chains with slip44=1 but isTestnet=false
 3. **Rule 3 - Name/Tag Mismatch**: Chain full names containing "Testnet" or "Devnet" but not tagged as Testnet
-4. **Rule 4 - Sepolia/Hoodie Networks**: Chains containing "sepolia" or "hoodie" keywords but not identifying as L2 or having no relations
+4. **Rule 4 - Named After a Test Network**: Chains whose name contains another testnet's own registry id or alias ("Base Sepolia" → Ethereum Sepolia's `sepolia`) but are not tagged L2 and have no relations. Which words name a test network is read from the registry, not a list.
 5. **Rule 5 - Status Conflicts**: Deprecated status conflicts across different sources
-6. **Rule 6 - Goerli Deprecation**: Chains containing "Goerli" keyword but not marked as deprecated
+6. **Rule 6 - Deprecated Here, Not Upstream**: Chains chains-api treats as deprecated (its end-of-life seed, or a deprecated parent) that no upstream source marks deprecated. Each carries `statusReason` and a `fix` naming the ethereum-lists/chains file to update (`_data/chains/eip155-<id>.json`, `status: "deprecated"`). Live on 2026-10-19: 18 chains, Goerli, Ropsten, Rinkeby, Mumbai and their L2s among them.
+7. Rules 7–17: L2BEAT classification, RPC block-height drift, name / currency / SLIP-44 disagreements, RPC URLs in one source only, active children of deprecated parents.
+18. **Rule 18 - No RPC Answers, Not Deprecated**: every listed endpoint failed with nothing answering (`unreachable`, `timeout`, `tls_error`, `connection_error`) and no source calls the network dead — dead and unmarked upstream, or its endpoints moved. An endpoint that answered at all (rate limit, HTTP error, a refused method) does not count as gone.
+19. **Rule 19 - Deprecated But an RPC Answers**: a deprecated chain with an endpoint still serving blocks.
+
+RPC health records each failed endpoint's `failure` kind (`unreachable` / `timeout` / `tls_error` / `connection_error` / `rate_limited` / `http_error` / `rpc_error` / `invalid_response`), and an endpoint serving blocks counts as working even when it disables `web3_clientVersion`.
 
 **Response:**
 ```json
@@ -883,9 +888,9 @@ This endpoint analyzes the chain data and identifies potential inconsistencies o
     "rule1_relation_conflicts": [...],
     "rule2_slip44_testnet_mismatch": [...],
     "rule3_name_testnet_mismatch": [...],
-    "rule4_sepolia_hoodie_issues": [...],
+    "rule4_test_network_no_relation": [...],
     "rule5_status_conflicts": [...],
-    "rule6_goerli_not_deprecated": [...]
+    "rule6_deprecated_not_upstream": [...]
   },
   "allErrors": [...]
 }
@@ -897,11 +902,11 @@ This endpoint analyzes the chain data and identifies potential inconsistencies o
   "rule": 6,
   "chainId": 5,
   "chainName": "Goerli",
-  "type": "goerli_not_deprecated",
-  "message": "Chain 5 (Goerli) contains \"Goerli\" but is not marked as deprecated",
-  "fullName": "Goerli",
-  "status": "active",
-  "statusInSources": []
+  "type": "deprecated_not_upstream",
+  "message": "Chain 5 (Goerli) is deprecated here (curated: known end-of-life network) but no upstream source marks it deprecated",
+  "statusReason": "curated: known end-of-life network",
+  "statusInSources": [],
+  "fix": { "source": "ethereum-lists/chains", "file": "_data/chains/eip155-5.json", "set": { "status": "deprecated" } }
 }
 ```
 

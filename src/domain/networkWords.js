@@ -14,7 +14,8 @@ let bareNames = new Map();
 const tokens = (s) => String(s ?? '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
 
 function namesOf(chain) {
-  return [chain?.name, chain?.['theGraph-id'], ...(Array.isArray(chain?.aliases) ? chain.aliases : [])]
+  // The index keeps TheGraph's id nested (`theGraph.id`); the API's flattened shape has `theGraph-id`.
+  return [chain?.name, chain?.['theGraph-id'] ?? chain?.theGraph?.id, ...(Array.isArray(chain?.aliases) ? chain.aliases : [])]
     .filter((n) => typeof n === 'string' && n && !/^evm-\d+$/.test(n));
 }
 
