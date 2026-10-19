@@ -86,6 +86,11 @@ export function chainOfBareName(name) {
   return hits.length === 1 ? hits[0] : null;
 }
 
+/** Every learned test-network word, sorted: what /repositories serves the client feed. */
+export function testNetworkWords() {
+  return [...words].sort();
+}
+
 export function _testNetworkWordsForTests() {
   return { words, strong };
 }

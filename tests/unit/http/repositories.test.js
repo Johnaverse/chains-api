@@ -23,6 +23,8 @@ describe('GET /repositories', () => {
     expect(eth.hardware).toHaveProperty('profiles');
     // Without registry data loaded, every network still carries an (empty) alias list.
     expect(body.networks.every(n => Array.isArray(n.aliases))).toBe(true);
+    // The registry's test-network words travel with it (empty until chain data has loaded).
+    expect(Array.isArray(body.testNetworkWords)).toBe(true);
   });
 
   it('gives each network the other names the registry knows it by, for the feed\'s fork matching', () => {
