@@ -22,6 +22,12 @@ vi.mock('../../../src/store/queries.js', async (importOriginal) => {
   return { ...actual, searchChains: (q) => registry.chains ?? actual.searchChains(q) };
 });
 
+const known = vi.hoisted(() => ({ forks: null }));
+vi.mock('../../../src/services/forks.js', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, getAllForks: () => (known.forks ? Promise.resolve({ forks: known.forks }) : actual.getAllForks()) };
+});
+
 const { buildApp } = await import('../../../index.js');
 const { _resetClientFeedCacheForTests } = await import('../../../src/sources/clientFeed.js');
 const { parseRepo } = await import('../../../src/services/latestRelease.js');
@@ -126,6 +132,30 @@ describe('GET /client-releases/latest', () => {
     const latest = (await get('/client-releases/latest?repo=ethereum/go-ethereum')).json().latest;
     expect(latest.hardfork).toEqual({ included: true, forks: [{ name: 'Glamsterdam', network: 'Ethereum Sepolia', state: 'scheduled', phase: 'past', activationAt: null, activationBlock: null, activationTimestamp: 1791000000 }] });
     expect(latest.mandatory).toBe(true);
+  });
+
+  it('does not take an undated "completed" as past when the fork list has it ahead', async () => {
+    // geth v1.17.8: "fixes related to the already-active Amsterdam fork", a week before Hoodi.
+    const forks = [
+      { name: 'Amsterdam', network: null, activationAt: null, activationBlock: null, state: 'completed' },
+      { name: 'Zanzibar', network: 'IoTeX', activationAt: null, state: 'completed' }
+    ];
+    known.forks = [
+      { name: 'Glamsterdam', aliases: ['Gloas'], chains: [1], phase: 'unscheduled' },
+      { name: 'Glamsterdam', chains: [560048], phase: 'upcoming' },
+      { name: 'Zanzibar', chains: [4689], phase: 'past' }
+    ];
+    try {
+      proxyFetch.mockResolvedValue(page([rel('v1.17.8', { chains: [{ chainId: 1 }, { chainId: 560048 }] }, {}, { class: 'urgent_software_fix', forks })]));
+      const { forks: out } = (await get('/client-releases/latest?repo=ethereum/go-ethereum')).json().latest.hardfork;
+      expect(out.map((f) => [f.name, f.state, f.phase, f.phaseFrom ?? null])).toEqual([
+        ['Glamsterdam', 'completed', 'upcoming', 'forks'],
+        // No fork-list entry on the release's chains: the notes' word stands.
+        ['Zanzibar', 'completed', 'past', null]
+      ]);
+    } finally {
+      known.forks = null;
+    }
   });
 
   it('gives each fork its phase now, whatever state the notes gave', async () => {

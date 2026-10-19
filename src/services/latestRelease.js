@@ -1,8 +1,9 @@
 import { getClientReleases, ClientFeedNotFoundError, MAX_RELEASE_LIMIT } from '../sources/clientFeed.js';
-import { forkIdentity, forkPhase, isDateOnly } from '../domain/forks.js';
+import { forkIdentity, forkPhase, isDateOnly, FORK_PHASE } from '../domain/forks.js';
 import { networkSlug } from '../domain/networkSlug.js';
 import { forkAliases } from './timeline.js';
 import { searchChains } from '../store/queries.js';
+import { getAllForks } from './forks.js';
 
 /**
  * The latest release of one client repository, answered as the questions an operator asks:
@@ -106,7 +107,7 @@ function chainOfNetwork(network, chains) {
  * say "Amsterdam", Prysm's "Gloas", Erigon's "Glamsterdam" — and the classifier may list the
  * same activation under two of them; the combined name leads, the layer name is kept.
  */
-function forksOf(forks, chains, now) {
+function forksOf(forks, chains, now, knownForks = null) {
   const out = [];
   const byKey = new Map();
   for (const f of forks) {
@@ -147,15 +148,38 @@ function forksOf(forks, chains, now) {
       state: entry.state,
       activationPrecision: entry.activationAt && isDateOnly(entry.activationAt) ? 'day' : null
     }, now);
+    // "Completed" with no date, height or timestamp is the notes' word alone, and the model
+    // misreads it: geth v1.17.8's fixes "related to the already-active Amsterdam fork" made
+    // Glamsterdam past while Hoodi's activation was a week away. When the fork list knows this
+    // fork on these chains and has it nowhere past, its phase stands instead.
+    if (entry.phase === FORK_PHASE.PAST && !at && entry.activationBlock == null && knownForks) {
+      const known = knownMatches(entry, chains, knownForks);
+      if (known.length && !known.some((k) => k.phase === FORK_PHASE.PAST)) {
+        entry.phase = known.some((k) => k.phase === FORK_PHASE.UPCOMING) ? FORK_PHASE.UPCOMING : known[0].phase;
+        entry.phaseFrom = 'forks';
+      }
+    }
   }
   return out;
 }
+
+/** Fork-list entries for the same fork (any name it goes by) on this entry's chains. */
+function knownMatches(entry, chains, knownForks) {
+  const ids = new Set([...forkAliases(entry.name), ...forkAliases(entry.layerName)]);
+  if (!ids.size) return [];
+  const chainIds = entry.chainId != null ? [entry.chainId] : (chains ?? []).map((c) => c.chainId);
+  return knownForks.filter((k) => [k.name, ...(k.aliases ?? [])].some((n) => forkAliases(n).some((id) => ids.has(id)))
+    && (!chainIds.length || (k.chains ?? []).some((id) => chainIds.includes(id))));
+}
+
+/** A release fork whose phase rests on its stated state alone (no date, height or timestamp). */
+const unverifiedState = (f) => f && f.activationAt == null && f.activationBlock == null && f.activationTimestamp == null;
 
 /** Whether the classifier has read the release: an enrichment with a class. */
 const isClassified = (item) => typeof item.enrichment?.class === 'string';
 
 /** Whether the release ships a fork: true, false, or null when it is not classified yet. */
-function hardforkOf(item, now) {
+function hardforkOf(item, now, knownForks = null) {
   const enr = item.enrichment;
   const forks = enr ? (enr.forks?.length ? enr.forks : enr.fork ? [enr.fork] : []) : [];
   const ahead = forks.some((f) => FORK_AHEAD.has(String(f.state ?? '').toLowerCase()));
@@ -163,14 +187,14 @@ function hardforkOf(item, now) {
   const included = enr?.class === 'planned_hard_fork' || ahead ? true : (isClassified(item) ? false : null);
   return {
     included,
-    forks: forksOf(forks, item.chains, now).slice(0, MAX_FORKS),
+    forks: forksOf(forks, item.chains, now, knownForks).slice(0, MAX_FORKS),
     // The feed's recall net: wording the model did not confirm. "Possibly", never "no".
     ...(enr?.review ? { review: enr.review } : {})
   };
 }
 
 /** One release as the latest-release answer. */
-export function describeRelease(item, now = Date.now()) {
+export function describeRelease(item, now = Date.now(), { knownForks = null } = {}) {
   const rel = item.release;
   const enr = item.enrichment;
   return {
@@ -182,7 +206,7 @@ export function describeRelease(item, now = Date.now()) {
     publishedAt: item.publishedAt,
     prerelease: rel.prerelease,
     client: item.source.name,
-    hardfork: hardforkOf(item, now),
+    hardfork: hardforkOf(item, now, knownForks),
     // Unclassified -> unknown. The normalizer folds a missing flag into false, which is right for a
     // list but would answer "not mandatory" for a release nobody has read; a stated "yes" stands.
     mandatory: rel.mandatory === true ? true : (isClassified(item) ? false : null),
@@ -234,6 +258,18 @@ export async function getLatestRelease({ repo, component, includePrerelease = fa
   }
 }
 
+/** The fork list, read only when a release's fork phase rests on its stated state alone. */
+async function knownForksFor(item) {
+  const enr = item.enrichment;
+  const forks = enr ? (enr.forks?.length ? enr.forks : enr.fork ? [enr.fork] : []) : [];
+  if (!forks.some(unverifiedState)) return null;
+  try {
+    return (await getAllForks()).forks;
+  } catch {
+    return null;
+  }
+}
+
 async function latestOf(repoId, { component, includePrerelease, now }) {
   const wanted = component ? String(component).toLowerCase() : null;
   const pick = (items) => items.filter((it) => !wanted || (it.release.component ?? '').toLowerCase() === wanted);
@@ -270,7 +306,7 @@ async function latestOf(repoId, { component, includePrerelease, now }) {
     ...(result.stale ? { stale: true } : {}),
     repo: repoId,
     component: wanted ? (latest?.release.component ?? all[0].release.component) : (latest?.release.component ?? null),
-    latest: latest ? describeRelease(latest, now) : null,
+    latest: latest ? describeRelease(latest, now, { knownForks: await knownForksFor(latest) }) : null,
     // Only prereleases on record: say so rather than answer "none".
     ...(latest ? {} : { note: 'Only prereleases are recorded for this repository; ask for prereleases (prerelease=true on the API, includePrerelease on MCP) to see the newest one.' }),
     newerPrerelease: !includePrerelease && newestPre && newestPre !== latest ? brief(newestPre) : null,

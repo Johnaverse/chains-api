@@ -163,6 +163,30 @@ describe('assembling forks from events', () => {
     expect(forkOut.phase).toBe(FORK_PHASE.UPCOMING);
   });
 
+  it('joins one activation listed under several names and network spellings', async () => {
+    // Live on 2026-10-19: Hoodi's 17:42:48 activation stood as five entries, Jenner as two.
+    const hoodi = (id, name, network) => event(id, { chains: [560048], affectedChains: [network], fork: fork({ name, network, activationAt: '2026-10-26T17:42:48Z', state: 'scheduled' }) });
+    const events = [
+      hoodi('a', 'Glamsterdam', 'Ethereum Hoodi'), hoodi('b', 'Glamsterdam', 'Ethereum Hoodi'),
+      hoodi('c', 'Gloas', 'Hoodi'), hoodi('d', 'Amsterdam', 'Hoodi'), hoodi('e', 'Glamsterdam', 'Hoodi')
+    ];
+    const chainIdsFor = () => [560048];
+    const out = await buildForks(events, { now: NOW, chainIdsFor });
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ name: 'Glamsterdam', chains: [560048] });
+    expect(out[0].aliases.sort()).toEqual(['Amsterdam', 'Gloas']);
+    expect(out[0].events).toHaveLength(5);
+  });
+
+  it('keeps forks apart that share only a day, or only a time on other chains', async () => {
+    const at = (id, name, activationAt, chains) => event(id, { chains, affectedChains: [name], fork: fork({ name, activationAt, state: 'scheduled' }) });
+    const out = await buildForks([
+      at('a', 'Alpha', '2026-11-03', [8453]), at('b', 'Beta', '2026-11-03', [8453]),
+      at('c', 'Gamma', '2026-11-04T10:00:00Z', [10]), at('d', 'Delta', '2026-11-04T10:00:00Z', [8453])
+    ], { now: NOW });
+    expect(out.map(f => f.name).sort()).toEqual(['Alpha', 'Beta', 'Delta', 'Gamma']);
+  });
+
   it('splits one codename into per-network forks with their own dates', async () => {
     // Reproduces the live Stellar data exactly. Protocol 28 reaches Testnet on Aug 27 and
     // Mainnet on Sep 16, while QuickNode runs ONE infrastructure window covering both. Before
