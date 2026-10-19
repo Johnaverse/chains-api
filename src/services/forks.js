@@ -3,6 +3,7 @@ import { getExplorerTip } from '../sources/blockscout.js';
 import { buildForks, forkPhase, sortForks, FORK_PHASE, FORK_KIND, registryScopes, scopeLookups, normalizeForkName } from '../domain/forks.js';
 import { getAllChains } from '../store/queries.js';
 import { logger } from '../util/logger.js';
+import { learnForkNames } from '../domain/forkNames.js';
 
 /**
  * Serves fork entities: the read side of src/domain/forks.js.
@@ -149,6 +150,8 @@ async function builtForks(mentions, fetchedAt) {
   if (memo.forks && memo.mentions === mentions && memo.fetchedAt === fetchedAt && memo.chains === chains) return memo.forks;
   const byId = new Map(chains.map((c) => [c.chainId, c]));
   const forks = (await buildForks(mentions.map((m) => qualifyBareNetwork(m, byId)), { tipFor, chainIdsFor: chainResolver(chains) })).map(present);
+  // What the feeds show about which names are one fork: read by the timeline and latest release.
+  learnForkNames(forks);
   memo = { mentions, fetchedAt, chains, forks };
   return forks;
 }

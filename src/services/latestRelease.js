@@ -4,6 +4,7 @@ import { networkSlug } from '../domain/networkSlug.js';
 import { forkAliases } from './timeline.js';
 import { searchChains } from '../store/queries.js';
 import { getAllForks } from './forks.js';
+import { forkDisplayName } from '../domain/forkNames.js';
 
 /**
  * The latest release of one client repository, answered as the questions an operator asks:
@@ -105,7 +106,8 @@ function chainOfNetwork(network, chains) {
 /**
  * One entry per fork and network. Ethereum names a fork per layer and combined — geth's notes
  * say "Amsterdam", Prysm's "Gloas", Erigon's "Glamsterdam" — and the classifier may list the
- * same activation under two of them; the combined name leads, the layer name is kept.
+ * same activation under two of them; the name the fork list resolves them to leads (learned
+ * from the feeds, see forkNames.js), the client's own name is kept as `layerName`.
  */
 function forksOf(forks, chains, now, knownForks = null) {
   const out = [];
@@ -116,7 +118,7 @@ function forksOf(forks, chains, now, knownForks = null) {
     const combined = aliases.length === 1 && aliases[0] !== forkIdentity(name)?.replace(/ hf$/, '') ? aliases[0] : null;
     const chain = f.network ? chainOfNetwork(f.network, chains) : null;
     const entry = {
-      name: combined ? titleCase(combined) : name,
+      name: combined ? (forkDisplayName(combined) ?? titleCase(combined)) : name,
       ...(combined ? { layerName: name } : {}),
       network: chain?.name ?? f.network ?? null,
       ...(chain ? { chainId: chain.chainId } : {}),
@@ -152,7 +154,7 @@ function forksOf(forks, chains, now, knownForks = null) {
     // misreads it: geth v1.17.8's fixes "related to the already-active Amsterdam fork" made
     // Glamsterdam past while Hoodi's activation was a week away. When the fork list knows this
     // fork on these chains and has it nowhere past, its phase stands instead.
-    if (entry.phase === FORK_PHASE.PAST && !at && entry.activationBlock == null && knownForks) {
+    if (entry.phase === FORK_PHASE.PAST && unverifiedState(entry) && knownForks) {
       const known = knownMatches(entry, chains, knownForks);
       if (known.length && !known.some((k) => k.phase === FORK_PHASE.PAST)) {
         entry.phase = known.some((k) => k.phase === FORK_PHASE.UPCOMING) ? FORK_PHASE.UPCOMING : known[0].phase;
@@ -258,11 +260,14 @@ export async function getLatestRelease({ repo, component, includePrerelease = fa
   }
 }
 
-/** The fork list, read only when a release's fork phase rests on its stated state alone. */
+/**
+ * The fork list, read when the release names a fork: building it is what teaches which names
+ * are one fork (forkNames.js), and an undated "completed" is checked against it.
+ */
 async function knownForksFor(item) {
   const enr = item.enrichment;
   const forks = enr ? (enr.forks?.length ? enr.forks : enr.fork ? [enr.fork] : []) : [];
-  if (!forks.some(unverifiedState)) return null;
+  if (!forks.length) return null;
   try {
     return (await getAllForks()).forks;
   } catch {

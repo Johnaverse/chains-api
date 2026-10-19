@@ -176,6 +176,11 @@ describe('assembling forks from events', () => {
     expect(out[0]).toMatchObject({ name: 'Glamsterdam', chains: [560048] });
     expect(out[0].aliases.sort()).toEqual(['Amsterdam', 'Gloas']);
     expect(out[0].events).toHaveLength(5);
+    // What the timeline and latest release then know: the names resolve to the attested one.
+    const { learnForkNames, canonicalForkId, _resetForkNamesForTests } = await import('../../../src/domain/forkNames.js');
+    learnForkNames(out);
+    expect([canonicalForkId('gloas'), canonicalForkId('amsterdam'), canonicalForkId('fusaka')]).toEqual(['glamsterdam', 'glamsterdam', 'fusaka']);
+    _resetForkNamesForTests();
   });
 
   it('keeps forks apart that share only a day, or only a time on other chains', async () => {

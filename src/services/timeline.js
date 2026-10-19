@@ -7,6 +7,7 @@ import { getWeb3News } from '../sources/web3News.js';
 import { getForumNews } from '../sources/forumNews.js';
 import { logger } from '../util/logger.js';
 import { getChainById } from '../store/queries.js';
+import { canonicalForkId, forkIdsOf, forkDisplayName } from '../domain/forkNames.js';
 
 /**
  * The event timeline: one entry per real-world event, with everything the feeds say about it
@@ -296,23 +297,10 @@ function maintenanceEntry(window, chainName) {
   return entry;
 }
 
-// Ethereum names each fork twice — once per layer — and the combined name besides: geth's
-// notes say "Amsterdam", Prysm's "Gloas", Erigon's "Glamsterdam", and all three are one
-// activation on one network. Networks that adopt Ethereum's forks (Gnosis, PulseChain) use the
-// same names, so the table is about the names, not about chain 1.
-const LAYER_NAMES = {
-  amsterdam: 'glamsterdam', gloas: 'glamsterdam',
-  osaka: 'fusaka', fulu: 'fusaka',
-  prague: 'pectra', electra: 'pectra',
-  cancun: 'dencun', deneb: 'dencun',
-  shanghai: 'shapella', capella: 'shapella',
-  paris: 'the merge', bellatrix: 'the merge'
-};
-
 /**
  * Every identity a fork name answers to: "nv29 (Solstice)" is nv29 and Solstice,
- * "Glamsterdam/ePBS (Gloas)" is Glamsterdam, ePBS and Gloas — each mapped to its combined
- * Ethereum name where it has one.
+ * "Glamsterdam/ePBS (Gloas)" is Glamsterdam, ePBS and Gloas — each resolved to the name the
+ * feeds have shown it shares an activation with (forkNames.js), not to any fixed table.
  */
 export function forkAliases(name) {
   if (typeof name !== 'string') return [];
@@ -322,7 +310,7 @@ export function forkAliases(name) {
     // "Lugano HF" is Lugano: release titles abbreviate the suffix forkIdentity strips.
     const id = forkIdentity(part)?.replace(/ hf$/, '');
     if (!id) continue;
-    ids.add(LAYER_NAMES[id] ?? id);
+    ids.add(canonicalForkId(id));
   }
   return [...ids];
 }
@@ -349,18 +337,17 @@ function mergeDuplicateForks(entries) {
     for (const k of keys) if (!byKey.has(k)) byKey.set(k, target);
   }
   for (const entry of out) {
-    // The combined name leads when the layers were named separately: "Glamsterdam", not "Gloas".
-    const combined = (entry.aliases ?? []).find((a) => Object.values(LAYER_NAMES).includes(a));
-    if (combined && forkIdentity(entry.name) !== combined) {
+    // The learned name leads when the entry was named by another one: "Glamsterdam", not "Gloas".
+    const combined = (entry.aliases ?? []).find((a) => a !== forkIdentity(entry.name) && forkDisplayName(a));
+    if (combined) {
       entry.layerName = entry.name;
-      entry.name = combined.replace(/\b[a-z]/g, (c) => c.toUpperCase());
+      entry.name = forkDisplayName(combined);
       entry.title = entry.name;
     }
-    // Name joins (windows, articles) match any alias, and each layer's own name: a provider
-    // window titled "Upgrade for Gloas" belongs to Glamsterdam.
+    // Name joins (windows, articles) match any alias, and every name learned for it: a provider
+    // window titled "Upgrade for Gloas" belongs to Glamsterdam once the feeds showed they are one.
     const names = entry.aliases?.length ? entry.aliases : (entry.identity ? [entry.identity] : []);
-    const layers = Object.entries(LAYER_NAMES).filter(([, combined]) => names.includes(combined)).map(([layer]) => layer);
-    entry.identities = [...new Set([...names, ...layers])];
+    entry.identities = [...new Set(names.flatMap((n) => forkIdsOf(n)))];
   }
   return out;
 }

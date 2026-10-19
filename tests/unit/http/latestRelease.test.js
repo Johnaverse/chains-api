@@ -25,8 +25,20 @@ vi.mock('../../../src/store/queries.js', async (importOriginal) => {
 const known = vi.hoisted(() => ({ forks: null }));
 vi.mock('../../../src/services/forks.js', async (importOriginal) => {
   const actual = await importOriginal();
-  return { ...actual, getAllForks: () => (known.forks ? Promise.resolve({ forks: known.forks }) : actual.getAllForks()) };
+  const { learnForkNames } = await import('../../../src/domain/forkNames.js');
+  // Building the fork list is what teaches which names are one fork; the stub does the same.
+  return {
+    ...actual,
+    getAllForks: () => {
+      if (!known.forks) return actual.getAllForks();
+      learnForkNames(known.forks);
+      return Promise.resolve({ forks: known.forks });
+    }
+  };
 });
+
+// What the feeds showed: Hoodi's activation reported as Glamsterdam, Gloas and Amsterdam.
+const HOODI_GLAMSTERDAM = { name: 'Glamsterdam', aliases: ['Gloas', 'Amsterdam'], chains: [560048], phase: 'upcoming', events: [{}, {}, {}] };
 
 const { buildApp } = await import('../../../index.js');
 const { _resetClientFeedCacheForTests } = await import('../../../src/sources/clientFeed.js');
@@ -141,7 +153,7 @@ describe('GET /client-releases/latest', () => {
       { name: 'Zanzibar', network: 'IoTeX', activationAt: null, state: 'completed' }
     ];
     known.forks = [
-      { name: 'Glamsterdam', aliases: ['Gloas'], chains: [1], phase: 'unscheduled' },
+      { name: 'Glamsterdam', aliases: ['Gloas', 'Amsterdam'], chains: [1], phase: 'unscheduled', events: [{}, {}] },
       { name: 'Glamsterdam', chains: [560048], phase: 'upcoming' },
       { name: 'Zanzibar', chains: [4689], phase: 'past' }
     ];
@@ -188,21 +200,31 @@ describe('GET /client-releases/latest', () => {
       { name: 'Jenner', network: 'BSC Chapel testnet', activationAt: null, state: 'scheduled' }
     ];
     const chains = [{ chainId: 11155111, name: 'Ethereum Sepolia' }, { chainId: 560048, name: 'Ethereum Hoodi' }];
-    proxyFetch.mockResolvedValue(page([rel('v2.7.0', { chains }, { mandatory: true }, { class: 'planned_hard_fork', forks })]));
-    const { forks: out } = (await get('/client-releases/latest?repo=ethereum/go-ethereum')).json().latest.hardfork;
-    expect(out.map((f) => [f.name, f.layerName ?? null, f.network, f.chainId ?? null, f.activationAt])).toEqual([
-      ['Glamsterdam', null, 'Ethereum Sepolia', 11155111, '2026-10-06T13:53:36.000Z'],
-      ['Glamsterdam', 'Gloas', 'Ethereum Hoodi', 560048, null],
-      ['Jenner', null, 'BSC Chapel testnet', null, null]
-    ]);
+    known.forks = [HOODI_GLAMSTERDAM];
+    try {
+      proxyFetch.mockResolvedValue(page([rel('v2.7.0', { chains }, { mandatory: true }, { class: 'planned_hard_fork', forks })]));
+      const { forks: out } = (await get('/client-releases/latest?repo=ethereum/go-ethereum')).json().latest.hardfork;
+      expect(out.map((f) => [f.name, f.layerName ?? null, f.network, f.chainId ?? null, f.activationAt])).toEqual([
+        ['Glamsterdam', null, 'Ethereum Sepolia', 11155111, '2026-10-06T13:53:36.000Z'],
+        ['Glamsterdam', 'Gloas', 'Ethereum Hoodi', 560048, null],
+        ['Jenner', null, 'BSC Chapel testnet', null, null]
+      ]);
+    } finally {
+      known.forks = null;
+    }
   });
 
   it('names a fork network the release chains leave out from the registry, Ethereum first for a bare testnet name', async () => {
     registry.chains = [{ chainId: 374, name: 'Status Network Hoodi' }, { chainId: 560048, name: 'Ethereum Hoodi' }, { chainId: 2910, name: 'Morph Hoodi' }];
     const forks = [{ name: 'Gloas', network: 'Hoodi', activationAt: '2026-10-26T17:42:48.000Z', state: 'scheduled' }];
-    proxyFetch.mockResolvedValue(page([rel('v7.3.0', { chains: [{ chainId: 17000, name: 'Holesky' }] }, { mandatory: true }, { class: 'planned_hard_fork', forks })]));
-    const [fork] = (await get('/client-releases/latest?repo=OffchainLabs/prysm')).json().latest.hardfork.forks;
-    expect(fork).toMatchObject({ name: 'Glamsterdam', layerName: 'Gloas', network: 'Ethereum Hoodi', chainId: 560048 });
+    known.forks = [HOODI_GLAMSTERDAM];
+    try {
+      proxyFetch.mockResolvedValue(page([rel('v7.3.0', { chains: [{ chainId: 17000, name: 'Holesky' }] }, { mandatory: true }, { class: 'planned_hard_fork', forks })]));
+      const [fork] = (await get('/client-releases/latest?repo=OffchainLabs/prysm')).json().latest.hardfork.forks;
+      expect(fork).toMatchObject({ name: 'Glamsterdam', layerName: 'Gloas', network: 'Ethereum Hoodi', chainId: 560048 });
+    } finally {
+      known.forks = null;
+    }
   });
 
   it('keeps another network\'s Sepolia and a bare "Mainnet" on the right chain', async () => {
