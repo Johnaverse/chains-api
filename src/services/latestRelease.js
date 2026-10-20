@@ -92,7 +92,17 @@ function pickChain(slug, chains) {
     const s = networkSlug(c?.name);
     return s && (s === slug || s.endsWith(`-${slug}`) || s === `${slug}-testnet` || isBare(c));
   });
-  if (matches.length <= 1) return matches[0] ?? null;
+  // A chain the registry names bare ("Holesky") written with its ecosystem in front ("Ethereum
+  // Holesky"): the front word must be another of the release's own chains, a main network.
+  if (matches.length === 0) {
+    const mains = new Set(chains.filter((c) => !isTestChain(c)).map((c) => networkSlug(c?.name)).filter(Boolean));
+    const prefixed = chains.filter((c) => {
+      const s = networkSlug(c?.name);
+      return s && slug.endsWith(`-${s}`) && mains.has(slug.slice(0, -s.length - 1));
+    });
+    return prefixed.length === 1 ? prefixed[0] : null;
+  }
+  if (matches.length === 1) return matches[0];
   const exact = matches.filter((c) => networkSlug(c.name) === slug || isBare(c));
   return exact.length === 1 ? exact[0] : null;
 }

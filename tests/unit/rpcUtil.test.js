@@ -122,6 +122,9 @@ describe('rpcUtil - jsonRpcCall', () => {
     expect(await kindOf(async () => ({ ok: false, status: 530 }))).toBe('http_error');
     expect(await kindOf(async () => ({ ok: true, json: async () => ({ error: { message: 'Method not found' } }) }))).toBe('rpc_error');
     expect(await kindOf(async () => ({ ok: true, json: async () => { throw new SyntaxError('Unexpected token <'); } }))).toBe('invalid_response');
+    // Not known to be the endpoint's fault: it may be our own proxy or egress.
+    expect(await kindOf(async () => { throw new TypeError('fetch failed'); })).toBe('unknown');
+    expect(await kindOf(async () => { throw Object.assign(new Error('reset'), { code: 'ECONNRESET' }); })).toBe('connection_error');
   });
 
   it('should use default params and timeout', async () => {

@@ -124,7 +124,8 @@ async function checkRpcEndpoint(url) {
     result.error = error?.message ?? 'No block height returned';
     // How it failed: `unreachable` / `timeout` mean nothing answered; `rpc_error`,
     // `http_error`, `rate_limited`, `invalid_response` mean something did (validation.js).
-    result.failure = error?.kind ?? 'invalid_response';
+    // A node that returned its client version answered, whatever eth_blockNumber did.
+    result.failure = version.status === 'fulfilled' ? 'answered_no_block' : (error?.kind ?? 'invalid_response');
     // 401/403 = the endpoint wants credentials or refuses us: not a public RPC. Rate limits
     // (429) and outages (5xx) are transient and stay listed.
     if (PRIVATE_RPC_STATUSES.has(error?.status)) result.authRequired = true;

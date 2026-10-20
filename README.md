@@ -867,10 +867,10 @@ This endpoint analyzes the chain data and identifies potential inconsistencies o
 5. **Rule 5 - Status Conflicts**: Deprecated status conflicts across different sources
 6. **Rule 6 - Deprecated Here, Not Upstream**: Chains chains-api treats as deprecated (its end-of-life seed, or a deprecated parent) that no upstream source marks deprecated. Each carries `statusReason` and a `fix` naming the ethereum-lists/chains file to update (`_data/chains/eip155-<id>.json`, `status: "deprecated"`). Live on 2026-10-19: 18 chains, Goerli, Ropsten, Rinkeby, Mumbai and their L2s among them.
 7. Rules 7–17: L2BEAT classification, RPC block-height drift, name / currency / SLIP-44 disagreements, RPC URLs in one source only, active children of deprecated parents.
-18. **Rule 18 - No RPC Answers, Not Deprecated**: every listed endpoint failed with nothing answering (`unreachable`, `timeout`, `tls_error`, `connection_error`) and no source calls the network dead — dead and unmarked upstream, or its endpoints moved. An endpoint that answered at all (rate limit, HTTP error, a refused method) does not count as gone.
+18. **Rule 18 - No RPC Answers, Not Deprecated**: every listed endpoint failed with nothing answering (`unreachable`, `timeout`, `tls_error`) and no source calls the network dead — dead and unmarked upstream, or its endpoints moved. An endpoint that answered at all (rate limit, HTTP error, a refused method, a client version without a block) does not count as gone, nor does a reset connection or an unrecognised error, which may be on our side.
 19. **Rule 19 - Deprecated But an RPC Answers**: a deprecated chain with an endpoint still serving blocks.
 
-RPC health records each failed endpoint's `failure` kind (`unreachable` / `timeout` / `tls_error` / `connection_error` / `rate_limited` / `http_error` / `rpc_error` / `invalid_response`), and an endpoint serving blocks counts as working even when it disables `web3_clientVersion`.
+RPC health records each failed endpoint's `failure` kind (`unreachable` / `timeout` / `tls_error` / `connection_error` / `rate_limited` / `http_error` / `rpc_error` / `invalid_response` / `answered_no_block` / `unknown`), and an endpoint serving blocks counts as working even when it disables `web3_clientVersion`.
 
 **Response:**
 ```json

@@ -1,5 +1,6 @@
 import { learnNetworkWords, chainOfBareName } from '../domain/networkWords.js';
 import { cachedData } from '../store/cache.js';
+import { getAllChains } from '../store/queries.js';
 
 function getChainFromSource(chainId, source) {
   if (source === 'theGraph') {
@@ -113,9 +114,13 @@ function validateRule3NameTestnetMismatch(chain, errors) {
 // for that network and should say so. "Named after" is read from the registry: a word in the name
 // that is another testnet's own id or alias ("sepolia" is Ethereum Sepolia's) — never a list of
 // names here, and never the generic "testnet", which names no network.
+// Plain words for a kind of network, not names of one: a chain aliased "testnet" names no other.
+const NETWORK_KIND_WORDS = new Set(['mainnet', 'testnet', 'devnet', 'net', 'network', 'chain']);
+
 function testNetworkNamedIn(chain, fullName) {
   for (const word of fullName.toLowerCase().split(/[^a-z0-9]+/)) {
-    const named = chainOfBareName(word);
+    // A word naming test networks in general ("testnet") names none in particular.
+    const named = NETWORK_KIND_WORDS.has(word) ? null : chainOfBareName(word);
     if (named && named.chainId !== chain.chainId && named.tags?.includes('Testnet')) return named;
   }
   return null;
@@ -501,7 +506,8 @@ function validateRule17ActiveChildOfDeprecatedParent(chain, errors, byChainId) {
 }
 
 // How an endpoint failed (chainRefresher.js): these mean nothing answered at all.
-const NO_ANSWER = new Set(['unreachable', 'timeout', 'tls_error', 'connection_error']);
+// A reset connection or an unrecognised error may be our own side, so neither counts.
+const NO_ANSWER = new Set(['unreachable', 'timeout', 'tls_error']);
 
 // Every listed RPC endpoint is gone — its name no longer resolves, nothing listens, or it never
 // answers — and no source calls the network dead. Either the network is dead and upstream should
@@ -571,7 +577,8 @@ export function validateChainData() {
 
   const errors = [];
   // Which names are test networks comes from the registry itself.
-  learnNetworkWords(cachedData.indexed.all ?? Object.values(cachedData.indexed.byChainId));
+  // The same array the other services learn from, so the memo holds between them.
+  learnNetworkWords(cachedData.indexed.all ? getAllChains() : Object.values(cachedData.indexed.byChainId));
 
   Object.values(cachedData.indexed.byChainId).forEach(chain => {
     validateChain(chain, errors);

@@ -1945,11 +1945,15 @@ describe('validateChainData', () => {
     // Which words name test networks is read from the registry: several Sepolia testnets here.
     const testnet = (chainId, name) => ({ chainId, name, isTestnet: true, slip44: 1 });
     // The registry knows "sepolia" as Ethereum Sepolia's own id.
-    const mockTheGraph = { networks: [{ id: 'sepolia', caip2Id: 'eip155:11155111', fullName: 'Ethereum Sepolia', networkType: 'testnet' }] };
+    // ...and one testnet goes by the plain word "testnet", which names no network in particular.
+    const mockTheGraph = { networks: [
+      { id: 'sepolia', caip2Id: 'eip155:11155111', fullName: 'Ethereum Sepolia', networkType: 'testnet' },
+      { id: 'testnet', caip2Id: 'eip155:421614', fullName: 'Arbitrum Sepolia', networkType: 'testnet' }
+    ] };
     const mockChainlist = [
       testnet(11155111, 'Ethereum Sepolia'), testnet(84532, 'Base Sepolia Testnet'), testnet(11155420, 'OP Sepolia Testnet'),
       testnet(421614, 'Arbitrum Sepolia'), testnet(534351, 'Scroll Sepolia Testnet'),
-      { chainId: 123, name: 'Custom Sepolia Chain' }, { chainId: 456, name: 'Hoodie Network' }
+      { chainId: 123, name: 'Custom Sepolia Chain' }, { chainId: 456, name: 'Hoodie Network' }, { chainId: 789, name: 'Plain Testnet' }
     ];
     const mockChains = mockChainlist.map(({ chainId, name }) => ({ chainId, name }));
 
@@ -1969,6 +1973,7 @@ describe('validateChainData', () => {
     expect(rule4Errors.find(e => e.chainId === 11155111)).toBeUndefined();
     // "Hoodie" names no test network the registry knows: not flagged by a guessed keyword.
     expect(rule4Errors.find(e => e.chainId === 456)).toBeUndefined();
+    expect(rule4Errors.find(e => e.chainId === 789)).toBeUndefined();
   });
 
   it('should detect Rule 5: conflicting status across sources', async () => {

@@ -189,6 +189,17 @@ describe('assembling forks from events', () => {
     _resetForkNamesForTests();
   });
 
+  it('learns a bracket as an alias, unless it names a network, and keeps every alias one hop from the root', async () => {
+    const { learnForkNames, canonicalForkId, _resetForkNamesForTests } = await import('../../../src/domain/forkNames.js');
+    learnForkNames([
+      { name: 'Glamsterdam/ePBS (Gloas)', aliases: ['Amsterdam'], events: [{}, {}] },
+      { name: 'Fusaka (Hoodi)', events: [{}] }
+    ]);
+    expect([canonicalForkId('gloas'), canonicalForkId('amsterdam')]).toEqual(['glamsterdam', 'glamsterdam']);
+    expect(canonicalForkId('hoodi')).toBe('hoodi');
+    _resetForkNamesForTests();
+  });
+
   it('keeps forks apart that share only a day, or only a time on other chains', async () => {
     const at = (id, name, activationAt, chains) => event(id, { chains, affectedChains: [name], fork: fork({ name, activationAt, state: 'scheduled' }) });
     const out = await buildForks([

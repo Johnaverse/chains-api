@@ -19,16 +19,18 @@ const RPC_HEALTH_DIR = join(dirname(resolve(DATA_CACHE_FILE)), 'rpc-health');
 /**
  * True when the up/down state of a chain's endpoints differs from `prev`.
  * Deliberately ignores volatile fields (blockHeight, latency, clientVersion):
- * only a change in the set of URLs or any endpoint's ok/failed status counts,
+ * only a change in the set of URLs or any endpoint's ok/failed status or failure kind counts,
  * so a healthy endpoint advancing its block height does NOT trigger a write.
  */
 export function rpcStateChanged(prev, next) {
   if (!Array.isArray(prev)) return true;
   if (prev.length !== next.length) return true;
-  const prevByUrl = new Map(prev.map(r => [r.url, r.ok === true]));
+  // `failure` counts too: how an endpoint is down is what validation reads (rule 18).
+  const state = (r) => `${r.ok === true}|${r.failure ?? ''}`;
+  const prevByUrl = new Map(prev.map(r => [r.url, state(r)]));
   for (const r of next) {
     if (!prevByUrl.has(r.url)) return true;
-    if (prevByUrl.get(r.url) !== (r.ok === true)) return true;
+    if (prevByUrl.get(r.url) !== state(r)) return true;
   }
   return false;
 }

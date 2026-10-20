@@ -188,7 +188,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'validate_chains',
-      description: 'Validate chain data for potential quality issues across 17 cross-source validation rules (relation conflicts, slip44/name/status mismatches, L2BEAT consistency, RPC drift, deprecated-parent propagation, and more)',
+      description: 'Validate chain data for potential quality issues across 19 cross-source validation rules (relation conflicts, slip44/name/status mismatches, L2BEAT consistency, RPC drift, deprecated-parent propagation, networks deprecated here but not upstream, live chains with no answering RPC, deprecated chains whose RPC still answers, and more)',
       inputSchema: {
         type: 'object',
         properties: {},

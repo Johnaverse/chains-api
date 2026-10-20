@@ -1547,7 +1547,7 @@ function renderOverviewStats() {
         }),
         statTile({
             label: 'Data conflicts', value: state.validate ? fmtNum(state.validate.totalErrors) : '—',
-            sub: state.validate ? 'across 17 validation rules' : '',
+            sub: state.validate ? 'across 19 validation rules' : '',
             tone: !state.validate ? '' : state.validate.totalErrors > 500 ? 'warn' : '',
             hint: 'Disagreements between the five upstream sources found by the API validation rules. These are metadata conflicts, not service failures.'
         })
@@ -1914,7 +1914,7 @@ function renderDataQuality() {
     const clean = 17 - rules.length;
     host.appendChild(el('p', {
         class: 'note',
-        text: `${clean} of 17 rules found nothing. These are disagreements between upstream sources — most are metadata noise, but block-height drift and status conflicts are worth reading.`
+        text: `${clean} of 19 rules found nothing. These are disagreements between upstream sources — most are metadata noise, but block-height drift and status conflicts are worth reading.`
     }));
 }
 

@@ -134,6 +134,16 @@ describe('buildTimeline — hardforks', () => {
     expect(entries.map((e) => [e.chainIds[0], e.providerUpdates.length]).sort()).toEqual([[11155111, 1], [560048, 1]]);
   });
 
+  it('knows geth by its repository however the release writes it', () => {
+    for (const repo of ['https://github.com/ethereum/go-ethereum', 'go-ethereum']) {
+      const entries = build({
+        forks: [fork({ key: 'name:glamsterdam@sepolia', name: 'Glamsterdam', network: 'ethereum sepolia', chains: [11155111], activationAt: '2026-10-06T00:00:00.000Z', events: [releaseEvent({ release: { repo, version: 'v1.17.6' } })] })],
+        upgrades: [window({ title: 'Ethereum - Sepolia - Upgrade to Geth-v1.17.6', software: [{ client: 'geth', version: 'v1.17.6' }], chainIds: [11155111], networkSlugs: ['ethereum-sepolia'] })]
+      });
+      expect(entries[0].providerUpdates).toHaveLength(1);
+    }
+  });
+
   it('does not copy a window\'s fallout or news onto a fork', () => {
     const entries = build({
       forks: [fork({ events: [releaseEvent()] })],

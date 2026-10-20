@@ -18,7 +18,9 @@ function failureKind(error) {
   const code = error?.cause?.code ?? error?.code;
   if (['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH'].includes(code)) return 'unreachable';
   if (typeof code === 'string' && /CERT|TLS|SSL/i.test(code)) return 'tls_error';
-  return 'connection_error';
+  if (code === 'ECONNRESET' || code === 'UND_ERR_SOCKET') return 'connection_error';
+  // Anything else may be our own side (proxy, egress, a bug), so it says nothing about the endpoint.
+  return 'unknown';
 }
 
 export async function jsonRpcCall(url, method, { params = [], timeoutMs = 10000 } = {}) {

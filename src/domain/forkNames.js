@@ -1,4 +1,5 @@
 import { forkIdentity } from './forks.js';
+import { chainOfBareName, isNetworkName } from './networkWords.js';
 
 /**
  * Fork names learned from the feeds, never from a table. A source may state an alias itself
@@ -20,7 +21,10 @@ function statedAlias(name) {
   const m = /^([^()]+)\(([^()]+)\)\s*$/.exec(String(name ?? ''));
   if (!m) return null;
   const outer = m[1].split('/')[0].trim();
-  return outer && m[2].trim() ? { name: outer, alias: m[2].trim() } : null;
+  const alias = m[2].trim();
+  // "Fusaka (Hoodi)" says where, not what: a bracket the registry knows as a network is no alias.
+  if (!outer || !alias || isNetworkName(alias) || chainOfBareName(alias)) return null;
+  return { name: outer, alias };
 }
 
 /** Learn from fork entities ({name, aliases, events}). Replaces what was learned before. */
@@ -32,11 +36,15 @@ export function learnForkNames(forks = []) {
   const groups = forks.filter((f) => f?.name)
     .sort((a, b) => (b.events?.length ?? 0) - (a.events?.length ?? 0))
     .flatMap((f) => {
-      const out = f.aliases?.length ? [{ name: f.name, aliases: f.aliases }] : [];
+      // Stated aliases first: "Glamsterdam/ePBS (Gloas)" resolves to Glamsterdam before its
+      // same-activation aliases are attached, so those land on Glamsterdam too, not on the
+      // combined name.
+      const out = [];
       for (const n of [f.name, ...(f.aliases ?? [])]) {
         const stated = statedAlias(n);
         if (stated) out.push({ name: stated.name, aliases: [stated.alias, n] });
       }
+      if (f.aliases?.length) out.push({ name: f.name, aliases: f.aliases });
       return out;
     });
   for (const group of groups) {

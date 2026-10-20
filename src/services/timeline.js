@@ -446,12 +446,14 @@ function clientKey(name) {
     clientOfRepo = new Map();
     for (const [client, c] of Object.entries(CLIENT_REGISTRY)) {
       const repo = c.repo?.toLowerCase();
-      if (repo && !clientOfRepo.has(repo)) clientOfRepo.set(repo, client.replace(/[^a-z0-9]+/g, ''));
+      const id = client.replace(/[^a-z0-9]+/g, '');
+      // By owner/repo and by the repo alone: notes say "go-ethereum" as often as the full path.
+      for (const k of repo ? [repo, repo.split('/').pop()] : []) if (!clientOfRepo.has(k)) clientOfRepo.set(k, id);
     }
   }
-  const lower = name.toLowerCase();
+  const lower = name.toLowerCase().replace(/^https?:\/\/(?:www\.)?(?:github|gitlab)\.com\//, '').replace(/\.git$|\/+$/g, '');
   const key = lower.split('/').pop().replace(/[^a-z0-9]+/g, '');
-  return clientOfRepo.get(lower) ?? (key || null);
+  return clientOfRepo.get(lower) ?? clientOfRepo.get(lower.split('/').pop()) ?? (key || null);
 }
 
 function sameClient(a, b) {

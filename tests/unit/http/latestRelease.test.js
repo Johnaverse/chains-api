@@ -221,6 +221,14 @@ describe('GET /client-releases/latest', () => {
     }
   });
 
+  it('finds a release chain the registry names bare under its ecosystem name ("Ethereum Holesky" is Holesky)', async () => {
+    const forks = [{ name: 'Pectra', network: 'Ethereum Holesky', activationAt: null, state: 'completed' }];
+    const chains = [{ chainId: 1, name: 'Ethereum Mainnet' }, { chainId: 17000, name: 'Holesky' }];
+    proxyFetch.mockResolvedValue(page([rel('v1.15.0', { chains }, {}, { class: 'planned_hard_fork', forks })]));
+    const [fork] = (await get('/client-releases/latest?repo=ethereum/go-ethereum')).json().latest.hardfork.forks;
+    expect(fork.chainId).toBe(17000);
+  });
+
   it('names a fork network the release chains leave out from the registry, Ethereum first for a bare testnet name', async () => {
     registry.chains = [{ chainId: 374, name: 'Status Network Hoodi' }, { chainId: 560048, name: 'Ethereum Hoodi' }, { chainId: 2910, name: 'Morph Hoodi' }];
     const forks = [{ name: 'Gloas', network: 'Hoodi', activationAt: '2026-10-26T17:42:48.000Z', state: 'scheduled' }];
