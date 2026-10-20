@@ -588,6 +588,43 @@ function clusterUnnamed(groups) {
   }
 }
 
+/**
+ * Named groups on the same chains that activate at the same height or the same second are one
+ * activation under several names or network spellings. Live: Hoodi's upgrade on 2026-10-26
+ * 17:42:48 stood as five entries (Glamsterdam, Gloas and Amsterdam, each under "ethereum hoodi"
+ * and "hoodi"), BSC Chapel's Jenner as two. A date-only claim never joins: two forks a network
+ * schedules for the same day are not thereby one. Runs last, so `scopes` from collapseIdentical
+ * are combined. The group with the most events keeps its name; the rest become aliases.
+ */
+function mergeSameActivation(groups) {
+  const candidates = [];
+  for (const g of groups.values()) {
+    if (g.kind !== 'name') continue;
+    const chains = [...new Set(g.members.flatMap(m => m.chainIds))].sort((a, b) => a - b);
+    if (!chains.length) continue;
+    const blocks = new Set();
+    const times = new Set();
+    for (const m of g.members) {
+      const { block, time } = memberAnchor(m);
+      if (block !== null) blocks.add(block);
+      if (Number.isFinite(time) && !isDateOnly(m.fork.activationAt)) times.add(time);
+    }
+    if (blocks.size || times.size) candidates.push({ g, chains: chains.join(','), blocks, times });
+  }
+  // Largest first, so the best-attested group absorbs the others and keeps its name.
+  candidates.sort((a, b) => b.g.members.length - a.g.members.length);
+  const shares = (x, y) => [...x].some(v => y.has(v));
+  for (const target of candidates) {
+    if (!groups.has(target.g.key)) continue;
+    for (const other of candidates) {
+      if (other === target || !groups.has(other.g.key) || other.chains !== target.chains) continue;
+      if (!shares(other.blocks, target.blocks) && !shares(other.times, target.times)) continue;
+      target.g.scopes = [...new Set([...(target.g.scopes ?? [target.g.scope]), ...(other.g.scopes ?? [other.g.scope])])];
+      mergeInto(groups, target.g, other.g);
+    }
+  }
+}
+
 // Events with no URL still need a stable identity for de-duplication and collapsing.
 const anonymousIds = new WeakMap();
 let anonymousSeq = 0;
@@ -727,6 +764,7 @@ export async function buildForks(events = [], { tipFor = null, chainIdsFor = nul
   mergeUnscoped(groups);
   clusterUnnamed(groups);
   collapseIdentical(groups);
+  mergeSameActivation(groups);
 
   const forks = [];
   for (const { key, members, scopes } of groups.values()) {
@@ -758,11 +796,16 @@ export async function buildForks(events = [], { tipFor = null, chainIdsFor = nul
     const activationPrecision = activation?.precision ?? null;
 
     const named = members.map(m => m.fork.name).find(Boolean) ?? null;
+    // Other names the same activation goes by (mergeSameActivation): Gloas and Amsterdam beside
+    // Glamsterdam. Spelling variants of the name itself are not aliases.
+    const aliases = [...new Map(members.map(m => m.fork.name).filter(Boolean)
+      .filter(n => forkIdentity(n) !== forkIdentity(named)).map(n => [forkIdentity(n), n])).values()];
     const sources = [...new Set(members.map(m => m.event.statusPage?.id).filter(Boolean))];
     const feeds = [...new Set(members.map(m => m.event.feed ?? 'status'))];
     forks.push({
       key,
       name: named,
+      ...(aliases.length ? { aliases } : {}),
       // Consensus fork / network upgrade, or an ordinary software update that carried a fork
       // marker. See forkKind for the rule.
       kind: forkKind(members, activation),

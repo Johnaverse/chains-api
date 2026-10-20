@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { buildTimeline, getTimeline, forkAliases, normalizeVersion, namesFork, _resetTimelineMemoForTests } from '../../../src/services/timeline.js';
 import { getAllForks } from '../../../src/services/forks.js';
+import { learnForkNames, _resetForkNamesForTests } from '../../../src/domain/forkNames.js';
 import { getUpgradeTimeline } from '../../../src/services/upgrades.js';
 import { getClientReleases, clientFeedConfigured } from '../../../src/sources/clientFeed.js';
 import { getWeb3News } from '../../../src/sources/web3News.js';
@@ -167,7 +168,11 @@ describe('buildTimeline — not a fork', () => {
 });
 
 describe('buildTimeline — one fork, several names', () => {
+  beforeEach(() => _resetForkNamesForTests());
+
   it('merges geth\'s Amsterdam and Prysm\'s Gloas on one network into Glamsterdam', () => {
+    // Taught by the feeds, not a table: Hoodi's activation was reported under all three names.
+    learnForkNames([{ name: 'Glamsterdam', aliases: ['Gloas', 'Amsterdam'], events: [{}, {}, {}] }]);
     const entries = build({
       forks: [
         fork({ key: 'a', name: 'Amsterdam', network: 'ethereum sepolia', chains: [11155111], events: [releaseEvent({ release: { repo: 'ethereum/go-ethereum', version: 'v1.17.6' } })] }),
@@ -177,6 +182,16 @@ describe('buildTimeline — one fork, several names', () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]).toMatchObject({ name: 'Glamsterdam', layerName: 'Amsterdam', activationAt: '2026-10-29T02:30:00.000Z' });
     expect(entries[0].releases.map((r) => r.repo).sort()).toEqual(['ethereum/go-ethereum', 'offchainlabs/prysm']);
+  });
+
+  it('keeps two names apart until the feeds show they are one activation', () => {
+    const entries = build({
+      forks: [
+        fork({ key: 'a', name: 'Amsterdam', network: 'ethereum sepolia', chains: [11155111] }),
+        fork({ key: 'b', name: 'Gloas', network: 'sepolia', chains: [11155111], activationAt: null, activationEvidence: null, phase: 'unscheduled' })
+      ]
+    });
+    expect(entries.map((e) => e.name).sort()).toEqual(['Amsterdam', 'Gloas']);
   });
 
   it('keeps the same fork on different networks apart', () => {
@@ -342,7 +357,10 @@ describe('buildTimeline — news', () => {
 describe('name helpers', () => {
   it('reads every name a fork answers to', () => {
     expect(forkAliases('nv29 (Solstice)')).toEqual(['nv29 solstice', 'nv29', 'solstice']);
+    expect(forkAliases('Gloas')).toEqual(['gloas']);
+    learnForkNames([{ name: 'Glamsterdam', aliases: ['Gloas'], events: [{}] }]);
     expect(forkAliases('Gloas')).toEqual(['glamsterdam']);
+    _resetForkNamesForTests();
     expect(forkAliases('Hard Fork')).toEqual([]);
   });
 
