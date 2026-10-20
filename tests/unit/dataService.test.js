@@ -1514,8 +1514,9 @@ describe('runRpcHealthCheck', () => {
     const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     await runRpcHealthCheck();
 
+    // A node that serves blocks but disables web3_clientVersion works; its client is unknown.
     const cachedData = getCachedData();
-    expect(cachedData.rpcHealth[1][0].error).toContain('Method not found');
+    expect(cachedData.rpcHealth[1][0]).toMatchObject({ ok: true, blockHeight: 0x123, clientVersion: null, error: null });
     consoleLogSpy.mockRestore();
   });
 
@@ -1940,14 +1941,21 @@ describe('validateChainData', () => {
     expect(devnetError.message).toContain('Devnet');
   });
 
-  it('should detect Rule 4: name contains "sepolia" without L2 tag or relations', async () => {
-    const mockTheGraph = { networks: [] };
+  it('should detect Rule 4: a chain named after a test network, with no L2 tag or relations', async () => {
+    // Which words name test networks is read from the registry: several Sepolia testnets here.
+    const testnet = (chainId, name) => ({ chainId, name, isTestnet: true, slip44: 1 });
+    // The registry knows "sepolia" as Ethereum Sepolia's own id.
+    // ...and one testnet goes by the plain word "testnet", which names no network in particular.
+    const mockTheGraph = { networks: [
+      { id: 'sepolia', caip2Id: 'eip155:11155111', fullName: 'Ethereum Sepolia', networkType: 'testnet' },
+      { id: 'testnet', caip2Id: 'eip155:421614', fullName: 'Arbitrum Sepolia', networkType: 'testnet' }
+    ] };
     const mockChainlist = [
-      { chainId: 123, name: 'Sepolia Custom Chain' }
+      testnet(11155111, 'Ethereum Sepolia'), testnet(84532, 'Base Sepolia Testnet'), testnet(11155420, 'OP Sepolia Testnet'),
+      testnet(421614, 'Arbitrum Sepolia'), testnet(534351, 'Scroll Sepolia Testnet'),
+      { chainId: 123, name: 'Custom Sepolia Chain' }, { chainId: 456, name: 'Hoodie Network' }, { chainId: 789, name: 'Plain Testnet' }
     ];
-    const mockChains = [
-      { chainId: 123, name: 'Sepolia Custom Chain' }
-    ];
+    const mockChains = mockChainlist.map(({ chainId, name }) => ({ chainId, name }));
 
     global.fetch
       .mockResolvedValueOnce({ ok: true, json: async () => mockTheGraph })
@@ -1959,37 +1967,13 @@ describe('validateChainData', () => {
     const result = validateChainData();
 
     expect(result.error).toBeUndefined();
-    const rule4Errors = result.errorsByRule.rule4_sepolia_hoodie_issues;
-    expect(rule4Errors.length).toBeGreaterThan(0);
-    const sepoliaError = rule4Errors.find(e => e.chainId === 123);
-    expect(sepoliaError).toBeDefined();
-    expect(sepoliaError.message).toContain('sepolia');
-  });
-
-  it('should detect Rule 4: name contains "hoodie" without L2 tag or relations', async () => {
-    const mockTheGraph = { networks: [] };
-    const mockChainlist = [
-      { chainId: 456, name: 'Hoodie Network' }
-    ];
-    const mockChains = [
-      { chainId: 456, name: 'Hoodie Network' }
-    ];
-
-    global.fetch
-      .mockResolvedValueOnce({ ok: true, json: async () => mockTheGraph })
-      .mockResolvedValueOnce({ ok: true, json: async () => mockChainlist })
-      .mockResolvedValueOnce({ ok: true, json: async () => mockChains })
-      .mockResolvedValueOnce({ ok: true, text: async () => '' });
-
-    await loadData();
-    const result = validateChainData();
-
-    expect(result.error).toBeUndefined();
-    const rule4Errors = result.errorsByRule.rule4_sepolia_hoodie_issues;
-    expect(rule4Errors.length).toBeGreaterThan(0);
-    const hoodieError = rule4Errors.find(e => e.chainId === 456);
-    expect(hoodieError).toBeDefined();
-    expect(hoodieError.message).toContain('hoodie');
+    const rule4Errors = result.errorsByRule.rule4_test_network_no_relation;
+    expect(rule4Errors.find(e => e.chainId === 123)).toMatchObject({ type: 'test_network_no_l2_or_relations', namedNetwork: { chainId: 11155111 } });
+    // The testnet itself, and testnets merely called "X Testnet", are not flagged.
+    expect(rule4Errors.find(e => e.chainId === 11155111)).toBeUndefined();
+    // "Hoodie" names no test network the registry knows: not flagged by a guessed keyword.
+    expect(rule4Errors.find(e => e.chainId === 456)).toBeUndefined();
+    expect(rule4Errors.find(e => e.chainId === 789)).toBeUndefined();
   });
 
   it('should detect Rule 5: conflicting status across sources', async () => {
@@ -2022,18 +2006,11 @@ describe('validateChainData', () => {
     expect(statusError.message).toContain('conflicting status');
   });
 
-  it('should detect Rule 6: Goerli not marked as deprecated', async () => {
-    const mockTheGraph = {
-      networks: [
-        { id: 'goerli', caip2Id: 'eip155:5' }
-      ]
-    };
-    const mockChainlist = [
-      { chainId: 5, name: 'Goerli', status: 'active', slip44: 1 }
-    ];
-    const mockChains = [
-      { chainId: 5, name: 'Goerli' }
-    ];
+  it('should detect Rule 6: deprecated here but in no upstream source, naming the file to fix', async () => {
+    // Upstream gives Goerli no status at all; only chains-api calls it dead.
+    const mockTheGraph = { networks: [] };
+    const mockChainlist = [{ chainId: 5, name: 'Goerli', slip44: 1 }];
+    const mockChains = [{ chainId: 5, name: 'Goerli' }];
 
     global.fetch
       .mockResolvedValueOnce({ ok: true, json: async () => mockTheGraph })
@@ -2045,12 +2022,41 @@ describe('validateChainData', () => {
     const result = validateChainData();
 
     expect(result.error).toBeUndefined();
-    const rule6Errors = result.errorsByRule.rule6_goerli_not_deprecated;
-    expect(rule6Errors.length).toBeGreaterThan(0);
-    const goerliError = rule6Errors.find(e => e.chainId === 5);
-    expect(goerliError).toBeDefined();
-    expect(goerliError.message).toContain('Goerli');
-    expect(goerliError.message).toContain('not marked as deprecated');
+    const goerliError = result.errorsByRule.rule6_deprecated_not_upstream.find(e => e.chainId === 5);
+    expect(goerliError).toMatchObject({
+      type: 'deprecated_not_upstream',
+      fix: { source: 'ethereum-lists/chains', file: '_data/chains/eip155-5.json', set: { status: 'deprecated' } }
+    });
+    expect(goerliError.message).toContain('no upstream source marks it deprecated');
+  });
+
+  it('should detect Rules 18 and 19: no RPC answering on a live chain, an RPC answering on a dead one', async () => {
+    const mockTheGraph = { networks: [] };
+    const mockChainlist = [
+      { chainId: 777, name: 'Gone Chain', status: 'active' },
+      { chainId: 778, name: 'Busy Chain', status: 'active' },
+      { chainId: 779, name: 'Old Chain', status: 'deprecated' }
+    ];
+    const mockChains = mockChainlist.map(({ chainId, name, status }) => ({ chainId, name, status }));
+
+    global.fetch
+      .mockResolvedValueOnce({ ok: true, json: async () => mockTheGraph })
+      .mockResolvedValueOnce({ ok: true, json: async () => mockChainlist })
+      .mockResolvedValueOnce({ ok: true, json: async () => mockChains })
+      .mockResolvedValueOnce({ ok: true, text: async () => '' });
+
+    await loadData();
+    getCachedData().rpcHealth = {
+      777: [{ url: 'https://a.gone', ok: false, failure: 'unreachable', error: 'fetch failed' }, { url: 'https://b.gone', ok: false, failure: 'timeout', error: 'RPC request timed out' }],
+      // Rate limited and refusing a method: something answered, so not counted as gone.
+      778: [{ url: 'https://a.busy', ok: false, failure: 'rate_limited', error: 'HTTP 429' }, { url: 'https://b.busy', ok: false, failure: 'unreachable', error: 'fetch failed' }],
+      779: [{ url: 'https://a.old', ok: true, blockHeight: 42 }]
+    };
+    const result = validateChainData();
+
+    expect(result.errorsByRule.rule18_no_reachable_rpc.map(e => e.chainId)).toEqual([777]);
+    expect(result.errorsByRule.rule18_no_reachable_rpc[0].endpoints.map(e => e.failure)).toEqual(['unreachable', 'timeout']);
+    expect(result.errorsByRule.rule19_deprecated_rpc_answers.map(e => e.chainId)).toEqual([779]);
   });
 
   it('should handle complex multi-rule validation scenario', async () => {

@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { buildTimeline, getTimeline, forkAliases, normalizeVersion, namesFork, _resetTimelineMemoForTests } from '../../../src/services/timeline.js';
 import { getAllForks } from '../../../src/services/forks.js';
 import { learnForkNames, _resetForkNamesForTests } from '../../../src/domain/forkNames.js';
+import { learnNetworkWords } from '../../../src/domain/networkWords.js';
+import { TESTNET_REGISTRY } from '../../fixtures/testnetRegistry.js';
 import { getUpgradeTimeline } from '../../../src/services/upgrades.js';
 import { getClientReleases, clientFeedConfigured } from '../../../src/sources/clientFeed.js';
 import { getWeb3News } from '../../../src/sources/web3News.js';
@@ -12,8 +14,9 @@ vi.mock('../../../src/services/upgrades.js', async (importOriginal) => ({ ...(aw
 vi.mock('../../../src/sources/clientFeed.js', () => ({ getClientReleases: vi.fn(), clientFeedConfigured: vi.fn(() => true) }));
 vi.mock('../../../src/sources/web3News.js', () => ({ getWeb3News: vi.fn() }));
 vi.mock('../../../src/sources/forumNews.js', () => ({ getForumNews: vi.fn() }));
-vi.mock('../../../src/store/queries.js', () => ({
-  getChainById: vi.fn((id) => ({ 8453: { name: 'Base', tags: [] }, 1: { name: 'Ethereum Mainnet', tags: [] }, 11155111: { name: 'Sepolia', tags: ['Testnet'] } })[id] ?? null)
+vi.mock('../../../src/store/queries.js', async () => ({
+  getChainById: vi.fn((id) => ({ 8453: { name: 'Base', tags: [] }, 1: { name: 'Ethereum Mainnet', tags: [] }, 11155111: { name: 'Sepolia', tags: ['Testnet'] } })[id] ?? null),
+  getAllChains: vi.fn(() => [])
 }));
 
 const NOW = Date.parse('2026-10-17T00:00:00Z');
@@ -131,6 +134,16 @@ describe('buildTimeline — hardforks', () => {
     expect(entries.map((e) => [e.chainIds[0], e.providerUpdates.length]).sort()).toEqual([[11155111, 1], [560048, 1]]);
   });
 
+  it('knows geth by its repository however the release writes it', () => {
+    for (const repo of ['https://github.com/ethereum/go-ethereum', 'go-ethereum']) {
+      const entries = build({
+        forks: [fork({ key: 'name:glamsterdam@sepolia', name: 'Glamsterdam', network: 'ethereum sepolia', chains: [11155111], activationAt: '2026-10-06T00:00:00.000Z', events: [releaseEvent({ release: { repo, version: 'v1.17.6' } })] })],
+        upgrades: [window({ title: 'Ethereum - Sepolia - Upgrade to Geth-v1.17.6', software: [{ client: 'geth', version: 'v1.17.6' }], chainIds: [11155111], networkSlugs: ['ethereum-sepolia'] })]
+      });
+      expect(entries[0].providerUpdates).toHaveLength(1);
+    }
+  });
+
   it('does not copy a window\'s fallout or news onto a fork', () => {
     const entries = build({
       forks: [fork({ events: [releaseEvent()] })],
@@ -161,7 +174,8 @@ describe('buildTimeline — hardforks', () => {
 
 describe('buildTimeline — not a fork', () => {
   it('files a "fork" named after a network as a software update', () => {
-    // A release adding Hoodi support, read as a fork named "Hoodi".
+    // A release adding Hoodi support, read as a fork named "Hoodi". The registry says Hoodi is a network.
+    learnNetworkWords(TESTNET_REGISTRY);
     const entries = build({ forks: [fork({ name: 'Hoodi', network: null, chains: [1], activationAt: null, phase: 'unscheduled' })] });
     expect(entries[0].type).toBe('software_update');
   });
@@ -360,6 +374,9 @@ describe('name helpers', () => {
     expect(forkAliases('Gloas')).toEqual(['gloas']);
     learnForkNames([{ name: 'Glamsterdam', aliases: ['Gloas'], events: [{}] }]);
     expect(forkAliases('Gloas')).toEqual(['glamsterdam']);
+    // A name that states its alias teaches it; a slash list of two forks does not.
+    learnForkNames([{ name: 'Fusaka (Fulu)', events: [{}] }, { name: 'Berlin/London', events: [{}] }]);
+    expect([forkAliases('Fulu'), forkAliases('London')]).toEqual([['fusaka'], ['london']]);
     _resetForkNamesForTests();
     expect(forkAliases('Hard Fork')).toEqual([]);
   });

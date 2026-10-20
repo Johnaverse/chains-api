@@ -110,19 +110,25 @@ async function checkRpcEndpoint(url) {
     return result;
   }
 
-  try {
-    const [clientVersion, blockNumber] = await Promise.all([
-      jsonRpcCall(url, 'web3_clientVersion', { timeoutMs: RPC_CHECK_TIMEOUT_MS }),
-      jsonRpcCall(url, 'eth_blockNumber', { timeoutMs: RPC_CHECK_TIMEOUT_MS })
-    ]);
-    result.clientVersion = clientVersion || null;
-    result.blockHeight = parseBlockHeight(blockNumber);
-    result.ok = Boolean(result.clientVersion) && result.blockHeight !== null;
-  } catch (error) {
-    result.error = error.message;
+  const [version, block] = await Promise.allSettled([
+    jsonRpcCall(url, 'web3_clientVersion', { timeoutMs: RPC_CHECK_TIMEOUT_MS }),
+    jsonRpcCall(url, 'eth_blockNumber', { timeoutMs: RPC_CHECK_TIMEOUT_MS })
+  ]);
+  if (version.status === 'fulfilled') result.clientVersion = version.value || null;
+  if (block.status === 'fulfilled') result.blockHeight = parseBlockHeight(block.value);
+  // Serving blocks is what makes an RPC work; some nodes disable web3_clientVersion and were
+  // counted dead for it. The client version stays null then.
+  result.ok = result.blockHeight !== null;
+  if (!result.ok) {
+    const error = block.status === 'rejected' ? block.reason : (version.status === 'rejected' ? version.reason : null);
+    result.error = error?.message ?? 'No block height returned';
+    // How it failed: `unreachable` / `timeout` mean nothing answered; `rpc_error`,
+    // `http_error`, `rate_limited`, `invalid_response` mean something did (validation.js).
+    // A node that returned its client version answered, whatever eth_blockNumber did.
+    result.failure = version.status === 'fulfilled' ? 'answered_no_block' : (error?.kind ?? 'invalid_response');
     // 401/403 = the endpoint wants credentials or refuses us: not a public RPC. Rate limits
     // (429) and outages (5xx) are transient and stay listed.
-    if (PRIVATE_RPC_STATUSES.has(error.status)) result.authRequired = true;
+    if (PRIVATE_RPC_STATUSES.has(error?.status)) result.authRequired = true;
   }
   return result;
 }

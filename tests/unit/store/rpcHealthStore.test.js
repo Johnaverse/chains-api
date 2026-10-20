@@ -39,6 +39,11 @@ describe('rpcStateChanged', () => {
       [{ url: 'a', ok: true }, { url: 'b', ok: true }])).toBe(true);
   });
 
+  it('is true when a down endpoint fails differently, so the failure kind is saved', () => {
+    expect(rpcStateChanged([{ url: 'a', ok: false }], [{ url: 'a', ok: false, failure: 'unreachable' }])).toBe(true);
+    expect(rpcStateChanged([{ url: 'a', ok: false, failure: 'timeout' }], [{ url: 'a', ok: false, failure: 'timeout' }])).toBe(false);
+  });
+
   it('is false when only volatile fields change (block height / latency)', () => {
     const prev = [{ url: 'a', ok: true, blockHeight: 10, latencyMs: 5 }];
     const next = [{ url: 'a', ok: true, blockHeight: 99, latencyMs: 250 }];

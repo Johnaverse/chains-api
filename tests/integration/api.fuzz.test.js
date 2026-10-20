@@ -99,9 +99,9 @@ vi.mock('../../dataService.js', async () => {
         rule1_relation_conflicts: [{ rule: 1, chainId: 1, chainName: 'Ethereum', message: 'Test error' }],
         rule2_slip44_testnet_mismatch: [],
         rule3_name_testnet_mismatch: [{ rule: 3, chainId: 137, chainName: 'Polygon', message: 'Test error' }],
-        rule4_sepolia_hoodie_issues: [],
+        rule4_test_network_no_relation: [],
         rule5_status_conflicts: [],
-        rule6_goerli_not_deprecated: []
+        rule6_deprecated_not_upstream: []
       },
       summary: {
         rule1: 1,

@@ -1,9 +1,10 @@
 import { forkIdentity } from './forks.js';
+import { chainOfBareName, isNetworkName } from './networkWords.js';
 
 /**
- * Fork names learned from the feeds, never from a table. When the fork list finds several
- * names activating on the same chains at the same height or second (mergeSameActivation), they
- * are one fork: Hoodi's Glamsterdam, Gloas and Amsterdam on 2026-10-26 17:42:48. The
+ * Fork names learned from the feeds, never from a table. A source may state an alias itself
+ * ("Fusaka (Fulu)"); otherwise when the fork list finds several names activating on the same
+ * chains at the same height or second (mergeSameActivation), they are one fork: Hoodi's Glamsterdam, Gloas and Amsterdam on 2026-10-26 17:42:48. The
  * best-attested name (the entity's own) becomes the one the others resolve to, so a release
  * elsewhere that says only "Amsterdam" joins that fork without anyone listing the pair.
  */
@@ -11,26 +12,52 @@ let canonicalOf = new Map(); // identity -> canonical identity
 let displayOf = new Map(); // canonical identity -> the name as written
 let membersOf = new Map(); // canonical identity -> every identity resolving to it
 
+/**
+ * A name that states its own alias: "Fusaka (Fulu)" says Fulu is Fusaka, "Glamsterdam/ePBS
+ * (Gloas)" that Gloas is Glamsterdam. Only the bracket form counts: "Berlin/London" lists two
+ * forks, so of a slash list only the first is taken as the name the bracket explains.
+ */
+function statedAlias(name) {
+  const m = /^([^()]+)\(([^()]+)\)\s*$/.exec(String(name ?? ''));
+  if (!m) return null;
+  const outer = m[1].split('/')[0].trim();
+  const alias = m[2].trim();
+  // "Fusaka (Hoodi)" says where, not what: a bracket the registry knows as a network is no alias.
+  if (!outer || !alias || isNetworkName(alias) || chainOfBareName(alias)) return null;
+  return { name: outer, alias };
+}
+
 /** Learn from fork entities ({name, aliases, events}). Replaces what was learned before. */
 export function learnForkNames(forks = []) {
   const next = new Map();
   const display = new Map();
-  const weight = new Map();
   // Best-attested entities first, so a name claimed by two entities follows the stronger one.
-  const ranked = forks.filter((f) => f?.name && f.aliases?.length)
-    .sort((a, b) => (b.events?.length ?? 0) - (a.events?.length ?? 0));
-  for (const fork of ranked) {
-    const canonical = forkIdentity(fork.name);
+  // Each entity contributes its same-activation aliases and any alias its names state.
+  const groups = forks.filter((f) => f?.name)
+    .sort((a, b) => (b.events?.length ?? 0) - (a.events?.length ?? 0))
+    .flatMap((f) => {
+      // Stated aliases first: "Glamsterdam/ePBS (Gloas)" resolves to Glamsterdam before its
+      // same-activation aliases are attached, so those land on Glamsterdam too, not on the
+      // combined name.
+      const out = [];
+      for (const n of [f.name, ...(f.aliases ?? [])]) {
+        const stated = statedAlias(n);
+        if (stated) out.push({ name: stated.name, aliases: [stated.alias, n] });
+      }
+      if (f.aliases?.length) out.push({ name: f.name, aliases: f.aliases });
+      return out;
+    });
+  for (const group of groups) {
+    const canonical = forkIdentity(group.name);
     if (!canonical) continue;
     // A name already resolving elsewhere stays there: chains of renames stay one hop.
     const root = next.get(canonical) ?? canonical;
-    if (!display.has(root)) display.set(root, fork.name);
-    for (const alias of fork.aliases) {
+    if (!display.has(root)) display.set(root, group.name);
+    for (const alias of group.aliases) {
       const id = forkIdentity(alias);
       if (!id || id === root || next.has(id)) continue;
       next.set(id, root);
     }
-    weight.set(root, (weight.get(root) ?? 0) + (fork.events?.length ?? 0));
   }
   const members = new Map();
   for (const [id, root] of next) {

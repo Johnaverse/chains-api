@@ -9,6 +9,20 @@ import { proxyFetch } from './fetchUtil.js';
  * @param {number} options.timeoutMs - Timeout in milliseconds (default: 10000)
  * @returns {Promise<*>} The result field from the JSON-RPC response
  */
+/**
+ * What kind of failure this was, from the error itself, so a caller can tell an endpoint that is
+ * gone (its name no longer resolves, nothing listens) from one that answered with an error.
+ */
+function failureKind(error) {
+  if (Number.isInteger(error?.status)) return error.status === 429 ? 'rate_limited' : 'http_error';
+  const code = error?.cause?.code ?? error?.code;
+  if (['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH'].includes(code)) return 'unreachable';
+  if (typeof code === 'string' && /CERT|TLS|SSL/i.test(code)) return 'tls_error';
+  if (code === 'ECONNRESET' || code === 'UND_ERR_SOCKET') return 'connection_error';
+  // Anything else may be our own side (proxy, egress, a bug), so it says nothing about the endpoint.
+  return 'unknown';
+}
+
 export async function jsonRpcCall(url, method, { params = [], timeoutMs = 10000 } = {}) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -29,20 +43,34 @@ export async function jsonRpcCall(url, method, { params = [], timeoutMs = 10000 
     if (!response.ok) {
       const httpError = new Error(`HTTP ${response.status}`);
       httpError.status = response.status;
+      httpError.kind = response.status === 429 ? 'rate_limited' : 'http_error';
       throw httpError;
     }
 
-    const body = await response.json();
+    let body;
+    try {
+      body = await response.json();
+    } catch (parseError) {
+      // A page, not JSON-RPC (a parked domain, a login wall): the host is up, the endpoint is not.
+      parseError.kind = 'invalid_response';
+      throw parseError;
+    }
     if (body.error) {
       const message = body.error.message || JSON.stringify(body.error);
-      throw new Error(message);
+      const rpcError = new Error(message);
+      // The node answered: it is up, it just refused this method or request.
+      rpcError.kind = 'rpc_error';
+      throw rpcError;
     }
 
     return body.result;
   } catch (error) {
     if (error.name === 'AbortError') {
-      throw new Error('RPC request timed out');
+      const timeout = new Error('RPC request timed out');
+      timeout.kind = 'timeout';
+      throw timeout;
     }
+    if (!error.kind) error.kind = failureKind(error);
     throw error;
   } finally {
     clearTimeout(timeoutId);

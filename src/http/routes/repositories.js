@@ -1,5 +1,6 @@
 import { getRepositoryInputs } from '../../sources/networkResearch.js';
-import { getChainById } from '../../store/queries.js';
+import { getChainById, getAllChains } from '../../store/queries.js';
+import { learnNetworkWords, testNetworkWords } from '../../domain/networkWords.js';
 
 /**
  * Raw node/client repository research per chain, for chains-client-feed's registry. Static
@@ -30,7 +31,16 @@ export async function repositoriesRoutes(fastify) {
     const inputs = getRepositoryInputs(chainId => getChainById(chainId)?.name ?? null);
     // Other names the registry knows a network by (The Graph's id, its aliases): the feed matches
     // a release's fork network ("BSC Chapel testnet") against them, not only the display name.
-    for (const network of inputs.networks) network.aliases = aliasesOf(getChainById(network.chainId));
+    for (const network of inputs.networks) {
+      const chain = getChainById(network.chainId);
+      network.aliases = aliasesOf(chain);
+      // The registry's own word on test networks, so the feed keeps no list of its own.
+      if (chain) network.testnet = Array.isArray(chain.tags) && chain.tags.includes('Testnet');
+    }
+    // Words that name test networks, learned from the registry (networkWords.js): the feed reads
+    // "Hoodi" and "BSC Chapel" in release notes as test networks with them.
+    learnNetworkWords(getAllChains());
+    inputs.testNetworkWords = testNetworkWords();
     // Before the registry loads, names come from the hardware research alone and every alias
     // list is empty; pinning that would cost the feed its alias matches until a restart.
     if (inputs.networks.some(n => getChainById(n.chainId))) cached = inputs;

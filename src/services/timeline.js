@@ -6,8 +6,10 @@ import { getClientReleases, clientFeedConfigured } from '../sources/clientFeed.j
 import { getWeb3News } from '../sources/web3News.js';
 import { getForumNews } from '../sources/forumNews.js';
 import { logger } from '../util/logger.js';
-import { getChainById } from '../store/queries.js';
+import { getChainById, getAllChains } from '../store/queries.js';
 import { canonicalForkId, forkIdsOf, forkDisplayName } from '../domain/forkNames.js';
+import { learnNetworkWords, isNetworkName } from '../domain/networkWords.js';
+import { CLIENT_REGISTRY } from '../../clientRegistry.js';
 
 /**
  * The event timeline: one entry per real-world event, with everything the feeds say about it
@@ -170,11 +172,14 @@ export function buildTimeline({ forks = [], upgrades = [], incidentGroups = [], 
 // --- entries -------------------------------------------------------------------------------
 
 // Release notes sometimes put the network in the fork's name slot — "Hoodi", "Sepolia" — for a
-// release that adds the network, not a fork. Such an entry is a software update.
-const NETWORK_NOT_FORK = new Set(['sepolia', 'hoodi', 'holesky', 'goerli', 'ropsten', 'rinkeby', 'kovan', 'mainnet', 'testnet', 'devnet']);
+// release that adds the network, not a fork. Such an entry is a software update. Which names are
+// networks comes from the registry (networkWords.js); "mainnet" alone names no network.
+function namesNetwork(identity) {
+  return identity === 'mainnet' || isNetworkName(identity);
+}
 
 function forkEntry(fork) {
-  const notFork = NETWORK_NOT_FORK.has(forkIdentity(fork.name) ?? '');
+  const notFork = Boolean(fork.name) && namesNetwork(forkIdentity(fork.name) ?? '');
   const type = fork.kind === 'upgrade' || notFork ? TIMELINE_TYPES.SOFTWARE_UPDATE : TIMELINE_TYPES.HARDFORK;
   const networks = (fork.networks?.length ? fork.networks : [fork.network]).filter(Boolean);
   const entry = {
@@ -338,7 +343,9 @@ function mergeDuplicateForks(entries) {
   }
   for (const entry of out) {
     // The learned name leads when the entry was named by another one: "Glamsterdam", not "Gloas".
-    const combined = (entry.aliases ?? []).find((a) => a !== forkIdentity(entry.name) && forkDisplayName(a));
+    // A name that already spells it out ("Height Coordinated Upgrade (HCU)") keeps its own form.
+    const own = forkIdentity(entry.name) ?? '';
+    const combined = (entry.aliases ?? []).find((a) => a !== own && !own.startsWith(`${a} `) && forkDisplayName(a));
     if (combined) {
       entry.layerName = entry.name;
       entry.name = forkDisplayName(combined);
@@ -428,13 +435,25 @@ function windowVersions(window) {
 // Version numbers are not unique on a network: geth and Erigon can both be at 3.7.0. A join on
 // a version therefore also requires the software to be compatible — the same client, or one
 // side not saying which. Names are compared loosely ("op-geth" holds "geth", the repository
-// "erigontech/erigon" is "erigon"), so only two clients known to differ are kept apart.
-const CLIENT_ALIASES = { goethereum: 'geth' };
-
+// "erigontech/erigon" is "erigon"), so only two clients known to differ are kept apart. A
+// repository is read as the client the client registry names for it ("ethereum/go-ethereum"
+// is geth).
+let clientOfRepo = null;
 function clientKey(name) {
   if (typeof name !== 'string' || !name.trim()) return null;
-  const key = name.toLowerCase().split('/').pop().replace(/[^a-z0-9]+/g, '');
-  return CLIENT_ALIASES[key] ?? (key || null);
+  if (!clientOfRepo) {
+    // The first client listed for a repository is its own: reth before op-reth for paradigmxyz/reth.
+    clientOfRepo = new Map();
+    for (const [client, c] of Object.entries(CLIENT_REGISTRY)) {
+      const repo = c.repo?.toLowerCase();
+      const id = client.replace(/[^a-z0-9]+/g, '');
+      // By owner/repo and by the repo alone: notes say "go-ethereum" as often as the full path.
+      for (const k of repo ? [repo, repo.split('/').pop()] : []) if (!clientOfRepo.has(k)) clientOfRepo.set(k, id);
+    }
+  }
+  const lower = name.toLowerCase().replace(/^https?:\/\/(?:www\.)?(?:github|gitlab)\.com\//, '').replace(/\.git$|\/+$/g, '');
+  const key = lower.split('/').pop().replace(/[^a-z0-9]+/g, '');
+  return clientOfRepo.get(lower) ?? clientOfRepo.get(lower.split('/').pop()) ?? (key || null);
 }
 
 function sameClient(a, b) {
@@ -722,6 +741,8 @@ async function settle(label, promise, fallback) {
  * @param {number} [opts.limit] default 100, max 1000
  */
 export async function getTimeline({ chainId, type, phase, since, until, limit = DEFAULT_LIMIT } = {}) {
+  // Which names are networks rather than forks comes from the registry.
+  learnNetworkWords(getAllChains());
   const [forks, upgrades, releases, news, forum] = await Promise.all([
     settle('forks', getAllForks(), { forks: [], feeds: {}, fetchedAt: null }),
     settle('upgrades', getUpgradeTimeline(), { upgrades: [], incidentGroups: [] }),

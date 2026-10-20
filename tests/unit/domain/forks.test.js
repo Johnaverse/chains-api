@@ -1,11 +1,17 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import {
   forkKey, forkScopes, normalizeForkName, resolveForkActivation, forkPhase,
   bestActivation, bestState, buildForks, FORK_PHASE, forkIdentity, scopeName, sourceRank,
   registryScopes, scopeLookups, forkKind, plausibleFork, observedAtOf, forksOf, isDateOnly, FORK_KIND
 } from '../../../src/domain/forks.js';
 
+import { learnNetworkWords } from '../../../src/domain/networkWords.js';
+import { TESTNET_REGISTRY } from '../../fixtures/testnetRegistry.js';
+
 const NOW = Date.parse('2026-08-14T12:00:00Z');
+
+// Which words name test networks is learned from the registry, as in production.
+beforeAll(() => learnNetworkWords(TESTNET_REGISTRY));
 
 function event(id, { fork, chains = [8453], affectedChains, page = 'quicknode', publishedAt = '2026-08-14T00:00:00Z', updatedAt } = {}) {
   return {
@@ -180,6 +186,17 @@ describe('assembling forks from events', () => {
     const { learnForkNames, canonicalForkId, _resetForkNamesForTests } = await import('../../../src/domain/forkNames.js');
     learnForkNames(out);
     expect([canonicalForkId('gloas'), canonicalForkId('amsterdam'), canonicalForkId('fusaka')]).toEqual(['glamsterdam', 'glamsterdam', 'fusaka']);
+    _resetForkNamesForTests();
+  });
+
+  it('learns a bracket as an alias, unless it names a network, and keeps every alias one hop from the root', async () => {
+    const { learnForkNames, canonicalForkId, _resetForkNamesForTests } = await import('../../../src/domain/forkNames.js');
+    learnForkNames([
+      { name: 'Glamsterdam/ePBS (Gloas)', aliases: ['Amsterdam'], events: [{}, {}] },
+      { name: 'Fusaka (Hoodi)', events: [{}] }
+    ]);
+    expect([canonicalForkId('gloas'), canonicalForkId('amsterdam')]).toEqual(['glamsterdam', 'glamsterdam']);
+    expect(canonicalForkId('hoodi')).toBe('hoodi');
     _resetForkNamesForTests();
   });
 

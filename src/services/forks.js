@@ -4,6 +4,7 @@ import { buildForks, forkPhase, sortForks, FORK_PHASE, FORK_KIND, registryScopes
 import { getAllChains } from '../store/queries.js';
 import { logger } from '../util/logger.js';
 import { learnForkNames } from '../domain/forkNames.js';
+import { learnNetworkWords, mentionsTestNetwork } from '../domain/networkWords.js';
 
 /**
  * Serves fork entities: the read side of src/domain/forks.js.
@@ -87,12 +88,10 @@ function isTestChain(chain) {
   return Array.isArray(chain?.tags) && chain.tags.includes('Testnet');
 }
 
-const TEST_NAME = /\b(testnet|test|devnet|sepolia|holesky|hoodi|goerli|amoy|mumbai|chapel|fuji|futurenet|preview|preprod|staging|signet)\b/i;
-
 /** Whether a named network is a test network: by its registry tag, else by its name. */
 function isTestName(name, byName) {
   const chain = byName.get(normalizeForkName(name)) ?? byName.get(normalizeForkName(name).replace(/ testnet$/, ''));
-  return chain ? isTestChain(chain) : TEST_NAME.test(name);
+  return chain ? isTestChain(chain) : mentionsTestNetwork(name);
 }
 
 /**
@@ -148,6 +147,8 @@ export function _resetForksMemoForTests() {
 async function builtForks(mentions, fetchedAt) {
   const chains = getAllChains();
   if (memo.forks && memo.mentions === mentions && memo.fetchedAt === fetchedAt && memo.chains === chains) return memo.forks;
+  // Which words name a test network comes from the registry (networkWords.js).
+  learnNetworkWords(chains);
   const byId = new Map(chains.map((c) => [c.chainId, c]));
   const forks = (await buildForks(mentions.map((m) => qualifyBareNetwork(m, byId)), { tipFor, chainIdsFor: chainResolver(chains) })).map(present);
   // What the feeds show about which names are one fork: read by the timeline and latest release.

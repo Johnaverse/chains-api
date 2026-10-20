@@ -210,6 +210,18 @@ describe('chainRefresher', () => {
       expect(cachedData.lastRpcCheck).toBe(cachedData.indexed.byChainId[1].lastTested);
     });
 
+    it('records a node that gave its client version but no block as answered, not gone', async () => {
+      seedCacheWith([seedChain(1, ['https://rpc-a.example'])]);
+      jsonRpcCall.mockImplementation(async (_url, method) => {
+        if (method === 'web3_clientVersion') return 'Geth/v1.0';
+        throw Object.assign(new Error('RPC request timed out'), { kind: 'timeout' });
+      });
+
+      await processChainRpc(1);
+
+      expect(cachedData.rpcHealth[1][0]).toMatchObject({ ok: false, failure: 'answered_no_block' });
+    });
+
   describe('ensureChainRpcResults (on-demand probe)', () => {
     it('returns true without probing when results already exist', async () => {
       seedCacheWith([seedChain(1, ['https://rpc-a.example'])]);

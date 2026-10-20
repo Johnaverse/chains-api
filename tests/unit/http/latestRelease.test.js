@@ -19,7 +19,14 @@ vi.mock('../../../config.js', async (importOriginal) => {
 const registry = vi.hoisted(() => ({ chains: null }));
 vi.mock('../../../src/store/queries.js', async (importOriginal) => {
   const actual = await importOriginal();
-  return { ...actual, searchChains: (q) => registry.chains ?? actual.searchChains(q) };
+  const { TESTNET_REGISTRY } = await import('../../fixtures/testnetRegistry.js');
+  return {
+    ...actual,
+    searchChains: (q) => registry.chains ?? actual.searchChains(q),
+    // The registry is what says which chains and words are test networks.
+    getAllChains: () => TESTNET_REGISTRY,
+    getChainById: (id) => TESTNET_REGISTRY.find((c) => c.chainId === Number(id)) ?? actual.getChainById(id)
+  };
 });
 
 const known = vi.hoisted(() => ({ forks: null }));
@@ -212,6 +219,14 @@ describe('GET /client-releases/latest', () => {
     } finally {
       known.forks = null;
     }
+  });
+
+  it('finds a release chain the registry names bare under its ecosystem name ("Ethereum Holesky" is Holesky)', async () => {
+    const forks = [{ name: 'Pectra', network: 'Ethereum Holesky', activationAt: null, state: 'completed' }];
+    const chains = [{ chainId: 1, name: 'Ethereum Mainnet' }, { chainId: 17000, name: 'Holesky' }];
+    proxyFetch.mockResolvedValue(page([rel('v1.15.0', { chains }, {}, { class: 'planned_hard_fork', forks })]));
+    const [fork] = (await get('/client-releases/latest?repo=ethereum/go-ethereum')).json().latest.hardfork.forks;
+    expect(fork.chainId).toBe(17000);
   });
 
   it('names a fork network the release chains leave out from the registry, Ethereum first for a bare testnet name', async () => {

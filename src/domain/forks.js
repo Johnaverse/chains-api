@@ -1,3 +1,5 @@
+import { mentionsTestNetwork } from './networkWords.js';
+
 /**
  * Forks as first-class entities, assembled from the events that mention them.
  *
@@ -255,8 +257,6 @@ function scopesOf(event) {
   return { scopes: ['unscoped'], forkNetwork: null, named };
 }
 
-const TEST_NETWORK_WORD = /\b(testnet|test|devnet|sepolia|holesky|hoodi|goerli|futurenet|preview|preprod|staging|signet)\b/;
-
 /**
  * The scopes under which a registry chain name can be found. The registry writes test networks
  * both bare ("Sepolia") and qualified ("Base Sepolia Testnet"), sources write "Ethereum Sepolia"
@@ -274,7 +274,7 @@ export function scopeLookups(scope) {
   if (typeof scope !== 'string' || !scope) return [];
   const words = scope.split(' ');
   const tail = words.slice(1).join(' ');
-  return words.length > 1 && TEST_NETWORK_WORD.test(tail) ? [scope, tail] : [scope];
+  return words.length > 1 && mentionsTestNetwork(tail) ? [scope, tail] : [scope];
 }
 
 /**
@@ -284,7 +284,7 @@ export function scopeLookups(scope) {
 function sameNetworkFamily(a, b) {
   if (a === b) return true;
   const [base, longer] = a.length < b.length ? [a, b] : [b, a];
-  return longer.startsWith(`${base} `) && TEST_NETWORK_WORD.test(longer.slice(base.length));
+  return longer.startsWith(`${base} `) && mentionsTestNetwork(longer.slice(base.length));
 }
 
 /**

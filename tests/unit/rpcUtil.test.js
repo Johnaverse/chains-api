@@ -109,6 +109,24 @@ describe('rpcUtil - jsonRpcCall', () => {
       .rejects.toThrow('Network failure');
   });
 
+  it('says how a call failed: nothing answered, or the endpoint answered with an error', async () => {
+    const kindOf = async (impl) => {
+      vi.mocked(proxyFetch).mockImplementation(impl);
+      return jsonRpcCall('https://rpc.example.com', 'eth_blockNumber').then(() => null, (err) => err.kind);
+    };
+    const dns = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ENOTFOUND' } });
+    expect(await kindOf(async () => { throw dns; })).toBe('unreachable');
+    expect(await kindOf(async () => { throw Object.assign(new Error('x'), { cause: { code: 'CERT_HAS_EXPIRED' } }); })).toBe('tls_error');
+    expect(await kindOf(async () => { throw Object.assign(new Error('aborted'), { name: 'AbortError' }); })).toBe('timeout');
+    expect(await kindOf(async () => ({ ok: false, status: 429 }))).toBe('rate_limited');
+    expect(await kindOf(async () => ({ ok: false, status: 530 }))).toBe('http_error');
+    expect(await kindOf(async () => ({ ok: true, json: async () => ({ error: { message: 'Method not found' } }) }))).toBe('rpc_error');
+    expect(await kindOf(async () => ({ ok: true, json: async () => { throw new SyntaxError('Unexpected token <'); } }))).toBe('invalid_response');
+    // Not known to be the endpoint's fault: it may be our own proxy or egress.
+    expect(await kindOf(async () => { throw new TypeError('fetch failed'); })).toBe('unknown');
+    expect(await kindOf(async () => { throw Object.assign(new Error('reset'), { code: 'ECONNRESET' }); })).toBe('connection_error');
+  });
+
   it('should use default params and timeout', async () => {
     vi.mocked(proxyFetch).mockResolvedValue({
       ok: true,

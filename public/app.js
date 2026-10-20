@@ -1547,7 +1547,7 @@ function renderOverviewStats() {
         }),
         statTile({
             label: 'Data conflicts', value: state.validate ? fmtNum(state.validate.totalErrors) : '—',
-            sub: state.validate ? 'across 17 validation rules' : '',
+            sub: state.validate ? 'across 19 validation rules' : '',
             tone: !state.validate ? '' : state.validate.totalErrors > 500 ? 'warn' : '',
             hint: 'Disagreements between the five upstream sources found by the API validation rules. These are metadata conflicts, not service failures.'
         })
@@ -1862,9 +1862,9 @@ const RULE_LABELS = {
     rule1: 'Conflicting relations between sources',
     rule2: 'SLIP-44 coin type on a testnet',
     rule3: 'Name says testnet but the tag disagrees',
-    rule4: 'Sepolia / Hoodi naming problems',
+    rule4: 'Test-network chain with no relation',
     rule5: 'Lifecycle status conflicts',
-    rule6: 'Goerli chains not marked deprecated',
+    rule6: 'Deprecated here, not upstream',
     rule7: 'L2BEAT project missing a classification',
     rule8: 'L2BEAT host chain with no relation',
     rule9: 'L2BEAT category disagrees with the name',
@@ -1875,7 +1875,9 @@ const RULE_LABELS = {
     rule14: 'Native currency mismatch',
     rule15: 'SLIP-44 symbol vs native symbol mismatch',
     rule16: 'RPC URL present in only one source',
-    rule17: 'Active chain under a deprecated parent'
+    rule17: 'Active chain under a deprecated parent',
+    rule18: 'No RPC endpoint answers, not deprecated',
+    rule19: 'Deprecated, but an RPC still answers'
 };
 
 function renderDataQuality() {
@@ -1912,7 +1914,7 @@ function renderDataQuality() {
     const clean = 17 - rules.length;
     host.appendChild(el('p', {
         class: 'note',
-        text: `${clean} of 17 rules found nothing. These are disagreements between upstream sources — most are metadata noise, but block-height drift and status conflicts are worth reading.`
+        text: `${clean} of 19 rules found nothing. These are disagreements between upstream sources — most are metadata noise, but block-height drift and status conflicts are worth reading.`
     }));
 }
 
