@@ -11,8 +11,12 @@
  * in-progress RPC-health sweep). When everything is loaded it does nothing, so
  * the healthy path is never disrupted. Fetch-level retry (transport/fetch.js)
  * handles most blips; this is the backstop for the rest.
+ *
+ * It also reloads them once they are REGISTRY_MAX_AGE_MS old: the index (network words, fork
+ * names, deprecations) is learned from them and would otherwise stay as it was at boot.
  */
-import { SOURCE_REFRESH_INTERVAL_MS } from '../../config.js';
+import { SOURCE_REFRESH_INTERVAL_MS, REGISTRY_MAX_AGE_MS } from '../../config.js';
+import { cachedData } from '../store/cache.js';
 import { getFailedSources, refreshAllSources } from './loader.js';
 import { logger } from '../util/logger.js';
 import { incCounter } from '../util/metrics.js';
@@ -20,9 +24,15 @@ import { incCounter } from '../util/metrics.js';
 let timer = null;
 
 /** Run one self-heal check. Exported for tests and manual invocation. */
-export async function runSourceHealCheck() {
+export async function runSourceHealCheck(now = Date.now()) {
   const failed = getFailedSources();
-  if (failed.length === 0) return { healed: false, failed };
+  if (failed.length === 0) {
+    const loadedAt = Date.parse(cachedData.lastUpdated ?? '');
+    if (REGISTRY_MAX_AGE_MS > 0 && Number.isFinite(loadedAt) && now - loadedAt >= REGISTRY_MAX_AGE_MS) {
+      return reloadAged(now - loadedAt);
+    }
+    return { healed: false, failed };
+  }
 
   logger.warn({ failed }, 'Source self-heal: re-fetching after failed source(s)');
   incCounter('chains_api_source_selfheal_total', { outcome: 'attempt' });
@@ -37,6 +47,19 @@ export async function runSourceHealCheck() {
     incCounter('chains_api_source_selfheal_total', { outcome: 'error' });
     logger.error({ err: err.message || err }, 'Source self-heal failed');
     return { healed: false, failed };
+  }
+}
+
+async function reloadAged(ageMs) {
+  logger.info({ ageMs }, 'Registry reload: sources older than REGISTRY_MAX_AGE_MS');
+  try {
+    await refreshAllSources();
+    incCounter('chains_api_source_reload_total', { outcome: 'ok' });
+    return { healed: false, reloaded: true, failed: getFailedSources() };
+  } catch (err) {
+    incCounter('chains_api_source_reload_total', { outcome: 'error' });
+    logger.error({ err: err.message || err }, 'Registry reload failed; keeping the loaded data');
+    return { healed: false, reloaded: false, failed: getFailedSources() };
   }
 }
 

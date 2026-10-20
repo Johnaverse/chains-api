@@ -174,13 +174,41 @@ function forksOf(forks, chains, now, knownForks = null) {
     // fork on these chains and has it nowhere past, its phase stands instead.
     if (entry.phase === FORK_PHASE.PAST && unverifiedState(entry) && knownForks) {
       const known = knownMatches(entry, chains, knownForks);
-      if (known.length && !known.some((k) => k.phase === FORK_PHASE.PAST)) {
+      // Notes naming no network for a fork the list knows on several of the release's chains
+      // (geth v1.17.8: Amsterdam, past on Sepolia, a week out on Hoodi): one phase is wrong for
+      // one of them, so the fork is listed per network, each as the fork list has it.
+      const perNetwork = entry.network == null ? perNetworkForks(entry, known, chains) : [];
+      if (perNetwork.length > 1) {
+        entry.expandTo = perNetwork;
+      } else if (known.length && !known.some((k) => k.phase === FORK_PHASE.PAST)) {
         entry.phase = known.some((k) => k.phase === FORK_PHASE.UPCOMING) ? FORK_PHASE.UPCOMING : known[0].phase;
         entry.phaseFrom = 'forks';
       }
     }
   }
-  return out;
+  return out.flatMap((entry) => entry.expandTo ?? [entry]);
+}
+
+/** One entry per release chain the fork list knows this fork on: its phase and date there. */
+function perNetworkForks(entry, known, chains) {
+  const best = new Map(); // chainId -> the best-attested fork-list entry on it
+  for (const k of known) {
+    for (const id of k.chains ?? []) {
+      const chain = (chains ?? []).find((c) => c.chainId === id);
+      if (!chain) continue;
+      const held = best.get(id);
+      if (!held || (k.events?.length ?? 0) > (held.k.events?.length ?? 0)) best.set(id, { k, chain });
+    }
+  }
+  return [...best.values()].map(({ k, chain }) => ({
+    ...entry,
+    network: getChainById(chain.chainId)?.name ?? chain.name ?? null,
+    chainId: chain.chainId,
+    phase: k.phase,
+    activationAt: entry.activationAt ?? k.activationAt ?? null,
+    // Phase and date are the fork list's (/forks), not the notes'.
+    phaseFrom: 'forks'
+  }));
 }
 
 /** Fork-list entries for the same fork (any name it goes by) on this entry's chains. */

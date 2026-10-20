@@ -19,5 +19,8 @@ export const TESTNET_REGISTRY = [
   test(4801, 'World Chain Holesky'),
   test(97, 'BNB Smart Chain Testnet', { 'theGraph-id': 'chapel', aliases: ['bnb-chapel', 'bsc-testnet'] }),
   test(80002, 'Amoy', { 'theGraph-id': 'polygon-amoy' }),
-  test(43113, 'Avalanche Fuji Testnet', { aliases: ['avalanche-fuji'] })
+  test(43113, 'Avalanche Fuji Testnet', { aliases: ['avalanche-fuji'] }),
+  // A second chain on Amoy and on Fuji, as the registry has: one chain's name alone teaches no word.
+  test(900001, 'Example Amoy L2'),
+  test(900002, 'Example Fuji Subnet')
 ];

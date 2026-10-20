@@ -1,5 +1,6 @@
 import { learnNetworkWords, chainOfBareName } from '../domain/networkWords.js';
 import { cachedData } from '../store/cache.js';
+import { RPC_DEAD_AFTER_MS } from '../../config.js';
 import { getAllChains } from '../store/queries.js';
 
 function getChainFromSource(chainId, source) {
@@ -513,19 +514,23 @@ const NO_ANSWER = new Set(['unreachable', 'timeout', 'tls_error']);
 // answers — and no source calls the network dead. Either the network is dead and upstream should
 // mark it, or it moved and upstream lists stale endpoints. An endpoint that answered at all (a
 // rate limit, an error, a method it refuses) is not counted as gone.
-function validateRule18NoReachableRpc(chain, errors) {
+function validateRule18NoReachableRpc(chain, errors, now = Date.now()) {
   if (chain.status === 'deprecated') return;
   const results = cachedData.rpcHealth?.[chain.chainId];
   if (!Array.isArray(results) || results.length === 0) return;
-  if (!results.every(r => !r.ok && NO_ANSWER.has(r.failure))) return;
+  // Every endpoint, for days: an outage or one bad sweep from our side is not a dead network.
+  const since = (r) => Date.parse(r.failingSince ?? '');
+  if (!results.every(r => !r.ok && NO_ANSWER.has(r.failure) && now - since(r) >= RPC_DEAD_AFTER_MS)) return;
+  const failingSince = new Date(Math.max(...results.map(since))).toISOString();
   errors.push({
     rule: 18,
     chainId: chain.chainId,
     chainName: chain.name,
     type: 'no_reachable_rpc',
-    message: `Chain ${chain.chainId} (${chain.name}) is ${chain.status || 'active'} but none of its ${results.length} RPC endpoints answers — dead and unmarked upstream, or its endpoints moved`,
+    message: `Chain ${chain.chainId} (${chain.name}) is ${chain.status || 'active'} but none of its ${results.length} RPC endpoints has answered since ${failingSince.slice(0, 10)} — dead and unmarked upstream, or its endpoints moved`,
     status: chain.status ?? null,
-    endpoints: results.map(r => ({ url: r.url, failure: r.failure, error: r.error }))
+    failingSince,
+    endpoints: results.map(r => ({ url: r.url, failure: r.failure, error: r.error, failingSince: r.failingSince }))
   });
 }
 

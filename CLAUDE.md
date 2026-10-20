@@ -173,6 +173,8 @@ Copy `.env.example` to `.env` for local configuration. Key variables:
 | `SOURCE_FETCH_MAX_RETRIES` | `3` | Attempts per source fetch before it's treated as failed |
 | `SOURCE_FETCH_RETRY_BASE_MS` | `500` | Backoff base for source-fetch retries (`base × 2^(attempt-1)`) |
 | `SOURCE_REFRESH_INTERVAL_MS` | `900000` | Self-heal interval: re-fetch sources if any failed to load (0 disables) |
+| `RPC_DEAD_AFTER_MS` | `259200000` | How long every endpoint of a chain must fail (nothing answering) before validation rule 18 reports it |
+| `REGISTRY_MAX_AGE_MS` | `21600000` | Reload the chain registries once they are this old, so the learned index follows upstream (0: reload only on failure) |
 | `ASSISTANT_LLM_URL` | (empty) | OpenAI-compatible LLM server (e.g. Ollama `http://localhost:11434`); empty disables the assistant |
 | `ASSISTANT_LLM_API_KEY` | (empty) | Bearer token for key-protected LLM servers (OpenAI, OpenRouter, …) |
 | `ASSISTANT_MODEL` | `qwen3` | Model name for `/v1/chat/completions` |

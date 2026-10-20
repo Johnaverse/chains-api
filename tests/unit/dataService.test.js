@@ -17,7 +17,8 @@ vi.mock('../../config.js', () => ({
   PROXY_ENABLED: false,
   SOURCE_FETCH_MAX_RETRIES: 1,
   SOURCE_FETCH_RETRY_BASE_MS: 0,
-  SOURCE_REFRESH_INTERVAL_MS: 0
+  SOURCE_REFRESH_INTERVAL_MS: 0,
+  RPC_DEAD_AFTER_MS: 259200000
 }));
 
 // DefiLlama is supplementary metadata; keep its fetch out of the mocked-fetch call sequences below.
@@ -2035,7 +2036,8 @@ describe('validateChainData', () => {
     const mockChainlist = [
       { chainId: 777, name: 'Gone Chain', status: 'active' },
       { chainId: 778, name: 'Busy Chain', status: 'active' },
-      { chainId: 779, name: 'Old Chain', status: 'deprecated' }
+      { chainId: 779, name: 'Old Chain', status: 'deprecated' },
+      { chainId: 780, name: 'Down Today Chain', status: 'active' }
     ];
     const mockChains = mockChainlist.map(({ chainId, name, status }) => ({ chainId, name, status }));
 
@@ -2047,15 +2049,22 @@ describe('validateChainData', () => {
 
     await loadData();
     getCachedData().rpcHealth = {
-      777: [{ url: 'https://a.gone', ok: false, failure: 'unreachable', error: 'fetch failed' }, { url: 'https://b.gone', ok: false, failure: 'timeout', error: 'RPC request timed out' }],
+      777: [
+        { url: 'https://a.gone', ok: false, failure: 'unreachable', error: 'fetch failed', failingSince: '2026-01-01T00:00:00.000Z' },
+        { url: 'https://b.gone', ok: false, failure: 'timeout', error: 'RPC request timed out', failingSince: '2026-01-02T00:00:00.000Z' }
+      ],
+      // Gone for an hour is an outage, or our network, until it lasts.
+      780: [{ url: 'https://a.down', ok: false, failure: 'unreachable', error: 'fetch failed', failingSince: new Date(Date.now() - 3600e3).toISOString() }],
       // Rate limited and refusing a method: something answered, so not counted as gone.
-      778: [{ url: 'https://a.busy', ok: false, failure: 'rate_limited', error: 'HTTP 429' }, { url: 'https://b.busy', ok: false, failure: 'unreachable', error: 'fetch failed' }],
+      778: [{ url: 'https://a.busy', ok: false, failure: 'rate_limited', error: 'HTTP 429', failingSince: '2026-01-01T00:00:00.000Z' }, { url: 'https://b.busy', ok: false, failure: 'unreachable', error: 'fetch failed', failingSince: '2026-01-01T00:00:00.000Z' }],
       779: [{ url: 'https://a.old', ok: true, blockHeight: 42 }]
     };
     const result = validateChainData();
 
     expect(result.errorsByRule.rule18_no_reachable_rpc.map(e => e.chainId)).toEqual([777]);
     expect(result.errorsByRule.rule18_no_reachable_rpc[0].endpoints.map(e => e.failure)).toEqual(['unreachable', 'timeout']);
+    // Since the last endpoint went down.
+    expect(result.errorsByRule.rule18_no_reachable_rpc[0].failingSince).toBe('2026-01-02T00:00:00.000Z');
     expect(result.errorsByRule.rule19_deprecated_rpc_answers.map(e => e.chainId)).toEqual([779]);
   });
 
@@ -2160,7 +2169,8 @@ describe('initializeDataOnStartup with disk cache', () => {
       PROXY_ENABLED: false,
       SOURCE_FETCH_MAX_RETRIES: 1,
       SOURCE_FETCH_RETRY_BASE_MS: 0,
-      SOURCE_REFRESH_INTERVAL_MS: 0
+      SOURCE_REFRESH_INTERVAL_MS: 0,
+  RPC_DEAD_AFTER_MS: 259200000
     }));
     vi.doMock('../../fetchUtil.js', () => ({
       proxyFetch: vi.fn((...args) => fetch(...args)),

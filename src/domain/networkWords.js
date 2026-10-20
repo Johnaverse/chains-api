@@ -56,8 +56,13 @@ export function learnNetworkWords(chains) {
       if (isTest && qual.has(t)) bump(testQual, t);
     }
   }
-  const numeric = (t) => /^\d+$/.test(t);
-  words = new Set([...testQual.keys()].filter((t) => !numeric(t) && testAny.get(t) === all.get(t)));
+  // Numbers and versions ("2", "v1") name no network.
+  const numeric = (t) => /^v?\d+$/.test(t);
+  // One chain's odd name ("YMTECH-BESU Testnet", "OP Celestia Raspberry") teaches nothing: a word
+  // counts once two test networks share it, or the registry knows it as a testnet's own id.
+  const bareTest = new Set([...bare].filter(([, cs]) => cs.length === 1 && cs[0].tags?.includes('Testnet')).map(([t]) => t));
+  words = new Set([...testQual.keys()].filter((t) => !numeric(t) && testAny.get(t) === all.get(t)
+    && (testAny.get(t) >= 2 || bareTest.has(t))));
   strong = new Set([...testAny].filter(([t, n]) => !numeric(t) && n >= MIN_TESTNETS
     && n / all.get(t) >= MIN_TEST_SHARE && (testQual.get(t) ?? 0) * 2 >= n).map(([t]) => t));
   for (const t of strong) words.add(t);

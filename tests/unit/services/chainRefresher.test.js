@@ -222,6 +222,23 @@ describe('chainRefresher', () => {
       expect(cachedData.rpcHealth[1][0]).toMatchObject({ ok: false, failure: 'answered_no_block' });
     });
 
+    it('keeps when an endpoint started failing across checks, and forgets it once it answers', async () => {
+      seedCacheWith([seedChain(1, ['https://rpc-a.example'])]);
+      const down = Object.assign(new Error('fetch failed'), { kind: 'unreachable' });
+      jsonRpcCall.mockRejectedValue(down);
+      await processChainRpc(1);
+      const first = cachedData.rpcHealth[1][0].failingSince;
+      expect(first).toMatch(/^\d{4}-/);
+
+      cachedData.rpcHealth[1][0].failingSince = '2026-01-01T00:00:00.000Z';
+      await processChainRpc(1);
+      expect(cachedData.rpcHealth[1][0].failingSince).toBe('2026-01-01T00:00:00.000Z');
+
+      jsonRpcCall.mockImplementation(async (_url, method) => (method === 'web3_clientVersion' ? 'Geth/v1' : '0x10'));
+      await processChainRpc(1);
+      expect(cachedData.rpcHealth[1][0].failingSince).toBeUndefined();
+    });
+
   describe('ensureChainRpcResults (on-demand probe)', () => {
     it('returns true without probing when results already exist', async () => {
       seedCacheWith([seedChain(1, ['https://rpc-a.example'])]);
@@ -387,6 +404,26 @@ describe('chainRefresher', () => {
       const status = getChainRefresherStatus();
       expect(status.queueDepth).toBe(0);
       expect(status.sweep.totalJobs).toBe(3); // 1 l2beat + 2 chains
+    });
+
+    it('carries on with the sweep when the data reloads mid-sweep, skipping chains it lost', async () => {
+      seedCacheWith([
+        seedChain(1, ['https://rpc-a.example']),
+        seedChain(2, ['https://rpc-b.example']),
+        seedChain(3, ['https://rpc-c.example'])
+      ]);
+      fetchL2Beat.mockResolvedValue({ source: 'live', fetchedAt: '2026-05-05T00:00:00.000Z', projects: [] });
+      jsonRpcCall.mockImplementation(async (_url, method) => (method === 'web3_clientVersion' ? 'Geth/v1' : '0x10'));
+
+      await tickOnce(); // l2beat_batch
+      await tickOnce(); // chain_rpc 1
+      // A scheduled reload lands: chain 2 is gone upstream, chain 3 stays.
+      delete cachedData.indexed.byChainId[2];
+      cachedData.lastUpdated = '2026-05-05T06:00:00.000Z';
+      await tickOnce(); // chain_rpc 3
+
+      expect(Object.keys(cachedData.rpcHealth).sort()).toEqual(['1', '3']);
+      expect(getChainRefresherStatus().sweep.sweepNumber).toBe(1);
     });
 
     it('rebuilds the queue once it drains, incrementing sweep number', async () => {
