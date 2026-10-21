@@ -9,7 +9,8 @@ vi.mock('../../config.js', () => ({
 }));
 
 // Mock rpcUtil (replaces direct fetchUtil usage)
-vi.mock('../../rpcUtil.js', () => ({
+vi.mock('../../rpcUtil.js', async (importOriginal) => ({
+  ...(await importOriginal()),
   jsonRpcCall: vi.fn(),
 }));
 

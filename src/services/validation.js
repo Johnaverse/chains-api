@@ -1,6 +1,7 @@
 import { learnNetworkWords, chainOfBareName } from '../domain/networkWords.js';
 import { cachedData } from '../store/cache.js';
 import { RPC_DEAD_AFTER_MS } from '../../config.js';
+import { NO_ANSWER_FAILURES } from '../../rpcUtil.js';
 import { getAllChains } from '../store/queries.js';
 
 function getChainFromSource(chainId, source) {
@@ -506,9 +507,6 @@ function validateRule17ActiveChildOfDeprecatedParent(chain, errors, byChainId) {
   }
 }
 
-// How an endpoint failed (chainRefresher.js): these mean nothing answered at all.
-// A reset connection or an unrecognised error may be our own side, so neither counts.
-const NO_ANSWER = new Set(['unreachable', 'timeout', 'tls_error']);
 
 // Every listed RPC endpoint is gone — its name no longer resolves, nothing listens, or it never
 // answers — and no source calls the network dead. Either the network is dead and upstream should
@@ -518,19 +516,21 @@ function validateRule18NoReachableRpc(chain, errors, now = Date.now()) {
   if (chain.status === 'deprecated') return;
   const results = cachedData.rpcHealth?.[chain.chainId];
   if (!Array.isArray(results) || results.length === 0) return;
-  // Every endpoint, for days: an outage or one bad sweep from our side is not a dead network.
-  const since = (r) => Date.parse(r.failingSince ?? '');
-  if (!results.every(r => !r.ok && NO_ANSWER.has(r.failure) && now - since(r) >= RPC_DEAD_AFTER_MS)) return;
-  const failingSince = new Date(Math.max(...results.map(since))).toISOString();
+  // Every endpoint silent for days (chainRefresher.js keeps the clock): an outage or one bad
+  // sweep from our side is not a dead network. A reset connection or an unrecognised error may be
+  // our own side, so neither starts the clock.
+  const since = (r) => Date.parse(r.unansweredSince ?? '');
+  if (!results.every(r => !r.ok && NO_ANSWER_FAILURES.has(r.failure) && now - since(r) >= RPC_DEAD_AFTER_MS)) return;
+  const unansweredSince = new Date(Math.max(...results.map(since))).toISOString();
   errors.push({
     rule: 18,
     chainId: chain.chainId,
     chainName: chain.name,
     type: 'no_reachable_rpc',
-    message: `Chain ${chain.chainId} (${chain.name}) is ${chain.status || 'active'} but none of its ${results.length} RPC endpoints has answered since ${failingSince.slice(0, 10)} — dead and unmarked upstream, or its endpoints moved`,
+    message: `Chain ${chain.chainId} (${chain.name}) is ${chain.status || 'active'} but none of its ${results.length} RPC endpoints has answered since ${unansweredSince.slice(0, 10)} — dead and unmarked upstream, or its endpoints moved`,
     status: chain.status ?? null,
-    failingSince,
-    endpoints: results.map(r => ({ url: r.url, failure: r.failure, error: r.error, failingSince: r.failingSince }))
+    unansweredSince,
+    endpoints: results.map(r => ({ url: r.url, failure: r.failure, error: r.error, unansweredSince: r.unansweredSince }))
   });
 }
 

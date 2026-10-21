@@ -10,6 +10,12 @@ import { proxyFetch } from './fetchUtil.js';
  * @returns {Promise<*>} The result field from the JSON-RPC response
  */
 /**
+ * Failure kinds where nothing answered at all — the name does not resolve, nothing listens, or no
+ * reply came. Every other kind means the endpoint is there and said something.
+ */
+export const NO_ANSWER_FAILURES = new Set(['unreachable', 'timeout', 'tls_error']);
+
+/**
  * What kind of failure this was, from the error itself, so a caller can tell an endpoint that is
  * gone (its name no longer resolves, nothing listens) from one that answered with an error.
  */

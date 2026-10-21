@@ -21,7 +21,7 @@
  * getL2BeatRefreshStatus, runRpcHealthCheck, runL2BeatRefresh) keeps
  * working unchanged.
  */
-import { jsonRpcCall } from '../../rpcUtil.js';
+import { jsonRpcCall, NO_ANSWER_FAILURES } from '../../rpcUtil.js';
 import { safeExternalUrl } from '../util/publicHost.js';
 import {
   RPC_CHECK_TIMEOUT_MS,
@@ -192,11 +192,14 @@ export async function processChainRpc(chainId) {
 
   if (!cachedData.rpcHealth) cachedData.rpcHealth = {};
   const previous = cachedData.rpcHealth[chainId];
-  // When each endpoint started failing, carried across checks: one failed sweep from one place
-  // proves little, weeks of them do (validation rule 18).
+  // Since when an endpoint has answered nothing at all, carried across consecutive checks: one
+  // silent sweep from one place proves little, days of them do (validation rule 18). Any answer
+  // in between — a rate limit, an error, a block — restarts the clock.
   const now = new Date().toISOString();
-  const failingSince = new Map((previous ?? []).filter(r => !r.ok && r.failingSince).map(r => [r.url, r.failingSince]));
-  for (const r of publicResults) if (!r.ok) r.failingSince = failingSince.get(r.url) ?? now;
+  const silentSince = new Map((previous ?? []).filter(r => r.unansweredSince).map(r => [r.url, r.unansweredSince]));
+  for (const r of publicResults) {
+    if (!r.ok && NO_ANSWER_FAILURES.has(r.failure)) r.unansweredSince = silentSince.get(r.url) ?? now;
+  }
   cachedData.rpcHealth[chainId] = publicResults;
   chain.lastTested = now;
   // Freshness signal for /clients and /rpc-monitor. Stamped per chain as

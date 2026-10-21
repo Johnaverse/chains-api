@@ -1238,6 +1238,29 @@ describe('loadData', () => {
     expect(result.indexed).toBeDefined();
   });
 
+  it('keeps a failed source\'s last good copy on a background reload', async () => {
+    const { refreshAllSources } = await import('../../src/services/loader.js');
+    const ok = (body) => ({ ok: true, json: async () => body });
+    const mockChainlist = [{ chainId: 1, name: 'Ethereum' }, { chainId: 42161, name: 'Arbitrum One' }];
+    global.fetch
+      .mockResolvedValueOnce(ok({ networks: [] }))
+      .mockResolvedValueOnce(ok(mockChainlist))
+      .mockResolvedValueOnce(ok([{ chainId: 1, name: 'Ethereum Mainnet' }]))
+      .mockResolvedValueOnce({ ok: true, text: async () => '' });
+    await loadData();
+
+    // The scheduled reload: chainlist is down this time.
+    global.fetch
+      .mockResolvedValueOnce(ok({ networks: [] }))
+      .mockRejectedValueOnce(new Error('chainlist down'))
+      .mockResolvedValueOnce(ok([{ chainId: 1, name: 'Ethereum Mainnet' }]))
+      .mockResolvedValueOnce({ ok: true, text: async () => '' });
+    const result = await refreshAllSources();
+
+    expect(result.chainlist).toEqual(mockChainlist);
+    expect(getChainById(42161)).toBeTruthy();
+  });
+
   it('should handle all sources failing', async () => {
     global.fetch
       .mockRejectedValueOnce(new Error('Error 1'))
@@ -2050,13 +2073,13 @@ describe('validateChainData', () => {
     await loadData();
     getCachedData().rpcHealth = {
       777: [
-        { url: 'https://a.gone', ok: false, failure: 'unreachable', error: 'fetch failed', failingSince: '2026-01-01T00:00:00.000Z' },
-        { url: 'https://b.gone', ok: false, failure: 'timeout', error: 'RPC request timed out', failingSince: '2026-01-02T00:00:00.000Z' }
+        { url: 'https://a.gone', ok: false, failure: 'unreachable', error: 'fetch failed', unansweredSince: '2026-01-01T00:00:00.000Z' },
+        { url: 'https://b.gone', ok: false, failure: 'timeout', error: 'RPC request timed out', unansweredSince: '2026-01-02T00:00:00.000Z' }
       ],
       // Gone for an hour is an outage, or our network, until it lasts.
-      780: [{ url: 'https://a.down', ok: false, failure: 'unreachable', error: 'fetch failed', failingSince: new Date(Date.now() - 3600e3).toISOString() }],
+      780: [{ url: 'https://a.down', ok: false, failure: 'unreachable', error: 'fetch failed', unansweredSince: new Date(Date.now() - 3600e3).toISOString() }],
       // Rate limited and refusing a method: something answered, so not counted as gone.
-      778: [{ url: 'https://a.busy', ok: false, failure: 'rate_limited', error: 'HTTP 429', failingSince: '2026-01-01T00:00:00.000Z' }, { url: 'https://b.busy', ok: false, failure: 'unreachable', error: 'fetch failed', failingSince: '2026-01-01T00:00:00.000Z' }],
+      778: [{ url: 'https://a.busy', ok: false, failure: 'rate_limited', error: 'HTTP 429', unansweredSince: '2026-01-01T00:00:00.000Z' }, { url: 'https://b.busy', ok: false, failure: 'unreachable', error: 'fetch failed', unansweredSince: '2026-01-01T00:00:00.000Z' }],
       779: [{ url: 'https://a.old', ok: true, blockHeight: 42 }]
     };
     const result = validateChainData();
@@ -2064,7 +2087,7 @@ describe('validateChainData', () => {
     expect(result.errorsByRule.rule18_no_reachable_rpc.map(e => e.chainId)).toEqual([777]);
     expect(result.errorsByRule.rule18_no_reachable_rpc[0].endpoints.map(e => e.failure)).toEqual(['unreachable', 'timeout']);
     // Since the last endpoint went down.
-    expect(result.errorsByRule.rule18_no_reachable_rpc[0].failingSince).toBe('2026-01-02T00:00:00.000Z');
+    expect(result.errorsByRule.rule18_no_reachable_rpc[0].unansweredSince).toBe('2026-01-02T00:00:00.000Z');
     expect(result.errorsByRule.rule19_deprecated_rpc_answers.map(e => e.chainId)).toEqual([779]);
   });
 

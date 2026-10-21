@@ -47,7 +47,7 @@ function countLoadedChainSources(data) {
   return loaded;
 }
 
-async function fetchAndBuildData() {
+async function fetchAndBuildData({ lastGood = null } = {}) {
   logger.info('Loading data from all sources');
 
   const results = await Promise.allSettled([
@@ -59,23 +59,32 @@ async function fetchAndBuildData() {
     fetchDefiLlama()
   ]);
 
-  const theGraph = results[0].status === 'fulfilled' ? results[0].value : null;
-  const chainlist = results[1].status === 'fulfilled' ? results[1].value : null;
-  const chains = results[2].status === 'fulfilled' ? results[2].value : null;
-  const slip44Text = results[3].status === 'fulfilled' ? results[3].value : null;
-  const l2beat = results[4].status === 'fulfilled' ? results[4].value : null;
-  const defillama = results[5].status === 'fulfilled' ? results[5].value : null;
-
+  const fresh = (i) => (results[i].status === 'fulfilled' ? results[i].value : null);
   const sourceNames = ['theGraph', 'chainlist', 'chains', 'slip44', 'l2beat', 'defillama'];
   results.forEach((result, i) => {
     if (result.status === 'rejected') {
       logger.error({ source: sourceNames[i], err: result.reason?.message || result.reason }, 'Failed to load source');
     }
   });
+  const freshCount = countLoadedChainSources({ theGraph: fresh(0), chainlist: fresh(1), chains: fresh(2) });
 
   // Only parse SLIP-44 when fetch actually returned something; otherwise keep
   // null so /sources can distinguish "fetch failed" from "fetched, empty".
-  const slip44 = slip44Text === null ? null : parseSLIP44(slip44Text);
+  const slip44Text = fresh(3);
+  const parsed = {
+    theGraph: fresh(0), chainlist: fresh(1), chains: fresh(2),
+    slip44: slip44Text === null ? null : parseSLIP44(slip44Text), l2beat: fresh(4), defillama: fresh(5)
+  };
+  // A background reload over loaded data keeps a failed source's last good copy: one source down
+  // for a moment must not drop its chains, aliases and statuses from the index.
+  const kept = [];
+  if (lastGood) {
+    for (const name of sourceNames) {
+      if (parsed[name] === null && lastGood[name] != null) { parsed[name] = lastGood[name]; kept.push(name); }
+    }
+    if (kept.length) logger.warn({ sources: kept }, 'Source fetch failed; kept the last good copy');
+  }
+  const { theGraph, chainlist, chains, slip44, l2beat, defillama } = parsed;
   const indexed = indexData(theGraph, chainlist, chains, slip44, l2beat, defillama);
 
   return {
@@ -91,7 +100,9 @@ async function fetchAndBuildData() {
       rpcHealth: {},
       lastRpcCheck: null
     },
-    loadedSourceCount: countLoadedChainSources({ theGraph, chainlist, chains })
+    // Fresh fetches only: a reload where every registry failed is a failure, last good copies or not.
+    loadedSourceCount: freshCount,
+    keptSources: kept
   };
 }
 
@@ -99,13 +110,14 @@ async function refreshDataWithGuard(options = {}) {
   const {
     requireAtLeastOneSource = false,
     logSuccessMessage = true,
-    preserveRpcHealth = false
+    preserveRpcHealth = false,
+    keepLastGood = false
   } = options;
 
   if (dataRefreshPromise) return dataRefreshPromise;
 
   dataRefreshPromise = (async () => {
-    const { data, loadedSourceCount } = await fetchAndBuildData();
+    const { data, loadedSourceCount } = await fetchAndBuildData({ lastGood: keepLastGood && cachedData.indexed ? cachedData : null });
 
     if (requireAtLeastOneSource && loadedSourceCount === 0) {
       throw new Error('All chain registry sources failed during data refresh');
@@ -164,7 +176,8 @@ export async function refreshAllSources() {
   return refreshDataWithGuard({
     requireAtLeastOneSource: true,
     logSuccessMessage: false,
-    preserveRpcHealth: true
+    preserveRpcHealth: true,
+    keepLastGood: true
   });
 }
 
@@ -221,7 +234,7 @@ export async function initializeDataOnStartup(options = {}) {
       // serves the cached endpoint statuses immediately and the rolling
       // refresher replaces each chain's entry as it re-tests it. Without this
       // the post-boot data refresh would wipe the cached statuses.
-      refreshDataWithGuard({ requireAtLeastOneSource: true, preserveRpcHealth: true })
+      refreshDataWithGuard({ requireAtLeastOneSource: true, preserveRpcHealth: true, keepLastGood: true })
         .then(() => {
           logger.info('Background refresh completed successfully');
           if (typeof onBackgroundRefreshSuccess === 'function') {

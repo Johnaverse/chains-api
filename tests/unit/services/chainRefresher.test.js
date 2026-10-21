@@ -4,7 +4,8 @@ vi.mock('../../../src/sources/l2beat.js', () => ({
   fetchL2Beat: vi.fn()
 }));
 
-vi.mock('../../../rpcUtil.js', () => ({
+vi.mock('../../../rpcUtil.js', async (importOriginal) => ({
+  ...(await importOriginal()),
   jsonRpcCall: vi.fn()
 }));
 
@@ -222,21 +223,25 @@ describe('chainRefresher', () => {
       expect(cachedData.rpcHealth[1][0]).toMatchObject({ ok: false, failure: 'answered_no_block' });
     });
 
-    it('keeps when an endpoint started failing across checks, and forgets it once it answers', async () => {
+    it('keeps since when an endpoint answers nothing across silent checks, and restarts it on any answer', async () => {
       seedCacheWith([seedChain(1, ['https://rpc-a.example'])]);
-      const down = Object.assign(new Error('fetch failed'), { kind: 'unreachable' });
-      jsonRpcCall.mockRejectedValue(down);
+      const silent = () => jsonRpcCall.mockRejectedValue(Object.assign(new Error('fetch failed'), { kind: 'unreachable' }));
+      silent();
       await processChainRpc(1);
-      const first = cachedData.rpcHealth[1][0].failingSince;
-      expect(first).toMatch(/^\d{4}-/);
+      expect(cachedData.rpcHealth[1][0].unansweredSince).toMatch(/^\d{4}-/);
 
-      cachedData.rpcHealth[1][0].failingSince = '2026-01-01T00:00:00.000Z';
+      cachedData.rpcHealth[1][0].unansweredSince = '2026-01-01T00:00:00.000Z';
       await processChainRpc(1);
-      expect(cachedData.rpcHealth[1][0].failingSince).toBe('2026-01-01T00:00:00.000Z');
+      expect(cachedData.rpcHealth[1][0].unansweredSince).toBe('2026-01-01T00:00:00.000Z');
 
-      jsonRpcCall.mockImplementation(async (_url, method) => (method === 'web3_clientVersion' ? 'Geth/v1' : '0x10'));
+      // A rate limit is an answer: the endpoint is there.
+      jsonRpcCall.mockRejectedValue(Object.assign(new Error('HTTP 429'), { kind: 'rate_limited', status: 429 }));
       await processChainRpc(1);
-      expect(cachedData.rpcHealth[1][0].failingSince).toBeUndefined();
+      expect(cachedData.rpcHealth[1][0].unansweredSince).toBeUndefined();
+
+      silent();
+      await processChainRpc(1);
+      expect(Date.parse(cachedData.rpcHealth[1][0].unansweredSince)).toBeGreaterThan(Date.parse('2026-01-01T00:00:00.000Z'));
     });
 
   describe('ensureChainRpcResults (on-demand probe)', () => {

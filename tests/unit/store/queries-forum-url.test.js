@@ -32,3 +32,21 @@ describe('queries — forumUrl survives transformChain serialization', () => {
     expect(getChainById(424242).forumUrl).toBeUndefined();
   });
 });
+
+describe('getAllChains memo', () => {
+  it('serves a new index even when it loaded in the same millisecond as the last one', () => {
+    const saved = { indexed: cachedData.indexed, lastUpdated: cachedData.lastUpdated };
+    const index = (chainId) => ({ all: [{ chainId, name: `Chain ${chainId}`, tags: [] }], byChainId: {}, byName: {} });
+    try {
+      _resetGetAllChainsCacheForTests();
+      cachedData.lastUpdated = '2026-10-21T00:00:00.000Z';
+      cachedData.indexed = index(1);
+      expect(getAllChains().map(c => c.chainId)).toEqual([1]);
+      cachedData.indexed = index(2); // same lastUpdated
+      expect(getAllChains().map(c => c.chainId)).toEqual([2]);
+    } finally {
+      Object.assign(cachedData, saved);
+      _resetGetAllChainsCacheForTests();
+    }
+  });
+});
