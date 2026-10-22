@@ -2,8 +2,10 @@
 # builds against the same base-image contents (a mutable tag can be repointed
 # upstream). The digest is the multi-arch OCI index for the tag in the
 # comment; refresh it deliberately — resolve the tag's current index digest
-# (e.g. `docker buildx imagetools inspect node:20-alpine`), update, rescan.
-FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293
+# (e.g. `docker buildx imagetools inspect node:22.23.4-alpine`), update, rescan.
+# Node 22 LTS: Node 20 reached end of life in 2026 and no longer gets security releases
+# (22.23.4 carries the 2026-10-21 TLS / DNS / zlib fixes and the eMudhra CA removal).
+FROM node:22.23.4-alpine@sha256:ebc216c22db53dbde85719a874978d5aec04e6e405ad26a3804c6f9abc4ca1a9
 
 # Set working directory
 WORKDIR /app

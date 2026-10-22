@@ -7,7 +7,7 @@ import {
 import { jsonRpcCall } from '../../rpcUtil.js';
 import { getChainById, getEndpointsById } from '../store/queries.js';
 import { getExplorerTip } from '../sources/blockscout.js';
-import { safeExternalUrl } from '../util/publicHost.js';
+import { safeExternalUrl, resolvesPublic } from '../util/publicHost.js';
 import { logger } from '../util/logger.js';
 
 /**
@@ -71,6 +71,9 @@ function usableRpcUrls(chainId) {
 }
 
 async function probeRpc(url) {
+  if (!(await resolvesPublic(url))) {
+    return { source: url, kind: 'rpc', ok: false, error: 'RPC host resolves to a non-public address' };
+  }
   try {
     const block = await jsonRpcCall(url, 'eth_getBlockByNumber', {
       params: LATEST_BLOCK_PARAMS,

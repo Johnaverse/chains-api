@@ -22,7 +22,7 @@
  * working unchanged.
  */
 import { jsonRpcCall, NO_ANSWER_FAILURES } from '../../rpcUtil.js';
-import { safeExternalUrl } from '../util/publicHost.js';
+import { safeExternalUrl, resolvesPublic } from '../util/publicHost.js';
 import {
   RPC_CHECK_TIMEOUT_MS,
   L2BEAT_REFRESH_INTERVAL_MS,
@@ -107,6 +107,12 @@ async function checkRpcEndpoint(url) {
   }
   if (url.includes('${')) {
     result.error = 'RPC URL requires API key substitution';
+    return result;
+  }
+  // A public-looking name whose DNS answers a private address is the same probe by another route.
+  if (!(await resolvesPublic(url))) {
+    result.error = 'RPC host resolves to a non-public address';
+    result.failure = 'private_address';
     return result;
   }
 

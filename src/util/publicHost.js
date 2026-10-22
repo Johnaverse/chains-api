@@ -12,11 +12,14 @@
  * client need it, and neither owns it. (It also keeps the rule out of modules that tests
  * routinely mock — importing it from a mocked module made the guard vanish under test.)
  *
- * Scope, stated honestly: this blocks LITERAL private addresses and internal-looking names. It
- * does NOT defeat DNS rebinding — a public hostname that resolves to 10.x still passes, because
- * stopping that needs resolve-then-pin at the socket layer. This closes the direct route, which
- * is the one a registry entry can take.
+ * Scope, stated honestly: `safeExternalUrl` blocks LITERAL private addresses and
+ * internal-looking names. `resolvesPublic` closes the next route — a public-looking name whose
+ * DNS answers a private address — by resolving before the request. It does NOT defeat DNS
+ * rebinding (a name that answers differently between our lookup and the socket's), which needs
+ * resolve-then-pin at the socket layer.
  */
+import { lookup } from 'node:dns/promises';
+import { BlockList, isIP } from 'node:net';
 
 const PRIVATE_HOST = /^(?:localhost|.*\.local|.*\.internal|.*\.localdomain|.*\.svc(?:\.cluster\.local)?)$/i;
 
@@ -51,4 +54,56 @@ export function safeExternalUrl(url) {
   }
   if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
   return isPubliclyRoutable(parsed.hostname) ? parsed : null;
+}
+
+// Every address range that is not the public internet, for resolved addresses.
+const NON_PUBLIC = new BlockList();
+for (const [net, prefix] of [
+  ['0.0.0.0', 8], ['10.0.0.0', 8], ['100.64.0.0', 10], ['127.0.0.0', 8], ['169.254.0.0', 16],
+  ['172.16.0.0', 12], ['192.0.0.0', 24], ['192.168.0.0', 16], ['198.18.0.0', 15], ['224.0.0.0', 3]
+]) NON_PUBLIC.addSubnet(net, prefix, 'ipv4');
+for (const [net, prefix] of [['::', 128], ['::1', 128], ['fc00::', 7], ['fe80::', 10], ['ff00::', 8]]) {
+  NON_PUBLIC.addSubnet(net, prefix, 'ipv6');
+}
+
+/** Whether an IP address (v4, v6, or v4-mapped v6) is on the public internet. */
+export function isPublicAddress(address) {
+  const family = isIP(address);
+  if (family === 0) return false;
+  const mapped = family === 6 ? /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address) : null;
+  if (mapped) return !NON_PUBLIC.check(mapped[1], 'ipv4');
+  return !NON_PUBLIC.check(address, family === 6 ? 'ipv6' : 'ipv4');
+}
+
+const RESOLVED_TTL_MS = 10 * 60 * 1000;
+const resolved = new Map(); // hostname -> { ok, at }
+
+/**
+ * Resolve a URL's host and accept it only if EVERY address it answers is public. A host that
+ * does not resolve is not refused here: the request fails on its own, and the RPC monitor
+ * records it as unreachable. Cached for ten minutes per host, since the RPC sweep asks about
+ * the same hosts over and over.
+ * @returns {Promise<boolean>}
+ */
+export async function resolvesPublic(url, { now = Date.now(), resolve = lookup } = {}) {
+  const parsed = safeExternalUrl(url);
+  if (!parsed) return false;
+  const host = parsed.hostname.replace(/^\[|\]$/g, '');
+  if (isIP(host)) return isPublicAddress(host);
+  const hit = resolved.get(host);
+  if (hit && now - hit.at < RESOLVED_TTL_MS) return hit.ok;
+  let ok;
+  try {
+    const addresses = await resolve(host, { all: true, verbatim: true });
+    ok = addresses.every(({ address }) => isPublicAddress(address));
+  } catch {
+    return true;
+  }
+  if (resolved.size > 20000) resolved.clear();
+  resolved.set(host, { ok, at: now });
+  return ok;
+}
+
+export function _resetResolvedForTests() {
+  resolved.clear();
 }

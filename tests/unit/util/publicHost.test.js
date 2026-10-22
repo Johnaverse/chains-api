@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isPubliclyRoutable, safeExternalUrl } from '../../../src/util/publicHost.js';
+import { isPubliclyRoutable, safeExternalUrl, isPublicAddress, resolvesPublic, _resetResolvedForTests } from '../../../src/util/publicHost.js';
 
 describe('isPubliclyRoutable', () => {
   it('rejects every private IPv4 range', () => {
@@ -75,5 +75,29 @@ describe('safeExternalUrl', () => {
     for (const url of ['not a url', '', null, undefined, 'http://']) {
       expect(safeExternalUrl(url)).toBeNull();
     }
+  });
+});
+
+describe('resolved addresses', () => {
+  it('knows public from private, including v4-mapped IPv6 and carrier-grade NAT', () => {
+    for (const a of ['8.8.8.8', '104.26.3.19', '2606:4700::6810:84e5']) expect(isPublicAddress(a), a).toBe(true);
+    for (const a of ['10.43.0.1', '127.0.0.1', '100.64.1.1', '169.254.169.254', '::1', 'fd00::1', 'fe80::1', '::ffff:10.0.0.1', '0.0.0.0', 'not-an-ip']) {
+      expect(isPublicAddress(a), a).toBe(false);
+    }
+  });
+
+  it('refuses a public-looking name whose DNS answers a private address', async () => {
+    _resetResolvedForTests();
+    const dns = { 'rpc.example.com': ['104.26.3.19'], 'rpc.evil.example': ['104.26.3.19', '10.43.0.1'] };
+    const resolve = async (host) => (dns[host] ?? []).map((address) => ({ address }));
+    expect(await resolvesPublic('https://rpc.example.com', { resolve })).toBe(true);
+    expect(await resolvesPublic('https://rpc.evil.example/x', { resolve })).toBe(false);
+    expect(await resolvesPublic('http://10.0.0.1', { resolve })).toBe(false);
+  });
+
+  it('leaves a name that does not resolve to fail on its own', async () => {
+    _resetResolvedForTests();
+    const resolve = async () => { throw Object.assign(new Error('nx'), { code: 'ENOTFOUND' }); };
+    expect(await resolvesPublic('https://gone.example', { resolve })).toBe(true);
   });
 });

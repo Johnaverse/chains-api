@@ -1,6 +1,6 @@
 {
   "name": "chains-api",
-  "version": "1.7.72",
+  "version": "1.7.73",
   "description": "API query service for blockchain chain data from multiple sources",
   "main": "index.js",
   "type": "module",
@@ -32,7 +32,7 @@
   },
   "homepage": "https://github.com/Johnaverse/chains-api#readme",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "dependencies": {
     "@fastify/compress": "^9.2.0",

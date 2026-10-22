@@ -33,7 +33,7 @@ Each is consumed on **two independent paths**, which is easy to miss:
 ## Quick Reference
 
 ```bash
-npm install          # Install dependencies (Node >=20 required)
+npm install          # Install dependencies (Node >=22 required)
 npm start            # Start combined server: REST API (3000) + MCP HTTP (3001), one process
 npm run start:rest   # Start ONLY the REST API on port 3000 (node index.js)
 npm run dev          # Start combined server with --watch for auto-reload
@@ -87,7 +87,7 @@ src/http/                       ← Fastify routes
 
 ## Tech Stack
 
-- **Runtime:** Node.js >=20, ES Modules (`"type": "module"`)
+- **Runtime:** Node.js >=22, ES Modules (`"type": "module"`)
 - **HTTP:** Fastify v5 (REST API), Express v5 (MCP HTTP server)
 - **MCP SDK:** `@modelcontextprotocol/sdk` v1.26+
 - **Logging:** pino structured JSON logs (no `console.*` in src/)
@@ -95,7 +95,7 @@ src/http/                       ← Fastify routes
 - **Testing:** Vitest v4 with `@vitest/coverage-v8`, `fast-check` for property-based fuzz tests
 - **Linting:** ESLint v10 (`eslint.config.js`, flat config)
 - **CI/CD:** GitHub Actions — test, SonarQube scan, Docker build/push to GHCR
-- **Containerization:** Docker (node:20-alpine), Docker Compose
+- **Containerization:** Docker (node:22-alpine, pinned by digest), Docker Compose
 
 ## Data Sources
 
