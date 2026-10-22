@@ -107,6 +107,14 @@ export const SOURCE_FETCH_RETRY_BASE_MS = parseIntEnv('SOURCE_FETCH_RETRY_BASE_M
 // currently missing (e.g. failed at boot), re-fetch all sources. Set to 0 to
 // disable. Default 15 min.
 export const SOURCE_REFRESH_INTERVAL_MS = parseIntEnv('SOURCE_REFRESH_INTERVAL_MS', 900000);
+// The registries change upstream (new chains, statuses, aliases) and everything learned from them
+// (network words, fork names) follows only on a reload. The same timer reloads them once they are
+// this old, even when nothing failed. Set to 0 to reload only on failure. Default 6 h.
+// How long every endpoint of a chain must have failed before validation calls the chain
+// unreachable (rule 18): long enough that an outage, or one bad sweep from our network, is not
+// reported as a dead network. Default 3 days.
+export const RPC_DEAD_AFTER_MS = parseIntEnv('RPC_DEAD_AFTER_MS', 259200000);
+export const REGISTRY_MAX_AGE_MS = parseIntEnv('REGISTRY_MAX_AGE_MS', 21600000);
 /**
  * @deprecated Cadence is now driven by the unified rolling refresher
  * (CHAIN_REFRESHER_TICK_MS × queue length). Kept so /scaling/status can keep

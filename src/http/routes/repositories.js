@@ -1,13 +1,17 @@
 import { getRepositoryInputs } from '../../sources/networkResearch.js';
 import { getChainById, getAllChains } from '../../store/queries.js';
 import { learnNetworkWords, testNetworkWords } from '../../domain/networkWords.js';
+import { cachedData } from '../../store/cache.js';
 
 /**
- * Raw node/client repository research per chain, for chains-client-feed's registry. Static
- * data that only changes on deploy, so it is built once — after the registry has loaded, so
- * chain names resolve — and served from memory.
+ * Raw node/client repository research per chain, for chains-client-feed's registry. Built once
+ * per registry version — after the registry has loaded, so chain names resolve — and served
+ * from memory until the registry reloads.
  */
 let cached = null;
+// The registry version the response was built from: a reload (sourceRefresher.js) rebuilds it, so
+// the feed gets the words, aliases and testnet flags learned from the new registry.
+let cachedVersion = null;
 
 // `evm-56`-style ids carry no name, so they can never identify a network in release text.
 const NAMELESS = /^evm-\d+$/i;
@@ -27,7 +31,7 @@ export async function repositoriesRoutes(fastify) {
       querystring: { type: 'object', additionalProperties: false, properties: {} }
     }
   }, async () => {
-    if (cached) return cached;
+    if (cached && cachedVersion === cachedData.lastUpdated) return cached;
     const inputs = getRepositoryInputs(chainId => getChainById(chainId)?.name ?? null);
     // Other names the registry knows a network by (The Graph's id, its aliases): the feed matches
     // a release's fork network ("BSC Chapel testnet") against them, not only the display name.
@@ -43,7 +47,10 @@ export async function repositoriesRoutes(fastify) {
     inputs.testNetworkWords = testNetworkWords();
     // Before the registry loads, names come from the hardware research alone and every alias
     // list is empty; pinning that would cost the feed its alias matches until a restart.
-    if (inputs.networks.some(n => getChainById(n.chainId))) cached = inputs;
+    if (inputs.networks.some(n => getChainById(n.chainId))) {
+      cached = inputs;
+      cachedVersion = cachedData.lastUpdated;
+    }
     return inputs;
   });
 }

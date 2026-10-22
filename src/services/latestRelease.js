@@ -65,9 +65,8 @@ const titleCase = (s) => s.replace(/\b[a-z]/g, (c) => c.toUpperCase());
 
 /**
  * The one chain among `chains` a network name names: the same slug, or the name with its
- * ecosystem in front or "Testnet" behind ("Hoodi" → "Ethereum Hoodi", "Base Sepolia" → "Base
- * Sepolia Testnet"). Client notes name Ethereum's testnets bare, so between "Ethereum Hoodi" and
- * "Status Network Hoodi" the Ethereum one is meant.
+ * ecosystem in front or "Testnet" behind ("X" → "Eco X", "Eco X" → "Eco X Testnet"). Client notes
+ * often name a testnet bare; the registry id or alias it goes by decides which chain is meant.
  */
 /** Whether a chain is a test network: its registry tag, else a test-network word in its name. */
 function isTestChain(c) {
@@ -82,18 +81,18 @@ function pickChain(slug, chains) {
     const mains = chains.filter((c) => networkSlug(c?.name) && !isTestChain(c));
     return mains.length === 1 ? mains[0] : null;
   }
-  // A network named bare is the chain the registry knows by that id or alias ("hoodi" is
-  // Ethereum Hoodi's TheGraph id, "chapel" BSC testnet's), not any chain ending in the word.
+  // A network named bare is the chain the registry knows by that id or alias (its TheGraph id,
+  // an alias), not any chain ending in the word.
   const bare = chainOfBareName(slug);
   const isBare = (c) => Boolean(bare) && (c?.chainId === bare.chainId || networkSlug(c?.name) === networkSlug(bare.name));
   // Otherwise the chain's name may put the ecosystem in front or "Testnet" behind. Any other
-  // prefix is another network: "Base Sepolia" is not Sepolia.
+  // prefix is another network: "Other X" is not X.
   const matches = chains.filter((c) => {
     const s = networkSlug(c?.name);
     return s && (s === slug || s.endsWith(`-${slug}`) || s === `${slug}-testnet` || isBare(c));
   });
-  // A chain the registry names bare ("Holesky") written with its ecosystem in front ("Ethereum
-  // Holesky"): the front word must be another of the release's own chains, a main network.
+  // A chain the registry names bare ("X") written with its ecosystem in front ("Eco X"): the
+  // front word must be another of the release's own chains, a main network.
   if (matches.length === 0) {
     const mains = new Set(chains.filter((c) => !isTestChain(c)).map((c) => networkSlug(c?.name)).filter(Boolean));
     const prefixed = chains.filter((c) => {
@@ -109,7 +108,7 @@ function pickChain(slug, chains) {
 
 /**
  * The chain a fork's network names: the release's own chains first, then the registry for a
- * network they leave out (a release tagged with Holesky that schedules the fork on Hoodi).
+ * network they leave out (a release tagged with one testnet that schedules the fork on another).
  */
 function chainOfNetwork(network, chains) {
   const slug = networkSlug(network);
@@ -122,8 +121,8 @@ function chainOfNetwork(network, chains) {
 }
 
 /**
- * One entry per fork and network. Ethereum names a fork per layer and combined — geth's notes
- * say "Amsterdam", Prysm's "Gloas", Erigon's "Glamsterdam" — and the classifier may list the
+ * One entry per fork and network. A fork may go by one name per layer and a combined one, each
+ * client's notes using its own — and the classifier may list the
  * same activation under two of them; the name the fork list resolves them to leads (learned
  * from the feeds, see forkNames.js), the client's own name is kept as `layerName`.
  */
@@ -169,18 +168,49 @@ function forksOf(forks, chains, now, knownForks = null) {
       activationPrecision: entry.activationAt && isDateOnly(entry.activationAt) ? 'day' : null
     }, now);
     // "Completed" with no date, height or timestamp is the notes' word alone, and the model
-    // misreads it: geth v1.17.8's fixes "related to the already-active Amsterdam fork" made
-    // Glamsterdam past while Hoodi's activation was a week away. When the fork list knows this
-    // fork on these chains and has it nowhere past, its phase stands instead.
+    // misreads it: notes about fixes for an already-active fork read as the fork being done
+    // everywhere. When the fork list (/forks) knows this fork on these chains and has it nowhere
+    // past, its phase stands instead.
     if (entry.phase === FORK_PHASE.PAST && unverifiedState(entry) && knownForks) {
       const known = knownMatches(entry, chains, knownForks);
-      if (known.length && !known.some((k) => k.phase === FORK_PHASE.PAST)) {
+      // Notes naming no network for a fork the list knows on several of the release's chains,
+      // past on one and ahead on another: any one phase is wrong for one of them, so the fork is
+      // listed per network, each as the fork list has it.
+      const perNetwork = entry.network == null ? perNetworkForks(entry, known, chains) : [];
+      if (perNetwork.length > 1) {
+        entry.expandTo = perNetwork;
+      } else if (known.length && !known.some((k) => k.phase === FORK_PHASE.PAST)) {
         entry.phase = known.some((k) => k.phase === FORK_PHASE.UPCOMING) ? FORK_PHASE.UPCOMING : known[0].phase;
         entry.phaseFrom = 'forks';
       }
     }
   }
-  return out;
+  // An entry the notes tied to a network wins over one listed there by expansion: it carries
+  // the notes' own evidence for that network.
+  const stated = new Set(out.filter((e) => !e.expandTo && e.chainId != null).map((e) => `${e.name}|${e.chainId}`));
+  return out.flatMap((entry) => (entry.expandTo ?? [entry]).filter((e) => !entry.expandTo || !stated.has(`${e.name}|${e.chainId}`)));
+}
+
+/** One entry per release chain the fork list knows this fork on: its phase and date there. */
+function perNetworkForks(entry, known, chains) {
+  const best = new Map(); // chainId -> the best-attested fork-list entry on it
+  for (const k of known) {
+    for (const id of k.chains ?? []) {
+      const chain = (chains ?? []).find((c) => c.chainId === id);
+      if (!chain) continue;
+      const held = best.get(id);
+      if (!held || (k.events?.length ?? 0) > (held.k.events?.length ?? 0)) best.set(id, { k, chain });
+    }
+  }
+  return [...best.values()].map(({ k, chain }) => ({
+    ...entry,
+    network: getChainById(chain.chainId)?.name ?? chain.name ?? null,
+    chainId: chain.chainId,
+    phase: k.phase,
+    activationAt: entry.activationAt ?? k.activationAt ?? null,
+    // Phase and date are the fork list's (/forks), not the notes'.
+    phaseFrom: 'forks'
+  }));
 }
 
 /** Fork-list entries for the same fork (any name it goes by) on this entry's chains. */

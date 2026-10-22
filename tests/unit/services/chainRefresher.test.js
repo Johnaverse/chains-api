@@ -4,7 +4,8 @@ vi.mock('../../../src/sources/l2beat.js', () => ({
   fetchL2Beat: vi.fn()
 }));
 
-vi.mock('../../../rpcUtil.js', () => ({
+vi.mock('../../../rpcUtil.js', async (importOriginal) => ({
+  ...(await importOriginal()),
   jsonRpcCall: vi.fn()
 }));
 
@@ -222,6 +223,27 @@ describe('chainRefresher', () => {
       expect(cachedData.rpcHealth[1][0]).toMatchObject({ ok: false, failure: 'answered_no_block' });
     });
 
+    it('keeps since when an endpoint answers nothing across silent checks, and restarts it on any answer', async () => {
+      seedCacheWith([seedChain(1, ['https://rpc-a.example'])]);
+      const silent = () => jsonRpcCall.mockRejectedValue(Object.assign(new Error('fetch failed'), { kind: 'unreachable' }));
+      silent();
+      await processChainRpc(1);
+      expect(cachedData.rpcHealth[1][0].unansweredSince).toMatch(/^\d{4}-/);
+
+      cachedData.rpcHealth[1][0].unansweredSince = '2026-01-01T00:00:00.000Z';
+      await processChainRpc(1);
+      expect(cachedData.rpcHealth[1][0].unansweredSince).toBe('2026-01-01T00:00:00.000Z');
+
+      // A rate limit is an answer: the endpoint is there.
+      jsonRpcCall.mockRejectedValue(Object.assign(new Error('HTTP 429'), { kind: 'rate_limited', status: 429 }));
+      await processChainRpc(1);
+      expect(cachedData.rpcHealth[1][0].unansweredSince).toBeUndefined();
+
+      silent();
+      await processChainRpc(1);
+      expect(Date.parse(cachedData.rpcHealth[1][0].unansweredSince)).toBeGreaterThan(Date.parse('2026-01-01T00:00:00.000Z'));
+    });
+
   describe('ensureChainRpcResults (on-demand probe)', () => {
     it('returns true without probing when results already exist', async () => {
       seedCacheWith([seedChain(1, ['https://rpc-a.example'])]);
@@ -387,6 +409,26 @@ describe('chainRefresher', () => {
       const status = getChainRefresherStatus();
       expect(status.queueDepth).toBe(0);
       expect(status.sweep.totalJobs).toBe(3); // 1 l2beat + 2 chains
+    });
+
+    it('carries on with the sweep when the data reloads mid-sweep, skipping chains it lost', async () => {
+      seedCacheWith([
+        seedChain(1, ['https://rpc-a.example']),
+        seedChain(2, ['https://rpc-b.example']),
+        seedChain(3, ['https://rpc-c.example'])
+      ]);
+      fetchL2Beat.mockResolvedValue({ source: 'live', fetchedAt: '2026-05-05T00:00:00.000Z', projects: [] });
+      jsonRpcCall.mockImplementation(async (_url, method) => (method === 'web3_clientVersion' ? 'Geth/v1' : '0x10'));
+
+      await tickOnce(); // l2beat_batch
+      await tickOnce(); // chain_rpc 1
+      // A scheduled reload lands: chain 2 is gone upstream, chain 3 stays.
+      delete cachedData.indexed.byChainId[2];
+      cachedData.lastUpdated = '2026-05-05T06:00:00.000Z';
+      await tickOnce(); // chain_rpc 3
+
+      expect(Object.keys(cachedData.rpcHealth).sort()).toEqual(['1', '3']);
+      expect(getChainRefresherStatus().sweep.sweepNumber).toBe(1);
     });
 
     it('rebuilds the queue once it drains, incrementing sweep number', async () => {

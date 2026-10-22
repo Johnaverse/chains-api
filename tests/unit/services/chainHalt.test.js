@@ -4,7 +4,7 @@ import { jsonRpcCall } from '../../../rpcUtil.js';
 import { getChainById, getEndpointsById } from '../../../src/store/queries.js';
 import { getExplorerTip } from '../../../src/sources/blockscout.js';
 
-vi.mock('../../../rpcUtil.js', () => ({ jsonRpcCall: vi.fn() }));
+vi.mock('../../../rpcUtil.js', async (importOriginal) => ({ ...(await importOriginal()), jsonRpcCall: vi.fn() }));
 vi.mock('../../../src/sources/blockscout.js', () => ({ getExplorerTip: vi.fn() }));
 vi.mock('../../../src/store/queries.js', () => ({
   getChainById: vi.fn(),

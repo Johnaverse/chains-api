@@ -26,11 +26,13 @@ describe('test-network words, learned from the registry', () => {
       ...TESTNET_REGISTRY,
       { chainId: 314, name: 'Filecoin - Mainnet', tags: [] },
       test(314159, 'Filecoin - Calibration testnet'), test(3141, 'Filecoin - Hyperspace testnet'), test(31415926, 'Filecoin Local testnet'),
-      test(9999, 'Foo Istanbul')
+      test(9999, 'Foo Istanbul'), test(9998, 'Bar Istanbul'), test(9997, 'Baz Network v1')
     ]);
     expect(isTestNetworkWord('filecoin')).toBe(false);
-    expect(isTestNetworkWord('calibration')).toBe(true);
-    // A single testnet named "Istanbul" reads a mention as a testnet, but never makes the fork a network.
+    // One chain's name is not evidence: "calibration" names a single testnet here.
+    expect(isTestNetworkWord('calibration')).toBe(false);
+    expect(isTestNetworkWord('v1')).toBe(false);
+    // Two testnets named "Istanbul" read a mention as a testnet, but never make the fork a network.
     expect(isNetworkName('Istanbul')).toBe(false);
   });
 

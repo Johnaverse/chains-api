@@ -77,16 +77,20 @@ export function getChainDetail(chainId) {
 // over every entry. Keyed by cachedData.lastUpdated — invalidated automatically
 // on loadData(); also invalidated when the cache is hot-merged (e.g.
 // indexL2BeatSource adds fields without bumping lastUpdated).
-let allChainsCache = { lastUpdated: null, lastL2BeatFetchedAt: null, value: null };
+// The index object itself is part of the key: two loads inside one millisecond share a
+// lastUpdated, and the second must not be served the first one's chains.
+let allChainsCache = { lastUpdated: null, lastL2BeatFetchedAt: null, indexed: null, value: null };
 
 function invalidateAllChainsCacheIfStale() {
   const current = {
     lastUpdated: cachedData.lastUpdated,
-    lastL2BeatFetchedAt: cachedData.l2beat?.fetchedAt ?? null
+    lastL2BeatFetchedAt: cachedData.l2beat?.fetchedAt ?? null,
+    indexed: cachedData.indexed
   };
   if (
     allChainsCache.lastUpdated !== current.lastUpdated ||
-    allChainsCache.lastL2BeatFetchedAt !== current.lastL2BeatFetchedAt
+    allChainsCache.lastL2BeatFetchedAt !== current.lastL2BeatFetchedAt ||
+    allChainsCache.indexed !== current.indexed
   ) {
     allChainsCache = { ...current, value: null };
   }
@@ -103,7 +107,7 @@ export function getAllChains() {
 
 // Test-only helper.
 export function _resetGetAllChainsCacheForTests() {
-  allChainsCache = { lastUpdated: null, lastL2BeatFetchedAt: null, value: null };
+  allChainsCache = { lastUpdated: null, lastL2BeatFetchedAt: null, indexed: null, value: null };
 }
 
 // Words that describe WHICH network variant the user wants rather than the

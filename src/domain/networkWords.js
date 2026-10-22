@@ -2,13 +2,13 @@
  * Which words name a test network, read from the chain registry rather than listed in code.
  *
  * A word is a test-network word when the chains it names — in a name, TheGraph id or alias —
- * are nearly all ones the registry tags `Testnet`, and there are several of them: Sepolia,
- * Hoodi and Amoy qualify; Ethereum and Polygon also name main networks and never do. New
- * testnets join as the registry lists them.
+ * are nearly all ones the registry tags `Testnet`, and there are several of them. An ecosystem's
+ * name also names its main network and never qualifies. New testnets join as the registry lists
+ * them.
  */
 let words = new Set();
 let learnedFrom = null;
-// TheGraph id / alias -> chain, for a network named bare ("hoodi" is Ethereum Hoodi's id).
+// TheGraph id / alias -> chain, for a network named bare by its registry id.
 let bareNames = new Map();
 
 const tokens = (s) => String(s ?? '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
@@ -19,9 +19,9 @@ function namesOf(chain) {
     .filter((n) => typeof n === 'string' && n && !/^evm-\d+$/.test(n));
 }
 
-// Two strengths. A word that QUALIFIES test networks — follows the ecosystem, as in "Polygon
-// Amoy", "bnb-chapel" — and names no main network reads a network mention as a test network.
-// A word is a NETWORK NAME outright (a fork "named" Hoodi is the network, not a fork) only on
+// Two strengths. A word that QUALIFIES test networks — follows the ecosystem, as in "Eco X",
+// "eco-x" — and names no main network reads a network mention as a test network.
+// A word is a NETWORK NAME outright (a fork "named" after it is the network, not a fork) only on
 // more evidence: several test networks, most of them naming it as the qualifier, and nearly all
 // chains carrying it tagged Testnet — registry tags have gaps, and a project whose chains are
 // mostly testnets ("Filecoin", leading every name) must not count.
@@ -56,8 +56,13 @@ export function learnNetworkWords(chains) {
       if (isTest && qual.has(t)) bump(testQual, t);
     }
   }
-  const numeric = (t) => /^\d+$/.test(t);
-  words = new Set([...testQual.keys()].filter((t) => !numeric(t) && testAny.get(t) === all.get(t)));
+  // Numbers and versions ("2", "v1") name no network.
+  const numeric = (t) => /^v?\d+$/.test(t);
+  // One chain's name alone (a client or project word in it) teaches nothing: a word
+  // counts once two test networks share it, or the registry knows it as a testnet's own id.
+  const bareTest = new Set([...bare].filter(([, cs]) => cs.length === 1 && cs[0].tags?.includes('Testnet')).map(([t]) => t));
+  words = new Set([...testQual.keys()].filter((t) => !numeric(t) && testAny.get(t) === all.get(t)
+    && (testAny.get(t) >= 2 || bareTest.has(t))));
   strong = new Set([...testAny].filter(([t, n]) => !numeric(t) && n >= MIN_TESTNETS
     && n / all.get(t) >= MIN_TEST_SHARE && (testQual.get(t) ?? 0) * 2 >= n).map(([t]) => t));
   for (const t of strong) words.add(t);
@@ -65,18 +70,18 @@ export function learnNetworkWords(chains) {
   learnedFrom = chains;
 }
 
-/** Whether `text` is a network's name and nothing else ("Hoodi", "Sepolia testnet"). */
+/** Whether `text` is a network's name and nothing else ("X", "X testnet"). */
 export function isNetworkName(text) {
   const ts = tokens(text);
   return ts.length > 0 && ts.every((t) => strong.has(t));
 }
 
-/** Whether this one word names a test network ("sepolia", "testnet"). */
+/** Whether this one word names a test network (a learned word, or "testnet"). */
 export function isTestNetworkWord(word) {
   return words.has(String(word ?? '').toLowerCase());
 }
 
-/** Whether any word of `text` names a test network ("Base Sepolia", "bsc-chapel"). */
+/** Whether any word of `text` names a test network ("Eco X", "eco-x"). */
 export function mentionsTestNetwork(text) {
   return tokens(text).some((t) => words.has(t));
 }

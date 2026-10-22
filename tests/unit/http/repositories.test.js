@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { buildApp } from '../../../index.js';
-import { aliasesOf } from '../../../src/http/routes/repositories.js';
+import { aliasesOf, _resetRepositoriesForTests } from '../../../src/http/routes/repositories.js';
+import { cachedData } from '../../../src/store/cache.js';
 
 // Static research data only, so the app is built without loading chain data.
 let app;
@@ -25,6 +26,28 @@ describe('GET /repositories', () => {
     expect(body.networks.every(n => Array.isArray(n.aliases))).toBe(true);
     // The registry's test-network words travel with it (empty until chain data has loaded).
     expect(Array.isArray(body.testNetworkWords)).toBe(true);
+  });
+
+  it('rebuilds after the registry reloads, so the feed gets what the new registry teaches', async () => {
+    const saved = { indexed: cachedData.indexed, lastUpdated: cachedData.lastUpdated };
+    const load = (tags, version) => {
+      const chain = { chainId: 1, name: 'Ethereum Mainnet', tags, aliases: [] };
+      cachedData.indexed = { byChainId: { 1: chain }, byName: {}, all: [chain] };
+      cachedData.lastUpdated = version;
+    };
+    try {
+      _resetRepositoriesForTests();
+      load([], '2026-10-20T12:40:00.000Z');
+      const first = (await app.inject({ method: 'GET', url: '/repositories' })).json();
+      expect(first.networks.find(n => n.chainId === 1).testnet).toBe(false);
+      // The reloaded registry tags it differently: the next response says so.
+      load(['Testnet'], '2026-10-20T18:40:00.000Z');
+      const second = (await app.inject({ method: 'GET', url: '/repositories' })).json();
+      expect(second.networks.find(n => n.chainId === 1).testnet).toBe(true);
+    } finally {
+      Object.assign(cachedData, saved);
+      _resetRepositoriesForTests();
+    }
   });
 
   it('gives each network the other names the registry knows it by, for the feed\'s fork matching', () => {

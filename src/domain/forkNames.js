@@ -3,26 +3,26 @@ import { chainOfBareName, isNetworkName } from './networkWords.js';
 
 /**
  * Fork names learned from the feeds, never from a table. A source may state an alias itself
- * ("Fusaka (Fulu)"); otherwise when the fork list finds several names activating on the same
- * chains at the same height or second (mergeSameActivation), they are one fork: Hoodi's Glamsterdam, Gloas and Amsterdam on 2026-10-26 17:42:48. The
+ * ("A (B)"); otherwise when the fork list finds several names activating on the same
+ * chains at the same height or second (mergeSameActivation), they are one fork. The
  * best-attested name (the entity's own) becomes the one the others resolve to, so a release
- * elsewhere that says only "Amsterdam" joins that fork without anyone listing the pair.
+ * elsewhere that uses only another of the names joins that fork without anyone listing the pair.
  */
 let canonicalOf = new Map(); // identity -> canonical identity
 let displayOf = new Map(); // canonical identity -> the name as written
 let membersOf = new Map(); // canonical identity -> every identity resolving to it
 
 /**
- * A name that states its own alias: "Fusaka (Fulu)" says Fulu is Fusaka, "Glamsterdam/ePBS
- * (Gloas)" that Gloas is Glamsterdam. Only the bracket form counts: "Berlin/London" lists two
- * forks, so of a slash list only the first is taken as the name the bracket explains.
+ * A name that states its own alias: "A (B)" says B is A, "A/C (B)" that B is A. Only the
+ * bracket form counts: "A/C" lists two forks, so of a slash list only the first is taken as the
+ * name the bracket explains.
  */
 function statedAlias(name) {
   const m = /^([^()]+)\(([^()]+)\)\s*$/.exec(String(name ?? ''));
   if (!m) return null;
   const outer = m[1].split('/')[0].trim();
   const alias = m[2].trim();
-  // "Fusaka (Hoodi)" says where, not what: a bracket the registry knows as a network is no alias.
+  // "A (<network>)" says where, not what: a bracket the registry knows as a network is no alias.
   if (!outer || !alias || isNetworkName(alias) || chainOfBareName(alias)) return null;
   return { name: outer, alias };
 }
@@ -36,8 +36,8 @@ export function learnForkNames(forks = []) {
   const groups = forks.filter((f) => f?.name)
     .sort((a, b) => (b.events?.length ?? 0) - (a.events?.length ?? 0))
     .flatMap((f) => {
-      // Stated aliases first: "Glamsterdam/ePBS (Gloas)" resolves to Glamsterdam before its
-      // same-activation aliases are attached, so those land on Glamsterdam too, not on the
+      // Stated aliases first: "A/C (B)" resolves to A before its same-activation aliases are
+      // attached, so those land on A too, not on the
       // combined name.
       const out = [];
       for (const n of [f.name, ...(f.aliases ?? [])]) {

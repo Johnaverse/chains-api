@@ -21,7 +21,7 @@
  * getL2BeatRefreshStatus, runRpcHealthCheck, runL2BeatRefresh) keeps
  * working unchanged.
  */
-import { jsonRpcCall } from '../../rpcUtil.js';
+import { jsonRpcCall, NO_ANSWER_FAILURES } from '../../rpcUtil.js';
 import { safeExternalUrl } from '../util/publicHost.js';
 import {
   RPC_CHECK_TIMEOUT_MS,
@@ -192,8 +192,16 @@ export async function processChainRpc(chainId) {
 
   if (!cachedData.rpcHealth) cachedData.rpcHealth = {};
   const previous = cachedData.rpcHealth[chainId];
+  // Since when an endpoint has answered nothing at all, carried across consecutive checks: one
+  // silent sweep from one place proves little, days of them do (validation rule 18). Any answer
+  // in between — a rate limit, an error, a block — restarts the clock.
+  const now = new Date().toISOString();
+  const silentSince = new Map((previous ?? []).filter(r => r.unansweredSince).map(r => [r.url, r.unansweredSince]));
+  for (const r of publicResults) {
+    if (!r.ok && NO_ANSWER_FAILURES.has(r.failure)) r.unansweredSince = silentSince.get(r.url) ?? now;
+  }
   cachedData.rpcHealth[chainId] = publicResults;
-  chain.lastTested = new Date().toISOString();
+  chain.lastTested = now;
   // Freshness signal for /clients and /rpc-monitor. Stamped per chain as
   // results are written — not at sweep end — because a full sweep can abort
   // mid-pass on a data-version change (so onSweepEnd may never run), which
@@ -336,17 +344,22 @@ export async function tickOnce() {
 
     // Inter-job race guard: if a concurrent loadData() bumped lastUpdated
     // mid-sweep, the queue references chainIds from the old data version.
-    // Drop the rest of the sweep — the next tick will rebuild from scratch.
+    // The registries reload on a schedule (sourceRefresher.js), so restarting
+    // the sweep each time would leave its tail untested: carry on with the
+    // chains the new data still has.
     if (
       cursor.sweepDataVersion !== null &&
       cachedData.lastUpdated !== cursor.sweepDataVersion
     ) {
-      logger.warn(
-        { sweepNumber: cursor.sweepNumber, droppedJobs: queue.length },
-        'Chain refresher sweep aborted: data version changed mid-sweep'
+      const before = queue.length;
+      const byChainId = cachedData.indexed?.byChainId ?? {};
+      queue = queue.filter(job => job.type !== 'chain_rpc' || byChainId[job.chainId]);
+      cursor.sweepDataVersion = cachedData.lastUpdated;
+      logger.info(
+        { sweepNumber: cursor.sweepNumber, remainingJobs: queue.length, droppedJobs: before - queue.length },
+        'Chain refresher sweep continues on reloaded data'
       );
-      queue = [];
-      return;
+      if (queue.length === 0) return;
     }
 
     const job = queue.shift();

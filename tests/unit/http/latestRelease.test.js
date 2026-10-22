@@ -167,10 +167,12 @@ describe('GET /client-releases/latest', () => {
     try {
       proxyFetch.mockResolvedValue(page([rel('v1.17.8', { chains: [{ chainId: 1 }, { chainId: 560048 }] }, {}, { class: 'urgent_software_fix', forks })]));
       const { forks: out } = (await get('/client-releases/latest?repo=ethereum/go-ethereum')).json().latest.hardfork;
-      expect(out.map((f) => [f.name, f.state, f.phase, f.phaseFrom ?? null])).toEqual([
-        ['Glamsterdam', 'completed', 'upcoming', 'forks'],
+      // No network named, and the fork list has it on two of the release's chains: one entry each.
+      expect(out.map((f) => [f.name, f.chainId ?? null, f.state, f.phase, f.phaseFrom ?? null])).toEqual([
+        ['Glamsterdam', 1, 'completed', 'unscheduled', 'forks'],
+        ['Glamsterdam', 560048, 'completed', 'upcoming', 'forks'],
         // No fork-list entry on the release's chains: the notes' word stands.
-        ['Zanzibar', 'completed', 'past', null]
+        ['Zanzibar', null, 'completed', 'past', null]
       ]);
     } finally {
       known.forks = null;
@@ -215,6 +217,48 @@ describe('GET /client-releases/latest', () => {
         ['Glamsterdam', null, 'Ethereum Sepolia', 11155111, '2026-10-06T13:53:36.000Z'],
         ['Glamsterdam', 'Gloas', 'Ethereum Hoodi', 560048, null],
         ['Jenner', null, 'BSC Chapel testnet', null, null]
+      ]);
+    } finally {
+      known.forks = null;
+    }
+  });
+
+  it('lists a fork the notes name with no network once per network the fork list knows, each with its own phase', async () => {
+    const forks = [{ name: 'Amsterdam', network: null, activationAt: null, state: 'completed' }];
+    const chains = [{ chainId: 1, name: 'Ethereum Mainnet' }, { chainId: 11155111, name: 'Ethereum Sepolia' }, { chainId: 560048, name: 'Ethereum Hoodi' }];
+    known.forks = [
+      HOODI_GLAMSTERDAM,
+      { name: 'Glamsterdam', aliases: ['Gloas', 'Amsterdam'], chains: [11155111], phase: 'past', activationAt: '2026-10-06T13:53:36.000Z', events: [{}, {}, {}, {}] },
+      { name: 'Gloas', chains: [11155111], phase: 'unscheduled', events: [{}] }
+    ];
+    try {
+      proxyFetch.mockResolvedValue(page([rel('v1.17.8', { chains }, {}, { class: 'urgent_software_fix', forks })]));
+      const { forks: out } = (await get('/client-releases/latest?repo=ethereum/go-ethereum')).json().latest.hardfork;
+      expect(out.map((f) => [f.chainId, f.phase, f.activationAt, f.phaseFrom]).sort()).toEqual([
+        [11155111, 'past', '2026-10-06T13:53:36.000Z', 'forks'],
+        [560048, 'upcoming', null, 'forks']
+      ]);
+    } finally {
+      known.forks = null;
+    }
+  });
+
+  it('keeps the notes\' own entry for a network over the one an undated, unscoped mention expands to', async () => {
+    const forks = [
+      { name: 'Amsterdam', network: null, activationAt: null, state: 'completed' },
+      { name: 'Glamsterdam', network: 'Ethereum Hoodi', activationAt: '2026-10-26T17:42:48.000Z', state: 'scheduled' }
+    ];
+    const chains = [{ chainId: 11155111, name: 'Ethereum Sepolia' }, { chainId: 560048, name: 'Ethereum Hoodi' }];
+    known.forks = [
+      HOODI_GLAMSTERDAM,
+      { name: 'Glamsterdam', aliases: ['Gloas', 'Amsterdam'], chains: [11155111], phase: 'past', activationAt: '2026-10-06T13:53:36.000Z', events: [{}, {}, {}, {}] }
+    ];
+    try {
+      proxyFetch.mockResolvedValue(page([rel('v1.17.8', { chains }, {}, { class: 'planned_hard_fork', forks })]));
+      const { forks: out } = (await get('/client-releases/latest?repo=ethereum/go-ethereum')).json().latest.hardfork;
+      expect(out.map((f) => [f.chainId, f.state, f.phaseFrom ?? null]).sort()).toEqual([
+        [11155111, 'completed', 'forks'],
+        [560048, 'scheduled', null]
       ]);
     } finally {
       known.forks = null;
