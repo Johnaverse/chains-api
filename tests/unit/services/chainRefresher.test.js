@@ -108,6 +108,17 @@ describe('chainRefresher', () => {
       for (const [url] of jsonRpcCall.mock.calls) expect(url).toBe('https://rpc-public.example');
     });
 
+    it('never probes a public-looking RPC name whose DNS answers a private address', async () => {
+      const { lookup } = await import('node:dns/promises');
+      lookup.mockResolvedValueOnce([{ address: '10.43.0.1', family: 4 }]);
+      seedCacheWith([seedChain(1, ['https://rpc.points-inside.example'])]);
+
+      await processChainRpc(1);
+
+      expect(jsonRpcCall).not.toHaveBeenCalled();
+      expect(cachedData.rpcHealth[1][0]).toMatchObject({ ok: false, failure: 'private_address' });
+    });
+
     it('drops an endpoint that answers HTTP 401 and never probes it again', async () => {
       // A 401 is a keyed/private endpoint: listing it as a public RPC is wrong, and probing it
       // on every sweep is wasted fan-out.

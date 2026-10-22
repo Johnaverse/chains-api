@@ -8,7 +8,7 @@ import {
 import { proxyFetch } from '../../fetchUtil.js';
 import { getChainById } from '../store/queries.js';
 import { logger } from '../util/logger.js';
-import { safeExternalUrl } from '../util/publicHost.js';
+import { safeExternalUrl, resolvesPublic } from '../util/publicHost.js';
 
 /**
  * Keyless Blockscout client, used by the chain-halt check as an independent
@@ -109,6 +109,11 @@ async function fetchJson(url) {
     return null;
   }
 
+  // Registry explorer URLs: a public-looking name may still resolve to a private address.
+  if (!(await resolvesPublic(url))) {
+    logger.warn({ host }, 'Blockscout host resolves to a non-public address; skipping');
+    return null;
+  }
   await pace();
   try {
     const response = await proxyFetch(url, {

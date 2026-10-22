@@ -870,7 +870,7 @@ This endpoint analyzes the chain data and identifies potential inconsistencies o
 18. **Rule 18 - No RPC Answers, Not Deprecated**: every listed endpoint has failed with nothing answering (`unreachable`, `timeout`, `tls_error`) for at least `RPC_DEAD_AFTER_MS` (3 days; each endpoint's `unansweredSince` runs across consecutive silent checks and restarts on any answer) and no source calls the network dead — dead and unmarked upstream, or its endpoints moved. An endpoint that answered at all (rate limit, HTTP error, a refused method, a client version without a block) does not count as gone, nor does a reset connection or an unrecognised error, which may be on our side.
 19. **Rule 19 - Deprecated But an RPC Answers**: a deprecated chain with an endpoint still serving blocks.
 
-RPC health records each failed endpoint's `failure` kind (`unreachable` / `timeout` / `tls_error` / `connection_error` / `rate_limited` / `http_error` / `rpc_error` / `invalid_response` / `answered_no_block` / `unknown`), and an endpoint serving blocks counts as working even when it disables `web3_clientVersion`.
+RPC health records each failed endpoint's `failure` kind (`unreachable` / `timeout` / `tls_error` / `connection_error` / `rate_limited` / `http_error` / `rpc_error` / `invalid_response` / `answered_no_block` / `unknown` / `private_address`). `private_address` means the endpoint's hostname resolves to a non-public address, so it is never probed: registry URLs are community-submitted, and the same check guards the chain-halt probe and the Blockscout explorer reader., and an endpoint serving blocks counts as working even when it disables `web3_clientVersion`.
 
 **Response:**
 ```json
