@@ -410,7 +410,7 @@ function mergeEntry(into, from) {
   for (const slug of from.networkSlugs) if (!into.networkSlugs.includes(slug)) into.networkSlugs.push(slug);
   into.sources = [...new Set([...into.sources, ...from.sources])];
   into.feeds = [...new Set([...into.feeds, ...from.feeds])];
-  for (const r of from.releases) addRelease(into, { title: r.title, url: r.url, publishedAt: r.publishedAt, release: r, enrichment: { class: r.class } });
+  for (const r of from.releases) addRelease(into, { title: r.title, url: r.url, publishedAt: r.publishedAt, release: r, enrichment: { class: r.class }, forkState: r.forkState });
   for (const p of from.providerUpdates) addProviderUpdate(into, p);
   for (const n of from.news) addNews(into, n);
   into.url ??= from.url;
@@ -668,38 +668,30 @@ const CALLS_OFF = new Set(['cancelled', 'rescheduled']);
 /**
  * A fork called off before it activated. The releases that scheduled it are then the danger:
  * a node still running one activates the fork on its own and leaves the network at the
- * original time. What to run is the releases that call it off, so `software` names those; the
- * scheduling versions move to `supersededSoftware`; and while the original activation is still
- * ahead, `upgradeBy` is that moment. Read only from what each release said (`forkState`).
+ * original time. Read per client from what each release said (`forkState`), newest last word
+ * wins: a client whose NEWEST release cancels or reschedules the fork has a version to run
+ * (`software`), and every older release of it is superseded — a reschedule later cancelled is
+ * not safe; a client whose newest release still schedules it has none yet (superseded, nothing
+ * to run). `software` may be empty: a status post or article can call a fork off before any
+ * client ships a release that does — no safe version known, not "the old one is fine". Provider
+ * windows add to neither list: a window may roll out the very release that cancels the fork.
+ * While the original activation is still ahead, `upgradeBy` is that moment.
  */
 function callOff(entry, now) {
-  const off = entry.releases.filter((r) => CALLS_OFF.has(r.forkState));
-  if (!off.length) return;
-  // One row per client and version. A provider window names a client its own way ("Lighthouse",
-  // or not at all) and the release by its repo ("sigp/lighthouse"): sameClient makes them one
-  // row. Two different clients stay apart even on one version (date-versioned clients share them).
-  const merge = (list) => {
-    const out = [];
-    for (const s of list) {
-      const v = normalizeVersion(s.version);
-      if (!v) continue;
-      const same = out.find((x) => normalizeVersion(x.version) === v && sameClient(x.client, s.client));
-      if (!same) out.push({ ...s });
-      else if (!same.client && s.client) same.client = s.client;
-    }
-    return out;
-  };
-  const sameRow = (a, b) => normalizeVersion(a.version) === normalizeVersion(b.version) && sameClient(a.client, b.client);
-  const running = merge(off.map((r) => ({ client: r.repo, version: r.version })));
-  const superseded = merge([
-    ...entry.releases.filter((r) => !CALLS_OFF.has(r.forkState)).map((r) => ({ client: r.repo, version: r.version })),
-    ...entry.software
-  ]);
-  entry.supersededSoftware = superseded.filter((s) => !running.some((r) => sameRow(r, s)));
-  entry.software = running;
+  const repoKey = (r) => `${r.repo ?? ''}|${(r.component ?? '').toLowerCase()}`;
+  const byTime = [...entry.releases].sort((a, b) => (ms(a.publishedAt) ?? 0) - (ms(b.publishedAt) ?? 0));
+  const newest = new Map();
+  for (const r of byTime) newest.set(repoKey(r), r);
+  const run = [...newest.values()].filter((r) => CALLS_OFF.has(r.forkState));
+  const runSet = new Set(run);
+  const row = (r) => ({ client: r.repo, version: r.version, ...(r.component ? { component: r.component } : {}) });
+  const unique = (list) => [...new Map(list.map((x) => [`${x.client}|${x.component ?? ''}@${normalizeVersion(x.version)}`, x])).values()];
+  entry.software = unique(run.map(row));
+  entry.supersededSoftware = unique(byTime.filter((r) => !runSet.has(r)).map(row))
+    .filter((x) => !entry.software.some((y) => y.client === x.client && (y.component ?? '') === (x.component ?? '') && normalizeVersion(y.version) === normalizeVersion(x.version)));
   const at = ms(entry.activationAt);
   if (at != null && at > now) entry.upgradeBy = entry.activationAt;
-  if (off.some((r) => r.mandatory)) entry.urgency = 'mandatory';
+  if (run.some((r) => r.mandatory)) entry.urgency = 'mandatory';
 }
 
 function finish(entry, now) {

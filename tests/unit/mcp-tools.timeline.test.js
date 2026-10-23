@@ -43,6 +43,16 @@ describe('get_timeline', () => {
     expect(e.releases[0]).toEqual({ repo: 'r0', version: '1', mandatory: true, url: 'https://r/0', publishedAt: '2025-11-01T00:00:00Z' });
   });
 
+  it('passes what each release said about the fork, and a called-off fork\'s deadline and run-list', async () => {
+    const called = { ...entry(2), phase: 'cancelled', state: 'cancelled', upgradeBy: '2026-10-26T17:42:48.000Z',
+      software: [{ client: 'r1', version: '2' }], supersededSoftware: [{ client: 'r0', version: '1' }] };
+    called.releases = [{ ...called.releases[0], forkState: 'scheduled' }, { ...called.releases[1], version: '2', forkState: 'cancelled' }];
+    svc.getTimeline.mockResolvedValue({ totalMatched: 1, count: 1, truncated: false, byType: {}, byPhase: {}, sources: {}, entries: [called] });
+    const [e] = parse(await handleToolCall('get_timeline', {})).entries;
+    expect(e.releases.map((r) => r.forkState)).toEqual(['scheduled', 'cancelled']);
+    expect(e).toMatchObject({ upgradeBy: '2026-10-26T17:42:48.000Z', software: [{ client: 'r1', version: '2' }], supersededSoftware: [{ client: 'r0', version: '1' }] });
+  });
+
   it('reports an outage as a tool error', async () => {
     svc.getTimeline.mockRejectedValue(new Error('Timeline sources unavailable'));
     const r = await handleToolCall('get_timeline', {});

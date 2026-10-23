@@ -7186,7 +7186,11 @@ function timelineRow(u, now) {
             class: 'tlx-chip-cancel',
             title: superseded ? `Superseded, forks off at the original time: ${superseded}` : 'This fork will not activate.',
             text: upgradeByMs != null && upgradeByMs > now
-                ? `Called off · upgrade before ${fmtDateTime(upgradeByMs)}`
+                ? (u.software || []).length
+                    ? `Called off · upgrade before ${fmtDateTime(upgradeByMs)}`
+                    // Called off by a post or article before any client shipped the release that
+                    // disables it: the deadline stands, the version to move to is not known yet.
+                    : `Called off · no release that disables it yet · activates ${fmtDateTime(upgradeByMs)} on the old versions`
                 : 'Called off'
         }));
     }
