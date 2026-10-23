@@ -4,18 +4,35 @@ import { RPC_DEAD_AFTER_MS } from '../../config.js';
 import { NO_ANSWER_FAILURES } from '../../rpcUtil.js';
 import { getAllChains } from '../store/queries.js';
 
-function getChainFromSource(chainId, source) {
-  if (source === 'theGraph') {
-    return cachedData.theGraph.networks?.find(n => {
-      if (n.caip2Id) {
-        const match = n.caip2Id.match(/^eip155:(\d+)$/);
-        return match && Number.parseInt(match[1], 10) === chainId;
-      }
-      return false;
-    });
+// chainId -> the source's entry, built once per source array. Keyed on the array itself, so a
+// reload (a new array) rebuilds it and nothing is ever stale. Every rule looks chains up by id,
+// and a linear find per chain per rule made a validation run ~0.7 s of blocked event loop —
+// stalling every request that arrived meanwhile (the dashboard loads /metrics at boot).
+const sourceIndexes = new WeakMap();
+function indexBy(list, idOf) {
+  if (!Array.isArray(list)) return null;
+  let index = sourceIndexes.get(list);
+  if (!index) {
+    index = new Map();
+    for (const entry of list) {
+      const id = idOf(entry);
+      // The first entry for an id wins, as Array.find did.
+      if (id != null && !index.has(id)) index.set(id, entry);
+    }
+    sourceIndexes.set(list, index);
   }
-  if (source === 'chainlist') return cachedData.chainlist?.find(c => c.chainId === chainId);
-  if (source === 'chains') return cachedData.chains?.find(c => c.chainId === chainId);
+  return index;
+}
+const theGraphChainId = (n) => {
+  const match = typeof n?.caip2Id === 'string' ? /^eip155:(\d+)$/.exec(n.caip2Id) : null;
+  return match ? Number.parseInt(match[1], 10) : null;
+};
+const ownChainId = (c) => c?.chainId ?? null;
+
+function getChainFromSource(chainId, source) {
+  if (source === 'theGraph') return indexBy(cachedData.theGraph?.networks, theGraphChainId)?.get(chainId);
+  if (source === 'chainlist') return indexBy(cachedData.chainlist, ownChainId)?.get(chainId);
+  if (source === 'chains') return indexBy(cachedData.chains, ownChainId)?.get(chainId);
   return null;
 }
 
@@ -438,9 +455,7 @@ function extractRpcUrls(rpcArray) {
 }
 
 function rawSourceRpcUrls(chainId, source) {
-  const raw = source === 'chains' ? cachedData.chains : cachedData.chainlist;
-  if (!Array.isArray(raw)) return new Set();
-  const entry = raw.find(c => c?.chainId === chainId);
+  const entry = getChainFromSource(chainId, source === 'chains' ? 'chains' : 'chainlist');
   return extractRpcUrls(entry?.rpc);
 }
 
