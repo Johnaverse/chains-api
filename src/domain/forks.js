@@ -819,13 +819,17 @@ export async function buildForks(events = [], { tipFor = null, chainIdsFor = nul
   const forks = [];
   for (const { key, members: all, scopes } of groups.values()) {
     // An RPC provider's maintenance window is the provider's own schedule, not the network's:
-    // it may help group reports (it names the fork), but the fork's time, state, chains and kind
-    // come from the network's own sources — client releases, its status page, forums, its blog
+    // it may help group reports (it names the fork), but the fork's time, state and kind come
+    // from the network's own sources — client releases, its status page, forums, its blog
     // and news. A fork only providers mention is their maintenance, not a fork (it stays in
     // /upgrades, and the timeline shows it as the provider's software update).
     const members = all.filter(m => !isProviderWindow(m.event));
     if (!members.length) continue;
-    const chainIds = [...new Set(members.flatMap(m => m.chainIds))];
+    // Which chain a window is about is a fact about the network, not the provider's schedule:
+    // a provider's chains place the fork only when the network's own sources name none (a
+    // rollup's release saying "Hoodi Testnet", the provider's window naming its chain).
+    const own = [...new Set(members.flatMap(m => m.chainIds))];
+    const chainIds = own.length ? own : [...new Set(all.flatMap(m => m.chainIds))];
     // A tip is only fetched when some member needs a height converted, so the common
     // stated-time fork costs no explorer call at all.
     const needsTip = members.some(m => m.fork.activationBlock && !m.fork.activationAt);

@@ -327,9 +327,9 @@ describe('assembling forks from events', () => {
 
 describe('forks across status, forum and news feeds', () => {
   // A mention from chains-forum-news or chains-news, in the shape src/sources/forkFeeds.js builds.
-  const mention = (id, feed, f, { affectedChains = [], weight = null, page = id, kind, publishedAt = '2026-09-28T00:00:00Z' } = {}) => ({
+  const mention = (id, feed, f, { affectedChains = [], weight = null, page = id, kind, publishedAt = '2026-09-28T00:00:00Z', chains = [] } = {}) => ({
     id, feed, title: `t-${id}`, publishedAt, updatedAt: publishedAt, weight,
-    statusPage: { id: page, kind: kind ?? feed }, chains: [],
+    statusPage: { id: page, kind: kind ?? feed }, chains,
     enrichment: { affectedChains, fork: fork(f) }
   });
 
@@ -441,6 +441,17 @@ describe('forks across status, forum and news feeds', () => {
     // The windows stay listed: they say when each provider upgrades.
     expect(out[0].events).toHaveLength(3);
     expect(out[0].sources.sort()).toEqual(['alc', 'page', 'qn']);
+  });
+
+  it('takes the chain from a provider window only when the network\'s own sources name none', async () => {
+    const out = await buildForks([
+      mention('rel', 'release', { name: 'Celadon', network: 'Hoodi Testnet', activationAt: '2099-10-28T06:00:00Z' }, { chains: [] }),
+      mention('qn', 'status', { name: 'Celadon', network: 'Hoodi Testnet', activationAt: '2099-10-28T05:00:00Z' }, { kind: 'rpc-provider', chains: [{ chainId: 2910 }], affectedChains: ['Hoodi Testnet'] })
+    ], { now: Date.parse('2026-08-22T00:00:00Z') });
+    expect(out).toHaveLength(1);
+    expect(out[0].chains).toEqual([2910]);
+    // ...and still never the time: the release's, not the window's hour earlier.
+    expect(out[0].activationAt).toBe('2099-10-28T06:00:00.000Z');
   });
 
   it('lists no fork that only providers mention: their windows are their maintenance', async () => {
