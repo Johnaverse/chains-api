@@ -176,6 +176,19 @@ describe('buildTimeline — hardforks', () => {
     expect(entry.supersededSoftware.map((x) => x.version)).toEqual(['v1.8.1', 'v1.8.2']);
   });
 
+  it('counts a reschedule as safe only when it names no new date ahead', () => {
+    const rel = (repo, version, state, at) => releaseEvent({ title: version, url: `https://github.com/${repo}/releases/tag/${version}`, publishedAt: '2026-10-15T00:00:00Z', state, activationAt: at, release: { repo, version, mandatory: true } });
+    const [entry] = build({ forks: [fork({ phase: 'cancelled', state: 'cancelled', events: [
+      // Moved to a later day: a node on it still activates then.
+      rel('a/moved', 'v2', 'rescheduled', '2026-11-20T00:00:00Z'),
+      // "Before the new date is set": no date, the fork is off for it.
+      rel('b/undated', 'v3', 'rescheduled', null)
+    ] })] });
+    expect(entry.software.map((x) => x.client)).toEqual(['b/undated']);
+    expect(entry.supersededSoftware.map((x) => x.client)).toEqual(['a/moved']);
+    expect(entry.releases.find((r) => r.repo === 'a/moved').forkActivationAt).toBe('2026-11-20T00:00:00Z');
+  });
+
   it('keeps the deadline and names nothing safe when a fork is called off before any release does', () => {
     // A status post cancels it; the only release still schedules it.
     const [entry] = build({ forks: [fork({ phase: 'cancelled', state: 'cancelled', events: [releaseEvent({ state: 'scheduled' })] })], upgrades: [window()] });
