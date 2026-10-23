@@ -122,6 +122,13 @@ describe('rpcUtil - jsonRpcCall', () => {
     expect(await kindOf(async () => ({ ok: false, status: 530 }))).toBe('http_error');
     expect(await kindOf(async () => ({ ok: true, json: async () => ({ error: { message: 'Method not found' } }) }))).toBe('rpc_error');
     expect(await kindOf(async () => ({ ok: true, json: async () => { throw new SyntaxError('Unexpected token <'); } }))).toBe('invalid_response');
+    // And it says so in words, not as the parser's message.
+    vi.mocked(proxyFetch).mockImplementation(async () => ({ ok: true, json: async () => { throw new SyntaxError('Unexpected token \'<\', "<!DOCTYPE "... is not valid JSON'); } }));
+    await expect(jsonRpcCall('https://rpc.example.com', 'eth_blockNumber')).rejects.toThrow('Returned a web page (HTML), not JSON-RPC');
+    vi.mocked(proxyFetch).mockImplementation(async () => ({ ok: true, json: async () => { throw new SyntaxError('Unexpected end of JSON input'); } }));
+    await expect(jsonRpcCall('https://rpc.example.com', 'eth_blockNumber')).rejects.toThrow('Returned a response that is not JSON-RPC');
+    // Timed out while the body was still arriving: a timeout, not a bad response.
+    expect(await kindOf(async () => ({ ok: true, json: async () => { throw Object.assign(new Error('aborted'), { name: 'AbortError' }); } }))).toBe('timeout');
     // Not known to be the endpoint's fault: it may be our own proxy or egress.
     expect(await kindOf(async () => { throw new TypeError('fetch failed'); })).toBe('unknown');
     expect(await kindOf(async () => { throw Object.assign(new Error('reset'), { code: 'ECONNRESET' }); })).toBe('connection_error');

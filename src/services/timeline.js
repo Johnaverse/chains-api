@@ -211,7 +211,7 @@ function forkEntry(fork) {
     followedByIncidents: []
   };
   for (const e of fork.events ?? []) {
-    if (e.feed === 'release' && e.release) addRelease(entry, { title: e.title, url: e.url, publishedAt: e.publishedAt, release: e.release, enrichment: { class: e.class } });
+    if (e.feed === 'release' && e.release) addRelease(entry, { title: e.title, url: e.url, publishedAt: e.publishedAt, release: e.release, enrichment: { class: e.class }, forkState: e.state, forkActivationAt: e.activationAt ?? null });
     else if (e.feed === 'status') addProviderUpdate(entry, { provider: e.provider, title: e.title, url: e.url, status: e.status, activationAt: e.activationAt ?? null, activationEvidence: e.activationAt ? 'stated' : null, urgency: null });
     else addNews(entry, { feed: e.feed, title: e.title, url: e.url, publishedAt: e.publishedAt, source: e.provider });
   }
@@ -388,7 +388,7 @@ function foldSupportReleases(entries, isTestnet) {
       if (mainnet.length === 1) target = mainnet[0];
     }
     if (!target) { out.push(entry); continue; }
-    for (const r of entry.releases) addRelease(target, { title: r.title, url: r.url, publishedAt: r.publishedAt, release: r, enrichment: { class: r.class } });
+    for (const r of entry.releases) addRelease(target, { title: r.title, url: r.url, publishedAt: r.publishedAt, release: r, enrichment: { class: r.class }, forkState: r.forkState, forkActivationAt: r.forkActivationAt ?? null });
     for (const p of entry.providerUpdates) addProviderUpdate(target, p);
     for (const n of entry.news) addNews(target, n);
     target.sources = [...new Set([...target.sources, ...entry.sources])];
@@ -410,7 +410,7 @@ function mergeEntry(into, from) {
   for (const slug of from.networkSlugs) if (!into.networkSlugs.includes(slug)) into.networkSlugs.push(slug);
   into.sources = [...new Set([...into.sources, ...from.sources])];
   into.feeds = [...new Set([...into.feeds, ...from.feeds])];
-  for (const r of from.releases) addRelease(into, { title: r.title, url: r.url, publishedAt: r.publishedAt, release: r, enrichment: { class: r.class } });
+  for (const r of from.releases) addRelease(into, { title: r.title, url: r.url, publishedAt: r.publishedAt, release: r, enrichment: { class: r.class }, forkState: r.forkState, forkActivationAt: r.forkActivationAt ?? null });
   for (const p of from.providerUpdates) addProviderUpdate(into, p);
   for (const n of from.news) addNews(into, n);
   into.url ??= from.url;
@@ -614,6 +614,12 @@ function addRelease(entry, release) {
     version,
     mandatory: r.mandatory === true,
     class: release.enrichment?.class ?? null,
+    // The fork's state as this release states it: `cancelled` / `rescheduled` marks a release
+    // that calls the fork off, which is what to run once it is (see callOff).
+    forkState: release.forkState ?? null,
+    // The activation this release itself states, when it states one: a reschedule naming a new
+    // date still activates the fork, just later (see callOff).
+    ...(release.forkActivationAt ? { forkActivationAt: release.forkActivationAt } : {}),
     title: release.title ?? null,
     url: release.url ?? null,
     publishedAt: release.publishedAt ?? null
@@ -660,12 +666,54 @@ function windowActivation(entry) {
   return best;
 }
 
+/**
+ * A fork called off before it activated. The releases that scheduled it are then the danger:
+ * a node still running one activates the fork on its own and leaves the network at the
+ * original time. Read per client from what each release said (`forkState`), newest last word
+ * wins: a client whose NEWEST release cancels the fork, or reschedules it without naming a new
+ * date ahead, has a version to run
+ * (`software`), and every older release of it is superseded — a reschedule later cancelled is
+ * not safe; a client whose newest release still schedules it has none yet (superseded, nothing
+ * to run). `software` may be empty: a status post or article can call a fork off before any
+ * client ships a release that does — no safe version known, not "the old one is fine". Provider
+ * windows add to neither list: a window may roll out the very release that cancels the fork.
+ * While any unsafe version still has its activation ahead, `upgradeBy` is the earliest such
+ * moment.
+ */
+function callOff(entry, now) {
+  const repoKey = (r) => `${r.repo ?? ''}|${(r.component ?? '').toLowerCase()}`;
+  const byTime = [...entry.releases].sort((a, b) => (ms(a.publishedAt) ?? 0) - (ms(b.publishedAt) ?? 0));
+  const newest = new Map();
+  for (const r of byTime) newest.set(repoKey(r), r);
+  // A reschedule is safe only when it names no new date ahead: one moving the fork to a later
+  // day still activates it then, so a node on it is not off the fork (geth's "reschedules ...
+  // before the new date is set" names none and counts; "moved to Nov 2" would not).
+  const disables = (r) => r.forkState === 'cancelled'
+    || (r.forkState === 'rescheduled' && !((ms(r.forkActivationAt) ?? -Infinity) > now));
+  const run = [...newest.values()].filter(disables);
+  const runSet = new Set(run);
+  const row = (r) => ({ client: r.repo, version: r.version, ...(r.component ? { component: r.component } : {}) });
+  const unique = (list) => [...new Map(list.map((x) => [`${x.client}|${x.component ?? ''}@${normalizeVersion(x.version)}`, x])).values()];
+  entry.software = unique(run.map(row));
+  entry.supersededSoftware = unique(byTime.filter((r) => !runSet.has(r)).map(row))
+    .filter((x) => !entry.software.some((y) => y.client === x.client && (y.component ?? '') === (x.component ?? '') && normalizeVersion(y.version) === normalizeVersion(x.version)));
+  // The deadline is the FIRST moment any unsafe version still activates the fork: a node on the
+  // release that scheduled Oct 26 forks off then, even when a later release moved the fork's
+  // own date to Nov 2. Each superseded release's own claim, and the fork's date.
+  const ahead = [entry.activationAt, ...byTime.filter((r) => !disables(r)).map((r) => r.forkActivationAt)]
+    .filter((at) => (ms(at) ?? -Infinity) > now)
+    .sort((a, b) => ms(a) - ms(b));
+  if (ahead.length) entry.upgradeBy = new Date(ms(ahead[0])).toISOString();
+  if (run.some((r) => r.mandatory)) entry.urgency = 'mandatory';
+}
+
 function finish(entry, now) {
   if (entry.type !== TIMELINE_TYPES.HARDFORK && entry.activationEvidence !== 'released' && !entry.activationAt) {
     const best = windowActivation(entry);
     if (best) { entry.activationAt = iso(best.at); entry.activationEvidence = best.evidence; entry.activationPrecision = 'time'; }
   }
   if (!entry.phase || entry.type !== TIMELINE_TYPES.HARDFORK) entry.phase = phaseOf(entry, now);
+  if (entry.type === TIMELINE_TYPES.HARDFORK && entry.phase === 'cancelled') callOff(entry, now);
   if (!entry.url) entry.url = entry.releases[0]?.url ?? entry.providerUpdates.find((p) => p.url)?.url ?? null;
   const byTime = (a, b) => (ms(a.publishedAt ?? a.activationAt) ?? 0) - (ms(b.publishedAt ?? b.activationAt) ?? 0);
   const counts = {
@@ -678,10 +726,14 @@ function finish(entry, now) {
   const { identity, identities, aliases, versions, completed, ...rest } = entry;
   return {
     ...rest,
-    provider: entry.provider ?? (providers.length === 1 ? providers[0] : null),
+    // A fork is the network's, never a provider's: its windows are listed under providerUpdates
+    // and `providers`, but no single provider is named as the event's own.
+    provider: entry.type === TIMELINE_TYPES.HARDFORK ? null : (entry.provider ?? (providers.length === 1 ? providers[0] : null)),
     providers,
     counts,
-    releases: entry.releases.sort(byTime).slice(0, MAX_GROUPED),
+    // The newest: a fork's later releases are the ones that change it (a reschedule, a
+    // cancellation), and cutting them off left only the versions that scheduled it.
+    releases: entry.releases.sort(byTime).slice(-MAX_GROUPED),
     providerUpdates: entry.providerUpdates.sort(byTime).slice(0, MAX_GROUPED),
     news: entry.news.sort(byTime).slice(-MAX_GROUPED),
     followedByIncidents: entry.followedByIncidents.slice(0, MAX_GROUPED)
@@ -691,11 +743,13 @@ function finish(entry, now) {
 const PHASE_ORDER = { upcoming: 0, unscheduled: 1, cancelled: 2, past: 3 };
 
 function compareEntries(a, b) {
-  const pa = PHASE_ORDER[a.phase] ?? 3;
-  const pb = PHASE_ORDER[b.phase] ?? 3;
+  // A cancelled fork with an upgrade deadline ahead is still something to act on: it sorts
+  // with the upcoming ones, by its deadline.
+  const pa = a.upgradeBy ? PHASE_ORDER.upcoming : PHASE_ORDER[a.phase] ?? 3;
+  const pb = b.upgradeBy ? PHASE_ORDER.upcoming : PHASE_ORDER[b.phase] ?? 3;
   if (pa !== pb) return pa - pb;
-  const ta = ms(a.activationAt) ?? 0;
-  const tb = ms(b.activationAt) ?? 0;
+  const ta = ms(a.upgradeBy ?? a.activationAt) ?? 0;
+  const tb = ms(b.upgradeBy ?? b.activationAt) ?? 0;
   return pa === 0 ? ta - tb : tb - ta;
 }
 

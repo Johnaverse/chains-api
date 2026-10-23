@@ -57,9 +57,15 @@ export async function jsonRpcCall(url, method, { params = [], timeoutMs = 10000 
     try {
       body = await response.json();
     } catch (parseError) {
-      // A page, not JSON-RPC (a parked domain, a login wall): the host is up, the endpoint is not.
-      parseError.kind = 'invalid_response';
-      throw parseError;
+      // Timed out while reading the body: a timeout, for the outer catch to say so.
+      if (parseError?.name === 'AbortError') throw parseError;
+      // A page, not JSON-RPC (a parked domain, a login wall, a site moved onto the RPC's
+      // host): the host is up, the endpoint is not. Said plainly — the parser's own message
+      // ("Unexpected token '<', "<!DOCTYPE "... is not valid JSON") is what readers saw.
+      const html = /token '<'|"\s*<|<!doctype|<html/i.test(parseError?.message ?? '');
+      const notJson = new Error(html ? 'Returned a web page (HTML), not JSON-RPC' : 'Returned a response that is not JSON-RPC');
+      notJson.kind = 'invalid_response';
+      throw notJson;
     }
     if (body.error) {
       const message = body.error.message || JSON.stringify(body.error);

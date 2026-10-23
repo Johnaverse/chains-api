@@ -144,6 +144,111 @@ describe('buildTimeline — hardforks', () => {
     }
   });
 
+  it('names what to run for a fork called off before it activated, and the deadline', () => {
+    // Scheduled by one release, called off by the next; a provider window still says the old version.
+    const called = fork({
+      phase: 'cancelled', state: 'cancelled', activationAt: '2026-10-29T02:30:00.000Z',
+      events: [
+        releaseEvent({ state: 'scheduled' }),
+        releaseEvent({ title: 'v1.8.2', url: 'https://github.com/bnb-chain/bsc/releases/tag/v1.8.2', publishedAt: '2026-10-16T00:00:00Z', activationAt: null, state: 'cancelled', release: { repo: 'bnb-chain/bsc', version: 'v1.8.2', mandatory: true } })
+      ]
+    });
+    const later = fork({ key: 'name:later@x', name: 'Later', activationAt: '2026-11-30T00:00:00.000Z', events: [] });
+    // The window names the client its own way: still the release's row.
+    const entries = build({ forks: [later, called], upgrades: [window({ software: [{ client: 'BSC', version: 'v1.8.1' }] })] });
+    const entry = entries.find((e) => e.name === 'Jenner');
+    expect(entry.phase).toBe('cancelled');
+    expect(entry.software).toEqual([{ client: 'bnb-chain/bsc', version: 'v1.8.2' }]);
+    // From releases only: a provider window's versions are in neither list.
+    expect(entry.supersededSoftware).toEqual([{ client: 'bnb-chain/bsc', version: 'v1.8.1' }]);
+    expect(entry.upgradeBy).toBe('2026-10-29T02:30:00.000Z');
+    expect(entry.urgency).toBe('mandatory');
+    expect(entry.releases.map((r) => [r.version, r.forkState])).toEqual([['v1.8.1', 'scheduled'], ['v1.8.2', 'cancelled']]);
+    // Still something to act on: listed with the upcoming forks, by its deadline (before November's).
+    expect(entries.map((e) => e.name).slice(0, 2)).toEqual(['Jenner', 'Later']);
+  });
+
+  it('does not count a reschedule as safe once a later release of that client cancels the fork', () => {
+    const rel = (version, state, day) => releaseEvent({ title: version, url: `https://github.com/bnb-chain/bsc/releases/tag/${version}`, publishedAt: `2026-10-${day}T00:00:00Z`, state, release: { repo: 'bnb-chain/bsc', version, mandatory: true } });
+    const [entry] = build({ forks: [fork({ phase: 'cancelled', state: 'cancelled', events: [rel('v1.8.1', 'scheduled', '10'), rel('v1.8.2', 'rescheduled', '12'), rel('v1.8.3', 'cancelled', '15')] })] });
+    // v1.8.2 moved the date; a node on it still activates then. Only v1.8.3 disables it.
+    expect(entry.software.map((x) => x.version)).toEqual(['v1.8.3']);
+    expect(entry.supersededSoftware.map((x) => x.version)).toEqual(['v1.8.1', 'v1.8.2']);
+  });
+
+  it('sets the deadline at the earliest date any unsafe version still activates', () => {
+    const rel = (version, state, at, day) => releaseEvent({ title: version, url: `https://github.com/bnb-chain/bsc/releases/tag/${version}`, publishedAt: `2026-10-${day}T00:00:00Z`, state, activationAt: at, release: { repo: 'bnb-chain/bsc', version, mandatory: true } });
+    // v1 schedules Oct 26, v2 moves it to Nov 2 (the fork's own date), v3 cancels it.
+    const [entry] = build({ forks: [fork({ phase: 'cancelled', state: 'cancelled', activationAt: '2026-11-02T00:00:00.000Z', events: [
+      rel('v1', 'scheduled', '2026-10-26T00:00:00Z', '10'), rel('v2', 'rescheduled', '2026-11-02T00:00:00Z', '12'), rel('v3', 'cancelled', null, '15')
+    ] })] });
+    expect(entry.software.map((x) => x.version)).toEqual(['v3']);
+    // A node still on v1 forks off on Oct 26, not Nov 2.
+    expect(entry.upgradeBy).toBe('2026-10-26T00:00:00.000Z');
+  });
+
+  it('counts a reschedule as safe only when it names no new date ahead', () => {
+    const rel = (repo, version, state, at) => releaseEvent({ title: version, url: `https://github.com/${repo}/releases/tag/${version}`, publishedAt: '2026-10-15T00:00:00Z', state, activationAt: at, release: { repo, version, mandatory: true } });
+    const [entry] = build({ forks: [fork({ phase: 'cancelled', state: 'cancelled', events: [
+      // Moved to a later day: a node on it still activates then.
+      rel('a/moved', 'v2', 'rescheduled', '2026-11-20T00:00:00Z'),
+      // "Before the new date is set": no date, the fork is off for it.
+      rel('b/undated', 'v3', 'rescheduled', null)
+    ] })] });
+    expect(entry.software.map((x) => x.client)).toEqual(['b/undated']);
+    expect(entry.supersededSoftware.map((x) => x.client)).toEqual(['a/moved']);
+    expect(entry.releases.find((r) => r.repo === 'a/moved').forkActivationAt).toBe('2026-11-20T00:00:00Z');
+  });
+
+  it('keeps the deadline and names nothing safe when a fork is called off before any release does', () => {
+    // A status post cancels it; the only release still schedules it.
+    const [entry] = build({ forks: [fork({ phase: 'cancelled', state: 'cancelled', events: [releaseEvent({ state: 'scheduled' })] })], upgrades: [window()] });
+    expect(entry.software).toEqual([]);
+    expect(entry.supersededSoftware.map((x) => x.version)).toEqual(['v1.8.1']);
+    expect(entry.upgradeBy).toBe('2026-10-29T02:30:00.000Z');
+  });
+
+  it('keeps what each release said when two entries of one fork merge', () => {
+    // The same fork under two spellings on the same chain: the cancellation arrives under the other.
+    const a = fork({ key: 'name:jenner@bsc chapel testnet', network: 'bsc chapel testnet', phase: 'cancelled', state: 'cancelled', events: [releaseEvent({ state: 'scheduled' })] });
+    const b = fork({ key: 'name:jenner@bnb smart chain chapel testnet', network: 'bnb smart chain chapel testnet', phase: 'cancelled', state: 'cancelled', events: [releaseEvent({ title: 'v1.8.2', url: 'https://github.com/bnb-chain/bsc/releases/tag/v1.8.2', publishedAt: '2026-10-16T00:00:00Z', state: 'cancelled', release: { repo: 'bnb-chain/bsc', version: 'v1.8.2', mandatory: true } })] });
+    const entries = build({ forks: [a, b] });
+    expect(entries).toHaveLength(1);
+    expect(entries[0].releases.map((r) => [r.version, r.forkState])).toEqual([['v1.8.1', 'scheduled'], ['v1.8.2', 'cancelled']]);
+    expect(entries[0].software.map((x) => x.version)).toEqual(['v1.8.2']);
+    expect(entries[0].upgradeBy).toBe('2026-10-29T02:30:00.000Z');
+  });
+
+  it('keeps two clients that share a version apart when listing what to run', () => {
+    const rel = (repo, version, state, day) => releaseEvent({ title: version, url: `https://github.com/${repo}/releases/tag/${version}`, publishedAt: `2026-10-${day}T00:00:00Z`, state, release: { repo, version, mandatory: true } });
+    const [entry] = build({ forks: [fork({ phase: 'cancelled', state: 'cancelled', events: [
+      rel('Consensys/teku', '26.10.1', 'scheduled', '10'), rel('status-im/nimbus-eth2', '26.10.1', 'scheduled', '11'),
+      rel('Consensys/teku', '26.10.2', 'cancelled', '15'), rel('status-im/nimbus-eth2', '26.10.2', 'cancelled', '16')
+    ] })] });
+    expect(entry.software.map((x) => x.client)).toEqual(['Consensys/teku', 'status-im/nimbus-eth2']);
+    expect(entry.supersededSoftware).toHaveLength(2);
+    expect(entry.supersededSoftware.map((x) => `${x.client} ${x.version}`)).toEqual(['Consensys/teku 26.10.1', 'status-im/nimbus-eth2 26.10.1']);
+  });
+
+  it('sets no deadline once the original activation has passed, and leaves a fork nobody called off alone', () => {
+    const passed = fork({ phase: 'cancelled', state: 'cancelled', activationAt: '2026-10-01T00:00:00.000Z', events: [releaseEvent({ state: 'cancelled' })] });
+    expect(build({ forks: [passed] })[0].upgradeBy).toBeUndefined();
+    const scheduled = build({ forks: [fork({ events: [releaseEvent({ state: 'scheduled' })] })] })[0];
+    expect(scheduled.upgradeBy).toBeUndefined();
+    expect(scheduled.supersededSoftware).toBeUndefined();
+  });
+
+  it('keeps a fork\'s newest releases when it has more than it lists', () => {
+    const events = Array.from({ length: 25 }, (_, i) => releaseEvent({
+      title: `v1.${i}`, url: `https://github.com/bnb-chain/bsc/releases/tag/v1.${i}`, publishedAt: new Date(Date.parse('2026-10-01T00:00:00Z') + i * 36e5).toISOString(),
+      release: { repo: 'bnb-chain/bsc', version: `v1.${i}`, mandatory: false }
+    }));
+    const [entry] = build({ forks: [fork({ events })] });
+    expect(entry.counts.releases).toBe(25);
+    expect(entry.releases).toHaveLength(20);
+    expect(entry.releases.at(-1).version).toBe('v1.24');
+  });
+
   it('does not copy a window\'s fallout or news onto a fork', () => {
     const entries = build({
       forks: [fork({ events: [releaseEvent()] })],

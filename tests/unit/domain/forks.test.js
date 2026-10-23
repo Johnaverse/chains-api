@@ -200,6 +200,28 @@ describe('assembling forks from events', () => {
     _resetForkNamesForTests();
   });
 
+  it('joins a fork whose network resolved to no chain into the one placed fork at the same instant', async () => {
+    // Live on 2026-10-23: a provider window put Glamsterdam on "Hoodi Testnet" (no chain), at the
+    // exact second the placed Hoodi fork used; that fork was then cancelled, the stray stayed "upcoming".
+    const placed = (id, state, publishedAt) => event(id, { chains: [560048], affectedChains: ['Ethereum Hoodi'], publishedAt, fork: fork({ name: 'Glamsterdam', network: 'Ethereum Hoodi', activationAt: '2026-10-26T17:42:48Z', state }) });
+    const stray = event('w', { chains: [], affectedChains: ['Hoodi Testnet'], publishedAt: '2026-10-19T17:03:57Z', fork: fork({ name: 'Glamsterdam', network: 'Hoodi Testnet', activationAt: '2026-10-26T17:42:48Z', state: 'scheduled' }) });
+    // A scope (the network as written) to chains: "Hoodi Testnet" resolves to none.
+    const chainIdsFor = (scope) => (/ethereum hoodi/i.test(scope) ? [560048] : []);
+    const out = await buildForks([placed('a', 'scheduled', '2026-10-16T00:00:00Z'), stray, placed('c', 'cancelled', '2026-10-22T20:00:00Z')], { now: NOW, chainIdsFor });
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ name: 'Glamsterdam', chains: [560048], phase: FORK_PHASE.CANCELLED });
+    expect(out[0].events).toHaveLength(3);
+  });
+
+  it('leaves a fork with no chain apart when its instant matches two placed forks, or none', async () => {
+    const at = (id, network, chains) => event(id, { chains, affectedChains: [network], fork: fork({ name: 'Celadon', network, activationAt: '2026-10-28T06:00:00Z', state: 'scheduled' }) });
+    const chainIdsFor = (scope) => (/rollup a/i.test(scope) ? [1] : /rollup b/i.test(scope) ? [2] : []);
+    const two = await buildForks([at('a', 'Rollup A Hoodi', [1]), at('b', 'Rollup B Hoodi', [2]), at('c', 'Hoodi Testnet', [])], { now: NOW, chainIdsFor });
+    expect(two).toHaveLength(3);
+    const day = await buildForks([at('a', 'Rollup A Hoodi', [1]), event('d', { chains: [], affectedChains: ['Hoodi Testnet'], fork: fork({ name: 'Celadon', network: 'Hoodi Testnet', activationAt: '2026-10-28', state: 'scheduled' }) })], { now: NOW, chainIdsFor });
+    expect(day).toHaveLength(2);
+  });
+
   it('keeps forks apart that share only a day, or only a time on other chains', async () => {
     const at = (id, name, activationAt, chains) => event(id, { chains, affectedChains: [name], fork: fork({ name, activationAt, state: 'scheduled' }) });
     const out = await buildForks([
@@ -305,9 +327,9 @@ describe('assembling forks from events', () => {
 
 describe('forks across status, forum and news feeds', () => {
   // A mention from chains-forum-news or chains-news, in the shape src/sources/forkFeeds.js builds.
-  const mention = (id, feed, f, { affectedChains = [], weight = null, page = id, kind, publishedAt = '2026-09-28T00:00:00Z' } = {}) => ({
+  const mention = (id, feed, f, { affectedChains = [], weight = null, page = id, kind, publishedAt = '2026-09-28T00:00:00Z', chains = [] } = {}) => ({
     id, feed, title: `t-${id}`, publishedAt, updatedAt: publishedAt, weight,
-    statusPage: { id: page, kind: kind ?? feed }, chains: [],
+    statusPage: { id: page, kind: kind ?? feed }, chains,
     enrichment: { affectedChains, fork: fork(f) }
   });
 
@@ -408,14 +430,36 @@ describe('forks across status, forum and news feeds', () => {
     expect(forkScopes(etc)).toEqual(['ethereum classic']);
   });
 
-  it('follows a reschedule that newer provider windows report, even over the network page', async () => {
+  it('keeps the network\'s own date when provider windows say another: a provider window is the provider\'s schedule', async () => {
     const out = await buildForks([
       mention('page', 'status', { name: 'Protocol 30', network: 'X', activationAt: '2099-09-01T00:00:00Z' }, { kind: 'chain', publishedAt: '2026-08-01T00:00:00Z' }),
       mention('qn', 'status', { name: 'Protocol 30', network: 'X', activationAt: '2099-09-15T00:00:00Z' }, { kind: 'rpc-provider', publishedAt: '2026-08-20T00:00:00Z' }),
       mention('alc', 'status', { name: 'Protocol 30', network: 'X', activationAt: '2099-09-15T01:00:00Z' }, { kind: 'rpc-provider', publishedAt: '2026-08-21T00:00:00Z' })
     ], { now: Date.parse('2026-08-22T00:00:00Z') });   // observed times are clamped to now
     expect(out).toHaveLength(1);
-    expect(out[0].activationAt).toBe('2099-09-15T01:00:00.000Z');
+    expect(out[0].activationAt).toBe('2099-09-01T00:00:00.000Z');
+    // The windows stay listed: they say when each provider upgrades.
+    expect(out[0].events).toHaveLength(3);
+    expect(out[0].sources.sort()).toEqual(['alc', 'page', 'qn']);
+  });
+
+  it('takes the chain from a provider window only when the network\'s own sources name none', async () => {
+    const out = await buildForks([
+      mention('rel', 'release', { name: 'Celadon', network: 'Hoodi Testnet', activationAt: '2099-10-28T06:00:00Z' }, { chains: [] }),
+      mention('qn', 'status', { name: 'Celadon', network: 'Hoodi Testnet', activationAt: '2099-10-28T05:00:00Z' }, { kind: 'rpc-provider', chains: [{ chainId: 2910 }], affectedChains: ['Hoodi Testnet'] })
+    ], { now: Date.parse('2026-08-22T00:00:00Z') });
+    expect(out).toHaveLength(1);
+    expect(out[0].chains).toEqual([2910]);
+    // ...and still never the time: the release's, not the window's hour earlier.
+    expect(out[0].activationAt).toBe('2099-10-28T06:00:00.000Z');
+  });
+
+  it('lists no fork that only providers mention: their windows are their maintenance', async () => {
+    const out = await buildForks([
+      mention('qn', 'status', { name: 'Protocol 31', network: 'X', activationAt: '2099-10-01T00:00:00Z' }, { kind: 'rpc-provider' }),
+      mention('alc', 'status', { name: 'Protocol 31', network: 'X', activationAt: '2099-10-01T00:00:00Z' }, { kind: 'rpc-provider' })
+    ], { now: Date.parse('2026-08-22T00:00:00Z') });
+    expect(out).toEqual([]);
   });
 
   it('does not treat a provider window a few hours early as a reschedule', () => {

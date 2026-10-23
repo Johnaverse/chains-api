@@ -1,4 +1,5 @@
 import { mentionsTestNetwork } from './networkWords.js';
+import { canonicalForkId } from './forkNames.js';
 
 /**
  * Forks as first-class entities, assembled from the events that mention them.
@@ -443,6 +444,11 @@ export function sourceRank(event) {
   return 0;
 }
 
+/** An RPC provider's maintenance window (its status page), as opposed to the network's own. */
+export function isProviderWindow(event) {
+  return (event?.feed ?? 'status') === 'status' && event?.statusPage?.kind === 'rpc-provider';
+}
+
 // How far apart two unnamed notices of one activation may be. Providers state their own window
 // start, typically an hour or a few before the activation second.
 const UNNAMED_MATCH_MS = 6 * 60 * 60 * 1000;
@@ -625,6 +631,49 @@ function mergeSameActivation(groups) {
   }
 }
 
+/**
+ * A fork whose network resolved to no chain ("Hoodi Testnet" — whose? Ethereum's, or a rollup's
+ * own Hoodi testnet) that names the same fork, activating at the same exact instant or height,
+ * as exactly ONE fork placed on chains, is that fork: the shared moment says which network it
+ * meant, where guessing from the name would not. Left apart it stood as a second, still
+ * "upcoming" entry after the placed one was cancelled. A day-only date never decides this, and
+ * an instant two placed forks share decides nothing.
+ */
+function mergeUnplacedIntoPlaced(groups) {
+  const anchorsOf = (g) => {
+    const blocks = new Set();
+    const times = new Set();
+    for (const m of g.members) {
+      const { block, time } = memberAnchor(m);
+      if (block !== null) blocks.add(block);
+      if (Number.isFinite(time) && !isDateOnly(m.fork.activationAt)) times.add(time);
+    }
+    return { blocks, times };
+  };
+  const placed = [];
+  const unplaced = [];
+  for (const g of groups.values()) {
+    if (g.kind !== 'name') continue;
+    (g.members.some(m => m.chainIds.length) ? placed : unplaced).push(g);
+  }
+  if (!unplaced.length || !placed.length) return;
+  const names = (g) => new Set(g.members.map(m => forkIdentity(m.fork?.name)).filter(Boolean).map(canonicalForkId));
+  const shares = (x, y) => [...x].some(v => y.has(v));
+  for (const g of unplaced) {
+    const own = anchorsOf(g);
+    if (!own.blocks.size && !own.times.size) continue;
+    const ids = names(g);
+    const matches = placed.filter(p => groups.has(p.key) && shares(ids, names(p)) && (() => {
+      const theirs = anchorsOf(p);
+      return shares(own.blocks, theirs.blocks) || shares(own.times, theirs.times);
+    })());
+    if (matches.length !== 1) continue;
+    const [target] = matches;
+    target.scopes = [...new Set([...(target.scopes ?? [target.scope]), ...(g.scopes ?? [g.scope])])];
+    mergeInto(groups, target, g);
+  }
+}
+
 // Events with no URL still need a stable identity for de-duplication and collapsing.
 const anonymousIds = new WeakMap();
 let anonymousSeq = 0;
@@ -765,10 +814,22 @@ export async function buildForks(events = [], { tipFor = null, chainIdsFor = nul
   clusterUnnamed(groups);
   collapseIdentical(groups);
   mergeSameActivation(groups);
+  mergeUnplacedIntoPlaced(groups);
 
   const forks = [];
-  for (const { key, members, scopes } of groups.values()) {
-    const chainIds = [...new Set(members.flatMap(m => m.chainIds))];
+  for (const { key, members: all, scopes } of groups.values()) {
+    // An RPC provider's maintenance window is the provider's own schedule, not the network's:
+    // it may help group reports (it names the fork), but the fork's time, state and kind come
+    // from the network's own sources — client releases, its status page, forums, its blog
+    // and news. A fork only providers mention is their maintenance, not a fork (it stays in
+    // /upgrades, and the timeline shows it as the provider's software update).
+    const members = all.filter(m => !isProviderWindow(m.event));
+    if (!members.length) continue;
+    // Which chain a window is about is a fact about the network, not the provider's schedule:
+    // a provider's chains place the fork only when the network's own sources name none (a
+    // rollup's release saying "Hoodi Testnet", the provider's window naming its chain).
+    const own = [...new Set(members.flatMap(m => m.chainIds))];
+    const chainIds = own.length ? own : [...new Set(all.flatMap(m => m.chainIds))];
     // A tip is only fetched when some member needs a height converted, so the common
     // stated-time fork costs no explorer call at all.
     const needsTip = members.some(m => m.fork.activationBlock && !m.fork.activationAt);
@@ -800,8 +861,8 @@ export async function buildForks(events = [], { tipFor = null, chainIdsFor = nul
     // Glamsterdam. Spelling variants of the name itself are not aliases.
     const aliases = [...new Map(members.map(m => m.fork.name).filter(Boolean)
       .filter(n => forkIdentity(n) !== forkIdentity(named)).map(n => [forkIdentity(n), n])).values()];
-    const sources = [...new Set(members.map(m => m.event.statusPage?.id).filter(Boolean))];
-    const feeds = [...new Set(members.map(m => m.event.feed ?? 'status'))];
+    const sources = [...new Set(all.map(m => m.event.statusPage?.id).filter(Boolean))];
+    const feeds = [...new Set(all.map(m => m.event.feed ?? 'status'))];
     forks.push({
       key,
       name: named,
@@ -825,13 +886,14 @@ export async function buildForks(events = [], { tipFor = null, chainIdsFor = nul
       activationBlock: candidates.map(c => c.block).find(b => b != null) ?? null,
       state,
       phase: forkPhase({ activationAt: activation?.at ?? null, state, activationPrecision }, now),
-      // Which status pages reported it — the point of the exercise. More than one means the
-      // cross-provider join actually fired.
+      // Which status pages reported it, providers' included — the point of the exercise. More
+      // than one means the cross-provider join actually fired.
       sources,
       // Which KINDS of source: status pages, forums, news. A fork only news reported is a
       // claim to attribute, not a schedule the network published.
       feeds,
-      events: uniqueEvents(members)
+      // Every report, providers' windows included: they say when each provider upgrades.
+      events: uniqueEvents(all)
     });
   }
 
