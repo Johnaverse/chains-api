@@ -1774,12 +1774,21 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .tlx-row-main { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; flex: 1; }
 .tlx-row-title { font-size: var(--fs-300); font-weight: 600; color: var(--ink-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 a.tlx-row-title:hover { color: var(--accent-hover); }
-.tlx-row-sub { flex-shrink: 0; font-size: var(--fs-100); }
-.tlx-row-chips { display: flex; gap: 5px; flex-shrink: 0; }
+/* The title keeps at least a short name's room; the network label gives way first. */
+.tlx-row-title { min-width: 11ch; }
+.tlx-row-sub { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-100); }
+/* Chips wrap to a second line instead of overflowing onto the title when there are many
+   (a called-off fork's deadline chip plus three software versions). */
+.tlx-row-main { flex-basis: 220px; }
+.tlx-row-chips { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; min-width: 0; max-width: 55%; }
 /* Software chips stay neutral rather than taking a hue of their own: every colour in this
    view already means something about urgency or evidence. */
 .sw-chip { font-size: var(--fs-100); font-weight: 500; padding: 1px 5px; border-radius: var(--r-xs); background: var(--surface-3); color: var(--ink-2); }
 .tlx-chip-dim { font-size: var(--fs-100); font-weight: 500; padding: 1px 5px; border-radius: var(--r-xs); background: var(--tint); color: var(--ink-3); }
+.tlx-chip-cancel {
+    font-size: var(--fs-100); font-weight: 600; padding: 1px 5px; border-radius: var(--r-xs);
+    background: color-mix(in srgb, var(--critical) 14%, transparent); color: var(--critical-text);
+}
 .tlx-chip-fallout {
     font-size: var(--fs-100); font-weight: 500; padding: 1px 5px; border-radius: var(--r-xs);
     background: color-mix(in srgb, var(--critical) 14%, transparent); color: var(--critical-text);
@@ -1824,7 +1833,7 @@ a.tlx-row-title:hover { color: var(--accent-hover); }
        evidence badge and the urgency pill above the one thing that identifies the row. */
     .tlx-row-main { flex-basis: 100%; order: -1; }
     .tlx-row-sub { display: none; }
-    .tlx-row-chips { flex-wrap: wrap; }
+    .tlx-row-chips { flex-wrap: wrap; max-width: none; justify-content: flex-start; }
     .tlx-row-detail { padding-left: var(--sp-4); }
     .tlx-sort { margin-left: 0; }
     .tlx-tooltip { width: auto; left: var(--sp-3) !important; right: var(--sp-3); }

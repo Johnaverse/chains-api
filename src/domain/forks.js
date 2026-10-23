@@ -1,4 +1,5 @@
 import { mentionsTestNetwork } from './networkWords.js';
+import { canonicalForkId } from './forkNames.js';
 
 /**
  * Forks as first-class entities, assembled from the events that mention them.
@@ -625,6 +626,49 @@ function mergeSameActivation(groups) {
   }
 }
 
+/**
+ * A fork whose network resolved to no chain ("Hoodi Testnet" — whose? Ethereum's, or a rollup's
+ * own Hoodi testnet) that names the same fork, activating at the same exact instant or height,
+ * as exactly ONE fork placed on chains, is that fork: the shared moment says which network it
+ * meant, where guessing from the name would not. Left apart it stood as a second, still
+ * "upcoming" entry after the placed one was cancelled. A day-only date never decides this, and
+ * an instant two placed forks share decides nothing.
+ */
+function mergeUnplacedIntoPlaced(groups) {
+  const anchorsOf = (g) => {
+    const blocks = new Set();
+    const times = new Set();
+    for (const m of g.members) {
+      const { block, time } = memberAnchor(m);
+      if (block !== null) blocks.add(block);
+      if (Number.isFinite(time) && !isDateOnly(m.fork.activationAt)) times.add(time);
+    }
+    return { blocks, times };
+  };
+  const placed = [];
+  const unplaced = [];
+  for (const g of groups.values()) {
+    if (g.kind !== 'name') continue;
+    (g.members.some(m => m.chainIds.length) ? placed : unplaced).push(g);
+  }
+  if (!unplaced.length || !placed.length) return;
+  const names = (g) => new Set(g.members.map(m => forkIdentity(m.fork?.name)).filter(Boolean).map(canonicalForkId));
+  const shares = (x, y) => [...x].some(v => y.has(v));
+  for (const g of unplaced) {
+    const own = anchorsOf(g);
+    if (!own.blocks.size && !own.times.size) continue;
+    const ids = names(g);
+    const matches = placed.filter(p => groups.has(p.key) && shares(ids, names(p)) && (() => {
+      const theirs = anchorsOf(p);
+      return shares(own.blocks, theirs.blocks) || shares(own.times, theirs.times);
+    })());
+    if (matches.length !== 1) continue;
+    const [target] = matches;
+    target.scopes = [...new Set([...(target.scopes ?? [target.scope]), ...(g.scopes ?? [g.scope])])];
+    mergeInto(groups, target, g);
+  }
+}
+
 // Events with no URL still need a stable identity for de-duplication and collapsing.
 const anonymousIds = new WeakMap();
 let anonymousSeq = 0;
@@ -765,6 +809,7 @@ export async function buildForks(events = [], { tipFor = null, chainIdsFor = nul
   clusterUnnamed(groups);
   collapseIdentical(groups);
   mergeSameActivation(groups);
+  mergeUnplacedIntoPlaced(groups);
 
   const forks = [];
   for (const { key, members, scopes } of groups.values()) {

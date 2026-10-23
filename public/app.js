@@ -6551,11 +6551,19 @@ function timelineMatchesSearch(u, q) {
     return (u.chainIds || []).some(id => String(id).includes(q) || state.byId.get(id)?.name?.toLowerCase().includes(q));
 }
 
+// A fork called off before it activated still has a deadline while its original moment is
+// ahead (the API's `upgradeBy`): a node on the release that scheduled it forks off then.
+function timelineUpgradeByMs(u) {
+    if (u.phase !== 'cancelled' || !u.upgradeBy) return null;
+    const ms = Date.parse(u.upgradeBy);
+    return Number.isNaN(ms) ? null : ms;
+}
+
 // Whether an event is still to come — the API's forkPhase rule, on the live clock: a cancelled
-// fork never is, whatever its date, and a date-only activation stays pending until that UTC
-// day is over (it is not "done" at midnight it began).
+// fork never is, whatever its date — unless its upgrade deadline is — and a date-only
+// activation stays pending until that UTC day is over (it is not "done" at midnight it began).
 function timelinePending(u, now) {
-    if (u.phase === 'cancelled') return false;
+    if (u.phase === 'cancelled') return (timelineUpgradeByMs(u) ?? -Infinity) > now;
     const ms = timelineActivationMs(u);
     if (ms == null) return false;
     return (u.activationPrecision === 'day' ? ms + 864e5 : ms) > now;
@@ -6565,7 +6573,7 @@ function timelinePending(u, now) {
 // by status: providers leave a window labelled "scheduled" long after it ran.
 function timelineStreamOf(u, now) {
     const ms = timelineActivationMs(u);
-    if (u.phase === 'cancelled') return 'done';
+    if (u.phase === 'cancelled') return timelinePending(u, now) ? 'upcoming' : 'done';
     // Undated but not finished: announced, day unknown. Calling this 'done' would file a
     // pending fork under history purely because nobody has named the date yet.
     if (ms == null) return u.status === 'maintenance_completed' || u.phase === 'past' ? 'done' : 'undated';
@@ -7148,7 +7156,9 @@ function timelineGroupRows(u) {
 // a disclosure so a hundred windows stay scannable; rows with fallout open by
 // default because that is the finding, not a footnote.
 function timelineRow(u, now) {
-    const actMs = timelineActivationMs(u);
+    // A called-off fork counts down to its upgrade deadline, not to an activation that will not happen.
+    const upgradeByMs = timelineUpgradeByMs(u);
+    const actMs = upgradeByMs ?? timelineActivationMs(u);
     const pending = actMs != null && actMs > now;
     const label = timelineNetworkLabel(u);
     const chainId = (u.chainIds || [])[0] ?? null;
@@ -7168,8 +7178,23 @@ function timelineRow(u, now) {
             });
 
     const chips = [];
+    if (u.phase === 'cancelled') {
+        // The software chips that follow are then the releases that call it off (the API moves
+        // the versions that scheduled it to supersededSoftware): those are what to run.
+        const superseded = (u.supersededSoftware || []).map(s => [s.client, s.version].filter(Boolean).join(' ')).join(', ');
+        chips.push(el('span', {
+            class: 'tlx-chip-cancel',
+            title: superseded ? `Superseded, forks off at the original time: ${superseded}` : 'This fork will not activate.',
+            text: upgradeByMs != null && upgradeByMs > now
+                ? `Called off · upgrade before ${fmtDateTime(upgradeByMs)}`
+                : 'Called off'
+        }));
+    }
     for (const s of (u.software || []).slice(0, 3)) {
-        chips.push(el('span', { class: 'sw-chip mono', text: [s.client, s.version].filter(Boolean).join(' ') }));
+        // A release names its client by repository ("Consensys-Incorporated/teku"): the chip
+        // shows the client ("teku"), the full name stays in the tooltip.
+        const client = typeof s.client === 'string' ? s.client.split('/').pop() : null;
+        chips.push(el('span', { class: 'sw-chip mono', title: [s.client, s.version].filter(Boolean).join(' '), text: [client, s.version].filter(Boolean).join(' ') }));
     }
     const releaseCount = u.counts?.releases ?? (u.releases || []).length;
     if (releaseCount) chips.push(el('span', { class: 'tlx-chip-dim', text: `${releaseCount} release${releaseCount === 1 ? '' : 's'}` }));

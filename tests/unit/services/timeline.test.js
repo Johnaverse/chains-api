@@ -144,6 +144,60 @@ describe('buildTimeline — hardforks', () => {
     }
   });
 
+  it('names what to run for a fork called off before it activated, and the deadline', () => {
+    // Scheduled by one release, called off by the next; a provider window still says the old version.
+    const called = fork({
+      phase: 'cancelled', state: 'cancelled', activationAt: '2026-10-29T02:30:00.000Z',
+      events: [
+        releaseEvent({ state: 'scheduled' }),
+        releaseEvent({ title: 'v1.8.2', url: 'https://github.com/bnb-chain/bsc/releases/tag/v1.8.2', publishedAt: '2026-10-16T00:00:00Z', activationAt: null, state: 'cancelled', release: { repo: 'bnb-chain/bsc', version: 'v1.8.2', mandatory: true } })
+      ]
+    });
+    const later = fork({ key: 'name:later@x', name: 'Later', activationAt: '2026-11-30T00:00:00.000Z', events: [] });
+    // The window names the client its own way: still the release's row.
+    const entries = build({ forks: [later, called], upgrades: [window({ software: [{ client: 'BSC', version: 'v1.8.1' }] })] });
+    const entry = entries.find((e) => e.name === 'Jenner');
+    expect(entry.phase).toBe('cancelled');
+    expect(entry.software).toEqual([{ client: 'bnb-chain/bsc', version: 'v1.8.2' }]);
+    // The window's version-only "v1.8.1" is the release's row, not a second one.
+    expect(entry.supersededSoftware).toEqual([{ client: 'bnb-chain/bsc', version: 'v1.8.1' }]);
+    expect(entry.upgradeBy).toBe('2026-10-29T02:30:00.000Z');
+    expect(entry.urgency).toBe('mandatory');
+    expect(entry.releases.map((r) => [r.version, r.forkState])).toEqual([['v1.8.1', 'scheduled'], ['v1.8.2', 'cancelled']]);
+    // Still something to act on: listed with the upcoming forks, by its deadline (before November's).
+    expect(entries.map((e) => e.name).slice(0, 2)).toEqual(['Jenner', 'Later']);
+  });
+
+  it('keeps two clients that share a version apart when listing what to run', () => {
+    const rel = (repo, version, state, day) => releaseEvent({ title: version, url: `https://github.com/${repo}/releases/tag/${version}`, publishedAt: `2026-10-${day}T00:00:00Z`, state, release: { repo, version, mandatory: true } });
+    const [entry] = build({ forks: [fork({ phase: 'cancelled', state: 'cancelled', events: [
+      rel('Consensys/teku', '26.10.1', 'scheduled', '10'), rel('status-im/nimbus-eth2', '26.10.1', 'scheduled', '11'),
+      rel('Consensys/teku', '26.10.2', 'cancelled', '15'), rel('status-im/nimbus-eth2', '26.10.2', 'cancelled', '16')
+    ] })] });
+    expect(entry.software.map((x) => x.client)).toEqual(['Consensys/teku', 'status-im/nimbus-eth2']);
+    expect(entry.supersededSoftware).toHaveLength(2);
+    expect(entry.supersededSoftware.map((x) => `${x.client} ${x.version}`)).toEqual(['Consensys/teku 26.10.1', 'status-im/nimbus-eth2 26.10.1']);
+  });
+
+  it('sets no deadline once the original activation has passed, and leaves a fork nobody called off alone', () => {
+    const passed = fork({ phase: 'cancelled', state: 'cancelled', activationAt: '2026-10-01T00:00:00.000Z', events: [releaseEvent({ state: 'cancelled' })] });
+    expect(build({ forks: [passed] })[0].upgradeBy).toBeUndefined();
+    const scheduled = build({ forks: [fork({ events: [releaseEvent({ state: 'scheduled' })] })] })[0];
+    expect(scheduled.upgradeBy).toBeUndefined();
+    expect(scheduled.supersededSoftware).toBeUndefined();
+  });
+
+  it('keeps a fork\'s newest releases when it has more than it lists', () => {
+    const events = Array.from({ length: 25 }, (_, i) => releaseEvent({
+      title: `v1.${i}`, url: `https://github.com/bnb-chain/bsc/releases/tag/v1.${i}`, publishedAt: new Date(Date.parse('2026-10-01T00:00:00Z') + i * 36e5).toISOString(),
+      release: { repo: 'bnb-chain/bsc', version: `v1.${i}`, mandatory: false }
+    }));
+    const [entry] = build({ forks: [fork({ events })] });
+    expect(entry.counts.releases).toBe(25);
+    expect(entry.releases).toHaveLength(20);
+    expect(entry.releases.at(-1).version).toBe('v1.24');
+  });
+
   it('does not copy a window\'s fallout or news onto a fork', () => {
     const entries = build({
       forks: [fork({ events: [releaseEvent()] })],

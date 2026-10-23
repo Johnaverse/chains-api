@@ -211,7 +211,7 @@ function forkEntry(fork) {
     followedByIncidents: []
   };
   for (const e of fork.events ?? []) {
-    if (e.feed === 'release' && e.release) addRelease(entry, { title: e.title, url: e.url, publishedAt: e.publishedAt, release: e.release, enrichment: { class: e.class } });
+    if (e.feed === 'release' && e.release) addRelease(entry, { title: e.title, url: e.url, publishedAt: e.publishedAt, release: e.release, enrichment: { class: e.class }, forkState: e.state });
     else if (e.feed === 'status') addProviderUpdate(entry, { provider: e.provider, title: e.title, url: e.url, status: e.status, activationAt: e.activationAt ?? null, activationEvidence: e.activationAt ? 'stated' : null, urgency: null });
     else addNews(entry, { feed: e.feed, title: e.title, url: e.url, publishedAt: e.publishedAt, source: e.provider });
   }
@@ -388,7 +388,7 @@ function foldSupportReleases(entries, isTestnet) {
       if (mainnet.length === 1) target = mainnet[0];
     }
     if (!target) { out.push(entry); continue; }
-    for (const r of entry.releases) addRelease(target, { title: r.title, url: r.url, publishedAt: r.publishedAt, release: r, enrichment: { class: r.class } });
+    for (const r of entry.releases) addRelease(target, { title: r.title, url: r.url, publishedAt: r.publishedAt, release: r, enrichment: { class: r.class }, forkState: r.forkState });
     for (const p of entry.providerUpdates) addProviderUpdate(target, p);
     for (const n of entry.news) addNews(target, n);
     target.sources = [...new Set([...target.sources, ...entry.sources])];
@@ -614,6 +614,9 @@ function addRelease(entry, release) {
     version,
     mandatory: r.mandatory === true,
     class: release.enrichment?.class ?? null,
+    // The fork's state as this release states it: `cancelled` / `rescheduled` marks a release
+    // that calls the fork off, which is what to run once it is (see callOff).
+    forkState: release.forkState ?? null,
     title: release.title ?? null,
     url: release.url ?? null,
     publishedAt: release.publishedAt ?? null
@@ -660,12 +663,52 @@ function windowActivation(entry) {
   return best;
 }
 
+const CALLS_OFF = new Set(['cancelled', 'rescheduled']);
+
+/**
+ * A fork called off before it activated. The releases that scheduled it are then the danger:
+ * a node still running one activates the fork on its own and leaves the network at the
+ * original time. What to run is the releases that call it off, so `software` names those; the
+ * scheduling versions move to `supersededSoftware`; and while the original activation is still
+ * ahead, `upgradeBy` is that moment. Read only from what each release said (`forkState`).
+ */
+function callOff(entry, now) {
+  const off = entry.releases.filter((r) => CALLS_OFF.has(r.forkState));
+  if (!off.length) return;
+  // One row per client and version. A provider window names a client its own way ("Lighthouse",
+  // or not at all) and the release by its repo ("sigp/lighthouse"): sameClient makes them one
+  // row. Two different clients stay apart even on one version (date-versioned clients share them).
+  const merge = (list) => {
+    const out = [];
+    for (const s of list) {
+      const v = normalizeVersion(s.version);
+      if (!v) continue;
+      const same = out.find((x) => normalizeVersion(x.version) === v && sameClient(x.client, s.client));
+      if (!same) out.push({ ...s });
+      else if (!same.client && s.client) same.client = s.client;
+    }
+    return out;
+  };
+  const sameRow = (a, b) => normalizeVersion(a.version) === normalizeVersion(b.version) && sameClient(a.client, b.client);
+  const running = merge(off.map((r) => ({ client: r.repo, version: r.version })));
+  const superseded = merge([
+    ...entry.releases.filter((r) => !CALLS_OFF.has(r.forkState)).map((r) => ({ client: r.repo, version: r.version })),
+    ...entry.software
+  ]);
+  entry.supersededSoftware = superseded.filter((s) => !running.some((r) => sameRow(r, s)));
+  entry.software = running;
+  const at = ms(entry.activationAt);
+  if (at != null && at > now) entry.upgradeBy = entry.activationAt;
+  if (off.some((r) => r.mandatory)) entry.urgency = 'mandatory';
+}
+
 function finish(entry, now) {
   if (entry.type !== TIMELINE_TYPES.HARDFORK && entry.activationEvidence !== 'released' && !entry.activationAt) {
     const best = windowActivation(entry);
     if (best) { entry.activationAt = iso(best.at); entry.activationEvidence = best.evidence; entry.activationPrecision = 'time'; }
   }
   if (!entry.phase || entry.type !== TIMELINE_TYPES.HARDFORK) entry.phase = phaseOf(entry, now);
+  if (entry.type === TIMELINE_TYPES.HARDFORK && entry.phase === 'cancelled') callOff(entry, now);
   if (!entry.url) entry.url = entry.releases[0]?.url ?? entry.providerUpdates.find((p) => p.url)?.url ?? null;
   const byTime = (a, b) => (ms(a.publishedAt ?? a.activationAt) ?? 0) - (ms(b.publishedAt ?? b.activationAt) ?? 0);
   const counts = {
@@ -681,7 +724,9 @@ function finish(entry, now) {
     provider: entry.provider ?? (providers.length === 1 ? providers[0] : null),
     providers,
     counts,
-    releases: entry.releases.sort(byTime).slice(0, MAX_GROUPED),
+    // The newest: a fork's later releases are the ones that change it (a reschedule, a
+    // cancellation), and cutting them off left only the versions that scheduled it.
+    releases: entry.releases.sort(byTime).slice(-MAX_GROUPED),
     providerUpdates: entry.providerUpdates.sort(byTime).slice(0, MAX_GROUPED),
     news: entry.news.sort(byTime).slice(-MAX_GROUPED),
     followedByIncidents: entry.followedByIncidents.slice(0, MAX_GROUPED)
@@ -691,11 +736,13 @@ function finish(entry, now) {
 const PHASE_ORDER = { upcoming: 0, unscheduled: 1, cancelled: 2, past: 3 };
 
 function compareEntries(a, b) {
-  const pa = PHASE_ORDER[a.phase] ?? 3;
-  const pb = PHASE_ORDER[b.phase] ?? 3;
+  // A cancelled fork with an upgrade deadline ahead is still something to act on: it sorts
+  // with the upcoming ones, by its deadline.
+  const pa = a.upgradeBy ? PHASE_ORDER.upcoming : PHASE_ORDER[a.phase] ?? 3;
+  const pb = b.upgradeBy ? PHASE_ORDER.upcoming : PHASE_ORDER[b.phase] ?? 3;
   if (pa !== pb) return pa - pb;
-  const ta = ms(a.activationAt) ?? 0;
-  const tb = ms(b.activationAt) ?? 0;
+  const ta = ms(a.upgradeBy ?? a.activationAt) ?? 0;
+  const tb = ms(b.upgradeBy ?? b.activationAt) ?? 0;
   return pa === 0 ? ta - tb : tb - ta;
 }
 

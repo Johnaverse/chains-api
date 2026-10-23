@@ -271,6 +271,9 @@ function present(fork) {
       class: e.enrichment?.class ?? null,
       // A client release names the version operators run for this fork.
       ...(e.release ? { release: e.release } : {}),
+      // What THIS source said the fork's state is: a later release that cancels or reschedules
+      // the fork is the one to run, not the one that scheduled it (timeline.js).
+      state: e.enrichment?.fork?.state ?? null,
       // What THIS source claimed. The fork's activationAt is the strongest claim; sources can
       // disagree, and a reader checking a date needs to see who said what.
       activationAt: e.enrichment?.fork?.activationAt ?? null,

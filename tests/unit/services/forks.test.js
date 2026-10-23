@@ -155,7 +155,7 @@ describe('getForks', () => {
     const out = await getForks();
     const [member] = out.forks[0].events;
 
-    expect(Object.keys(member).sort()).toEqual(['activationAt', 'class', 'feed', 'provider', 'publishedAt', 'status', 'title', 'url']);
+    expect(Object.keys(member).sort()).toEqual(['activationAt', 'class', 'feed', 'provider', 'publishedAt', 'state', 'status', 'title', 'url']);
     // publishedMs is an internal sort key; get_live_incidents already strips it for this reason.
     expect(member.publishedMs).toBeUndefined();
     expect(member.enrichment).toBeUndefined();

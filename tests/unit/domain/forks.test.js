@@ -200,6 +200,28 @@ describe('assembling forks from events', () => {
     _resetForkNamesForTests();
   });
 
+  it('joins a fork whose network resolved to no chain into the one placed fork at the same instant', async () => {
+    // Live on 2026-10-23: a provider window put Glamsterdam on "Hoodi Testnet" (no chain), at the
+    // exact second the placed Hoodi fork used; that fork was then cancelled, the stray stayed "upcoming".
+    const placed = (id, state, publishedAt) => event(id, { chains: [560048], affectedChains: ['Ethereum Hoodi'], publishedAt, fork: fork({ name: 'Glamsterdam', network: 'Ethereum Hoodi', activationAt: '2026-10-26T17:42:48Z', state }) });
+    const stray = event('w', { chains: [], affectedChains: ['Hoodi Testnet'], publishedAt: '2026-10-19T17:03:57Z', fork: fork({ name: 'Glamsterdam', network: 'Hoodi Testnet', activationAt: '2026-10-26T17:42:48Z', state: 'scheduled' }) });
+    // A scope (the network as written) to chains: "Hoodi Testnet" resolves to none.
+    const chainIdsFor = (scope) => (/ethereum hoodi/i.test(scope) ? [560048] : []);
+    const out = await buildForks([placed('a', 'scheduled', '2026-10-16T00:00:00Z'), stray, placed('c', 'cancelled', '2026-10-22T20:00:00Z')], { now: NOW, chainIdsFor });
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ name: 'Glamsterdam', chains: [560048], phase: FORK_PHASE.CANCELLED });
+    expect(out[0].events).toHaveLength(3);
+  });
+
+  it('leaves a fork with no chain apart when its instant matches two placed forks, or none', async () => {
+    const at = (id, network, chains) => event(id, { chains, affectedChains: [network], fork: fork({ name: 'Celadon', network, activationAt: '2026-10-28T06:00:00Z', state: 'scheduled' }) });
+    const chainIdsFor = (scope) => (/rollup a/i.test(scope) ? [1] : /rollup b/i.test(scope) ? [2] : []);
+    const two = await buildForks([at('a', 'Rollup A Hoodi', [1]), at('b', 'Rollup B Hoodi', [2]), at('c', 'Hoodi Testnet', [])], { now: NOW, chainIdsFor });
+    expect(two).toHaveLength(3);
+    const day = await buildForks([at('a', 'Rollup A Hoodi', [1]), event('d', { chains: [], affectedChains: ['Hoodi Testnet'], fork: fork({ name: 'Celadon', network: 'Hoodi Testnet', activationAt: '2026-10-28', state: 'scheduled' }) })], { now: NOW, chainIdsFor });
+    expect(day).toHaveLength(2);
+  });
+
   it('keeps forks apart that share only a day, or only a time on other chains', async () => {
     const at = (id, name, activationAt, chains) => event(id, { chains, affectedChains: [name], fork: fork({ name, activationAt, state: 'scheduled' }) });
     const out = await buildForks([
