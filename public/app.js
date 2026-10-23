@@ -5638,7 +5638,7 @@ function setClientFeedConfigured(ok) {
 // The probe IS the default list: it loads what the Releases tab opens on, so the tab paints at
 // once instead of after a round-trip (as Providers does). One ~50 KB compressed request per visit.
 async function probeClientFeed() {
-    await loadReleases({ probe: true });
+    await loadReleases();
 }
 
 function initReleaseControls() {
@@ -5687,7 +5687,7 @@ function ensureReleasesView() {
 // answer changed, and a failed one keeps the list on screen.
 const RELEASE_REFRESH_MS = 60000;
 
-async function loadReleases({ quiet = false, probe = false } = {}) {
+async function loadReleases({ quiet = false } = {}) {
     const key = releaseKey();
     if (releases.loading[key]) return;
     if (releases.from && releases.to && releases.to < releases.from) {
@@ -5722,9 +5722,12 @@ async function loadReleases({ quiet = false, probe = false } = {}) {
         else if (isFeedAbsent(err)) setClientFeedConfigured(false);
         else {
             releases.error[key] = true;
-            // At boot: configured but failing (502, 429…) keeps the tab, whose list shows the
-            // outage; no status at all = the API itself is unreachable, so it stays hidden.
-            if (probe && err?.status) setClientFeedConfigured(true);
+            // While it is still unknown whether the feed exists: an HTTP error that is not "absent"
+            // (502, 429…) means it does, so the tab shows and its list states the outage. Whoever
+            // started the request — a ?view=releases deep link begins it before the boot probe,
+            // which then finds it in flight. No status at all = the API itself is unreachable,
+            // so the tab stays hidden.
+            if (err?.status && releases.configured === null) setClientFeedConfigured(true);
         }
     } finally {
         releases.loading[key] = false;
