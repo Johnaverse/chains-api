@@ -677,7 +677,8 @@ function windowActivation(entry) {
  * to run). `software` may be empty: a status post or article can call a fork off before any
  * client ships a release that does — no safe version known, not "the old one is fine". Provider
  * windows add to neither list: a window may roll out the very release that cancels the fork.
- * While the original activation is still ahead, `upgradeBy` is that moment.
+ * While any unsafe version still has its activation ahead, `upgradeBy` is the earliest such
+ * moment.
  */
 function callOff(entry, now) {
   const repoKey = (r) => `${r.repo ?? ''}|${(r.component ?? '').toLowerCase()}`;
@@ -696,8 +697,13 @@ function callOff(entry, now) {
   entry.software = unique(run.map(row));
   entry.supersededSoftware = unique(byTime.filter((r) => !runSet.has(r)).map(row))
     .filter((x) => !entry.software.some((y) => y.client === x.client && (y.component ?? '') === (x.component ?? '') && normalizeVersion(y.version) === normalizeVersion(x.version)));
-  const at = ms(entry.activationAt);
-  if (at != null && at > now) entry.upgradeBy = entry.activationAt;
+  // The deadline is the FIRST moment any unsafe version still activates the fork: a node on the
+  // release that scheduled Oct 26 forks off then, even when a later release moved the fork's
+  // own date to Nov 2. Each superseded release's own claim, and the fork's date.
+  const ahead = [entry.activationAt, ...byTime.filter((r) => !disables(r)).map((r) => r.forkActivationAt)]
+    .filter((at) => (ms(at) ?? -Infinity) > now)
+    .sort((a, b) => ms(a) - ms(b));
+  if (ahead.length) entry.upgradeBy = new Date(ms(ahead[0])).toISOString();
   if (run.some((r) => r.mandatory)) entry.urgency = 'mandatory';
 }
 

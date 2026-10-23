@@ -176,6 +176,17 @@ describe('buildTimeline — hardforks', () => {
     expect(entry.supersededSoftware.map((x) => x.version)).toEqual(['v1.8.1', 'v1.8.2']);
   });
 
+  it('sets the deadline at the earliest date any unsafe version still activates', () => {
+    const rel = (version, state, at, day) => releaseEvent({ title: version, url: `https://github.com/bnb-chain/bsc/releases/tag/${version}`, publishedAt: `2026-10-${day}T00:00:00Z`, state, activationAt: at, release: { repo: 'bnb-chain/bsc', version, mandatory: true } });
+    // v1 schedules Oct 26, v2 moves it to Nov 2 (the fork's own date), v3 cancels it.
+    const [entry] = build({ forks: [fork({ phase: 'cancelled', state: 'cancelled', activationAt: '2026-11-02T00:00:00.000Z', events: [
+      rel('v1', 'scheduled', '2026-10-26T00:00:00Z', '10'), rel('v2', 'rescheduled', '2026-11-02T00:00:00Z', '12'), rel('v3', 'cancelled', null, '15')
+    ] })] });
+    expect(entry.software.map((x) => x.version)).toEqual(['v3']);
+    // A node still on v1 forks off on Oct 26, not Nov 2.
+    expect(entry.upgradeBy).toBe('2026-10-26T00:00:00.000Z');
+  });
+
   it('counts a reschedule as safe only when it names no new date ahead', () => {
     const rel = (repo, version, state, at) => releaseEvent({ title: version, url: `https://github.com/${repo}/releases/tag/${version}`, publishedAt: '2026-10-15T00:00:00Z', state, activationAt: at, release: { repo, version, mandatory: true } });
     const [entry] = build({ forks: [fork({ phase: 'cancelled', state: 'cancelled', events: [
