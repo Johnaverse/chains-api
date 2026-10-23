@@ -444,6 +444,11 @@ export function sourceRank(event) {
   return 0;
 }
 
+/** An RPC provider's maintenance window (its status page), as opposed to the network's own. */
+export function isProviderWindow(event) {
+  return (event?.feed ?? 'status') === 'status' && event?.statusPage?.kind === 'rpc-provider';
+}
+
 // How far apart two unnamed notices of one activation may be. Providers state their own window
 // start, typically an hour or a few before the activation second.
 const UNNAMED_MATCH_MS = 6 * 60 * 60 * 1000;
@@ -812,7 +817,14 @@ export async function buildForks(events = [], { tipFor = null, chainIdsFor = nul
   mergeUnplacedIntoPlaced(groups);
 
   const forks = [];
-  for (const { key, members, scopes } of groups.values()) {
+  for (const { key, members: all, scopes } of groups.values()) {
+    // An RPC provider's maintenance window is the provider's own schedule, not the network's:
+    // it may help group reports (it names the fork), but the fork's time, state, chains and kind
+    // come from the network's own sources — client releases, its status page, forums, its blog
+    // and news. A fork only providers mention is their maintenance, not a fork (it stays in
+    // /upgrades, and the timeline shows it as the provider's software update).
+    const members = all.filter(m => !isProviderWindow(m.event));
+    if (!members.length) continue;
     const chainIds = [...new Set(members.flatMap(m => m.chainIds))];
     // A tip is only fetched when some member needs a height converted, so the common
     // stated-time fork costs no explorer call at all.
@@ -845,8 +857,8 @@ export async function buildForks(events = [], { tipFor = null, chainIdsFor = nul
     // Glamsterdam. Spelling variants of the name itself are not aliases.
     const aliases = [...new Map(members.map(m => m.fork.name).filter(Boolean)
       .filter(n => forkIdentity(n) !== forkIdentity(named)).map(n => [forkIdentity(n), n])).values()];
-    const sources = [...new Set(members.map(m => m.event.statusPage?.id).filter(Boolean))];
-    const feeds = [...new Set(members.map(m => m.event.feed ?? 'status'))];
+    const sources = [...new Set(all.map(m => m.event.statusPage?.id).filter(Boolean))];
+    const feeds = [...new Set(all.map(m => m.event.feed ?? 'status'))];
     forks.push({
       key,
       name: named,
@@ -870,13 +882,14 @@ export async function buildForks(events = [], { tipFor = null, chainIdsFor = nul
       activationBlock: candidates.map(c => c.block).find(b => b != null) ?? null,
       state,
       phase: forkPhase({ activationAt: activation?.at ?? null, state, activationPrecision }, now),
-      // Which status pages reported it — the point of the exercise. More than one means the
-      // cross-provider join actually fired.
+      // Which status pages reported it, providers' included — the point of the exercise. More
+      // than one means the cross-provider join actually fired.
       sources,
       // Which KINDS of source: status pages, forums, news. A fork only news reported is a
       // claim to attribute, not a schedule the network published.
       feeds,
-      events: uniqueEvents(members)
+      // Every report, providers' windows included: they say when each provider upgrades.
+      events: uniqueEvents(all)
     });
   }
 

@@ -430,14 +430,25 @@ describe('forks across status, forum and news feeds', () => {
     expect(forkScopes(etc)).toEqual(['ethereum classic']);
   });
 
-  it('follows a reschedule that newer provider windows report, even over the network page', async () => {
+  it('keeps the network\'s own date when provider windows say another: a provider window is the provider\'s schedule', async () => {
     const out = await buildForks([
       mention('page', 'status', { name: 'Protocol 30', network: 'X', activationAt: '2099-09-01T00:00:00Z' }, { kind: 'chain', publishedAt: '2026-08-01T00:00:00Z' }),
       mention('qn', 'status', { name: 'Protocol 30', network: 'X', activationAt: '2099-09-15T00:00:00Z' }, { kind: 'rpc-provider', publishedAt: '2026-08-20T00:00:00Z' }),
       mention('alc', 'status', { name: 'Protocol 30', network: 'X', activationAt: '2099-09-15T01:00:00Z' }, { kind: 'rpc-provider', publishedAt: '2026-08-21T00:00:00Z' })
     ], { now: Date.parse('2026-08-22T00:00:00Z') });   // observed times are clamped to now
     expect(out).toHaveLength(1);
-    expect(out[0].activationAt).toBe('2099-09-15T01:00:00.000Z');
+    expect(out[0].activationAt).toBe('2099-09-01T00:00:00.000Z');
+    // The windows stay listed: they say when each provider upgrades.
+    expect(out[0].events).toHaveLength(3);
+    expect(out[0].sources.sort()).toEqual(['alc', 'page', 'qn']);
+  });
+
+  it('lists no fork that only providers mention: their windows are their maintenance', async () => {
+    const out = await buildForks([
+      mention('qn', 'status', { name: 'Protocol 31', network: 'X', activationAt: '2099-10-01T00:00:00Z' }, { kind: 'rpc-provider' }),
+      mention('alc', 'status', { name: 'Protocol 31', network: 'X', activationAt: '2099-10-01T00:00:00Z' }, { kind: 'rpc-provider' })
+    ], { now: Date.parse('2026-08-22T00:00:00Z') });
+    expect(out).toEqual([]);
   });
 
   it('does not treat a provider window a few hours early as a reschedule', () => {

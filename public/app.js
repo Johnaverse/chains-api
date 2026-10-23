@@ -7026,7 +7026,7 @@ function timelineNetworkLabel(u) {
     const registry = (u.chainIds || []).map(id => state.byId.get(id)?.name).filter(Boolean);
     const names = u.type === 'hardfork' && registry.length ? registry
         : u.networkNames?.length ? u.networkNames : registry;
-    return names[0] || u.network || u.provider || 'Unknown';
+    return names[0] || u.network || (u.type === 'hardfork' ? null : u.provider) || 'Unknown';
 }
 
 // "in 2d 4h" / "in 35m" — the live part of a pending row.
@@ -7228,7 +7228,8 @@ function timelineRow(u, now) {
                 chainId != null && state.byId.has(chainId)
                     ? el('button', { class: 'chain-chip', type: 'button', text: label, onclick: e => { e.preventDefault(); e.stopPropagation(); openChainDetail(chainId); } })
                     : el('span', { text: label }),
-                u.provider ? el('span', { text: ` · ${u.provider}` }) : null
+                // A fork is the network's: no provider is named as its own.
+                u.provider && u.type !== 'hardfork' ? el('span', { text: ` · ${u.provider}` }) : null
             ])
         ]),
         el('span', { class: 'tlx-row-chips' }, chips),

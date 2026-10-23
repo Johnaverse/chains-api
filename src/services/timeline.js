@@ -721,7 +721,9 @@ function finish(entry, now) {
   const { identity, identities, aliases, versions, completed, ...rest } = entry;
   return {
     ...rest,
-    provider: entry.provider ?? (providers.length === 1 ? providers[0] : null),
+    // A fork is the network's, never a provider's: its windows are listed under providerUpdates
+    // and `providers`, but no single provider is named as the event's own.
+    provider: entry.type === TIMELINE_TYPES.HARDFORK ? null : (entry.provider ?? (providers.length === 1 ? providers[0] : null)),
     providers,
     counts,
     // The newest: a fork's later releases are the ones that change it (a reschedule, a
