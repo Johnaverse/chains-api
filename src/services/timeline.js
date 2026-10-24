@@ -743,13 +743,13 @@ function finish(entry, now) {
 const PHASE_ORDER = { upcoming: 0, unscheduled: 1, cancelled: 2, past: 3 };
 
 function compareEntries(a, b) {
-  // A cancelled fork with an upgrade deadline ahead is still something to act on: it sorts
-  // with the upcoming ones, by its deadline.
-  const pa = a.upgradeBy ? PHASE_ORDER.upcoming : PHASE_ORDER[a.phase] ?? 3;
-  const pb = b.upgradeBy ? PHASE_ORDER.upcoming : PHASE_ORDER[b.phase] ?? 3;
+  // A cancelled fork is not coming, deadline or not: it sorts with the cancelled ones (its
+  // `upgradeBy` still says what to do by when).
+  const pa = PHASE_ORDER[a.phase] ?? 3;
+  const pb = PHASE_ORDER[b.phase] ?? 3;
   if (pa !== pb) return pa - pb;
-  const ta = ms(a.upgradeBy ?? a.activationAt) ?? 0;
-  const tb = ms(b.upgradeBy ?? b.activationAt) ?? 0;
+  const ta = ms(a.activationAt) ?? 0;
+  const tb = ms(b.activationAt) ?? 0;
   return pa === 0 ? ta - tb : tb - ta;
 }
 

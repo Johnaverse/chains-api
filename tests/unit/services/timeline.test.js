@@ -164,8 +164,8 @@ describe('buildTimeline — hardforks', () => {
     expect(entry.upgradeBy).toBe('2026-10-29T02:30:00.000Z');
     expect(entry.urgency).toBe('mandatory');
     expect(entry.releases.map((r) => [r.version, r.forkState])).toEqual([['v1.8.1', 'scheduled'], ['v1.8.2', 'cancelled']]);
-    // Still something to act on: listed with the upcoming forks, by its deadline (before November's).
-    expect(entries.map((e) => e.name).slice(0, 2)).toEqual(['Jenner', 'Later']);
+    // Not coming: the upcoming fork leads, the cancelled one follows it however near its deadline.
+    expect(entries.map((e) => e.name).slice(0, 2)).toEqual(['Later', 'Jenner']);
   });
 
   it('does not count a reschedule as safe once a later release of that client cancels the fork', () => {
