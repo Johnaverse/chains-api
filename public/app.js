@@ -6560,10 +6560,11 @@ function timelineUpgradeByMs(u) {
 }
 
 // Whether an event is still to come — the API's forkPhase rule, on the live clock: a cancelled
-// fork never is, whatever its date — unless its upgrade deadline is — and a date-only
-// activation stays pending until that UTC day is over (it is not "done" at midnight it began).
+// fork never is, whatever its date or upgrade deadline (the row says "called off" and carries
+// the deadline instead), and a date-only activation stays pending until that UTC day is over
+// (it is not "done" at midnight it began).
 function timelinePending(u, now) {
-    if (u.phase === 'cancelled') return (timelineUpgradeByMs(u) ?? -Infinity) > now;
+    if (u.phase === 'cancelled') return false;
     const ms = timelineActivationMs(u);
     if (ms == null) return false;
     return (u.activationPrecision === 'day' ? ms + 864e5 : ms) > now;
@@ -6573,7 +6574,7 @@ function timelinePending(u, now) {
 // by status: providers leave a window labelled "scheduled" long after it ran.
 function timelineStreamOf(u, now) {
     const ms = timelineActivationMs(u);
-    if (u.phase === 'cancelled') return timelinePending(u, now) ? 'upcoming' : 'done';
+    if (u.phase === 'cancelled') return 'done';
     // Undated but not finished: announced, day unknown. Calling this 'done' would file a
     // pending fork under history purely because nobody has named the date yet.
     if (ms == null) return u.status === 'maintenance_completed' || u.phase === 'past' ? 'done' : 'undated';
@@ -7156,10 +7157,10 @@ function timelineGroupRows(u) {
 // a disclosure so a hundred windows stay scannable; rows with fallout open by
 // default because that is the finding, not a footnote.
 function timelineRow(u, now) {
-    // A called-off fork counts down to its upgrade deadline, not to an activation that will not happen.
     const upgradeByMs = timelineUpgradeByMs(u);
-    const actMs = upgradeByMs ?? timelineActivationMs(u);
-    const pending = actMs != null && actMs > now;
+    const actMs = timelineActivationMs(u);
+    // A called-off fork is not coming: no countdown to an activation that will not happen.
+    const pending = u.phase !== 'cancelled' && actMs != null && actMs > now;
     const label = timelineNetworkLabel(u);
     const chainId = (u.chainIds || [])[0] ?? null;
     const fallout = u.followedByIncidents?.length || 0;
@@ -7168,7 +7169,9 @@ function timelineRow(u, now) {
     // to count down to, so the slot says so instead of rendering a dash that looks like a
     // missing value.
     const ev = evidenceOf(u);
-    const when = actMs == null
+    const when = u.phase === 'cancelled'
+        ? el('span', { class: 'tlx-when past', text: 'called off' })
+        : actMs == null
         ? el('span', { class: 'tlx-when tlx-when-tba', title: ev.title, text: 'date TBA' })
         : pending
             ? el('span', { class: 'tlx-when mono tl-countdown', 'data-at': String(actMs), text: countdownText(actMs - now) })
