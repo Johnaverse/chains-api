@@ -7,18 +7,19 @@ vi.mock('../../../fetchUtil.js', async (importOriginal) => ({
 }));
 
 // Mutable so one file can cover configured and unconfigured.
-const cfg = vi.hoisted(() => ({ url: 'http://client-feed.test/' }));
+const cfg = vi.hoisted(() => ({ url: 'http://client-feed.test/', maxBytes: 32 * 1024 * 1024 }));
 vi.mock('../../../config.js', async (importOriginal) => {
   const actual = await importOriginal();
   return {
     ...actual,
     get CLIENT_FEED_URL() { return cfg.url; },
+    get CLIENT_FEED_CACHE_MAX_BYTES() { return cfg.maxBytes; },
     CLIENT_FEED_CACHE_TTL_MS: 60000
   };
 });
 
 const { buildApp } = await import('../../../index.js');
-const { _resetClientFeedCacheForTests } = await import('../../../src/sources/clientFeed.js');
+const { _resetClientFeedCacheForTests, clientFeedCacheStats } = await import('../../../src/sources/clientFeed.js');
 
 const fusaka = { name: 'Fusaka', network: 'Ethereum', activationAt: '2025-12-03T21:49:11Z', activationBlock: null, state: 'scheduled', activationEpoch: 411392 };
 const release = {
@@ -97,6 +98,27 @@ describe('GET /client-releases', () => {
     await get('/client-releases?limit=5');
     await get('/client-releases?limit=5');
     expect(proxyFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('bounds the cache by total size, not only by entries: the oldest responses go first', async () => {
+    // Each distinct query is its own entry; three of these exceed a 2 KB budget.
+    const big = { items: [{ ...release, title: 'x'.repeat(600) }] };
+    cfg.maxBytes = 2048;
+    try {
+      proxyFetch.mockImplementation(async () => json(big));
+      await get('/client-releases?limit=5');
+      await get('/client-releases?limit=6');
+      await get('/client-releases?limit=7');
+      const { entries, bytes } = clientFeedCacheStats();
+      expect(bytes).toBeLessThanOrEqual(2048);
+      expect(entries).toBeLessThan(3);
+      // The oldest was evicted: asking for it again goes upstream.
+      proxyFetch.mockClear();
+      await get('/client-releases?limit=5');
+      expect(proxyFetch).toHaveBeenCalledTimes(1);
+    } finally {
+      cfg.maxBytes = 32 * 1024 * 1024;
+    }
   });
 
   it('502s on upstream failure with no cache, and serves stale after one', async () => {

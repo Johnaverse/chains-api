@@ -1,3 +1,4 @@
+import { clientFeedCacheStats } from '../../sources/clientFeed.js';
 import { getCachedData } from '../../store/cache.js';
 import { getRpcMonitoringStatus } from '../../services/rpcHealth.js';
 import { validateChainData } from '../../services/validation.js';
@@ -50,7 +51,7 @@ export async function metricsRoute(fastify) {
     // Read-only: never runs the sentinel, so a scrape cannot block on the incident feed.
     const incidentSummary = getLastIncidentSentinelSummary();
 
-    const body = renderMetrics({ cache, rpcStatus, l2beatStatus, validationSummary, incidentSummary });
+    const body = renderMetrics({ cache, rpcStatus, l2beatStatus, validationSummary, incidentSummary, clientFeedCache: clientFeedCacheStats() });
     reply.header('Content-Type', 'text/plain; version=0.0.4');
     return body;
   });

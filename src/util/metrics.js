@@ -1,3 +1,4 @@
+import v8 from 'node:v8';
 /**
  * Lightweight, dependency-free Prometheus-format metrics.
  *
@@ -69,10 +70,32 @@ const METRIC_HELP = {
  * Emit Prometheus exposition format. Gauges are computed on the fly from
  * the live cache to avoid drift.
  */
-export function renderMetrics({ cache, rpcStatus, l2beatStatus, validationSummary, incidentSummary }) {
+export function renderMetrics({ cache, rpcStatus, l2beatStatus, validationSummary, incidentSummary, clientFeedCache }) {
   const lines = [];
 
   formatCounters(lines);
+
+  // Process memory: growth toward the heap limit shows here before the process dies of it
+  // (2026-10-24: "JavaScript heap out of memory" after 18.5 h, with nothing on /metrics to see).
+  const mem = process.memoryUsage();
+  const heapLimit = v8.getHeapStatistics().heap_size_limit;
+  lines.push('# HELP chains_api_process_resident_bytes Resident memory of the process');
+  lines.push('# TYPE chains_api_process_resident_bytes gauge');
+  lines.push(`chains_api_process_resident_bytes ${mem.rss}`);
+  lines.push('# HELP chains_api_heap_used_bytes JavaScript heap in use');
+  lines.push('# TYPE chains_api_heap_used_bytes gauge');
+  lines.push(`chains_api_heap_used_bytes ${mem.heapUsed}`);
+  lines.push('# HELP chains_api_heap_limit_bytes JavaScript heap size limit');
+  lines.push('# TYPE chains_api_heap_limit_bytes gauge');
+  lines.push(`chains_api_heap_limit_bytes ${heapLimit}`);
+  if (clientFeedCache) {
+    lines.push('# HELP chains_api_client_feed_cache_bytes Client-feed responses held in memory');
+    lines.push('# TYPE chains_api_client_feed_cache_bytes gauge');
+    lines.push(`chains_api_client_feed_cache_bytes ${clientFeedCache.bytes}`);
+    lines.push('# HELP chains_api_client_feed_cache_entries Client-feed responses cached');
+    lines.push('# TYPE chains_api_client_feed_cache_entries gauge');
+    lines.push(`chains_api_client_feed_cache_entries ${clientFeedCache.entries}`);
+  }
 
   // Gauges
   lines.push('# HELP chains_api_chains_total Total chains in the index');

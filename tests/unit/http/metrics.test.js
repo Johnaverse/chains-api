@@ -58,6 +58,14 @@ describe('GET /metrics (Prometheus exposition)', () => {
     expect(res.headers['content-type']).toMatch(/text\/plain/);
   });
 
+  it('reports process memory against the heap limit', async () => {
+    dataService.getCachedData.mockReturnValue({ indexed: { all: [] } });
+    const res = await app.inject({ method: 'GET', url: '/metrics' });
+    for (const name of ['chains_api_process_resident_bytes', 'chains_api_heap_used_bytes', 'chains_api_heap_limit_bytes', 'chains_api_client_feed_cache_bytes', 'chains_api_client_feed_cache_entries']) {
+      expect(res.body).toMatch(new RegExp(`^${name} \\d+$`, 'm'));
+    }
+  });
+
   it('renders chains_api_chains_total gauge', async () => {
     dataService.getCachedData.mockReturnValue({
       indexed: { all: new Array(123).fill({}) }
