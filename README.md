@@ -23,7 +23,7 @@ All changes are validated through GitHub Actions CI/CD pipeline, ensuring code q
 ## Features
 
 - **Multi-Source Data Aggregation**: Combines data from multiple blockchain registries:
-  - [The Graph Networks Registry](https://raw.githubusercontent.com/Johnaverse/networks-registry/refs/heads/main/public/TheGraphNetworksRegistry.json)
+  - [The Graph Networks Registry](https://networks-registry.thegraph.com/TheGraphNetworksRegistry.json)
   - [Chainlist RPCs](https://chainlist.org/rpcs.json)
   - [Chain ID Network](https://chainid.network/chains.json) (for basic chain data and L2 relation indexing using parent field)
   - [SLIP-0044 Coin Types](https://github.com/satoshilabs/slips/blob/master/slip-0044.md)
