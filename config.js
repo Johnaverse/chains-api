@@ -62,7 +62,7 @@ export const MAX_SEARCH_QUERY_LENGTH = parseIntEnv('MAX_SEARCH_QUERY_LENGTH', 20
 // Data source URLs
 export const DATA_SOURCE_THE_GRAPH = parseStringEnv(
   'DATA_SOURCE_THE_GRAPH',
-  'https://raw.githubusercontent.com/Johnaverse/networks-registry/refs/heads/main/public/TheGraphNetworksRegistry.json'
+  'https://networks-registry.thegraph.com/TheGraphNetworksRegistry.json'
 );
 export const DATA_SOURCE_CHAINLIST = parseStringEnv(
   'DATA_SOURCE_CHAINLIST',
