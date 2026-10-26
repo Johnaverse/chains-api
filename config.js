@@ -221,6 +221,10 @@ export const CLIENT_FEED_URL = parseStringEnv('CLIENT_FEED_URL', '');
 export const CLIENT_FEED_FETCH_TIMEOUT_MS = parseIntEnv('CLIENT_FEED_FETCH_TIMEOUT_MS', 10000);
 // How long the /client-releases proxy holds one upstream answer before re-reading it.
 export const CLIENT_FEED_CACHE_TTL_MS = parseIntEnv('CLIENT_FEED_CACHE_TTL_MS', 60000);
+// Total size of client-feed responses kept in memory. The 200-key cap alone let a run of large
+// distinct queries (500-release pages, ~1 MB parsed each) grow the heap past Node's limit in a
+// 512 Mi pod (2026-10-24: out of memory after 18.5 h). Default 32 MB.
+export const CLIENT_FEED_CACHE_MAX_BYTES = parseIntEnv('CLIENT_FEED_CACHE_MAX_BYTES', 32 * 1024 * 1024);
 // growthepie (https://www.growthepie.com): Ethereum L2 fundamentals, fees, economics, blockspace and
 // DA usage. Public, chain-level ("Basic") data; attribution to growthepie is required wherever it
 // is shown. Each file is re-read on its own cadence (src/sources/growthepie.js); a checked-in

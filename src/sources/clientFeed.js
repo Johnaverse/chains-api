@@ -1,7 +1,8 @@
 import {
   CLIENT_FEED_URL,
   CLIENT_FEED_CACHE_TTL_MS,
-  CLIENT_FEED_FETCH_TIMEOUT_MS
+  CLIENT_FEED_FETCH_TIMEOUT_MS,
+  CLIENT_FEED_CACHE_MAX_BYTES
 } from '../../config.js';
 import { getFeed } from './feedHttp.js';
 import { slimFork } from '../domain/forks.js';
@@ -45,11 +46,33 @@ export class ClientFeedNotFoundError extends Error {
   }
 }
 
-// url -> { fetchedAt, body }
+// url -> { fetchedAt, body, bytes }. Bounded by entries AND by total size: one 500-release page
+// is ~1 MB parsed, so 200 distinct large queries alone filled the heap.
 const cache = new Map();
+let cacheBytes = 0;
+
+function remember(url, body) {
+  const prior = cache.get(url);
+  if (prior) { cacheBytes -= prior.bytes; cache.delete(url); }
+  const bytes = Buffer.byteLength(JSON.stringify(body) ?? '');
+  cache.set(url, { fetchedAt: Date.now(), body, bytes });
+  cacheBytes += bytes;
+  // Oldest first, until both bounds hold; the entry just stored is the last to go.
+  while (cache.size > 1 && (cache.size > MAX_CACHE_KEYS || cacheBytes > CLIENT_FEED_CACHE_MAX_BYTES)) {
+    const [oldUrl, old] = cache.entries().next().value;
+    cache.delete(oldUrl);
+    cacheBytes -= old.bytes;
+  }
+}
+
+/** Entries and bytes held by the response cache (for /metrics). */
+export function clientFeedCacheStats() {
+  return { entries: cache.size, bytes: cacheBytes };
+}
 
 export function _resetClientFeedCacheForTests() {
   cache.clear();
+  cacheBytes = 0;
 }
 
 export function clientFeedConfigured() {
@@ -90,9 +113,7 @@ async function cachedGet(path, params) {
     }
     if (!response.ok) throw new Error(`Feed responded ${response.status}`);
     const body = await response.json();
-    cache.delete(url);
-    cache.set(url, { fetchedAt: Date.now(), body });
-    while (cache.size > MAX_CACHE_KEYS) cache.delete(cache.keys().next().value);
+    remember(url, body);
     return { body, fetchedAt: Date.now(), stale: false };
   } catch (err) {
     if (err instanceof ClientFeedNotFoundError || err instanceof ClientFeedBadRequestError) throw err;
