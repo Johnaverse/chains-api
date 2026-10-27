@@ -809,6 +809,16 @@ describe('a node fork schedule (eth_config) on its chain', () => {
     expect(out.find(f => f.name === null)).toMatchObject({ activationAt: '2026-10-29T00:30:00.000Z', state: 'completed' });
   });
 
+  it('joins a node report a network-named provider notice took first to the named fork', async () => {
+    // QuickNode's unnamed notice names "BSC Chapel Testnet" at the activation second; chain 97's
+    // node report joins it (same instant), and the Jenner release names that instant.
+    const notice = { ...event('p', { fork: fork({ activationAt: '2026-10-29T02:30:00Z', state: 'scheduled' }), chains: [], affectedChains: ['BSC Chapel Testnet'], page: 'quicknode' }), feed: 'status' };
+    notice.statusPage.kind = 'rpc-provider';
+    const out = await buildForks([notice, node('n', 97, '2026-10-29T02:30:00Z'), release], opts);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ name: 'Jenner', chains: [97], activationAt: '2026-10-29T02:30:00.000Z' });
+  });
+
   it('does not match a node activation to a provider\'s maintenance window', async () => {
     // QuickNode's Jenner window starts two hours early; the node's 00:30 is the previous fork.
     const window = { ...event('w', { fork: fork({ name: 'Jenner', network: 'BSC Chapel Testnet', activationAt: '2026-10-29T00:30:00Z', state: 'scheduled' }), chains: [97], page: 'quicknode' }), feed: 'status' };

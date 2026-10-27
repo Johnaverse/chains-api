@@ -704,8 +704,18 @@ function foldChainScopedIntoNamed(groups) {
     return at ? Date.parse(at) : null;
   };
   const named = [...groups.values()].filter(g => g.kind === 'name').map(g => ({ g, a: exactAnchors(g.members), at: winning(g) }));
-  const pending = [...groups.values()].filter(g => g.kind !== 'name' && g.scope.startsWith('chain:'))
-    .map(g => ({ g, chainId: Number(g.scope.slice('chain:'.length)), anchors: exactAnchors(g.members) }));
+  // Unnamed groups known by a chain: scoped to it, or node-backed under a network name (a
+  // provider notice naming BSC Chapel that already took chain 97's node report) — by the chain
+  // the node members report, since clusterUnnamed leaves node-backed groups to this fold.
+  const chainOf = (g) => {
+    if (g.scope.startsWith('chain:')) return Number(g.scope.slice('chain:'.length));
+    if (!isNodeGroup(g)) return null;
+    const ids = new Set(g.members.filter(m => m.event?.feed === 'node').flatMap(m => m.chainIds));
+    return ids.size === 1 ? [...ids][0] : null;
+  };
+  const pending = [...groups.values()].filter(g => g.kind !== 'name')
+    .map(g => ({ g, chainId: chainOf(g), anchors: exactAnchors(g.members) }))
+    .filter(p => p.chainId !== null);
   // A named fork is one activation per chain: once a node activation joined it there, another
   // (the chain's previous fork, hours earlier) does not.
   const taken = new Set();
