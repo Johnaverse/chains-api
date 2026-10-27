@@ -6,6 +6,7 @@ import { getRepositoryChains } from '../sources/networkResearch.js';
 import { logger } from '../util/logger.js';
 import { learnForkNames } from '../domain/forkNames.js';
 import { learnForkWords } from '../domain/forkWords.js';
+import { nodeForkMentions, nodeForkScheduleVersion, getNodeForkSchedules } from '../sources/nodeForkSchedule.js';
 import { learnNetworkWords, mentionsTestNetwork, isKindWord, isTestNetworkWord, chainOfBareName } from '../domain/networkWords.js';
 
 /**
@@ -235,26 +236,30 @@ export function qualifyBareNetwork(mention, byId) {
  * every call cost ~1s of CPU at 1,500 unnamed mentions. Phase depends on the clock, so it is
  * re-derived per call from the memoized activation rather than cached with it.
  */
-let memo = { mentions: null, fetchedAt: null, chains: null, repoChains: null, forks: null };
+let memo = { mentions: null, fetchedAt: null, chains: null, repoChains: null, nodeVersion: null, forks: null };
 
 export function _resetForksMemoForTests() {
-  memo = { mentions: null, fetchedAt: null, chains: null, repoChains: null, forks: null };
+  memo = { mentions: null, fetchedAt: null, chains: null, repoChains: null, nodeVersion: null, forks: null };
 }
 
 async function builtForks(mentions, fetchedAt) {
   const chains = getAllChains();
   const repoChains = getRepositoryChains();
-  if (memo.forks && memo.mentions === mentions && memo.fetchedAt === fetchedAt && memo.chains === chains && memo.repoChains === repoChains) return memo.forks;
+  const nodeVersion = nodeForkScheduleVersion();
+  if (memo.forks && memo.mentions === mentions && memo.fetchedAt === fetchedAt && memo.chains === chains && memo.repoChains === repoChains && memo.nodeVersion === nodeVersion) return memo.forks;
   // Which words name a test network, or only a kind of network, comes from the registry
   // (networkWords.js); which words of a fork's name are generic, from the feeds (forkWords.js).
   learnNetworkWords(chains);
   learnForkWords(mentions);
   const byId = new Map(chains.map((c) => [c.chainId, c]));
-  const forks = (await buildForks(mentions.map((m) => qualifyBareNetwork(m, byId)), { tipFor, chainIdsFor: chainResolver(chains), chainNamesFor: chainNamesLookup(chains), repoChainIdsFor: repositoryResolver(chains, repoChains) }))
+  // Each chain's fork schedule as its nodes hold it (eth_config): a dated fork no feed
+  // announced still reaches the chain, and an announced one is confirmed at its instant.
+  const nodes = nodeForkMentions({ nameOf: (id) => byId.get(id)?.name ?? null });
+  const forks = (await buildForks([...mentions.map((m) => qualifyBareNetwork(m, byId)), ...nodes], { tipFor, chainIdsFor: chainResolver(chains), chainNamesFor: chainNamesLookup(chains), repoChainIdsFor: repositoryResolver(chains, repoChains) }))
     .map((fork) => present(fork, unplacedReason(fork, repoChains, byId)));
   // What the feeds show about which names are one fork: read by the timeline and latest release.
   learnForkNames(forks);
-  memo = { mentions, fetchedAt, chains, repoChains, forks };
+  memo = { mentions, fetchedAt, chains, repoChains, nodeVersion, forks };
   return forks;
 }
 
@@ -324,9 +329,27 @@ export async function getForks({ chainId, phase, scheduledOnly = false, include,
  * Every fork entity, unfiltered and uncapped, phase current as of now — for the timeline,
  * which joins provider windows and releases onto them and must see all of them to do it.
  */
+// One empty array, so the fork memo still holds across calls during a feed outage.
+const NO_FEED_MENTIONS = [];
+
 export async function getAllForks() {
-  const { mentions, fetchedAt, feeds } = await getForkMentions();
+  let feedRead;
+  try {
+    feedRead = await getForkMentions();
+  } catch (err) {
+    // Every feed down before its first answer: the nodes' schedules are an independent source,
+    // served alone rather than failing /forks and /timeline with the feeds.
+    if (!nodeForkMentions().length) throw err;
+    logger.warn({ err: err.message }, 'fork feeds unavailable; serving node fork schedules alone');
+    const down = { ok: false, count: 0, filtered: false, oldest: null };
+    feedRead = { mentions: NO_FEED_MENTIONS, fetchedAt: null, feeds: { status: down, forum: down, news: down } };
+  }
+  const { mentions, fetchedAt, feeds: feedStatus } = feedRead;
   const now = Date.now();
+  const schedules = [...getNodeForkSchedules().values()];
+  // The node schedules read so far: a chain the refresher has not reached, or whose RPCs all
+  // refuse eth_config, has none.
+  const feeds = { ...feedStatus, node: { ok: true, count: schedules.filter((s) => !s.unsupported).length, unsupported: schedules.filter((s) => s.unsupported).length } };
   const forks = sortForks((await builtForks(mentions, fetchedAt)).map((f) => ({
     ...f,
     phase: forkPhase({ activationAt: f.activationAt, state: f.state, activationPrecision: f.activationPrecision }, now)

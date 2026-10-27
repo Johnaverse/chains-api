@@ -61,8 +61,12 @@ export const FORK_PHASE = Object.freeze({
  */
 export function slimFork(fork) {
   if (!fork || typeof fork !== 'object') return null;
-  const { name, network, activationAt, activationBlock, state } = fork;
+  const { name, network, activationAt, activationBlock, state, chainIds } = fork;
+  // The chains chains-client-feed's model chose for a release's fork (memberChainIds); only
+  // when it chose some.
+  const chosen = Array.isArray(chainIds) ? [...new Set(chainIds.filter(Number.isSafeInteger))] : [];
   return {
+    ...(chosen.length ? { chainIds: chosen } : {}),
     name: typeof name === 'string' && name.trim() ? name.trim() : null,
     network: typeof network === 'string' && network.trim() ? network.trim() : null,
     // ISO only: V8's Date.parse reads prose too — "Oct 6" parses as a date in 2001.
@@ -256,6 +260,12 @@ function scopesOf(event) {
     return { scopes: family.includes(forkNetwork) ? family : [forkNetwork], forkNetwork, named };
   }
   if (named.length) return { scopes: named, forkNetwork: null, named };
+  // The chains chains-client-feed's model chose for the fork, when the item names no network:
+  // ahead of the chains it declares, which for a client release are its repository's (geth's
+  // mainnet release is chain 1's, never Sepolia's too), and never left unscoped, which would
+  // fold it into the one same-named fork on another network.
+  const chosen = (event?.enrichment?.fork?.chainIds ?? []).filter(id => Number.isFinite(id));
+  if (chosen.length) return { scopes: [...new Set(chosen.map(id => `chain:${id}`))], forkNetwork: null, named };
   const chainIds = (event?.chains ?? []).map(c => c.chainId).filter(id => Number.isFinite(id));
   if (chainIds.length) return { scopes: [...new Set(chainIds.map(id => `chain:${id}`))], forkNetwork: null, named };
   // No network identity at all. Still groupable by codename, which is better than discarding
@@ -578,8 +588,11 @@ function mergeUnscoped(groups) {
  */
 function clusterUnnamed(groups) {
   const earliest = (a) => (a.times.length ? Math.min(...a.times) : Infinity);
+  // A node's schedule is one activation per fork id and second: never clustered by proximity,
+  // or a chain's active fork and its successor hours later became one completed entity. They
+  // are matched to named forks on their own (foldChainScopedIntoNamed).
   const unnamed = [...groups.values()]
-    .filter(g => g.kind !== 'name')
+    .filter(g => g.kind !== 'name' && !isNodeGroup(g))
     .map(g => ({ g, a: anchorsOf(g.members) }))
     .sort((x, y) => earliest(x.a) - earliest(y.a));
 
@@ -651,6 +664,88 @@ function mergeSameActivation(groups) {
       if (!shares(other.blocks, target.blocks) && !shares(other.times, target.times)) continue;
       target.g.scopes = [...new Set([...(target.g.scopes ?? [target.g.scope]), ...(other.g.scopes ?? [other.g.scope])])];
       mergeInto(groups, target.g, other.g);
+    }
+  }
+}
+
+/**
+ * An unnamed fork known only by its chain — a node's eth_config schedule, which gives a time
+ * and a fork id but no name — is the named fork placed on that chain at the same height or
+ * second: BSC Chapel's nodes scheduling 0xe660a57e for 2026-10-29 02:30:00 UTC is Jenner, which
+ * bnb-chain/bsc's release names for that instant. Scopes differ ("chain:97" against "bsc chapel
+ * testnet"), so the same-scope fold above never met them. The exact match first, else the only
+ * named fork on the chain within UNNAMED_MATCH_MS (Chiliz Spicy's nodes at 15:00 against a post
+ * saying 16:00 — the node's time then wins as the newest claim); never two candidates, and a
+ * day-only date never decides it. With none, it stays a fork of its own: dated, on its chain,
+ * unnamed.
+ */
+// Any node evidence makes a group node-backed: a provider notice already joined to a node
+// activation is still that one activation.
+function isNodeGroup(g) {
+  return g.members.some(m => m.event?.feed === 'node');
+}
+
+function foldChainScopedIntoNamed(groups) {
+  // A provider's maintenance window is the provider's schedule, not the network's activation.
+  const exactAnchors = (members) => {
+    const anchors = { blocks: new Set(), times: [] };
+    for (const m of members) {
+      if (isProviderWindow(m.event)) continue;
+      const { block, time } = memberAnchor(m);
+      if (block !== null) anchors.blocks.add(block);
+      if (Number.isFinite(time) && !isDateOnly(m.fork.activationAt)) anchors.times.push(time);
+    }
+    return anchors;
+  };
+  // The activation a named fork resolves to now: a node report matching a superseded claim
+  // (02:30, since moved to 03:30) must not move the fork back on its other chains. A day-only
+  // winner is no instant to match ("2026-10-29" is not midnight).
+  const winning = (g) => {
+    const best = bestActivation(g.members.map(m => ({ ...resolveForkActivation(m.fork, null), rank: sourceRank(m.event), observedAt: m.observedAt })));
+    return best?.at && best.precision !== 'day' ? Date.parse(best.at) : null;
+  };
+  const named = [...groups.values()].filter(g => g.kind === 'name').map(g => ({ g, a: exactAnchors(g.members), at: winning(g) }));
+  // Unnamed groups known by a chain: scoped to it, or node-backed under a network name (a
+  // provider notice naming BSC Chapel that already took chain 97's node report) — by the chain
+  // the node members report, since clusterUnnamed leaves node-backed groups to this fold.
+  const chainOf = (g) => {
+    if (g.scope.startsWith('chain:')) return Number(g.scope.slice('chain:'.length));
+    if (!isNodeGroup(g)) return null;
+    const ids = new Set(g.members.filter(m => m.event?.feed === 'node').flatMap(m => m.chainIds));
+    return ids.size === 1 ? [...ids][0] : null;
+  };
+  const pending = [...groups.values()].filter(g => g.kind !== 'name')
+    .map(g => ({ g, chainId: chainOf(g), anchors: exactAnchors(g.members) }))
+    .filter(p => p.chainId !== null);
+  // A named fork is one activation per chain: once a node activation joined it there, another
+  // (the chain's previous fork, hours earlier) does not.
+  const taken = new Set();
+  // Moving a fork's time is only for one placed on this chain alone: an announcement giving
+  // chains 1 and 97 the same instant must not move chain 1's because chain 97's nodes differ.
+  const onlyHere = (g, chainId) => g.members.every(m => m.chainIds.every(id => id === chainId));
+  const candidatesOf = (p, exactPass) => named.filter(x => groups.has(x.g.key) && !taken.has(`${x.g.key}@${p.chainId}`)
+    && x.g.members.some(m => m.chainIds.includes(p.chainId)))
+    .map(x => ({ g: x.g, at: x.at, d: anchorDistance(p.anchors, x.a) }))
+    // On a fork other chains share, only its current activation is matched: anything else
+    // would move theirs too.
+    .filter(x => (onlyHere(x.g, p.chainId) ? (exactPass ? x.d === 0 : x.d === 1)
+      : exactPass && x.at !== null && p.anchors.times.includes(x.at)));
+  // Exact matches first, so a near one never takes the fork an exact one names.
+  for (const exactPass of [true, false]) {
+    const live = pending.filter(p => groups.has(p.g.key));
+    const claims = live.map(p => ({ p, targets: candidatesOf(p, exactPass) }));
+    // Near, a fork two of a chain's node activations could both be (the active fork at 00:30
+    // and its successor at 02:30, Jenner announced for 03:30) is neither's: proximity cannot say.
+    const claimants = new Map();
+    for (const { p, targets } of claims) {
+      for (const t of targets) claimants.set(`${t.g.key}@${p.chainId}`, (claimants.get(`${t.g.key}@${p.chainId}`) ?? 0) + 1);
+    }
+    for (const { p, targets } of claims) {
+      if (targets.length !== 1 || !groups.has(p.g.key)) continue;
+      const slot = `${targets[0].g.key}@${p.chainId}`;
+      if (taken.has(slot) || (!exactPass && claimants.get(slot) > 1)) continue;
+      taken.add(slot);
+      mergeInto(groups, targets[0].g, p.g);
     }
   }
 }
@@ -748,9 +843,14 @@ function collapseIdentical(groups) {
  * With no forking network named, the post's chains are kept and the scope's own resolution is
  * added: a HyperEVM window that declares no chain is still a chain 999 fork.
  */
-function memberChainIds({ event, scope, forkNetwork, named, eventChainIds, chainIdsFor, chainNamesFor, repoChainIdsFor }) {
-  const ids = namedChainIds({ scope, forkNetwork, named, eventChainIds, chainIdsFor, chainNamesFor });
+function memberChainIds({ event, fork, scope, forkNetwork, named, eventChainIds, chainIdsFor, chainNamesFor, repoChainIdsFor }) {
   const repo = releaseRepoOf(event);
+  // The client feed's model chose this fork's chains from the networks its repository runs,
+  // reasoning from the notes, the repository and the fork ("BSC Chapel testnet" from
+  // bnb-chain/bsc is 97): the closest reading there is, ahead of matching names to the registry.
+  const chosen = repo && Array.isArray(fork?.chainIds) ? fork.chainIds.filter(Number.isFinite) : [];
+  if (chosen.length) return { chainIds: [...new Set(chosen)], fallback: false };
+  const ids = namedChainIds({ scope, forkNetwork, named, eventChainIds, chainIdsFor, chainNamesFor });
   if (ids.length || !repo || scope.startsWith('chain:')) return { chainIds: ids, fallback: false };
   // Nothing the names say places it: a client release is still about the chains its repository
   // runs, and the network it names picks among those ("BSC Chapel Testnet" from bnb-chain/bsc).
@@ -764,7 +864,7 @@ function memberChainIds({ event, scope, forkNetwork, named, eventChainIds, chain
   // chain 2039 "Aleph Zero"): a dated fork on no chain is missing from every history. Only then
   // — "one testnet" from some client is not Harmony's "one", nor a news post's "Ethereum
   // devnet" Ethereum mainnet.
-  const tested = scope.split(' ').filter((w) => !isTestNetworkWord(w) && w !== 'devnet');
+  const tested = scope.split(' ').filter((w) => !isTestNetworkWord(w));
   const repoWords = new Set(nameWordsOf(repo.replace(/^[a-z]+:/, '')));
   if (!tested.length || tested.length === scope.split(' ').length || !tested.some((w) => repoWords.has(w))) return { chainIds: [], fallback: false };
   return { chainIds: chainIdsFor?.(tested.join(' ')) ?? [], fallback: true };
@@ -879,7 +979,7 @@ export async function buildForks(events = [], { tipFor = null, chainIdsFor = nul
     for (const scope of scopes) {
       const group = forkGroup(fork, scope);
       if (!group) continue;
-      const { chainIds, fallback } = memberChainIds({ event, scope, forkNetwork, named, eventChainIds, chainIdsFor, chainNamesFor, repoChainIdsFor });
+      const { chainIds, fallback } = memberChainIds({ event, fork: raw, scope, forkNetwork, named, eventChainIds, chainIdsFor, chainNamesFor, repoChainIdsFor });
       if (!groups.has(group.key)) groups.set(group.key, { ...group, scope, members: [] });
       groups.get(group.key).members.push({ event, fork, chainIds, scope, observedAt, ...(fallback ? { placedByRepository: true } : {}) });
     }
@@ -890,6 +990,7 @@ export async function buildForks(events = [], { tipFor = null, chainIdsFor = nul
   clusterUnnamed(groups);
   collapseIdentical(groups);
   mergeSameActivation(groups);
+  foldChainScopedIntoNamed(groups);
   mergeUnplacedIntoPlaced(groups);
 
   const forks = [];

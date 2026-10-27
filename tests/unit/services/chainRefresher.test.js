@@ -16,6 +16,10 @@ vi.mock('../../../src/store/rpcHealthStore.js', async (importOriginal) => {
   return { ...actual, persistChainRpcHealth: vi.fn(() => Promise.resolve()) };
 });
 
+vi.mock('../../../src/sources/nodeForkSchedule.js', () => ({
+  refreshNodeForkSchedule: vi.fn(() => Promise.resolve(null))
+}));
+
 vi.mock('../../../config.js', () => ({
   RPC_CHECK_TIMEOUT_MS: 5000,
   RPC_CHECK_CONCURRENCY: 8,
@@ -32,6 +36,7 @@ vi.mock('../../../config.js', () => ({
 
 import { fetchL2Beat } from '../../../src/sources/l2beat.js';
 import { jsonRpcCall } from '../../../rpcUtil.js';
+import { refreshNodeForkSchedule } from '../../../src/sources/nodeForkSchedule.js';
 import { persistChainRpcHealth } from '../../../src/store/rpcHealthStore.js';
 import { applyDataToCache, cachedData } from '../../../src/store/cache.js';
 import { isPrivateRpc, _resetPrivateRpcsForTests } from '../../../src/store/privateRpcStore.js';
@@ -258,6 +263,22 @@ describe('chainRefresher', () => {
       vi.useRealTimers();
       expect(Date.parse(cachedData.rpcHealth[1][0].unansweredSince)).toBeGreaterThan(Date.parse('2026-01-01T00:00:00.000Z'));
     });
+
+  it('reads the node fork schedule only from endpoints that served blocks in this pass', async () => {
+    seedCacheWith([seedChain(1, ['https://rpc-a.example'])]);
+    jsonRpcCall.mockResolvedValueOnce('Geth/v1.0').mockResolvedValueOnce('0x10');
+    await processChainRpc(1);
+    expect(refreshNodeForkSchedule).toHaveBeenLastCalledWith(1, ['https://rpc-a.example']);
+
+    // The provider rate-limits us: backed off, its endpoint keeps its earlier healthy result,
+    // and is not sent eth_config either.
+    jsonRpcCall.mockRejectedValue(Object.assign(new Error('HTTP 429'), { kind: 'rate_limited', status: 429 }));
+    await processChainRpc(1);
+    cachedData.rpcHealth[1] = [{ url: 'https://rpc-a.example', ok: true, blockHeight: 16 }];
+    await processChainRpc(1);
+    expect(cachedData.rpcHealth[1][0].ok).toBe(true);
+    expect(refreshNodeForkSchedule).toHaveBeenLastCalledWith(1, []);
+  });
 
   describe('ensureChainRpcResults (on-demand probe)', () => {
     it('returns true without probing when results already exist', async () => {

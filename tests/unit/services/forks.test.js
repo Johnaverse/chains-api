@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { getForks, _resetForksMemoForTests, qualifyBareNetwork } from '../../../src/services/forks.js';
 import { getForkMentions } from '../../../src/sources/forkFeeds.js';
+import { _setNodeForkScheduleForTests, _resetNodeForkSchedulesForTests } from '../../../src/sources/nodeForkSchedule.js';
 import { getExplorerTip } from '../../../src/sources/blockscout.js';
 import { getAllChains } from '../../../src/store/queries.js';
 import { KIND_REGISTRY } from '../../fixtures/structuralWords.js';
@@ -35,6 +36,19 @@ describe('getForks', () => {
     getAllChains.mockReturnValue([]);
     getRepositoryChains.mockReturnValue(new Map());
     fetchedAt = '2026-08-15T00:00:00.000Z';
+  });
+
+  it('serves the nodes\' fork schedules when every feed is down', async () => {
+    getForkMentions.mockRejectedValue(new Error('Fork feeds unavailable: status: down'));
+    await expect(getForks()).rejects.toThrow('Fork feeds unavailable');
+    _setNodeForkScheduleForTests(97, { checkedAt: Date.parse('2026-08-15T00:00:00Z'), url: 'https://rpc', current: { activationTime: 1784601000, forkId: '0x5203e674' }, next: { activationTime: 4102444800, forkId: '0xe660a57e' }, last: null, nextSince: Date.parse('2026-08-15T00:00:00Z') });
+    try {
+      const out = await getForks();
+      expect(out.forks.map(f => f.chains)).toEqual([[97], [97]]);
+      expect(out.feeds).toMatchObject({ status: { ok: false }, node: { ok: true, count: 1 } });
+    } finally {
+      _resetNodeForkSchedulesForTests();
+    }
   });
 
   it('groups a fork across sources and reports where it came from', async () => {
@@ -450,6 +464,24 @@ describe('getForks', () => {
     it('keeps a bare "Testnet" for picking among the repository\'s chains', async () => {
       const forks = await placed(release('a', 'github:gluwa/creditcoin3', 'Testnet', 'OsakaBare'));
       expect(on(forks, 'OsakaBare')).toEqual([102031]);
+    });
+
+    it('takes the chains the client feed\'s model chose from the repository\'s networks first', async () => {
+      const chose = (id, repo, network, name, chainIds) => {
+        const m = release(id, repo, network, name);
+        return { ...m, enrichment: { ...m.enrichment, fork: { ...m.enrichment.fork, chainIds } } };
+      };
+      const forks = await placed(
+        // A Lighthouse release naming no network is ambiguous between 1 and 100 by words alone;
+        // the model read the notes ("Mainnet release for Fusaka") with the repository's list.
+        chose('a', 'github:sigp/lighthouse', null, 'Q2', [1]),
+        chose('c', 'github:morph-l2/morph', 'Hoodi Testnet', 'Celadon', [2810]),
+        // [] (the model could not tell) leaves the other evidence to decide.
+        chose('b', 'github:gluwa/creditcoin3', 'Creditcoin3 Devnet', 'OsakaDev2', [])
+      );
+      expect(on(forks, 'Q2')).toEqual([1]);
+      expect(on(forks, 'Celadon')).toEqual([2810]);
+      expect(on(forks, 'OsakaDev2')).toEqual([102032]);
     });
 
     it('does not read a bare test qualifier as a network among a widely run client\'s chains', async () => {

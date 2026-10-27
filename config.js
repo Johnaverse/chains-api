@@ -55,6 +55,10 @@ export const RPC_CHECK_TIMEOUT_MS = parseIntEnv('RPC_CHECK_TIMEOUT_MS', 8000);
  */
 export const RPC_CHECK_CONCURRENCY = parseIntEnv('RPC_CHECK_CONCURRENCY', 8);
 export const MAX_ENDPOINTS_PER_CHAIN = parseIntEnv('MAX_ENDPOINTS_PER_CHAIN', 5);
+// How often a chain's node fork schedule (eth_config, EIP-7910) is re-read from a working RPC,
+// and how long a chain none of whose RPCs answers it waits before it is asked again.
+export const NODE_FORK_SCHEDULE_REFRESH_MS = parseIntEnv('NODE_FORK_SCHEDULE_REFRESH_MS', 6 * 60 * 60 * 1000);
+export const NODE_FORK_SCHEDULE_RETRY_MS = parseIntEnv('NODE_FORK_SCHEDULE_RETRY_MS', 24 * 60 * 60 * 1000);
 
 // Search
 export const MAX_SEARCH_QUERY_LENGTH = parseIntEnv('MAX_SEARCH_QUERY_LENGTH', 200);
