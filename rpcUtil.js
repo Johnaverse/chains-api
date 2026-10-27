@@ -15,6 +15,14 @@ import { proxyFetch } from './fetchUtil.js';
  */
 export const NO_ANSWER_FAILURES = new Set(['unreachable', 'timeout', 'tls_error']);
 
+// A refusal that is about the caller's volume, not the endpoint: "rate limit exceeded",
+// "too many requests", "usage limit", "try again", "not able to process your request at this
+// time" (thirdweb, under a sweep's load). Each 429-equivalent is reworded per provider, so the
+// test is on the wording's meaning rather than on any provider's text.
+const THROTTLED = /rate.?limit|too many requests|usage limit|limit exceeded|try again|at this time|capacity|throttl/i;
+// EIP-1474 "Limit exceeded".
+const LIMIT_EXCEEDED = -32005;
+
 /**
  * What kind of failure this was, from the error itself, so a caller can tell an endpoint that is
  * gone (its name no longer resolves, nothing listens) from one that answered with an error.
@@ -70,8 +78,9 @@ export async function jsonRpcCall(url, method, { params = [], timeoutMs = 10000 
     if (body.error) {
       const message = body.error.message || JSON.stringify(body.error);
       const rpcError = new Error(message);
-      // The node answered: it is up, it just refused this method or request.
-      rpcError.kind = 'rpc_error';
+      // The node answered: it is up, it just refused this method or request — or refused US
+      // for now, which says nothing about the endpoint (see THROTTLED).
+      rpcError.kind = THROTTLED.test(message) || body.error.code === LIMIT_EXCEEDED ? 'rate_limited' : 'rpc_error';
       throw rpcError;
     }
 

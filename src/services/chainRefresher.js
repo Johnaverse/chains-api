@@ -72,6 +72,47 @@ let rpcState = {
   endpointsCheckedThisSweep: 0
 };
 
+// ───────────────────────── provider back-off ─────────────────────────
+
+// A sweep reaches one provider hundreds of times — thirdweb serves `<chainId>.rpc.thirdweb.com`
+// for ~700 chains — and providers start refusing us partway through. Those refusals were
+// recorded as ~1,200 failed endpoints that answered fine on their own. Once a provider limits
+// us, its endpoints are not probed again until a back-off passes (doubling while it keeps
+// refusing); each keeps its last result meanwhile, so a refusal never reads as an outage.
+const THROTTLE_BACKOFF_MS = 10 * 60 * 1000;
+const THROTTLE_BACKOFF_MAX_MS = 60 * 60 * 1000;
+const throttledProviders = new Map(); // provider -> { until, backoffMs }
+
+/** The provider behind a URL: its registrable domain, so per-chain subdomains count as one. */
+export function providerOf(url) {
+  let host;
+  try { host = new URL(url).hostname.toLowerCase(); } catch { return null; }
+  if (/^[\d.]+$/.test(host) || host.includes(':')) return host;
+  const labels = host.split('.');
+  // "example.co.uk": a two-letter country code under a short second level keeps three labels.
+  const keep = labels.length > 2 && labels.at(-1).length === 2 && labels.at(-2).length <= 3 ? 3 : 2;
+  return labels.slice(-keep).join('.');
+}
+
+function isThrottled(url, now) {
+  const entry = throttledProviders.get(providerOf(url));
+  return Boolean(entry && entry.until > now);
+}
+
+function noteProviderResponses(results, now) {
+  for (const r of results) {
+    const provider = providerOf(r.url);
+    if (!provider) continue;
+    if (r.failure === 'rate_limited') {
+      const prev = throttledProviders.get(provider);
+      const backoffMs = prev ? Math.min(prev.backoffMs * 2, THROTTLE_BACKOFF_MAX_MS) : THROTTLE_BACKOFF_MS;
+      throttledProviders.set(provider, { until: now + backoffMs, backoffMs });
+    } else if (r.ok) {
+      throttledProviders.delete(provider);
+    }
+  }
+}
+
 // ───────────────────────── job processors ─────────────────────────
 
 function normalizeRpcUrl(rpcEntry) {
@@ -171,10 +212,20 @@ export async function processChainRpc(chainId) {
     .slice(0, MAX_ENDPOINTS_PER_CHAIN);
   if (urls.length === 0) return;
 
+  const startedAt = Date.now();
+  const deferred = new Set(urls.filter(u => isThrottled(u, startedAt)));
   rpcState.isMonitoring = true;
-  const results = await Promise.all(urls.map(checkRpcEndpoint));
+  const probed = await Promise.all(urls.filter(u => !deferred.has(u)).map(checkRpcEndpoint));
   rpcState.isMonitoring = false;
-  rpcState.endpointsCheckedThisSweep += results.length;
+  noteProviderResponses(probed, Date.now());
+  const previousByUrl = new Map((cachedData.rpcHealth?.[chainId] ?? []).map(r => [r.url, r]));
+  const probedByUrl = new Map(probed.map(r => [r.url, r]));
+  const results = urls.map(u => probedByUrl.get(u) ?? previousByUrl.get(u) ?? {
+    url: u, ok: false, clientVersion: null, blockHeight: null,
+    error: 'Not checked yet: the provider is limiting our checks', failure: 'rate_limited'
+  });
+  if (deferred.size > 0) incCounter('chains_api_rpc_check_total', { outcome: 'deferred' }, deferred.size);
+  rpcState.endpointsCheckedThisSweep += probed.length;
 
   // A 401/403 is a fact about the URL, not about this data version, so record and apply it
   // before the race guard: a refresh landing mid-probe must not cost us the finding.
@@ -221,7 +272,7 @@ export async function processChainRpc(chainId) {
     persistChainRpcHealth(chainId, publicResults).catch(() => {});
   }
 
-  incCounter('chains_api_rpc_check_total', { outcome: 'completed' }, results.length);
+  incCounter('chains_api_rpc_check_total', { outcome: 'completed' }, probed.length);
 }
 
 // On-demand checks triggered by /rpc-monitor/:id (and the MCP tool) when the
@@ -434,6 +485,7 @@ export function _resetChainRefresherForTests() {
   tickInFlight = false;
   lastTickAt = null;
   lastTickJobType = null;
+  throttledProviders.clear();
   l2beatState = { lastRefreshAt: null, lastRefreshSource: null, lastRefreshProjectCount: 0, lastRefreshError: null };
   rpcState = { isMonitoring: false, lastSweepCompletedAt: null, endpointsCheckedThisSweep: 0 };
   onDemandInFlight = new Map();

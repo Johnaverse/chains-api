@@ -860,8 +860,8 @@ Validate chain data for potential human errors across all three data sources.
 
 This endpoint analyzes the chain data and identifies potential inconsistencies or errors based on the following rules:
 
-1. **Rule 1 - Relation Conflicts**: Assumes graph relations are always true and finds conflicts with other sources
-2. **Rule 2 - slip44/Testnet Mismatch**: Chains with slip44=1 but isTestnet=false
+1. **Rule 1 - Relation Conflicts**: Assumes graph relations are always true and finds conflicts with the chain's tags
+2. **Rule 2 - Mainnet or Testnet, Sources Disagree**: every source's claim — The Graph `networkType` / `testnetOf`, a `parent.type: "testnet"` (stated), the name's "Testnet"/"Mainnet" (name), `slip44: 1` and chainlist `isTestnet` (hints) — with `source`, `field`, `value` and what it `said`. The Testnet tag follows the strongest claim (`resolved`, `decidedBy`); `contested: true` means claims of equal strength disagree and the tag is only a default (32 on 2026-10-27, e.g. Morph, Superseed: slip44=1 vs chainlist `isTestnet: false`). World Chain, Plume and ~25 other mainnets with slip44=1 are no longer tagged Testnet.
 3. **Rule 3 - Name/Tag Mismatch**: Chain full names containing "Testnet" or "Devnet" but not tagged as Testnet
 4. **Rule 4 - Named After a Test Network**: Chains whose name contains another testnet's own registry id or alias ("Base Sepolia" → Ethereum Sepolia's `sepolia`) but are not tagged L2 and have no relations. Which words name a test network is read from the registry, not a list.
 5. **Rule 5 - Status Conflicts**: Deprecated status conflicts across different sources
@@ -869,8 +869,9 @@ This endpoint analyzes the chain data and identifies potential inconsistencies o
 7. Rules 7–17: L2BEAT classification, RPC block-height drift, name / currency / SLIP-44 disagreements, RPC URLs in one source only, active children of deprecated parents.
 18. **Rule 18 - No RPC Answers, Not Deprecated**: every listed endpoint has failed with nothing answering (`unreachable`, `timeout`, `tls_error`) for at least `RPC_DEAD_AFTER_MS` (3 days; each endpoint's `unansweredSince` runs across consecutive silent checks and restarts on any answer) and no source calls the network dead — dead and unmarked upstream, or its endpoints moved. An endpoint that answered at all (rate limit, HTTP error, a refused method, a client version without a block) does not count as gone, nor does a reset connection or an unrecognised error, which may be on our side.
 19. **Rule 19 - Deprecated But an RPC Answers**: a deprecated chain with an endpoint still serving blocks.
+20. **Rule 20 - One Chain ID, Different Networks**: the sources describe different networks under one ID (names with no word in common AND different native symbols). The record is built only from the sources that agree — the larger group, else chains.json, then The Graph, then chainlist — and the others are left out of it entirely (no name, RPCs, type or tags), listed with `kept`, `excluded` and each source's `identities` (`name`, `symbol`). 12 on 2026-10-27: 999 is HyperEVM in chainlist and The Graph but Wanchain Testnet in chains.json; 222 is Permission in chains.json but OPN Chain in chainlist.
 
-RPC health records each failed endpoint's `failure` kind (`unreachable` / `timeout` / `tls_error` / `connection_error` / `rate_limited` / `http_error` / `rpc_error` / `invalid_response` / `answered_no_block` / `unknown` / `private_address`). `private_address` means the endpoint's hostname resolves to a non-public address, so it is never probed: registry URLs are community-submitted, and the same check guards the chain-halt probe and the Blockscout explorer reader., and an endpoint serving blocks counts as working even when it disables `web3_clientVersion`.
+RPC health records each failed endpoint's `failure` kind. A provider that refuses our volume (HTTP 429, EIP-1474 `-32005`, or an error worded as a limit or "try again") is `rate_limited`: its endpoints are reported with status `rate_limited` — neither working nor failed, and left out of `healthPercent` — and that provider (registrable domain, so thirdweb's per-chain hosts count as one) is not probed again for 10 minutes, doubling to an hour while it keeps refusing, with each endpoint keeping its last result meanwhile. Failure kinds: `unreachable` / `timeout` / `tls_error` / `connection_error` / `rate_limited` / `http_error` / `rpc_error` / `invalid_response` / `answered_no_block` / `unknown` / `private_address`. `private_address` means the endpoint's hostname resolves to a non-public address, so it is never probed: registry URLs are community-submitted, and the same check guards the chain-halt probe and the Blockscout explorer reader. An endpoint serving blocks counts as working even when it disables `web3_clientVersion`.
 
 **Response:**
 ```json
@@ -886,7 +887,7 @@ RPC health records each failed endpoint's `failure` kind (`unreachable` / `timeo
   },
   "errorsByRule": {
     "rule1_relation_conflicts": [...],
-    "rule2_slip44_testnet_mismatch": [...],
+    "rule2_network_type_claims_conflict": [...],
     "rule3_name_testnet_mismatch": [...],
     "rule4_test_network_no_relation": [...],
     "rule5_status_conflicts": [...],

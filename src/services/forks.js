@@ -77,6 +77,11 @@ function chainResolver(chains) {
   };
 }
 
+function chainNamesLookup(chains) {
+  const byId = new Map(chains.filter((c) => Number.isFinite(c?.chainId)).map((c) => [c.chainId, chainNames(c)]));
+  return (chainId) => byId.get(chainId) ?? [];
+}
+
 // A fork network that is only a qualifier: "Mainnet", "Testnet". Release notes write it
 // because the repository already says which network — Forest's notes put Filecoin's Solstice
 // on "Mainnet", Heimdall's put Polygon's Lugano there — and as a scope it resolved through the
@@ -150,7 +155,7 @@ async function builtForks(mentions, fetchedAt) {
   // Which words name a test network comes from the registry (networkWords.js).
   learnNetworkWords(chains);
   const byId = new Map(chains.map((c) => [c.chainId, c]));
-  const forks = (await buildForks(mentions.map((m) => qualifyBareNetwork(m, byId)), { tipFor, chainIdsFor: chainResolver(chains) })).map(present);
+  const forks = (await buildForks(mentions.map((m) => qualifyBareNetwork(m, byId)), { tipFor, chainIdsFor: chainResolver(chains), chainNamesFor: chainNamesLookup(chains) })).map(present);
   // What the feeds show about which names are one fork: read by the timeline and latest release.
   learnForkNames(forks);
   memo = { mentions, fetchedAt, chains, forks };

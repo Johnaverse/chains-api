@@ -299,9 +299,12 @@ export async function adminRoutes(fastify) {
 
     const rpcWorking = monitorResults.workingEndpoints;
     const rpcFailed = monitorResults.failedEndpoints || 0;
+    const rpcRateLimited = monitorResults.rateLimitedEndpoints || 0;
     const rpcTested = monitorResults.testedEndpoints;
-    const rpcHealthPercent = rpcTested > 0
-      ? Math.round((rpcWorking / rpcTested) * 10000) / 100
+    // Over the endpoints with a verdict: one a provider is throttling us on has none.
+    const rpcJudged = rpcWorking + rpcFailed;
+    const rpcHealthPercent = rpcJudged > 0
+      ? Math.round((rpcWorking / rpcJudged) * 10000) / 100
       : null;
 
     return {
@@ -318,6 +321,7 @@ export async function adminRoutes(fastify) {
         tested: rpcTested,
         working: rpcWorking,
         failed: rpcFailed,
+        rateLimited: rpcRateLimited,
         healthPercent: rpcHealthPercent
       },
       lastUpdated: monitorResults.lastUpdated

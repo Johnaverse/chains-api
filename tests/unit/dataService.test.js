@@ -654,7 +654,8 @@ describe('indexData', () => {
     expect(result).toEqual({
       byChainId: {},
       byName: {},
-      all: []
+      all: [],
+      identityConflicts: []
     });
   });
 
@@ -1833,7 +1834,7 @@ describe('validateChainData', () => {
     // the Testnet tag when processing testnetOf relations from theGraph
   });
 
-  it('should detect Rule 1: testnetOf relation conflicts with chainlist isTestnet=false', async () => {
+  it('should list every source\'s claim when theGraph says testnet and chainlist says not (rule 2)', async () => {
     const mockTheGraph = {
       networks: [
         { id: 'mainnet', caip2Id: 'eip155:1' },
@@ -1862,10 +1863,15 @@ describe('validateChainData', () => {
     const result = validateChainData();
 
     expect(result.error).toBeUndefined();
-    const rule1Errors = result.errorsByRule.rule1_relation_conflicts;
-    const sourceConflict = rule1Errors.find(e => e.type === 'relation_source_conflict');
-    expect(sourceConflict).toBeDefined();
-    expect(sourceConflict.message).toContain('isTestnet=false in chainlist');
+    const conflict = result.errorsByRule.rule2_network_type_claims_conflict.find(e => e.chainId === 11155111);
+    expect(conflict).toMatchObject({
+      type: 'network_type_claims_conflict',
+      resolved: 'testnet',
+      decidedBy: { source: 'theGraph', field: 'relations' },
+      contested: false
+    });
+    expect(conflict.claims).toContainEqual({ source: 'chainlist', field: 'isTestnet', value: 'mainnet', said: false });
+    expect(conflict.message).toContain('chainlist isTestnet');
   });
 
   it.skip('should detect Rule 1: l2Of relation without L2 tag', () => {
@@ -1873,7 +1879,7 @@ describe('validateChainData', () => {
     // the L2 tag when processing l2Of relations from theGraph
   });
 
-  it('should detect Rule 2: slip44=1 with isTestnet=false in chainlist', async () => {
+  it('should flag slip44=1 against chainlist isTestnet=false as contested (rule 2)', async () => {
     const mockTheGraph = { networks: [] };
     const mockChainlist = [
       { chainId: 5, name: 'Goerli', slip44: 1, isTestnet: false }
@@ -1892,12 +1898,11 @@ describe('validateChainData', () => {
     const result = validateChainData();
 
     expect(result.error).toBeUndefined();
-    const rule2Errors = result.errorsByRule.rule2_slip44_testnet_mismatch;
-    expect(rule2Errors.length).toBeGreaterThan(0);
-    const slip44Error = rule2Errors.find(e => e.chainId === 5);
-    expect(slip44Error).toBeDefined();
-    expect(slip44Error.message).toContain('slip44=1');
-    expect(slip44Error.message).toContain('isTestnet=false');
+    const slip44Error = result.errorsByRule.rule2_network_type_claims_conflict.find(e => e.chainId === 5);
+    // Two hints of equal weight: the tag keeps the test-network default, and says it is one.
+    expect(slip44Error).toMatchObject({ resolved: 'testnet', decidedBy: { source: 'chainlist', field: 'slip44' }, contested: true });
+    expect(slip44Error.claims.map(c => `${c.source}.${c.field}=${c.value}`).sort())
+      .toEqual(['chainlist.isTestnet=mainnet', 'chainlist.slip44=testnet']);
   });
 
   it.skip('should detect Rule 2: slip44=1 without Testnet tag in chains.json', () => {
@@ -1908,7 +1913,8 @@ describe('validateChainData', () => {
   it('should detect Rule 3: name contains "Testnet" but not tagged', async () => {
     const mockTheGraph = {
       networks: [
-        { id: 'ropsten', caip2Id: 'eip155:3', fullName: 'Ethereum Testnet Ropsten' }
+        // Stated mainnet outranks the name, so the name's "Testnet" stands out.
+        { id: 'ropsten', caip2Id: 'eip155:3', fullName: 'Ethereum Testnet Ropsten', networkType: 'mainnet' }
       ]
     };
     const mockChainlist = [
@@ -1938,7 +1944,7 @@ describe('validateChainData', () => {
   it('should detect Rule 3: name contains "Devnet" but not tagged', async () => {
     const mockTheGraph = {
       networks: [
-        { id: 'devnet', caip2Id: 'eip155:999', fullName: 'My Devnet Chain' }
+        { id: 'devnet', caip2Id: 'eip155:999', fullName: 'My Devnet Chain', networkType: 'mainnet' }
       ]
     };
     const mockChainlist = [
@@ -2125,11 +2131,8 @@ describe('validateChainData', () => {
     expect(result.error).toBeUndefined();
     expect(result.totalErrors).toBeGreaterThan(0);
 
-    // Rule 1: testnetOf with isTestnet=false conflict
-    expect(result.errorsByRule.rule1_relation_conflicts.length).toBeGreaterThan(0);
-
-    // Rule 2: slip44=1 with isTestnet=false
-    expect(result.errorsByRule.rule2_slip44_testnet_mismatch.length).toBeGreaterThan(0);
+    // Rule 2: theGraph's testnetOf and slip44=1 against chainlist's isTestnet=false
+    expect(result.errorsByRule.rule2_network_type_claims_conflict.length).toBeGreaterThan(0);
 
     // Rule 5: status conflict
     expect(result.errorsByRule.rule5_status_conflicts.length).toBeGreaterThan(0);

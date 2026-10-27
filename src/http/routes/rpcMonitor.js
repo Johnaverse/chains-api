@@ -45,6 +45,7 @@ export async function rpcMonitorRoutes(fastify) {
 
     const workingCount = chainResults.filter(r => r.status === 'working').length;
     const failedCount = chainResults.filter(r => r.status === 'failed').length;
+    const rateLimitedCount = chainResults.filter(r => r.status === 'rate_limited').length;
 
     return {
       chainId,
@@ -52,6 +53,7 @@ export async function rpcMonitorRoutes(fastify) {
       totalEndpoints: chainResults.length,
       workingEndpoints: workingCount,
       failedEndpoints: failedCount,
+      rateLimitedEndpoints: rateLimitedCount,
       lastUpdated: results.lastUpdated,
       endpoints: chainResults,
       clients: summarizeChainClients(chainResults)?.clients ?? []

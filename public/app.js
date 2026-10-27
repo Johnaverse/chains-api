@@ -1547,7 +1547,7 @@ function renderOverviewStats() {
         }),
         statTile({
             label: 'Data conflicts', value: state.validate ? fmtNum(state.validate.totalErrors) : '—',
-            sub: state.validate ? 'across 19 validation rules' : '',
+            sub: state.validate ? `across ${Object.keys(RULE_LABELS).length} validation rules` : '',
             tone: !state.validate ? '' : state.validate.totalErrors > 500 ? 'warn' : '',
             hint: 'Disagreements between the five upstream sources found by the API validation rules. These are metadata conflicts, not service failures.'
         })
@@ -1860,7 +1860,7 @@ function paintConcentration(host, sorted, parts) {
 // ── Data quality ────────────────────────────────────────────────────────
 const RULE_LABELS = {
     rule1: 'Conflicting relations between sources',
-    rule2: 'SLIP-44 coin type on a testnet',
+    rule2: 'Sources disagree: mainnet or testnet',
     rule3: 'Name says testnet but the tag disagrees',
     rule4: 'Test-network chain with no relation',
     rule5: 'Lifecycle status conflicts',
@@ -1877,7 +1877,8 @@ const RULE_LABELS = {
     rule16: 'RPC URL present in only one source',
     rule17: 'Active chain under a deprecated parent',
     rule18: 'No RPC endpoint answers, not deprecated',
-    rule19: 'Deprecated, but an RPC still answers'
+    rule19: 'Deprecated, but an RPC still answers',
+    rule20: 'One chain ID, different networks'
 };
 
 function renderDataQuality() {
@@ -1911,10 +1912,11 @@ function renderDataQuality() {
         ]));
     }
     host.appendChild(list);
-    const clean = 17 - rules.length;
+    const ruleCount = Object.keys(RULE_LABELS).length;
+    const clean = ruleCount - rules.length;
     host.appendChild(el('p', {
         class: 'note',
-        text: `${clean} of 19 rules found nothing. These are disagreements between upstream sources — most are metadata noise, but block-height drift and status conflicts are worth reading.`
+        text: `${clean} of ${ruleCount} rules found nothing. These are disagreements between upstream sources — most are metadata noise, but block-height drift and status conflicts are worth reading.`
     }));
 }
 

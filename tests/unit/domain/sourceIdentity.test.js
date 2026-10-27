@@ -1,0 +1,47 @@
+import { resolveIdentity, findIdentityConflicts } from '../../../src/domain/sourceIdentity.js';
+
+const chains = (chainId, name, symbol) => ({ chainId, name, nativeCurrency: symbol ? { symbol } : undefined });
+const graph = (chainId, fullName, nativeToken, extra = {}) => ({ id: fullName.toLowerCase().replace(/\s+/g, '-'), caip2Id: `eip155:${chainId}`, fullName, nativeToken, ...extra });
+
+describe('sourceIdentity', () => {
+  it('builds a chain ID shared by two networks from the sources that agree, and names the one left out', () => {
+    // Real case: 999 is Wanchain Testnet in chains.json and HyperEVM in chainlist and The Graph.
+    const out = resolveIdentity({
+      chains: chains(999, 'Wanchain Testnet', 'WAN'),
+      chainlist: chains(999, 'HyperEVM', 'HYPE'),
+      theGraph: graph(999, 'HyperEVM Mainnet', 'HYPE')
+    });
+    expect(out.kept).toEqual(['theGraph', 'chainlist']);
+    expect(out.excluded).toEqual(['chains']);
+    expect(out.identities).toEqual({
+      chains: { name: 'Wanchain Testnet', symbol: 'WAN' },
+      theGraph: { name: 'HyperEVM Mainnet', symbol: 'HYPE' },
+      chainlist: { name: 'HyperEVM', symbol: 'HYPE' }
+    });
+  });
+
+  it('keeps the registry of record on a one-to-one disagreement', () => {
+    // Real case: 222 is "Permission" in chains.json and "OPN Chain Mainnet" in chainlist.
+    const out = resolveIdentity({ chains: chains(222, 'Permission', 'ASK'), chainlist: chains(222, 'OPN Chain Mainnet', 'IOPN') });
+    expect(out).toMatchObject({ kept: ['chains'], excluded: ['chainlist'] });
+  });
+
+  it('does not call a rename, a shared symbol or a bare entry a different network', () => {
+    // HSKChain / Hashkey Chain: no shared word, same symbol.
+    expect(resolveIdentity({ chains: chains(177, 'HSKChain', 'HSK'), theGraph: graph(177, 'Hashkey Chain Mainnet', 'HSK') })).toBeNull();
+    // A shared word, different symbols (a token rename).
+    expect(resolveIdentity({ chains: chains(88, 'Viction', 'VIC'), chainlist: chains(88, 'Viction Mainnet', 'TOMO') })).toBeNull();
+    // Too little to compare: no symbol on one side, or only structural words.
+    expect(resolveIdentity({ chains: chains(5, 'Alpha', 'A'), chainlist: chains(5, 'Beta') })).toBeNull();
+    expect(resolveIdentity({ chains: chains(6, 'Devnet', 'X'), chainlist: chains(6, 'Testnet Network', 'Y') })).toBeNull();
+  });
+
+  it('finds conflicts across the raw payloads, by EVM chain ID', () => {
+    const conflicts = findIdentityConflicts({
+      chains: [chains(1, 'Ethereum Mainnet', 'ETH'), chains(222, 'Permission', 'ASK')],
+      chainlist: [chains(1, 'Ethereum', 'ETH'), chains(222, 'OPN Chain Mainnet', 'IOPN')],
+      theGraph: { networks: [graph(1, 'Ethereum Mainnet', 'ETH'), { id: 'solana', caip2Id: 'solana:5eyk', fullName: 'Solana' }] }
+    });
+    expect([...conflicts.keys()]).toEqual([222]);
+  });
+});

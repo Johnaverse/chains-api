@@ -97,7 +97,7 @@ vi.mock('../../dataService.js', async () => {
       totalErrors: 5,
       errorsByRule: {
         rule1_relation_conflicts: [{ rule: 1, chainId: 1, chainName: 'Ethereum', message: 'Test error' }],
-        rule2_slip44_testnet_mismatch: [],
+        rule2_network_type_claims_conflict: [],
         rule3_name_testnet_mismatch: [{ rule: 3, chainId: 137, chainName: 'Polygon', message: 'Test error' }],
         rule4_test_network_no_relation: [],
         rule5_status_conflicts: [],

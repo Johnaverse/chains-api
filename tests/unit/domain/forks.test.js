@@ -421,6 +421,21 @@ describe('forks across status, forum and news feeds', () => {
     expect(out[0].chains).toEqual([1]);
   });
 
+  it('lends a post\'s chains to a network the registry cannot resolve only when the chain carries its name', async () => {
+    const names = { 1: ['Ethereum Mainnet', 'mainnet'], 2910: ['Morph Hoodi Testnet', 'morph-hoodi'] };
+    const opts = { now: Date.parse('2026-08-22T00:00:00Z'), chainIdsFor: () => [], chainNamesFor: (id) => names[id] ?? [] };
+    // Decrypt on Solana's Alpenglow "since Ethereum's Merge" declares chain 1; Solana has no EVM chain.
+    const alpenglow = await buildForks([
+      { ...mention('decrypt', 'news', { name: 'Alpenglow', network: 'Solana' }, { affectedChains: ['Solana'] }), chains: [{ chainId: 1 }] }
+    ], opts);
+    expect(alpenglow[0].chains).toEqual([]);
+    // QuickNode's Morph window on "Hoodi Testnet" declares 2910, whose own name says so.
+    const celadon = await buildForks([
+      mention('qn', 'status', { name: 'Celadon', network: 'Hoodi Testnet', activationAt: '2099-10-28T05:00:00Z' }, { chains: [{ chainId: 2910 }], affectedChains: ['Hoodi Testnet'] })
+    ], opts);
+    expect(celadon[0].chains).toEqual([2910]);
+  });
+
   it('keeps a multi-network window on the test network the fork network names alongside', () => {
     // fork.network narrows the scopes; it must not drop "Stellar Testnet" from a window covering both.
     const window = mention('qn', 'status', { name: 'Protocol 28', network: 'Stellar Mainnet' }, { affectedChains: ['Stellar Mainnet', 'Stellar Testnet'] });

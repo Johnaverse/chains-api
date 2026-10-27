@@ -223,7 +223,7 @@ function installMockDefaults() {
     totalErrors: 2,
     errorsByRule: {
       rule1_relation_conflicts: [{ rule: 1, chainId: 137, chainName: 'Polygon', message: 'Example validation error' }],
-      rule2_slip44_testnet_mismatch: [],
+      rule2_network_type_claims_conflict: [],
       rule3_name_testnet_mismatch: [{ rule: 3, chainId: 11155111, chainName: 'Sepolia', message: 'Name contains testnet keyword' }],
       rule4_test_network_no_relation: [],
       rule5_status_conflicts: [],
@@ -1076,7 +1076,7 @@ describe('API Endpoints', () => {
 
       // Check all rule categories exist
       expect(data.errorsByRule).toHaveProperty('rule1_relation_conflicts');
-      expect(data.errorsByRule).toHaveProperty('rule2_slip44_testnet_mismatch');
+      expect(data.errorsByRule).toHaveProperty('rule2_network_type_claims_conflict');
       expect(data.errorsByRule).toHaveProperty('rule3_name_testnet_mismatch');
       expect(data.errorsByRule).toHaveProperty('rule4_test_network_no_relation');
       expect(data.errorsByRule).toHaveProperty('rule5_status_conflicts');
@@ -1084,7 +1084,7 @@ describe('API Endpoints', () => {
 
       // Check all arrays
       expect(Array.isArray(data.errorsByRule.rule1_relation_conflicts)).toBe(true);
-      expect(Array.isArray(data.errorsByRule.rule2_slip44_testnet_mismatch)).toBe(true);
+      expect(Array.isArray(data.errorsByRule.rule2_network_type_claims_conflict)).toBe(true);
       expect(Array.isArray(data.errorsByRule.rule3_name_testnet_mismatch)).toBe(true);
       expect(Array.isArray(data.errorsByRule.rule4_test_network_no_relation)).toBe(true);
       expect(Array.isArray(data.errorsByRule.rule5_status_conflicts)).toBe(true);

@@ -41,7 +41,8 @@ import {
   tickOnce,
   getChainRefresherStatus,
   ensureChainRpcResults,
-  _resetChainRefresherForTests
+  _resetChainRefresherForTests,
+  providerOf
 } from '../../../src/services/chainRefresher.js';
 
 function seedChain(chainId, rpc = []) {
@@ -250,8 +251,11 @@ describe('chainRefresher', () => {
       await processChainRpc(1);
       expect(cachedData.rpcHealth[1][0].unansweredSince).toBeUndefined();
 
+      // The provider is backed off now; once that passes, the endpoint is probed again.
+      vi.useFakeTimers({ now: Date.now() + 61 * 60 * 1000, toFake: ['Date'] });
       silent();
       await processChainRpc(1);
+      vi.useRealTimers();
       expect(Date.parse(cachedData.rpcHealth[1][0].unansweredSince)).toBeGreaterThan(Date.parse('2026-01-01T00:00:00.000Z'));
     });
 
@@ -311,6 +315,29 @@ describe('chainRefresher', () => {
       await processChainRpc(1);
 
       expect(cachedData.lastRpcCheck).toBeNull();
+    });
+
+    it('backs off a provider that limits us, keeping each endpoint\'s last result meanwhile', async () => {
+      seedCacheWith([
+        seedChain(1, ['https://c1.rpc.provider.example']),
+        seedChain(10, ['https://c10.rpc.provider.example', 'https://rpc.other.example'])
+      ]);
+      cachedData.rpcHealth = { 10: [{ url: 'https://c10.rpc.provider.example', ok: true, blockHeight: 5 }] };
+      jsonRpcCall.mockRejectedValue(Object.assign(new Error('try again later'), { kind: 'rate_limited' }));
+      await processChainRpc(1);
+      expect(cachedData.rpcHealth[1][0]).toMatchObject({ ok: false, failure: 'rate_limited' });
+
+      // Chain 10's endpoint on the same provider is not probed; the other provider is.
+      jsonRpcCall.mockReset();
+      jsonRpcCall.mockResolvedValue('0x20');
+      await processChainRpc(10);
+      expect(jsonRpcCall.mock.calls.map(([url]) => url)).toEqual(['https://rpc.other.example', 'https://rpc.other.example']);
+      expect(cachedData.rpcHealth[10]).toEqual([
+        { url: 'https://c10.rpc.provider.example', ok: true, blockHeight: 5 },
+        expect.objectContaining({ url: 'https://rpc.other.example', ok: true })
+      ]);
+      expect(providerOf('https://c10.rpc.provider.example/path')).toBe('provider.example');
+      expect(providerOf('https://rpc.example.co.uk')).toBe('example.co.uk');
     });
 
     it('respects the data-version race guard', async () => {
