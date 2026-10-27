@@ -769,6 +769,16 @@ describe('a node fork schedule (eth_config) on its chain', () => {
     expect(out[0].events.map(e => e.id).sort()).toEqual(['n1', 'rel']);
   });
 
+  it('joins the announced fork by name once the client code names it, history included', async () => {
+    // nodeForkSchedule.js with a name from chains-client-feed /fork-source, and the earlier
+    // Pasteur from the same params/config.go, both placed on chain 97 by chainIds.
+    const named = { ...node('n1', 97, '2026-10-29T03:30:00Z'), enrichment: { class: 'planned_hard_fork', chains: [97], fork: fork({ name: 'Jenner', activationAt: '2026-10-29T03:30:00Z', state: 'scheduled' }) } };
+    const history = { ...event('s1', { fork: fork({ name: 'Pasteur', activationAt: '2026-07-21T02:30:00Z', state: 'completed', chainIds: [97] }), chains: [97], page: 'source:bnb-chain/bsc' }), feed: 'source' };
+    const pasteur = { ...release, id: 'rel-p', title: 't-rel-p', url: 'https://x/p', enrichment: { fork: fork({ name: 'Pasteur', network: 'BSC Chapel Testnet', activationAt: '2026-07-21T02:30:00Z', state: 'completed' }) } };
+    const out = await buildForks([release, named, history, pasteur], opts);
+    expect(out.map(f => [f.name, f.chains, f.events.length]).sort()).toEqual([['Jenner', [97], 2], ['Pasteur', [97], 2]]);
+  });
+
   it('stands as a dated fork of its own when nothing names it', async () => {
     const out = await buildForks([node('n1', 97, '2026-10-29T02:30:00Z')], opts);
     expect(out).toHaveLength(1);

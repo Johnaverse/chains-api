@@ -6,7 +6,8 @@ import { getRepositoryChains } from '../sources/networkResearch.js';
 import { logger } from '../util/logger.js';
 import { learnForkNames } from '../domain/forkNames.js';
 import { learnForkWords } from '../domain/forkWords.js';
-import { nodeForkMentions, nodeForkScheduleVersion, getNodeForkSchedules } from '../sources/nodeForkSchedule.js';
+import { nodeForkMentions, nodeForkScheduleVersion, getNodeForkSchedules, nodeForkPairs } from '../sources/nodeForkSchedule.js';
+import { requestForkSources, forkSourceOf, forkSourceVersion } from '../sources/forkSource.js';
 import { learnNetworkWords, mentionsTestNetwork, isKindWord, isTestNetworkWord, chainOfBareName } from '../domain/networkWords.js';
 
 /**
@@ -245,7 +246,7 @@ export function _resetForksMemoForTests() {
 async function builtForks(mentions, fetchedAt) {
   const chains = getAllChains();
   const repoChains = getRepositoryChains();
-  const nodeVersion = nodeForkScheduleVersion();
+  const nodeVersion = `${nodeForkScheduleVersion()}:${forkSourceVersion()}`;
   if (memo.forks && memo.mentions === mentions && memo.fetchedAt === fetchedAt && memo.chains === chains && memo.repoChains === repoChains && memo.nodeVersion === nodeVersion) return memo.forks;
   // Which words name a test network, or only a kind of network, comes from the registry
   // (networkWords.js); which words of a fork's name are generic, from the feeds (forkWords.js).
@@ -254,7 +255,7 @@ async function builtForks(mentions, fetchedAt) {
   const byId = new Map(chains.map((c) => [c.chainId, c]));
   // Each chain's fork schedule as its nodes hold it (eth_config): a dated fork no feed
   // announced still reaches the chain, and an announced one is confirmed at its instant.
-  const nodes = nodeForkMentions({ nameOf: (id) => byId.get(id)?.name ?? null });
+  const nodes = nodeForkMentions({ nameOf: (id) => byId.get(id)?.name ?? null, sourceOf: forkSourceOf });
   const forks = (await buildForks([...mentions.map((m) => qualifyBareNetwork(m, byId)), ...nodes], { tipFor, chainIdsFor: chainResolver(chains), chainNamesFor: chainNamesLookup(chains), repoChainIdsFor: repositoryResolver(chains, repoChains) }))
     .map((fork) => present(fork, unplacedReason(fork, repoChains, byId)));
   // What the feeds show about which names are one fork: read by the timeline and latest release.
@@ -333,6 +334,9 @@ export async function getForks({ chainId, phase, scheduledOnly = false, include,
 const NO_FEED_MENTIONS = [];
 
 export async function getAllForks() {
+  // Names for the nodes' unnamed forks, from the chains' client code (chains-client-feed
+  // /fork-source). Paced and cached there and here; an answer lands in a later build.
+  requestForkSources(nodeForkPairs())?.catch?.(() => {});
   let feedRead;
   try {
     feedRead = await getForkMentions();
