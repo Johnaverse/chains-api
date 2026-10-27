@@ -31,6 +31,8 @@ describe('node fork schedule (eth_config)', () => {
     expect(parseEthConfig(chapel, 56)).toBeNull();
     expect(parseEthConfig({ current: null }, 97)).toBeNull();
     expect(parseEthConfig({ ...chapel, next: null, last: null }, 97).next).toBeNull();
+    // A safe integer no Date can hold is not a time.
+    expect(parseEthConfig({ ...chapel, next: { ...chapel.next, activationTime: 8640000000001 } }, 97).next).toBeNull();
   });
 
   it('tries working endpoints until one answers, then waits for the refresh interval', async () => {

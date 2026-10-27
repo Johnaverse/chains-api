@@ -781,6 +781,20 @@ describe('a node fork schedule (eth_config) on its chain', () => {
     expect(out[0]).toMatchObject({ name: 'Jenner', activationAt: '2026-10-29T01:30:00.000Z' });
   });
 
+  it('keeps a chain\'s active fork and its successor hours later apart', async () => {
+    const done = { ...node('c', 97, '2026-10-29T00:30:00Z'), enrichment: { class: 'planned_hard_fork', chains: [97], fork: fork({ activationAt: '2026-10-29T00:30:00Z', state: 'completed', forkId: '0x5203e674' }) } };
+    const out = await buildForks([done, node('n', 97, '2026-10-29T02:30:00Z')], { ...opts, now: Date.parse('2026-10-29T01:00:00Z') });
+    expect(out.map(f => [f.activationAt, f.state]).sort()).toEqual([['2026-10-29T00:30:00.000Z', 'completed'], ['2026-10-29T02:30:00.000Z', 'scheduled']]);
+  });
+
+  it('moves no other chain\'s time: a near match joins only a fork on this chain alone', async () => {
+    // One announcement giving chains 97 and 1 the same instant; chain 97's nodes say an hour later.
+    const both = (scope) => (scope === 'bsc chapel testnet' ? [97, 1] : []);
+    const out = await buildForks([release, node('n1', 97, '2026-10-29T03:30:00Z')], { ...opts, chainIdsFor: both });
+    expect(out.find(f => f.name === 'Jenner')).toMatchObject({ activationAt: '2026-10-29T02:30:00.000Z' });
+    expect(out).toHaveLength(2);
+  });
+
   it('does not join a named fork a day away, two in range, or one on another chain', async () => {
     expect(await buildForks([release, node('n1', 97, '2026-10-30T05:30:00Z')], opts)).toHaveLength(2);
     expect(await buildForks([release, node('n1', 56, '2026-10-29T02:30:00Z')], opts)).toHaveLength(2);

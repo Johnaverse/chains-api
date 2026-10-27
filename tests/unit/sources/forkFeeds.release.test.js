@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { getForkMentions, toMentions, _resetForkFeedsForTests } from '../../../src/sources/forkFeeds.js';
+import { buildForks } from '../../../src/domain/forks.js';
 import { proxyFetch } from '../../../fetchUtil.js';
 
 vi.mock('../../../fetchUtil.js', () => ({ proxyFetch: vi.fn() }));
@@ -25,6 +26,18 @@ const release = (over = {}) => ({
 });
 
 const ok = (key, list) => ({ ok: true, status: 200, json: async () => ({ [key]: list }) });
+
+describe('chains the client feed\'s model chose', () => {
+  it('survive normalization and place the release\'s fork', async () => {
+    // As chains-client-feed 0.3.13 serves it: the model chose Sepolia from geth's networks.
+    const raw = release({ enrichment: { class: 'planned_hard_fork', createdAt: '2025-11-04T10:05:00Z', fork: { ...fusaka, network: 'Ethereum Sepolia', chainIds: [11155111, 'x'] } } });
+    const [mention] = toMentions('release', raw);
+    expect(mention.enrichment.fork.chainIds).toEqual([11155111]);
+    // By name alone, "ethereum sepolia" resolves nowhere here; the model's choice places it.
+    const [out] = await buildForks([mention], { now: Date.parse('2025-11-05T00:00:00Z'), chainIdsFor: () => [] });
+    expect(out.chains).toEqual([11155111]);
+  });
+});
 
 describe('client release feed', () => {
   beforeEach(() => {

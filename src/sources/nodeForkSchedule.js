@@ -35,7 +35,8 @@ function forkOf(entry, chainId) {
   if (!entry || typeof entry !== 'object') return null;
   const time = Number(entry.activationTime);
   const id = typeof entry.chainId === 'string' ? Number.parseInt(entry.chainId, 16) : Number(entry.chainId);
-  if (!Number.isSafeInteger(time) || time < 0 || id !== chainId) return null;
+  // A time a Date cannot hold (past ±8.64e15 ms) would throw in toISOString on every /forks read.
+  if (!Number.isSafeInteger(time) || time < 0 || time * 1000 > 8.64e15 || id !== chainId) return null;
   return { activationTime: time, forkId: typeof entry.forkId === 'string' ? entry.forkId.toLowerCase() : null };
 }
 

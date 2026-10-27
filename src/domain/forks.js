@@ -61,8 +61,12 @@ export const FORK_PHASE = Object.freeze({
  */
 export function slimFork(fork) {
   if (!fork || typeof fork !== 'object') return null;
-  const { name, network, activationAt, activationBlock, state } = fork;
+  const { name, network, activationAt, activationBlock, state, chainIds } = fork;
+  // The chains chains-client-feed's model chose for a release's fork (memberChainIds); only
+  // when it chose some.
+  const chosen = Array.isArray(chainIds) ? [...new Set(chainIds.filter(Number.isSafeInteger))] : [];
   return {
+    ...(chosen.length ? { chainIds: chosen } : {}),
     name: typeof name === 'string' && name.trim() ? name.trim() : null,
     network: typeof network === 'string' && network.trim() ? network.trim() : null,
     // ISO only: V8's Date.parse reads prose too — "Oct 6" parses as a date in 2001.
@@ -578,8 +582,11 @@ function mergeUnscoped(groups) {
  */
 function clusterUnnamed(groups) {
   const earliest = (a) => (a.times.length ? Math.min(...a.times) : Infinity);
+  // A node's schedule is one activation per fork id and second: never clustered by proximity,
+  // or a chain's active fork and its successor hours later became one completed entity. They
+  // are matched to named forks on their own (foldChainScopedIntoNamed).
   const unnamed = [...groups.values()]
-    .filter(g => g.kind !== 'name')
+    .filter(g => g.kind !== 'name' && !isNodeGroup(g))
     .map(g => ({ g, a: anchorsOf(g.members) }))
     .sort((x, y) => earliest(x.a) - earliest(y.a));
 
@@ -666,6 +673,10 @@ function mergeSameActivation(groups) {
  * day-only date never decides it. With none, it stays a fork of its own: dated, on its chain,
  * unnamed.
  */
+function isNodeGroup(g) {
+  return g.members.every(m => m.event?.feed === 'node');
+}
+
 function foldChainScopedIntoNamed(groups) {
   const exactAnchors = (members) => {
     const anchors = { blocks: new Set(), times: [] };
@@ -684,7 +695,10 @@ function foldChainScopedIntoNamed(groups) {
     const near = named.filter(x => groups.has(x.g.key) && x.g.members.some(m => m.chainIds.includes(chainId)))
       .map(x => ({ g: x.g, d: anchorDistance(anchors, x.a) })).filter(x => x.d !== null);
     const exact = near.filter(x => x.d === 0);
-    const targets = exact.length ? exact : near;
+    // Moving a fork's time is only for one placed on this chain alone: an announcement giving
+    // chains 1 and 97 the same instant must not move chain 1's because chain 97's nodes differ.
+    const onlyHere = (g) => g.members.every(m => m.chainIds.every(id => id === chainId));
+    const targets = exact.length ? exact : near.filter(x => onlyHere(x.g));
     if (targets.length === 1) mergeInto(groups, targets[0].g, group);
   }
 }
