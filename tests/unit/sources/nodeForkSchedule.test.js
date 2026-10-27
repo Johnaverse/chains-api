@@ -69,4 +69,11 @@ describe('node fork schedule (eth_config)', () => {
     expect(mentions[1]).toMatchObject({ feed: 'node', chains: [{ chainId: 97 }], id: 'node:97:0xe660a57e:1793241000', enrichment: { class: 'planned_hard_fork', fork: { name: null } } });
     expect(mentions[1].title).toContain('BNB Smart Chain Testnet');
   });
+
+  it('leaves out a fork parked far ahead: a placeholder, not a schedule', async () => {
+    // LUKSO's nodes report next at 2050-01-01.
+    jsonRpcCall.mockResolvedValueOnce({ ...chapel, next: { ...chapel.next, activationTime: 2524608000 }, last: { ...chapel.last, activationTime: 2524608000 } });
+    await refreshNodeForkSchedule(97, ['https://b'], { now: NOW });
+    expect(nodeForkMentions({ now: NOW }).map((m) => m.enrichment.fork.activationAt)).toEqual(['2026-07-21T02:30:00.000Z']);
+  });
 });

@@ -64,6 +64,9 @@ export const NODE_FORK_SCHEDULE_REFRESH_MS = parseIntEnv('NODE_FORK_SCHEDULE_REF
 export const NODE_FORK_SCHEDULE_RETRY_MS = parseIntEnv('NODE_FORK_SCHEDULE_RETRY_MS', 24 * 60 * 60 * 1000);
 // Working endpoints asked for eth_config per check, until one answers.
 export const NODE_FORK_SCHEDULE_MAX_URLS = parseIntEnv('NODE_FORK_SCHEDULE_MAX_URLS', 3);
+// A node fork further ahead than this is a placeholder, not a schedule: clients park a fork they
+// have not scheduled at a far date (NetX at 2030-01-01, LUKSO at 2050-01-01).
+export const NODE_FORK_SCHEDULE_MAX_AHEAD_MS = parseIntEnv('NODE_FORK_SCHEDULE_MAX_AHEAD_MS', 365 * 24 * 60 * 60 * 1000);
 
 // Search
 export const MAX_SEARCH_QUERY_LENGTH = parseIntEnv('MAX_SEARCH_QUERY_LENGTH', 200);
