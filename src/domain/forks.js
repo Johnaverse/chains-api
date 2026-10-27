@@ -698,10 +698,11 @@ function foldChainScopedIntoNamed(groups) {
     return anchors;
   };
   // The activation a named fork resolves to now: a node report matching a superseded claim
-  // (02:30, since moved to 03:30) must not move the fork back on its other chains.
+  // (02:30, since moved to 03:30) must not move the fork back on its other chains. A day-only
+  // winner is no instant to match ("2026-10-29" is not midnight).
   const winning = (g) => {
-    const at = bestActivation(g.members.map(m => ({ ...resolveForkActivation(m.fork, null), rank: sourceRank(m.event), observedAt: m.observedAt })))?.at;
-    return at ? Date.parse(at) : null;
+    const best = bestActivation(g.members.map(m => ({ ...resolveForkActivation(m.fork, null), rank: sourceRank(m.event), observedAt: m.observedAt })));
+    return best?.at && best.precision !== 'day' ? Date.parse(best.at) : null;
   };
   const named = [...groups.values()].filter(g => g.kind === 'name').map(g => ({ g, a: exactAnchors(g.members), at: winning(g) }));
   // Unnamed groups known by a chain: scoped to it, or node-backed under a network name (a
@@ -722,19 +723,28 @@ function foldChainScopedIntoNamed(groups) {
   // Moving a fork's time is only for one placed on this chain alone: an announcement giving
   // chains 1 and 97 the same instant must not move chain 1's because chain 97's nodes differ.
   const onlyHere = (g, chainId) => g.members.every(m => m.chainIds.every(id => id === chainId));
+  const candidatesOf = (p, exactPass) => named.filter(x => groups.has(x.g.key) && !taken.has(`${x.g.key}@${p.chainId}`)
+    && x.g.members.some(m => m.chainIds.includes(p.chainId)))
+    .map(x => ({ g: x.g, at: x.at, d: anchorDistance(p.anchors, x.a) }))
+    // On a fork other chains share, only its current activation is matched: anything else
+    // would move theirs too.
+    .filter(x => (onlyHere(x.g, p.chainId) ? (exactPass ? x.d === 0 : x.d === 1)
+      : exactPass && x.at !== null && p.anchors.times.includes(x.at)));
   // Exact matches first, so a near one never takes the fork an exact one names.
   for (const exactPass of [true, false]) {
-    for (const p of pending) {
-      if (!groups.has(p.g.key)) continue;
-      const targets = named.filter(x => groups.has(x.g.key) && !taken.has(`${x.g.key}@${p.chainId}`)
-        && x.g.members.some(m => m.chainIds.includes(p.chainId)))
-        .map(x => ({ g: x.g, at: x.at, d: anchorDistance(p.anchors, x.a) }))
-        // On a fork other chains share, only its current activation is matched: anything else
-        // would move theirs too.
-        .filter(x => (onlyHere(x.g, p.chainId) ? (exactPass ? x.d === 0 : x.d === 1)
-          : exactPass && p.anchors.times.includes(x.at)));
-      if (targets.length !== 1) continue;
-      taken.add(`${targets[0].g.key}@${p.chainId}`);
+    const live = pending.filter(p => groups.has(p.g.key));
+    const claims = live.map(p => ({ p, targets: candidatesOf(p, exactPass) }));
+    // Near, a fork two of a chain's node activations could both be (the active fork at 00:30
+    // and its successor at 02:30, Jenner announced for 03:30) is neither's: proximity cannot say.
+    const claimants = new Map();
+    for (const { p, targets } of claims) {
+      for (const t of targets) claimants.set(`${t.g.key}@${p.chainId}`, (claimants.get(`${t.g.key}@${p.chainId}`) ?? 0) + 1);
+    }
+    for (const { p, targets } of claims) {
+      if (targets.length !== 1 || !groups.has(p.g.key)) continue;
+      const slot = `${targets[0].g.key}@${p.chainId}`;
+      if (taken.has(slot) || (!exactPass && claimants.get(slot) > 1)) continue;
+      taken.add(slot);
       mergeInto(groups, targets[0].g, p.g);
     }
   }

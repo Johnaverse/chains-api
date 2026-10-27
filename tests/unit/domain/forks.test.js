@@ -819,6 +819,21 @@ describe('a node fork schedule (eth_config) on its chain', () => {
     expect(out[0]).toMatchObject({ name: 'Jenner', chains: [97], activationAt: '2026-10-29T02:30:00.000Z' });
   });
 
+  it('leaves a named fork two node activations are near unmatched', async () => {
+    const at0330 = { ...release, enrichment: { fork: fork({ name: 'Jenner', network: 'BSC Chapel Testnet', activationAt: '2026-10-29T03:30:00Z', state: 'scheduled' }) } };
+    const out = await buildForks([doneAt('c', '2026-10-29T00:30:00Z'), node('n', 97, '2026-10-29T02:30:00Z'), at0330], later);
+    expect(out).toHaveLength(3);
+    expect(out.find(f => f.name === 'Jenner')).toMatchObject({ activationAt: '2026-10-29T03:30:00.000Z' });
+  });
+
+  it('never matches a shared fork known only by its day', async () => {
+    const both = (scope) => (scope === 'bsc chapel testnet' ? [97, 1] : []);
+    const day = { ...release, enrichment: { fork: fork({ name: 'Jenner', network: 'BSC Chapel Testnet', activationAt: '2026-10-29', state: 'scheduled' }) } };
+    const out = await buildForks([day, node('n', 97, '2026-10-29T00:00:00Z')], { ...opts, chainIdsFor: both });
+    expect(out).toHaveLength(2);
+    expect(out.find(f => f.name === 'Jenner')).toMatchObject({ activationPrecision: 'day' });
+  });
+
   it('does not match a node activation to a provider\'s maintenance window', async () => {
     // QuickNode's Jenner window starts two hours early; the node's 00:30 is the previous fork.
     const window = { ...event('w', { fork: fork({ name: 'Jenner', network: 'BSC Chapel Testnet', activationAt: '2026-10-29T00:30:00Z', state: 'scheduled' }), chains: [97], page: 'quicknode' }), feed: 'status' };
