@@ -54,15 +54,21 @@ describe('sourceIdentity', () => {
     // knows a network whose whole id it is, so a source naming the chain just "Sepolia" is not bare.
     const eco = ['alder', 'birch', 'cedar', 'dogwood', 'elm', 'fir', 'ginkgo', 'hazel', 'ilex', 'juniper'];
     const registry = eco.flatMap((e, i) => [chains(9000 + i, `${e} Mainnet`, 'X'), chains(9100 + i, `${e} Sepolia Testnet`, 'X')]);
-    const theGraph = { networks: [graph(11155111, 'Sepolia', 'ETH'), graph(77, 'Unrelated Mainnet', 'OTHER')] };
+    const theGraph = { networks: [
+      { ...graph(11155111, 'Ethereum Sepolia Testnet', 'ETH'), id: 'sepolia' },
+      graph(77, 'Unrelated Mainnet', 'OTHER'),
+      graph(78, 'Zora Sepolia Testnet', 'ZORA')
+    ] };
     const conflicts = findIdentityConflicts({
-      chains: [...registry, chains(11155111, 'Sepolia', 'ETH'), chains(77, 'Sepolia', 'ETH')],
-      chainlist: [chains(11155111, 'Ethereum Sepolia', 'ETH')],
+      chains: [...registry, chains(11155111, 'Sepolia', 'ETH'), chains(77, 'Sepolia', 'ETH'), chains(78, 'Sepolia', 'ETH')],
+      // The same network spelled in full, with a different symbol: no conflict.
+      chainlist: [chains(11155111, 'Ethereum Sepolia', 'sepETH')],
       theGraph
     });
-    expect([...conflicts.keys()]).toEqual([77]);
+    // Another ecosystem's Sepolia is not The Graph's "sepolia".
+    expect([...conflicts.keys()]).toEqual([77, 78]);
     // A name made only of structural words no network goes by is still too bare to compare.
-    expect(resolveIdentity({ chains: chains(6, 'Devnet', 'X'), chainlist: chains(6, 'Testnet Network', 'Y') }, KIND, new Set(['sepolia']))).toBeNull();
+    expect(resolveIdentity({ chains: chains(6, 'Devnet', 'X'), chainlist: chains(6, 'Testnet Network', 'Y') }, KIND, new Map([['sepolia', new Set(['sepolia', 'ethereum'])]]))).toBeNull();
   });
 
   it('learns the structural words from chainlist when chains.json is missing', () => {
