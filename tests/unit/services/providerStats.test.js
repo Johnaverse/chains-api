@@ -99,6 +99,7 @@ describe('buildProviderStats — per-provider metrics', () => {
     const events = [
       anchor(),
       ev({ incidentId: 'q:1', publishedMs: NOW - 5 * DAY, status: 'investigating', ongoing: true }),
+      ev({ incidentId: 'q:1', publishedMs: NOW - 2 * HOUR, status: 'identified', ongoing: true }),
       // Distinct titles: same-titled maintenance entries are one rollout
       // (a provider's announcement and its window carry different GUIDs).
       ev({ incidentId: 'q:2', title: 'Upgrade to v2', publishedMs: NOW - 3 * DAY, status: 'maintenance_scheduled' }),
@@ -146,11 +147,32 @@ describe('buildProviderStats — per-provider metrics', () => {
 
   it('still counts an incident as ongoing when it started before the window', () => {
     const events = [
-      ev({ incidentId: 'q:stuck', publishedMs: NOW - 40 * DAY, status: 'investigating', ongoing: true })
+      ev({ incidentId: 'q:stuck', publishedMs: NOW - 40 * DAY, status: 'investigating', ongoing: true }),
+      // Still being updated: the provider says it is live.
+      ev({ incidentId: 'q:stuck', publishedMs: NOW - 6 * HOUR, status: 'monitoring', ongoing: true })
     ];
     const q = buildProviderStats(events, { now: NOW }).providers.find((p) => p.id === 'quicknode');
     expect(q.incidents30d).toBe(0); // out of window…
     expect(q.ongoingNow).toBe(1);   // …but burning NOW
+  });
+
+  it('lists an incident the provider left open with no update for days as stale, not ongoing', () => {
+    // Pinax, 23 Oct: "Issue with token-api" on BSC went Monitoring -> Investigating ->
+    // Identified within the hour and was never touched again.
+    const events = [
+      anchor(),
+      ev({ incidentId: 'q:forgotten', title: 'Issue with token-api', url: 'https://status.example/i/1', publishedMs: NOW - 4 * DAY - HOUR, status: 'monitoring', ongoing: false, chains: [{ chainId: 56 }] }),
+      ev({ incidentId: 'q:forgotten', title: 'Issue with token-api', url: 'https://status.example/i/1', publishedMs: NOW - 4 * DAY, status: 'identified', ongoing: true, chains: [{ chainId: 56 }] })
+    ];
+    const q = buildProviderStats(events, { now: NOW }).providers.find((p) => p.id === 'quicknode');
+    expect(q.ongoingNow).toBe(0);
+    expect(q.oldestOngoingAt).toBeNull();
+    expect(q.staleOngoing).toBe(1);
+    expect(q.staleIncidents).toEqual([{ title: 'Issue with token-api', url: 'https://status.example/i/1', status: 'identified', openedAt: new Date(NOW - 4 * DAY - HOUR).toISOString(), lastUpdateAt: new Date(NOW - 4 * DAY).toISOString() }]);
+    // Charged up to its last update (1h on one chain), not four days to now.
+    expect(q.availability.last30d.chainHoursLost).toBe(1);
+    expect(q.availability.last24h.chainHoursLost).toBe(0);
+    expect(q.availability.durationEvidence.stale).toBe(1);
   });
 
   it('computes median and avg resolution hours from first update to FIRST resolved update', () => {

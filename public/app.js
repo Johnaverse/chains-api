@@ -1276,12 +1276,23 @@ function isOpen(it) {
     // planned work: `ongoing: true` on maintenance means "the window is in progress", not
     // "something is wrong".
     if (it.kind === 'scheduled') return false;
-    // §13: the feed's `ongoing` flag is the authoritative "still live" signal where it exists.
-    if (it.ongoing != null) return it.ongoing;
+    // §13: the feed's `ongoing` flag is the authoritative "still live" signal where it exists —
+    // unless the provider has said nothing about the incident for days (isStaleOpen).
+    if (it.ongoing != null) return it.ongoing && !isStaleOpen(it);
     if (it.rawStatus) return OPEN_STATUSES.has(it.rawStatus);
     // Older cached events predate rawStatus; keep the label comparison for those alone. An
     // unrecognized status leaves `it.status` null here, so it closes rather than falling open.
     return Boolean(it.status && !['resolved', 'completed', 'closed'].includes(it.status.toLowerCase()));
+}
+
+// Mirrors the API's PROVIDER_INCIDENT_STALE_MS default: an incident the page still marks open
+// with no update for this long is stale. Pinax left its BSC token-api incident at "Identified"
+// on 23 Oct after resolving its two siblings that afternoon, and it read as open for days.
+const STALE_OPEN_MS = 72 * 60 * 60 * 1000;
+
+/** Marked open by its page, but not updated for STALE_OPEN_MS: listed as stale, not open. */
+function isStaleOpen(it) {
+    return it.kind !== 'scheduled' && it.ongoing === true && it.whenMs != null && Date.now() - it.whenMs > STALE_OPEN_MS;
 }
 
 // A maintenance window actually running now, as distinct from one still upcoming or already
@@ -2846,6 +2857,13 @@ function incidentCard(it) {
     const main = el('div', { class: 'incident-main' }, [
         el('div', { class: 'incident-title' }, [
             it.kind === 'scheduled' ? el('span', { class: 'kind-tag', text: 'Scheduled' }) : null,
+            isStaleOpen(it)
+                ? el('span', {
+                    class: 'kind-tag',
+                    title: 'The status page still marks this open, but it has had no update for over three days — likely left unresolved by the operator. Not counted as open.',
+                    text: `Stale · no update since ${fmtDateTime(it.whenMs)}`
+                })
+                : null,
             duringWindow
                 ? el('span', {
                     class: 'kind-tag during-maint',
@@ -3303,6 +3321,14 @@ function providerRow(p, columns, retainedMap) {
         td('Provider', [
             providerNameControl(p, retained, selected),
             p.ongoingNow > 0 ? el('span', { class: 'pill pill-ongoing sm', text: `${p.ongoingNow} ongoing` }) : null,
+            // Left open on the page with no update for days: shown, but not as an outage.
+            p.staleOngoing > 0
+                ? el('span', {
+                    class: 'pill pill-quiet sm',
+                    title: `Still open on the status page with no update for over three days: ${(p.staleIncidents || []).map(s => `${s.title} (last update ${fmtDateTime(Date.parse(s.lastUpdateAt))})`).join('; ')}`,
+                    text: `${p.staleOngoing} stale`
+                })
+                : null,
             // Red is reserved for real incidents. A window running to schedule is planned
             // work and gets a neutral chip, not an alarm.
             p.ongoingMaintenance > 0
