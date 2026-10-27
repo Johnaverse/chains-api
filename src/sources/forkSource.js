@@ -76,16 +76,22 @@ async function fetchAnswers(wanted, now) {
     const response = await getFeed(`${CLIENT_FEED_URL.replace(/\/+$/, '')}/fork-source?at=${at}`, CLIENT_FEED_FETCH_TIMEOUT_MS);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const body = await response.json();
+    const answered = new Set();
     for (const item of Array.isArray(body?.items) ? body.items : []) {
       const key = keyOf(Number(item?.chainId), Number(item?.time));
       if (!wanted.some((w) => w.key === key)) continue;
+      answered.add(key);
       const answer = sanitize(item, now);
       if (answer.status === 'found' && answers.get(key)?.status !== 'found') version += 1;
       answers.set(key, answer);
     }
+    // A pair the feed left out of its answer is a failed attempt, not one never made.
+    for (const w of wanted) if (!answered.has(w.key) && answers.get(w.key)?.status !== 'found') answers.set(w.key, { status: 'failed', askedAt: now });
   } catch (err) {
     logger.warn({ err: err.message, pairs: wanted.length }, 'fork source lookup failed');
-    for (const w of wanted) if (!answers.has(w.key)) answers.set(w.key, { status: 'failed', askedAt: now });
+    // Every pair asked records this attempt, so a retry that fails waits RETRY_FAILED_MS like
+    // the first; a name already found is kept.
+    for (const w of wanted) if (answers.get(w.key)?.status !== 'found') answers.set(w.key, { status: 'failed', askedAt: now });
   }
 }
 

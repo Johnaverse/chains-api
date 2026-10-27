@@ -97,16 +97,21 @@ export function nodeForkScheduleVersion() {
  * every schedule read: the last one activated and the scheduled ones. `nameOf(chainId)` names
  * the chain in the title.
  */
-export function nodeForkMentions({ now = Date.now(), nameOf = () => null } = {}) {
+export function nodeForkMentions({ now = Date.now(), nameOf = () => null, sourceOf = () => null } = {}) {
   const mentions = [];
   for (const [chainId, s] of schedules) {
     if (s.unsupported) continue;
     const seen = new Set();
+    // Where the chain's client code defines these forks (forkSource.js): the name the node does
+    // not give, and the rest of the chain's schedule in that configuration — its fork history.
+    const sources = [];
     for (const [which, fork] of [['current', s.current], ['next', s.next], ['last', s.last]]) {
       if (!fork || fork.activationTime === 0 || seen.has(fork.activationTime)) continue;
       seen.add(fork.activationTime);
       const at = new Date(fork.activationTime * 1000).toISOString();
       const done = fork.activationTime * 1000 <= now;
+      const source = sourceOf(chainId, fork.activationTime);
+      if (source) sources.push(source);
       const chain = nameOf(chainId) ?? `chain ${chainId}`;
       // A scheduled fork is announced when the node schedule first showed it; one already
       // active, when it was read.
@@ -129,7 +134,7 @@ export function nodeForkMentions({ now = Date.now(), nameOf = () => null } = {})
           affectedChains: [],
           chains: [chainId],
           fork: {
-            name: null,
+            name: source?.name ?? null,
             network: null,
             activationAt: at,
             activationBlock: null,
@@ -139,8 +144,68 @@ export function nodeForkMentions({ now = Date.now(), nameOf = () => null } = {})
         }
       });
     }
+    mentions.push(...sourceMentions(chainId, sources, { now, chain: nameOf(chainId) ?? `chain ${chainId}`, checkedAt: s.checkedAt }));
   }
   return mentions;
+}
+
+/**
+ * The chain's schedule as its client code states it, one dated (or height-only) mention per
+ * fork, de-duplicated across the files the node's forks were found in. Feed `source`; placed on
+ * the chain by `chainIds`, so a fork the feeds no longer hold (Tempo's T8–T10, Ethereum's BPO2)
+ * is still in the chain's history.
+ */
+function sourceMentions(chainId, sources, { now, chain, checkedAt }) {
+  const out = [];
+  const seen = new Set();
+  for (const source of sources) {
+    for (const f of source.forks ?? []) {
+      const key = `${f.name.toLowerCase()}|${f.activationTime ?? ''}|${f.activationBlock ?? ''}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const at = f.activationTime ? new Date(f.activationTime * 1000).toISOString() : null;
+      const done = at ? Date.parse(at) <= now : null;
+      out.push({
+        id: `source:${chainId}:${source.repo ?? 'unknown'}:${key}`,
+        feed: 'source',
+        title: `${chain}: ${f.name} ${at ? `at ${at}` : `at block ${f.activationBlock}`} (${source.repo ?? 'client code'}${source.path ? ` ${source.path}` : ''})`,
+        url: source.url ?? null,
+        publishedAt: new Date(checkedAt).toISOString(),
+        updatedAt: new Date(checkedAt).toISOString(),
+        status: null,
+        chains: [{ chainId }],
+        statusPage: { id: `source:${source.repo ?? 'unknown'}`, name: source.repo ?? 'Client code', kind: 'source' },
+        weight: null,
+        enrichment: {
+          class: 'planned_hard_fork',
+          createdAt: new Date(checkedAt).toISOString(),
+          affectedChains: [],
+          chains: [chainId],
+          fork: {
+            name: f.name,
+            network: null,
+            activationAt: at,
+            activationBlock: at ? null : f.activationBlock,
+            state: done === false ? 'scheduled' : 'completed',
+            chainIds: [chainId]
+          }
+        }
+      });
+    }
+  }
+  return out;
+}
+
+/** Every chain-and-time pair the schedules read so far report: what forkSource.js is asked. */
+export function nodeForkPairs() {
+  const pairs = [];
+  for (const [chainId, s] of schedules) {
+    if (s.unsupported) continue;
+    for (const fork of [s.current, s.next, s.last]) {
+      if (fork?.activationTime > 0) pairs.push({ chainId, time: fork.activationTime });
+    }
+  }
+  return pairs;
 }
 
 /** Every schedule read, for /forks' `feeds` summary and the review of disagreements. */
