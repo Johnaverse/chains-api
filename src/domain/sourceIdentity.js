@@ -23,31 +23,46 @@ import { kindWordsOf } from './networkWords.js';
 export const SOURCE_PRECEDENCE = ['chains', 'theGraph', 'chainlist'];
 
 // Words that say what kind of network a name is, not which network ("Mainnet", "Chain",
-// "Testnet"), are learned from chains.json's names (kindWordsOf) and passed in as `kind`.
-function nameWords(kind, ...names) {
-  const words = new Set();
-  for (const name of names) {
-    for (const w of String(name ?? '').toLowerCase().split(/[^a-z0-9]+/)) {
-      if (w && !kind.has(w) && !/^\d+$/.test(w)) words.add(w);
-    }
+// "Testnet"), are learned from chains.json's names (kindWordsOf) and passed in as `kind`. A name
+// made only of them says nothing ("Devnet") — unless one of its words is a network's whole id in
+// The Graph's registry (`bare`, id -> that network's own name words): "Sepolia" is common across
+// ecosystems, yet The Graph's "sepolia" is "Ethereum Sepolia Testnet", so it reads as `ethereum`
+// and agrees with "Ethereum Sepolia" while "Zora Sepolia" or "Unrelated Mainnet" still conflict.
+const wordsOf = (...names) => names.flatMap((name) => String(name ?? '').toLowerCase().split(/[^a-z0-9]+/))
+  .filter((w) => w && !/^\d+$/.test(w));
+
+function nameWords(kind, bare, ...names) {
+  const all = wordsOf(...names);
+  const words = new Set(all.filter((w) => !kind.has(w)));
+  return words.size ? words : new Set(all.flatMap((w) => [...(bare.get(w) ?? [])]));
+}
+
+/** The Graph's networks whose whole id is one word, each with its own distinctive name words. */
+function bareNetworkWords(networks, kind) {
+  const bare = new Map();
+  for (const n of Array.isArray(networks) ? networks : []) {
+    const id = String(n?.id ?? '').toLowerCase();
+    if (!/^[a-z]+$/.test(id)) continue;
+    const own = wordsOf(n.fullName, n.shortName, ...(Array.isArray(n.aliases) ? n.aliases : [])).filter((w) => !kind.has(w));
+    bare.set(id, new Set([id, ...own]));
   }
-  return words;
+  return bare;
 }
 
 /** What one source says a chain ID is: its names, as words, and its native symbol. */
-export function identityOf(source, entry, kind = new Set()) {
+export function identityOf(source, entry, kind = new Set(), bare = new Map()) {
   if (!entry) return null;
   if (source === 'theGraph') {
     return {
       name: entry.fullName ?? entry.shortName ?? entry.id ?? null,
       symbol: entry.nativeToken ?? null,
-      words: nameWords(kind, entry.fullName, entry.shortName, entry.id, ...(Array.isArray(entry.aliases) ? entry.aliases : []))
+      words: nameWords(kind, bare, entry.fullName, entry.shortName, entry.id, ...(Array.isArray(entry.aliases) ? entry.aliases : []))
     };
   }
   return {
     name: entry.name ?? null,
     symbol: entry.nativeCurrency?.symbol ?? null,
-    words: nameWords(kind, entry.name, entry.shortName, entry.chain)
+    words: nameWords(kind, bare, entry.name, entry.shortName, entry.chain)
   };
 }
 
@@ -59,13 +74,14 @@ function sameNetwork(a, b) {
 
 /**
  * The sources to build one chain ID's record from, given each source's entry for it.
- * `kind`: the registry's structural words (kindWordsOf), which say nothing about which network.
+ * `kind`: the registry's structural words (kindWordsOf), which say nothing about which network;
+ * `bare`: The Graph's one-word network ids ("sepolia"), each with that network's own name words.
  * Returns null when every pair agrees (the usual case); otherwise `{ kept, excluded, identities }`.
  */
-export function resolveIdentity(entries, kind = new Set()) {
+export function resolveIdentity(entries, kind = new Set(), bare = new Map()) {
   const present = SOURCE_PRECEDENCE.filter((s) => entries[s]);
   if (present.length < 2) return null;
-  const ids = Object.fromEntries(present.map((s) => [s, identityOf(s, entries[s], kind)]));
+  const ids = Object.fromEntries(present.map((s) => [s, identityOf(s, entries[s], kind, bare)]));
   const agree = (a, b) => sameNetwork(ids[a], ids[b]);
   if (present.every((a, i) => present.slice(i + 1).every((b) => agree(a, b)))) return null;
 
@@ -106,13 +122,14 @@ export function findIdentityConflicts({ theGraph, chainlist, chains }) {
   // From chains.json, else chainlist's names: a chains.json outage must not leave "Mainnet" as
   // the word that makes two networks one.
   const kind = kindWordsOf(Array.isArray(chains) && chains.length ? chains : Array.isArray(chainlist) ? chainlist : []);
+  const bare = bareNetworkWords(theGraph?.networks, kind);
   const conflicts = new Map();
   for (const id of new Set([...bySource.chains.keys(), ...bySource.chainlist.keys(), ...bySource.theGraph.keys()])) {
     const resolved = resolveIdentity({
       chains: bySource.chains.get(id),
       chainlist: bySource.chainlist.get(id),
       theGraph: bySource.theGraph.get(id)
-    }, kind);
+    }, kind, bare);
     if (resolved) conflicts.set(id, resolved);
   }
   return conflicts;
