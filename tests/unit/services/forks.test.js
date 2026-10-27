@@ -452,6 +452,24 @@ describe('getForks', () => {
       expect(on(forks, 'OsakaBare')).toEqual([102031]);
     });
 
+    it('takes the chains the client feed\'s model chose from the repository\'s networks first', async () => {
+      const chose = (id, repo, network, name, chainIds) => {
+        const m = release(id, repo, network, name);
+        return { ...m, enrichment: { ...m.enrichment, fork: { ...m.enrichment.fork, chainIds } } };
+      };
+      const forks = await placed(
+        // A Lighthouse release naming no network is ambiguous between 1 and 100 by words alone;
+        // the model read the notes ("Mainnet release for Fusaka") with the repository's list.
+        chose('a', 'github:sigp/lighthouse', null, 'Q2', [1]),
+        chose('c', 'github:morph-l2/morph', 'Hoodi Testnet', 'Celadon', [2810]),
+        // [] (the model could not tell) leaves the other evidence to decide.
+        chose('b', 'github:gluwa/creditcoin3', 'Creditcoin3 Devnet', 'OsakaDev2', [])
+      );
+      expect(on(forks, 'Q2')).toEqual([1]);
+      expect(on(forks, 'Celadon')).toEqual([2810]);
+      expect(on(forks, 'OsakaDev2')).toEqual([102032]);
+    });
+
     it('does not read a bare test qualifier as a network among a widely run client\'s chains', async () => {
       // "Testnet" matches Base Sepolia Testnet's name, but says nothing about Base: four chains run
       // this client, so a release naming no network of its own places nothing.
