@@ -21,5 +21,7 @@ export const FORK_TITLE_MENTIONS = [
 
 // Ten unrelated ecosystems naming their chains with the registry's structural words.
 const ECOSYSTEMS = ['alder', 'birch', 'cedar', 'dogwood', 'elm', 'fir', 'ginkgo', 'hazel', 'ilex', 'juniper'];
-const KINDS = ['Mainnet', 'Chain', 'Network', 'EVM', 'Protocol', 'Blockchain'];
-export const KIND_REGISTRY = ECOSYSTEMS.flatMap((eco, i) => KINDS.map((kind, j) => ({ chainId: 9_000_000 + i * 10 + j, name: `${eco} ${kind}` })));
+const KINDS = ['Mainnet', 'Chain', 'Network', 'EVM', 'Protocol', 'Blockchain', 'Testnet'];
+export const KIND_REGISTRY = ECOSYSTEMS.flatMap((eco, i) => KINDS.map((kind, j) => ({
+  chainId: 9_000_000 + i * 10 + j, name: `${eco} ${kind}`, ...(kind === 'Testnet' ? { tags: ['Testnet'] } : {})
+})));

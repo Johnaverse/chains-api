@@ -349,7 +349,9 @@ describe('forks across status, forum and news feeds', () => {
     expect(forkIdentity('Protocol Upgrade')).toBeNull();
     expect(forkIdentity('Network Upgrade')).toBeNull();
     expect(forkIdentity('the hard fork')).toBeNull();
-    expect(forkIdentity('Network Upgrade 5')).toBe('network upgrade 5');
+    // A number keeps the word before it as its label, and only that.
+    expect(forkIdentity('Network Upgrade 5')).toBe('upgrade 5');
+    expect(forkIdentity('the Protocol 28 upgrade')).toBe(forkIdentity('Protocol 28'));
   });
 
   it('drops only the mainnet qualifier from a scope', () => {

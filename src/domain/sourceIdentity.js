@@ -103,7 +103,9 @@ export function findIdentityConflicts({ theGraph, chainlist, chains }) {
   for (const c of Array.isArray(chainlist) ? chainlist : []) add('chainlist', Number(c?.chainId), c);
   for (const n of Array.isArray(theGraph?.networks) ? theGraph.networks : []) add('theGraph', graphChainId(n), n);
 
-  const kind = kindWordsOf(Array.isArray(chains) ? chains : []);
+  // From chains.json, else chainlist's names: a chains.json outage must not leave "Mainnet" as
+  // the word that makes two networks one.
+  const kind = kindWordsOf(Array.isArray(chains) && chains.length ? chains : Array.isArray(chainlist) ? chainlist : []);
   const conflicts = new Map();
   for (const id of new Set([...bySource.chains.keys(), ...bySource.chainlist.keys(), ...bySource.theGraph.keys()])) {
     const resolved = resolveIdentity({

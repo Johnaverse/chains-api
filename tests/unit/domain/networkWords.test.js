@@ -47,7 +47,7 @@ describe('test-network words, learned from the registry', () => {
 describe('kind words, learned from the registry', () => {
   it('learns a word many unrelated ecosystems put after their own name', () => {
     const kind = kindWordsOf(KIND_REGISTRY);
-    expect([...kind].sort()).toEqual(['blockchain', 'chain', 'evm', 'mainnet', 'network', 'protocol']);
+    expect([...kind].sort()).toEqual(['blockchain', 'chain', 'evm', 'mainnet', 'network', 'protocol', 'testnet']);
   });
 
   it('does not learn a project word that repeats inside one ecosystem, or a leading one', () => {

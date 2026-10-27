@@ -48,4 +48,12 @@ describe('sourceIdentity', () => {
     });
     expect([...conflicts.keys()]).toEqual([222]);
   });
+
+  it('learns the structural words from chainlist when chains.json is missing', () => {
+    const eco = ['alder', 'birch', 'cedar', 'dogwood', 'elm', 'fir', 'ginkgo', 'hazel', 'ilex', 'juniper'];
+    const chainlist = [...eco.map((e, i) => chains(9000 + i, `${e} Mainnet`, 'X')), chains(77, 'Alpha Mainnet', 'AAA')];
+    const theGraph = { networks: [graph(77, 'Beta Mainnet', 'BBB')] };
+    // Sharing only "mainnet" does not make Alpha and Beta one network.
+    expect([...findIdentityConflicts({ chains: [], chainlist, theGraph }).keys()]).toEqual([77]);
+  });
 });

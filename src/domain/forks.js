@@ -207,12 +207,12 @@ export function forkIdentity(name) {
   // fork is treated as unnamed and grouped by height or time instead. Which words are generic
   // is learned, not listed (genericInName).
   if (words.every(genericInName)) return null;
-  // Generic words around the name go; a leading one stays when only a number would be left
-  // ("Protocol 28" ≠ "Protocol 29", and is not "28").
+  // Generic words around the name go; the one before a number stays, as its label ("the
+  // Protocol 28 upgrade" is "Protocol 28" — ≠ "Protocol 29", and not "28").
   let end = words.length;
   while (genericInName(words[end - 1])) end--;
   let start = 0;
-  while (genericInName(words[start]) && words.slice(start + 1, end).some(w => !/^\d+$/.test(w) && !genericInName(w))) start++;
+  while (genericInName(words[start]) && words.slice(start + 1, end).some(w => !/^\d+$/.test(w))) start++;
   return words.slice(start, end).join(' ');
 }
 

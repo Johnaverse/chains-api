@@ -319,6 +319,9 @@ describe('getForks', () => {
       { chainId: 17000, name: 'Ethereum Holesky', tags: ['Testnet'] },
       { chainId: 1666600000, name: 'Harmony Mainnet Shard 0', shortName: 'one', aliases: ['one'] },
       { chainId: 2810, name: 'Morph Hoodi', tags: ['Testnet'] },
+      { chainId: 8453, name: 'Base' },
+      { chainId: 84532, name: 'Base Sepolia Testnet', tags: ['Testnet'] },
+      { chainId: 10, name: 'OP Mainnet' },
       // Enough unrelated ecosystems for "Mainnet", "Chain", "Network" to be learned as kind words.
       ...KIND_REGISTRY
     ];
@@ -333,7 +336,8 @@ describe('getForks', () => {
       ['github:quarkchain/goquarkchain', [100000, 100001, 100002]],
       ['github:sigp/lighthouse', [1, 100]],
       ['github:paradigmxyz/reth', [1, 11155111, 560048, 17000]],
-      ['github:morph-l2/morph', [2810]]
+      ['github:morph-l2/morph', [2810]],
+      ['github:ethereum-optimism/optimism', [1, 8453, 10, 84532]]
     ]);
     const placed = async (...mentions) => {
       getAllChains.mockReturnValue(registry);
@@ -446,6 +450,19 @@ describe('getForks', () => {
     it('keeps a bare "Testnet" for picking among the repository\'s chains', async () => {
       const forks = await placed(release('a', 'github:gluwa/creditcoin3', 'Testnet', 'OsakaBare'));
       expect(on(forks, 'OsakaBare')).toEqual([102031]);
+    });
+
+    it('does not read a bare test qualifier as a network among a widely run client\'s chains', async () => {
+      // "Testnet" matches Base Sepolia Testnet's name, but says nothing about Base: four chains run
+      // this client, so a release naming no network of its own places nothing.
+      const forks = await placed(
+        release('a', 'github:ethereum-optimism/optimism', 'Testnet', 'OpBare'),
+        release('b', 'github:ethereum-optimism/optimism', 'Fusaka Testnet', 'OpFusaka'),
+        release('c', 'github:ethereum-optimism/optimism', 'Base Sepolia', 'OpBase')
+      );
+      expect(on(forks, 'OpBare')).toEqual([]);
+      expect(on(forks, 'OpFusaka')).toEqual([]);
+      expect(on(forks, 'OpBase')).toEqual([84532]);
     });
 
     it('serves the unplaced ones as a review queue', async () => {

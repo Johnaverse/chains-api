@@ -6,7 +6,7 @@ import { getRepositoryChains } from '../sources/networkResearch.js';
 import { logger } from '../util/logger.js';
 import { learnForkNames } from '../domain/forkNames.js';
 import { learnForkWords } from '../domain/forkWords.js';
-import { learnNetworkWords, mentionsTestNetwork, isKindWord, isTestNetworkWord } from '../domain/networkWords.js';
+import { learnNetworkWords, mentionsTestNetwork, isKindWord, isTestNetworkWord, chainOfBareName } from '../domain/networkWords.js';
 
 /**
  * Serves fork entities: the read side of src/domain/forks.js.
@@ -136,14 +136,19 @@ export function repositoryResolver(chains, repoChains) {
       const own = all.filter((w) => !kindOnly(w));
       // A test word many ecosystems use ("testnet", "sepolia") counts half: "Boba BNB Testnet" is
       // nearer Boba BNB than Boba Sepolia (alias "boba-testnet").
-      const named = words.reduce((sum, w) => sum + Math.max(carried(own, w), carried(repoWords, w)) / (isKindWord(w) ? 2 : 1), 0);
+      const score = (w) => Math.max(carried(own, w), carried(repoWords, w));
+      const named = words.reduce((sum, w) => sum + score(w) / (isKindWord(w) ? 2 : 1), 0);
+      // Whether a word naming a network, not only a kind of one, matched: "Testnet" or "Fusaka
+      // Testnet" says which of go-ethereum's chains no more than no network at all. "Sepolia" is
+      // common too, but the registry's id for a network of its own.
+      const identified = words.some((w) => (!isKindWord(w) || chainOfBareName(w)) && score(w) > 0);
       // A retired network loses to its live successor ("Tempo Testnet Andantino (Deprecated)").
       const kind = (isTestChain(chain) === wantTest ? 2 : 0) + (chain.status === 'deprecated' ? 0 : 1);
       // Name words the network did not say: "Metal C-Chain" over "Metal Tahoe C-Chain" for "Metal".
       const extra = own.filter((o) => !words.some((w) => carried([o], w))).length;
       // Then the kind words it did not say: "Shibarium" over "Shibarium Beta" (named networks only).
       const extraKind = all.filter((o) => kindOnly(o) && !scopeWords.includes(o)).length;
-      return { chain, named, kind, extra, extraKind };
+      return { chain, named, identified, kind, extra, extraKind };
     });
     const pick = (list, by) => { const top = Math.max(...list.map(by)); return list.filter((n) => by(n) === top); };
     const byName = pick(scored, (n) => n.named);
@@ -151,7 +156,7 @@ export function repositoryResolver(chains, repoChains) {
     // "Sei Network"): only a project's own client — a mainnet and a testnet or two — is narrow
     // enough to read its kind as the answer. A release of go-ethereum or reth naming "Fusaka
     // Devnet-3" is no Sepolia or chain 1 fork.
-    const guessing = !scope || byName[0].named === 0;
+    const guessing = !scope || !byName.some((n) => n.identified);
     if (guessing && candidates.length > PROJECT_CLIENT_CHAINS) return [];
     const nearest = pick(pick(byName, (n) => n.kind), (n) => -n.extra);
     // Kind words only break a tie on a network that was named: with none named, "Gnosis" is no
