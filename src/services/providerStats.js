@@ -3,6 +3,7 @@ import { getStatusNewsPages } from '../sources/statusNewsPages.js';
 import { getRpcMonitoringResults } from '../store/queries.js';
 import { groupEventsByIncident, INCIDENT_STATUSES } from './upgrades.js';
 import { isPlannedGroup } from '../domain/plannedWork.js';
+import { PROVIDER_INCIDENT_STALE_MS } from '../../config.js';
 
 /**
  * Per-RPC-provider quality indicators. Two metrics that must never be
@@ -150,7 +151,13 @@ export function buildProviderStats(events, { statusPages = [], rpcResults = [], 
     // reliably labelled, so the unlabelled case is more likely an incident, and surfacing
     // it in red is the safer failure.
     const ongoingMaintenanceGroups = ongoing.filter((g) => isPlannedGroup(g));
-    const ongoingIncidents = ongoing.filter((g) => !isPlannedGroup(g));
+    // An incident the provider left open but has said nothing about for days is stale, not
+    // burning: Pinax's BSC token-api incident sat at "Identified" from 23 Oct, after its two
+    // sibling incidents that afternoon were resolved, and read as "1 ongoing" and a full day of
+    // downtime every day after. It stays visible, as stale, with its page link.
+    const openIncidents = ongoing.filter((g) => !isPlannedGroup(g));
+    const staleGroups = openIncidents.filter((g) => isStale(g, now));
+    const ongoingIncidents = openIncidents.filter((g) => !isStale(g, now));
     const ongoingNow = ongoingIncidents.length;
     const ongoingMaintenance = ongoingMaintenanceGroups.length;
     // When the longest-running open INCIDENT started. With resolution times
@@ -193,6 +200,14 @@ export function buildProviderStats(events, { statusPages = [], rpcResults = [], 
       ongoingNow,
       ongoingMaintenance,
       oldestOngoingAt,
+      staleOngoing: staleGroups.length,
+      staleIncidents: staleGroups.map((g) => ({
+        title: g.latest.title ?? null,
+        url: g.latest.url ?? null,
+        status: g.latest.status ?? null,
+        openedAt: g.first.publishedAt ?? null,
+        lastUpdateAt: g.latest.publishedAt ?? null
+      })),
       maintenance30d: maintenanceGroups.length,
       chainsAffected30d: chainsAffected.size,
       resolutionHours: resolutionSamples.length
@@ -321,7 +336,7 @@ function chainWeightedAvailability(incidentGroups, { chainsSupported, now, oldes
   const intervalsByChain = new Map();
   let measured = 0;
   let unknownDuration = 0;
-  const byEvidence = { observed: 0, ongoing: 0, unpublished: 0 };
+  const byEvidence = { observed: 0, ongoing: 0, stale: 0, unpublished: 0 };
   incidentGroups.forEach((g, idx) => {
     const startMs = g.first.publishedMs;
     const { ms: endMs, evidence } = downtimeEnd(g, now);
@@ -376,8 +391,9 @@ function chainWeightedAvailability(incidentGroups, { chainsSupported, now, oldes
   availability.measuredIncidents = measured;
   availability.unknownDurationIncidents = unknownDuration;
   // The basis, broken out: `observed` are real durations, `ongoing` are charged to now and
-  // will change on the next poll, `unpublished` contributed nothing. A consumer ranking
-  // providers needs to know which of the three it is actually comparing.
+  // will change on the next poll, `stale` are charged to the last update of an incident the
+  // provider never closed, `unpublished` contributed nothing. A consumer ranking providers
+  // needs to know which of them it is actually comparing.
   availability.durationEvidence = byEvidence;
   if (notes.length) availability.note = notes.join('; ');
   return availability;
@@ -390,6 +406,8 @@ function chainWeightedAvailability(incidentGroups, { chainsSupported, now, oldes
  * Three cases, and the third is the common one:
  *   observed    a later update flips to resolved -> that timestamp, the real duration
  *   ongoing     the feed still marks it live      -> now, it is genuinely burning
+ *   stale       still marked live, but no update for PROVIDER_INCIDENT_STALE_MS -> its last
+ *               update: what the page last asserted, never days of silence charged as outage
  *   unpublished a lone entry in a terminal state  -> null; the page posted the incident
  *               only once, at resolution, so its start and duration are unknowable from
  *               the feed. Inventing "until now" is the worst of the three options —
@@ -405,8 +423,17 @@ export function downtimeEnd(group, now) {
   const startMs = group.first.publishedMs;
   const resolved = group.updates.find((u) => u !== group.first && u.status === 'resolved' && u.publishedMs != null);
   if (resolved && resolved.publishedMs > startMs) return { ms: resolved.publishedMs, evidence: 'observed' };
+  // Left open with no word for PROVIDER_INCIDENT_STALE_MS: down as far as the page last said so,
+  // not to now — a forgotten incident is not days of outage.
+  if (group.latest.ongoing === true && isStale(group, now)) return { ms: group.latest.publishedMs ?? startMs, evidence: 'stale' };
   if (group.latest.ongoing === true) return { ms: now, evidence: 'ongoing' };
   return { ms: null, evidence: 'unpublished' };
+}
+
+/** Open, but the provider has posted nothing about it for PROVIDER_INCIDENT_STALE_MS. */
+export function isStale(group, now) {
+  const last = group.latest?.publishedMs;
+  return Number.isFinite(last) && now - last > PROVIDER_INCIDENT_STALE_MS;
 }
 
 /** Total time covered by `intervals` within [winStart, winEnd], overlaps merged. */

@@ -378,6 +378,8 @@ export function followingIncidents(incidentGroups, { chainIds = [], slugs = [], 
         // null unless a resolution was actually observed — never "now" standing in for it.
         resolvedAt: evidence === 'observed' && endMs != null ? new Date(endMs).toISOString() : null,
         ongoing: evidence === 'ongoing',
+        // Left open by the provider with no update for days (providerStats.isStale).
+        ...(evidence === 'stale' ? { stale: true } : {}),
         durationEvidence: evidence,
         chainIds: uniqueChainIds(inc.updates),
         // Temporal correlation on the same network — never asserted as causation. The honest
