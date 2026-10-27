@@ -7,11 +7,16 @@ import {
 
 import { learnNetworkWords } from '../../../src/domain/networkWords.js';
 import { TESTNET_REGISTRY } from '../../fixtures/testnetRegistry.js';
+import { learnForkWords } from '../../../src/domain/forkWords.js';
+import { FORK_TITLE_MENTIONS, KIND_REGISTRY } from '../../fixtures/structuralWords.js';
+
+// Which words of a fork's name are generic is learned from feed titles (forkWords.js).
+beforeAll(() => learnForkWords(FORK_TITLE_MENTIONS));
 
 const NOW = Date.parse('2026-08-14T12:00:00Z');
 
 // Which words name test networks is learned from the registry, as in production.
-beforeAll(() => learnNetworkWords(TESTNET_REGISTRY));
+beforeAll(() => learnNetworkWords([...TESTNET_REGISTRY, ...KIND_REGISTRY]));
 
 function event(id, { fork, chains = [8453], affectedChains, page = 'quicknode', publishedAt = '2026-08-14T00:00:00Z', updatedAt } = {}) {
   return {
@@ -338,7 +343,8 @@ describe('forks across status, forum and news feeds', () => {
     expect(forkIdentity('Glamsterdam hard fork')).toBe('glamsterdam');
     expect(forkIdentity('Protocol 28')).toBe('protocol 28');
     // A name made only of generic words identifies nothing, so it is no name at all: "Protocol
-    // Upgrade" must not collapse to "protocol" and merge two unrelated notices under it.
+    // Upgrade" must not collapse to "protocol" and merge two unrelated notices under it. The
+    // words are learned: "upgrade" from feed titles, "protocol" and "network" from the registry.
     expect(forkIdentity('Upgrade')).toBeNull();
     expect(forkIdentity('Protocol Upgrade')).toBeNull();
     expect(forkIdentity('Network Upgrade')).toBeNull();

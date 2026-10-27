@@ -1,4 +1,5 @@
-import { mentionsTestNetwork, isTestNetworkWord } from './networkWords.js';
+import { mentionsTestNetwork, isTestNetworkWord, isKindWord } from './networkWords.js';
+import { isGenericForkWord } from './forkWords.js';
 import { canonicalForkId } from './forkNames.js';
 
 /**
@@ -200,22 +201,26 @@ function forkGroup(fork, scope) {
 export function forkIdentity(name) {
   const cleaned = normalizeForkName(name);
   if (!cleaned) return null;
-  const stripped = cleaned
-    .replace(/^the /, '')
-    .replace(/ (network upgrade|protocol upgrade|hard ?fork|upgrade|fork)$/, '')
-    .trim();
-  // A name made only of generic words — "Protocol Upgrade", "Network Upgrade", "Hard Fork" —
+  const words = cleaned.split(' ');
+  // A name made only of generic words — "Network Upgrade", "Hard Fork", "Mandatory Release" —
   // identifies nothing: two unrelated notices on one network would merge under it. Such a
-  // fork is treated as unnamed and grouped by height or time instead.
-  if (cleaned.split(' ').every(w => GENERIC_FORK_WORDS.has(w))) return null;
-  return stripped || cleaned;
+  // fork is treated as unnamed and grouped by height or time instead. Which words are generic
+  // is learned, not listed (genericInName).
+  if (words.every(genericInName)) return null;
+  // Generic words around the name go; a leading one stays when only a number would be left
+  // ("Protocol 28" ≠ "Protocol 29", and is not "28").
+  let end = words.length;
+  while (genericInName(words[end - 1])) end--;
+  let start = 0;
+  while (genericInName(words[start]) && words.slice(start + 1, end).some(w => !/^\d+$/.test(w) && !genericInName(w))) start++;
+  return words.slice(start, end).join(' ');
 }
 
-const GENERIC_FORK_WORDS = new Set([
-  'the', 'a', 'network', 'protocol', 'chain', 'mainnet', 'testnet', 'upgrade', 'upgrades', 'hard',
-  'soft', 'fork', 'hardfork', 'softfork', 'scheduled', 'planned', 'emergency', 'mandatory',
-  'node', 'client', 'software', 'release', 'maintenance', 'update', 'activation'
-]);
+// Generic in a fork's name: a word the feeds drop from fork names, or one the registry uses only
+// to say what kind of network a name is ("Protocol", "Network") — neither says which fork.
+function genericInName(w) {
+  return isGenericForkWord(w) || (isKindWord(w) && !isTestNetworkWord(w));
+}
 
 /**
  * The networks one event is about, as grouping scopes.

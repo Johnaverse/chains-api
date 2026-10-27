@@ -1,3 +1,5 @@
+import { kindWordsOf } from './networkWords.js';
+
 /**
  * Whether the registries mean the same network by one chain ID.
  *
@@ -20,33 +22,32 @@
 // broadest and the most often reused for a different network.
 export const SOURCE_PRECEDENCE = ['chains', 'theGraph', 'chainlist'];
 
-// Words that say what kind of network a name is, not which network.
-const STRUCTURAL_WORDS = new Set(['mainnet', 'testnet', 'devnet', 'net', 'network', 'chain', 'the', 'of']);
-
-function nameWords(...names) {
+// Words that say what kind of network a name is, not which network ("Mainnet", "Chain",
+// "Testnet"), are learned from chains.json's names (kindWordsOf) and passed in as `kind`.
+function nameWords(kind, ...names) {
   const words = new Set();
   for (const name of names) {
     for (const w of String(name ?? '').toLowerCase().split(/[^a-z0-9]+/)) {
-      if (w && !STRUCTURAL_WORDS.has(w) && !/^\d+$/.test(w)) words.add(w);
+      if (w && !kind.has(w) && !/^\d+$/.test(w)) words.add(w);
     }
   }
   return words;
 }
 
 /** What one source says a chain ID is: its names, as words, and its native symbol. */
-export function identityOf(source, entry) {
+export function identityOf(source, entry, kind = new Set()) {
   if (!entry) return null;
   if (source === 'theGraph') {
     return {
       name: entry.fullName ?? entry.shortName ?? entry.id ?? null,
       symbol: entry.nativeToken ?? null,
-      words: nameWords(entry.fullName, entry.shortName, entry.id, ...(Array.isArray(entry.aliases) ? entry.aliases : []))
+      words: nameWords(kind, entry.fullName, entry.shortName, entry.id, ...(Array.isArray(entry.aliases) ? entry.aliases : []))
     };
   }
   return {
     name: entry.name ?? null,
     symbol: entry.nativeCurrency?.symbol ?? null,
-    words: nameWords(entry.name, entry.shortName, entry.chain)
+    words: nameWords(kind, entry.name, entry.shortName, entry.chain)
   };
 }
 
@@ -58,12 +59,13 @@ function sameNetwork(a, b) {
 
 /**
  * The sources to build one chain ID's record from, given each source's entry for it.
+ * `kind`: the registry's structural words (kindWordsOf), which say nothing about which network.
  * Returns null when every pair agrees (the usual case); otherwise `{ kept, excluded, identities }`.
  */
-export function resolveIdentity(entries) {
+export function resolveIdentity(entries, kind = new Set()) {
   const present = SOURCE_PRECEDENCE.filter((s) => entries[s]);
   if (present.length < 2) return null;
-  const ids = Object.fromEntries(present.map((s) => [s, identityOf(s, entries[s])]));
+  const ids = Object.fromEntries(present.map((s) => [s, identityOf(s, entries[s], kind)]));
   const agree = (a, b) => sameNetwork(ids[a], ids[b]);
   if (present.every((a, i) => present.slice(i + 1).every((b) => agree(a, b)))) return null;
 
@@ -101,13 +103,14 @@ export function findIdentityConflicts({ theGraph, chainlist, chains }) {
   for (const c of Array.isArray(chainlist) ? chainlist : []) add('chainlist', Number(c?.chainId), c);
   for (const n of Array.isArray(theGraph?.networks) ? theGraph.networks : []) add('theGraph', graphChainId(n), n);
 
+  const kind = kindWordsOf(Array.isArray(chains) ? chains : []);
   const conflicts = new Map();
   for (const id of new Set([...bySource.chains.keys(), ...bySource.chainlist.keys(), ...bySource.theGraph.keys()])) {
     const resolved = resolveIdentity({
       chains: bySource.chains.get(id),
       chainlist: bySource.chainlist.get(id),
       theGraph: bySource.theGraph.get(id)
-    });
+    }, kind);
     if (resolved) conflicts.set(id, resolved);
   }
   return conflicts;

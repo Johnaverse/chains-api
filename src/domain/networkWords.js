@@ -29,6 +29,35 @@ const MIN_TESTNETS = 3;
 const MIN_TEST_SHARE = 0.8;
 
 let strong = new Set();
+let kind = new Set();
+
+// A word that says what KIND of network a name is ("Mainnet", "Chain", "Network", "EVM",
+// "Subnet") rather than which: it follows the ecosystem's own word in the names of many
+// unrelated ecosystems. The ecosystem is a name's first word; a project word repeats inside one
+// ecosystem ("Skale" across 16 chains) and never reaches this many.
+const MIN_ECOSYSTEMS = 10;
+const kindMemo = new WeakMap();
+
+/**
+ * The registry's structural words, from any list of chains with a `name` (the built registry,
+ * or chains.json as fetched). Memoized on the array.
+ */
+export function kindWordsOf(chains) {
+  if (!Array.isArray(chains)) return new Set();
+  if (kindMemo.has(chains)) return kindMemo.get(chains);
+  const ecosystems = new Map(); // word -> ecosystems naming it after their own word
+  for (const chain of chains) {
+    const [eco, ...rest] = tokens(chain?.name);
+    for (const t of new Set(rest)) {
+      if (t === eco || /^v?\d+$/.test(t)) continue;
+      if (!ecosystems.has(t)) ecosystems.set(t, new Set());
+      ecosystems.get(t).add(eco);
+    }
+  }
+  const out = new Set([...ecosystems].filter(([, es]) => es.size >= MIN_ECOSYSTEMS).map(([t]) => t));
+  kindMemo.set(chains, out);
+  return out;
+}
 
 /** Rebuild from the registry's chains. Cheap to call repeatedly: memoized on the array. */
 export function learnNetworkWords(chains) {
@@ -66,6 +95,7 @@ export function learnNetworkWords(chains) {
   strong = new Set([...testAny].filter(([t, n]) => !numeric(t) && n >= MIN_TESTNETS
     && n / all.get(t) >= MIN_TEST_SHARE && (testQual.get(t) ?? 0) * 2 >= n).map(([t]) => t));
   for (const t of strong) words.add(t);
+  kind = kindWordsOf(chains);
   bareNames = bare;
   learnedFrom = chains;
 }
@@ -86,6 +116,11 @@ export function mentionsTestNetwork(text) {
   return tokens(text).some((t) => words.has(t));
 }
 
+/** Whether this one word says what kind of network a name is, not which (learned; see kindWordsOf). */
+export function isKindWord(word) {
+  return kind.has(String(word ?? '').toLowerCase());
+}
+
 /** The one chain whose registry id or alias is exactly this bare name, else null. */
 export function chainOfBareName(name) {
   const hits = bareNames.get(String(name ?? '').toLowerCase()) ?? [];
@@ -98,5 +133,5 @@ export function testNetworkWords() {
 }
 
 export function _testNetworkWordsForTests() {
-  return { words, strong };
+  return { words, strong, kind };
 }

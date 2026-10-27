@@ -3,6 +3,7 @@ import { getForks, _resetForksMemoForTests, qualifyBareNetwork } from '../../../
 import { getForkMentions } from '../../../src/sources/forkFeeds.js';
 import { getExplorerTip } from '../../../src/sources/blockscout.js';
 import { getAllChains } from '../../../src/store/queries.js';
+import { KIND_REGISTRY } from '../../fixtures/structuralWords.js';
 import { TESTNET_REGISTRY } from '../../fixtures/testnetRegistry.js';
 import { getRepositoryChains } from '../../../src/sources/networkResearch.js';
 
@@ -317,7 +318,9 @@ describe('getForks', () => {
       { chainId: 560048, name: 'Ethereum Hoodi', tags: ['Testnet'] },
       { chainId: 17000, name: 'Ethereum Holesky', tags: ['Testnet'] },
       { chainId: 1666600000, name: 'Harmony Mainnet Shard 0', shortName: 'one', aliases: ['one'] },
-      { chainId: 2810, name: 'Morph Hoodi', tags: ['Testnet'] }
+      { chainId: 2810, name: 'Morph Hoodi', tags: ['Testnet'] },
+      // Enough unrelated ecosystems for "Mainnet", "Chain", "Network" to be learned as kind words.
+      ...KIND_REGISTRY
     ];
     const repos = new Map([
       ['github:xinfinorg/xdposchain', [50, 51]],
