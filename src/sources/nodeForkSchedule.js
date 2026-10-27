@@ -1,5 +1,5 @@
 import { jsonRpcCall } from '../../rpcUtil.js';
-import { NODE_FORK_SCHEDULE_REFRESH_MS, NODE_FORK_SCHEDULE_RETRY_MS, RPC_CHECK_TIMEOUT_MS } from '../../config.js';
+import { NODE_FORK_SCHEDULE_REFRESH_MS, NODE_FORK_SCHEDULE_RETRY_MS, NODE_FORK_SCHEDULE_MAX_URLS, RPC_CHECK_TIMEOUT_MS } from '../../config.js';
 
 /**
  * Each chain's fork schedule as its own nodes are configured with it: `eth_config` (EIP-7910),
@@ -12,12 +12,11 @@ import { NODE_FORK_SCHEDULE_REFRESH_MS, NODE_FORK_SCHEDULE_RETRY_MS, RPC_CHECK_T
  * names its fork only by joining a named one at the same instant (src/domain/forks.js).
  *
  * Many public RPCs refuse the method (gateways, rate-limited demo keys), so up to
- * MAX_URLS_PER_CHECK working endpoints are tried, and a chain where none answers waits
+ * NODE_FORK_SCHEDULE_MAX_URLS working endpoints are tried, and a chain where none answers waits
  * NODE_FORK_SCHEDULE_RETRY_MS. An answer for another chain id is a misconfigured or
  * misattributed endpoint, never this chain's schedule.
  */
 
-const MAX_URLS_PER_CHECK = 3;
 
 // chainId -> { checkedAt, url, current, next, last } or { checkedAt, unsupported: true }
 let schedules = new Map();
@@ -63,7 +62,7 @@ export async function refreshNodeForkSchedule(chainId, urls, { now = Date.now() 
   if ((known && now - known.checkedAt < wait) || inFlight.has(chainId) || !urls?.length) return known ?? null;
   inFlight.add(chainId);
   try {
-    for (const url of urls.slice(0, MAX_URLS_PER_CHECK)) {
+    for (const url of urls.slice(0, NODE_FORK_SCHEDULE_MAX_URLS)) {
       let schedule = null;
       try {
         schedule = parseEthConfig(await jsonRpcCall(url, 'eth_config', { timeoutMs: RPC_CHECK_TIMEOUT_MS }), chainId);

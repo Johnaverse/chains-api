@@ -36,6 +36,23 @@ describe('fork names from client code (chains-client-feed /fork-source)', () => 
     expect(getFeed.mock.calls[1][0]).toBe('https://clients.test/fork-source?at=56:1787625000');
   });
 
+  it('asks again for a found answer each period: the schedule follows the code, a failed re-ask keeps it', async () => {
+    getFeed.mockResolvedValueOnce(reply([jenner]));
+    await requestForkSources([{ chainId: 97, time: 1793241000 }], { now: NOW });
+    const v = forkSourceVersion();
+    // The feed re-read bsc's params/config.go: a fork scheduled since.
+    const kepler = { ...jenner, forks: [...jenner.forks, { name: 'Kepler', activationTime: 1796000000, activationBlock: null }] };
+    getFeed.mockResolvedValueOnce(reply([kepler]));
+    await requestForkSources([{ chainId: 97, time: 1793241000 }], { now: NOW + 61 * 60_000 });
+    expect(forkSourceOf(97, 1793241000).forks.map((f) => f.name)).toEqual(['Pasteur', 'Jenner', 'Kepler']);
+    expect(forkSourceVersion()).toBe(v + 1);
+    getFeed.mockRejectedValueOnce(new Error('down'));
+    await requestForkSources([{ chainId: 97, time: 1793241000 }], { now: NOW + 122 * 60_000 });
+    expect(forkSourceOf(97, 1793241000)).toMatchObject({ name: 'Jenner' });
+    // …and waits a full period before asking again.
+    expect(requestForkSources([{ chainId: 97, time: 1793241000 }], { now: NOW + 123 * 60_000 })).toBeNull();
+  });
+
   it('backs off after a failed attempt, retries included', async () => {
     getFeed.mockRejectedValue(new Error('down'));
     await requestForkSources([{ chainId: 97, time: 1793241000 }], { now: NOW });

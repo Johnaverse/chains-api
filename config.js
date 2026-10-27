@@ -62,6 +62,8 @@ export const PROVIDER_INCIDENT_STALE_MS = parseIntEnv('PROVIDER_INCIDENT_STALE_M
 // and how long a chain none of whose RPCs answers it waits before it is asked again.
 export const NODE_FORK_SCHEDULE_REFRESH_MS = parseIntEnv('NODE_FORK_SCHEDULE_REFRESH_MS', 6 * 60 * 60 * 1000);
 export const NODE_FORK_SCHEDULE_RETRY_MS = parseIntEnv('NODE_FORK_SCHEDULE_RETRY_MS', 24 * 60 * 60 * 1000);
+// Working endpoints asked for eth_config per check, until one answers.
+export const NODE_FORK_SCHEDULE_MAX_URLS = parseIntEnv('NODE_FORK_SCHEDULE_MAX_URLS', 3);
 
 // Search
 export const MAX_SEARCH_QUERY_LENGTH = parseIntEnv('MAX_SEARCH_QUERY_LENGTH', 200);
@@ -226,6 +228,13 @@ export const WEB3_NEWS_URL = parseStringEnv(
 // so unset means the feed is simply not read — never a request that leaves the cluster.
 export const CLIENT_FEED_URL = parseStringEnv('CLIENT_FEED_URL', '');
 export const CLIENT_FEED_FETCH_TIMEOUT_MS = parseIntEnv('CLIENT_FEED_FETCH_TIMEOUT_MS', 10000);
+// Fork names and schedules from the networks' client code (chains-client-feed /fork-source):
+// how often a found answer is asked again (the feed re-reads the code each period), and when
+// a pending, failed or not-found answer is retried.
+export const FORK_SOURCE_RECHECK_MS = parseIntEnv('FORK_SOURCE_RECHECK_MS', 60 * 60 * 1000);
+export const FORK_SOURCE_PENDING_RETRY_MS = parseIntEnv('FORK_SOURCE_PENDING_RETRY_MS', 5 * 60 * 1000);
+export const FORK_SOURCE_FAILED_RETRY_MS = parseIntEnv('FORK_SOURCE_FAILED_RETRY_MS', 30 * 60 * 1000);
+export const FORK_SOURCE_NOT_FOUND_RETRY_MS = parseIntEnv('FORK_SOURCE_NOT_FOUND_RETRY_MS', 24 * 60 * 60 * 1000);
 // How long the /client-releases proxy holds one upstream answer before re-reading it.
 export const CLIENT_FEED_CACHE_TTL_MS = parseIntEnv('CLIENT_FEED_CACHE_TTL_MS', 60000);
 // Total size of client-feed responses kept in memory. The 200-key cap alone let a run of large

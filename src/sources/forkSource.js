@@ -1,4 +1,7 @@
-import { CLIENT_FEED_URL, CLIENT_FEED_FETCH_TIMEOUT_MS } from '../../config.js';
+import {
+  CLIENT_FEED_URL, CLIENT_FEED_FETCH_TIMEOUT_MS, FORK_SOURCE_RECHECK_MS, FORK_SOURCE_PENDING_RETRY_MS,
+  FORK_SOURCE_FAILED_RETRY_MS, FORK_SOURCE_NOT_FOUND_RETRY_MS
+} from '../../config.js';
 import { getFeed } from './feedHttp.js';
 import { logger } from '../util/logger.js';
 
@@ -9,14 +12,14 @@ import { logger } from '../util/logger.js';
  * timestamp and reads the fork's name there — `JennerTime: newUint64(1793241000)` in
  * bnb-chain/bsc — with the rest of that network's schedule in the same configuration.
  *
- * The feed answers `pending` while it looks (code search is slow and paced), so a pair is asked
- * again after RETRY_PENDING_MS; `found` and `not_found` are kept as the feed keeps them. Optional:
- * without CLIENT_FEED_URL nothing is asked and node forks stay unnamed.
+ * The feed re-reads the code it found each period, so a found answer is asked again every
+ * FORK_SOURCE_RECHECK_MS and a fork the client schedules later reaches the chain's history; the
+ * feed answers `pending` while it looks (code search is slow and paced), retried after
+ * FORK_SOURCE_PENDING_RETRY_MS. Optional: without CLIENT_FEED_URL nothing is asked and node forks
+ * stay unnamed.
  */
 
-const RETRY_PENDING_MS = 5 * 60 * 1000;
-const RETRY_FAILED_MS = 30 * 60 * 1000;
-const KEEP_NOT_FOUND_MS = 24 * 60 * 60 * 1000;
+// The feed's own limit per request.
 const MAX_PAIRS = 50;
 
 // `${chainId}:${time}` -> { status, askedAt, ...answer }
@@ -45,9 +48,11 @@ export function forkSourceOf(chainId, time) {
 
 function due(a, now) {
   if (!a) return true;
-  if (a.status === 'found') return false;
-  if (a.status === 'not_found') return now - a.askedAt >= KEEP_NOT_FOUND_MS;
-  return now - a.askedAt >= (a.status === 'pending' ? RETRY_PENDING_MS : RETRY_FAILED_MS);
+  const wait = a.status === 'found' ? FORK_SOURCE_RECHECK_MS
+    : a.status === 'not_found' ? FORK_SOURCE_NOT_FOUND_RETRY_MS
+      : a.status === 'pending' ? FORK_SOURCE_PENDING_RETRY_MS
+        : FORK_SOURCE_FAILED_RETRY_MS;
+  return now - a.askedAt >= wait;
 }
 
 /**
@@ -82,16 +87,28 @@ async function fetchAnswers(wanted, now) {
       if (!wanted.some((w) => w.key === key)) continue;
       answered.add(key);
       const answer = sanitize(item, now);
-      if (answer.status === 'found' && answers.get(key)?.status !== 'found') version += 1;
+      const before = answers.get(key);
+      // A name already found stays while the feed looks again; the schedule follows the code.
+      if (answer.status !== 'found' && before?.status === 'found') { before.askedAt = now; continue; }
+      if (answer.status === 'found' && JSON.stringify([before?.name, before?.forks]) !== JSON.stringify([answer.name, answer.forks])) version += 1;
       answers.set(key, answer);
     }
     // A pair the feed left out of its answer is a failed attempt, not one never made.
-    for (const w of wanted) if (!answered.has(w.key) && answers.get(w.key)?.status !== 'found') answers.set(w.key, { status: 'failed', askedAt: now });
+    for (const w of wanted) {
+      if (answered.has(w.key)) continue;
+      const before = answers.get(w.key);
+      if (before?.status === 'found') before.askedAt = now;
+      else answers.set(w.key, { status: 'failed', askedAt: now });
+    }
   } catch (err) {
     logger.warn({ err: err.message, pairs: wanted.length }, 'fork source lookup failed');
     // Every pair asked records this attempt, so a retry that fails waits RETRY_FAILED_MS like
     // the first; a name already found is kept.
-    for (const w of wanted) if (answers.get(w.key)?.status !== 'found') answers.set(w.key, { status: 'failed', askedAt: now });
+    for (const w of wanted) {
+      const before = answers.get(w.key);
+      if (before?.status === 'found') before.askedAt = now;
+      else answers.set(w.key, { status: 'failed', askedAt: now });
+    }
   }
 }
 
