@@ -748,9 +748,14 @@ function collapseIdentical(groups) {
  * With no forking network named, the post's chains are kept and the scope's own resolution is
  * added: a HyperEVM window that declares no chain is still a chain 999 fork.
  */
-function memberChainIds({ event, scope, forkNetwork, named, eventChainIds, chainIdsFor, chainNamesFor, repoChainIdsFor }) {
-  const ids = namedChainIds({ scope, forkNetwork, named, eventChainIds, chainIdsFor, chainNamesFor });
+function memberChainIds({ event, fork, scope, forkNetwork, named, eventChainIds, chainIdsFor, chainNamesFor, repoChainIdsFor }) {
   const repo = releaseRepoOf(event);
+  // The client feed's model chose this fork's chains from the networks its repository runs,
+  // reasoning from the notes, the repository and the fork ("BSC Chapel testnet" from
+  // bnb-chain/bsc is 97): the closest reading there is, ahead of matching names to the registry.
+  const chosen = repo && Array.isArray(fork?.chainIds) ? fork.chainIds.filter(Number.isFinite) : [];
+  if (chosen.length) return { chainIds: [...new Set(chosen)], fallback: false };
+  const ids = namedChainIds({ scope, forkNetwork, named, eventChainIds, chainIdsFor, chainNamesFor });
   if (ids.length || !repo || scope.startsWith('chain:')) return { chainIds: ids, fallback: false };
   // Nothing the names say places it: a client release is still about the chains its repository
   // runs, and the network it names picks among those ("BSC Chapel Testnet" from bnb-chain/bsc).
@@ -764,7 +769,7 @@ function memberChainIds({ event, scope, forkNetwork, named, eventChainIds, chain
   // chain 2039 "Aleph Zero"): a dated fork on no chain is missing from every history. Only then
   // — "one testnet" from some client is not Harmony's "one", nor a news post's "Ethereum
   // devnet" Ethereum mainnet.
-  const tested = scope.split(' ').filter((w) => !isTestNetworkWord(w) && w !== 'devnet');
+  const tested = scope.split(' ').filter((w) => !isTestNetworkWord(w));
   const repoWords = new Set(nameWordsOf(repo.replace(/^[a-z]+:/, '')));
   if (!tested.length || tested.length === scope.split(' ').length || !tested.some((w) => repoWords.has(w))) return { chainIds: [], fallback: false };
   return { chainIds: chainIdsFor?.(tested.join(' ')) ?? [], fallback: true };
@@ -879,7 +884,7 @@ export async function buildForks(events = [], { tipFor = null, chainIdsFor = nul
     for (const scope of scopes) {
       const group = forkGroup(fork, scope);
       if (!group) continue;
-      const { chainIds, fallback } = memberChainIds({ event, scope, forkNetwork, named, eventChainIds, chainIdsFor, chainNamesFor, repoChainIdsFor });
+      const { chainIds, fallback } = memberChainIds({ event, fork: raw, scope, forkNetwork, named, eventChainIds, chainIdsFor, chainNamesFor, repoChainIdsFor });
       if (!groups.has(group.key)) groups.set(group.key, { ...group, scope, members: [] });
       groups.get(group.key).members.push({ event, fork, chainIds, scope, observedAt, ...(fallback ? { placedByRepository: true } : {}) });
     }
