@@ -260,13 +260,14 @@ function scopesOf(event) {
     return { scopes: family.includes(forkNetwork) ? family : [forkNetwork], forkNetwork, named };
   }
   if (named.length) return { scopes: named, forkNetwork: null, named };
-  const chainIds = (event?.chains ?? []).map(c => c.chainId).filter(id => Number.isFinite(id));
-  if (chainIds.length) return { scopes: [...new Set(chainIds.map(id => `chain:${id}`))], forkNetwork: null, named };
-  // The chains chains-client-feed's model chose for the fork, when the item names no network and
-  // declares no chain of its own (a client many networks run): a mainnet release is chain 1's,
-  // never folded into the one Sepolia fork of that name as if it were unscoped.
+  // The chains chains-client-feed's model chose for the fork, when the item names no network:
+  // ahead of the chains it declares, which for a client release are its repository's (geth's
+  // mainnet release is chain 1's, never Sepolia's too), and never left unscoped, which would
+  // fold it into the one same-named fork on another network.
   const chosen = (event?.enrichment?.fork?.chainIds ?? []).filter(id => Number.isFinite(id));
   if (chosen.length) return { scopes: [...new Set(chosen.map(id => `chain:${id}`))], forkNetwork: null, named };
+  const chainIds = (event?.chains ?? []).map(c => c.chainId).filter(id => Number.isFinite(id));
+  if (chainIds.length) return { scopes: [...new Set(chainIds.map(id => `chain:${id}`))], forkNetwork: null, named };
   // No network identity at all. Still groupable by codename, which is better than discarding
   // the fork — it just cannot be split per network.
   return { scopes: ['unscoped'], forkNetwork: null, named };
@@ -678,21 +679,31 @@ function mergeSameActivation(groups) {
  * day-only date never decides it. With none, it stays a fork of its own: dated, on its chain,
  * unnamed.
  */
+// Any node evidence makes a group node-backed: a provider notice already joined to a node
+// activation is still that one activation.
 function isNodeGroup(g) {
-  return g.members.every(m => m.event?.feed === 'node');
+  return g.members.some(m => m.event?.feed === 'node');
 }
 
 function foldChainScopedIntoNamed(groups) {
+  // A provider's maintenance window is the provider's schedule, not the network's activation.
   const exactAnchors = (members) => {
     const anchors = { blocks: new Set(), times: [] };
     for (const m of members) {
+      if (isProviderWindow(m.event)) continue;
       const { block, time } = memberAnchor(m);
       if (block !== null) anchors.blocks.add(block);
       if (Number.isFinite(time) && !isDateOnly(m.fork.activationAt)) anchors.times.push(time);
     }
     return anchors;
   };
-  const named = [...groups.values()].filter(g => g.kind === 'name').map(g => ({ g, a: exactAnchors(g.members) }));
+  // The activation a named fork resolves to now: a node report matching a superseded claim
+  // (02:30, since moved to 03:30) must not move the fork back on its other chains.
+  const winning = (g) => {
+    const at = bestActivation(g.members.map(m => ({ ...resolveForkActivation(m.fork, null), rank: sourceRank(m.event), observedAt: m.observedAt })))?.at;
+    return at ? Date.parse(at) : null;
+  };
+  const named = [...groups.values()].filter(g => g.kind === 'name').map(g => ({ g, a: exactAnchors(g.members), at: winning(g) }));
   const pending = [...groups.values()].filter(g => g.kind !== 'name' && g.scope.startsWith('chain:'))
     .map(g => ({ g, chainId: Number(g.scope.slice('chain:'.length)), anchors: exactAnchors(g.members) }));
   // A named fork is one activation per chain: once a node activation joined it there, another
@@ -707,8 +718,11 @@ function foldChainScopedIntoNamed(groups) {
       if (!groups.has(p.g.key)) continue;
       const targets = named.filter(x => groups.has(x.g.key) && !taken.has(`${x.g.key}@${p.chainId}`)
         && x.g.members.some(m => m.chainIds.includes(p.chainId)))
-        .map(x => ({ g: x.g, d: anchorDistance(p.anchors, x.a) }))
-        .filter(x => (exactPass ? x.d === 0 : x.d === 1 && onlyHere(x.g, p.chainId)));
+        .map(x => ({ g: x.g, at: x.at, d: anchorDistance(p.anchors, x.a) }))
+        // On a fork other chains share, only its current activation is matched: anything else
+        // would move theirs too.
+        .filter(x => (onlyHere(x.g, p.chainId) ? (exactPass ? x.d === 0 : x.d === 1)
+          : exactPass && p.anchors.times.includes(x.at)));
       if (targets.length !== 1) continue;
       taken.add(`${targets[0].g.key}@${p.chainId}`);
       mergeInto(groups, targets[0].g, p.g);

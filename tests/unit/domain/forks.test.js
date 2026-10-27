@@ -795,6 +795,40 @@ describe('a node fork schedule (eth_config) on its chain', () => {
     expect(out.find(f => f.name === null)).toMatchObject({ activationAt: '2026-10-29T00:30:00.000Z', state: 'completed' });
   });
 
+  const doneAt = (id, at, extra = {}) => ({ ...node(id, 97, at), enrichment: { class: 'planned_hard_fork', chains: [97], fork: fork({ activationAt: at, state: 'completed', forkId: '0x5203e674' }) }, ...extra });
+  const later = { ...opts, now: Date.parse('2026-10-29T01:00:00Z') };
+
+  it('keeps a node fork with a provider notice beside it out of proximity clustering', async () => {
+    const notice = event('p', { fork: fork({ activationAt: '2026-10-29T00:30:00Z', state: 'scheduled' }), chains: [97], page: 'quicknode' });
+    notice.statusPage.kind = 'rpc-provider';
+    // The release is scoped by the chain the feed's model chose ("chain:97"), the scope the node
+    // and provider groups share, where proximity clustering folds unnamed groups into named ones.
+    const chosen = { ...release, enrichment: { fork: fork({ name: 'Jenner', activationAt: '2026-10-29T02:30:00Z', state: 'scheduled', chainIds: [97] }) } };
+    const out = await buildForks([notice, doneAt('c', '2026-10-29T00:30:00Z'), node('n', 97, '2026-10-29T02:30:00Z'), chosen], later);
+    expect(out.find(f => f.name === 'Jenner')).toMatchObject({ activationAt: '2026-10-29T02:30:00.000Z', state: 'scheduled' });
+    expect(out.find(f => f.name === null)).toMatchObject({ activationAt: '2026-10-29T00:30:00.000Z', state: 'completed' });
+  });
+
+  it('does not match a node activation to a provider\'s maintenance window', async () => {
+    // QuickNode's Jenner window starts two hours early; the node's 00:30 is the previous fork.
+    const window = { ...event('w', { fork: fork({ name: 'Jenner', network: 'BSC Chapel Testnet', activationAt: '2026-10-29T00:30:00Z', state: 'scheduled' }), chains: [97], page: 'quicknode' }), feed: 'status' };
+    window.statusPage.kind = 'rpc-provider';
+    const out = await buildForks([window, release, doneAt('c', '2026-10-29T00:30:00Z'), node('n', 97, '2026-10-29T02:30:00Z')], later);
+    expect(out.find(f => f.name === 'Jenner')).toMatchObject({ activationAt: '2026-10-29T02:30:00.000Z', state: 'scheduled' });
+    expect(out.find(f => f.name === null)).toMatchObject({ activationAt: '2026-10-29T00:30:00.000Z', state: 'completed' });
+  });
+
+  it('matches only the current activation of a fork other chains share', async () => {
+    // Chains 97 and 1 were given 02:30, then moved to 03:30; a chain-97 node still at 02:30
+    // must not move both back.
+    const both = (scope) => (scope === 'bsc chapel testnet' ? [97, 1] : []);
+    const moved = { ...release, id: 'rel2', title: 't-rel2', url: 'https://x/rel2', publishedAt: '2026-10-25T00:00:00Z', updatedAt: '2026-10-25T00:00:00Z',
+      enrichment: { fork: fork({ name: 'Jenner', network: 'BSC Chapel Testnet', activationAt: '2026-10-29T03:30:00Z', state: 'rescheduled' }) } };
+    const out = await buildForks([release, moved, node('n1', 97, '2026-10-29T02:30:00Z')], { ...opts, chainIdsFor: both });
+    expect(out.find(f => f.name === 'Jenner')).toMatchObject({ chains: [97, 1], activationAt: '2026-10-29T03:30:00.000Z' });
+    expect(out).toHaveLength(2);
+  });
+
   it('moves no other chain\'s time: a near match joins only a fork on this chain alone', async () => {
     // One announcement giving chains 97 and 1 the same instant; chain 97's nodes say an hour later.
     const both = (scope) => (scope === 'bsc chapel testnet' ? [97, 1] : []);

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { getForks, _resetForksMemoForTests, qualifyBareNetwork } from '../../../src/services/forks.js';
 import { getForkMentions } from '../../../src/sources/forkFeeds.js';
+import { _setNodeForkScheduleForTests, _resetNodeForkSchedulesForTests } from '../../../src/sources/nodeForkSchedule.js';
 import { getExplorerTip } from '../../../src/sources/blockscout.js';
 import { getAllChains } from '../../../src/store/queries.js';
 import { KIND_REGISTRY } from '../../fixtures/structuralWords.js';
@@ -35,6 +36,19 @@ describe('getForks', () => {
     getAllChains.mockReturnValue([]);
     getRepositoryChains.mockReturnValue(new Map());
     fetchedAt = '2026-08-15T00:00:00.000Z';
+  });
+
+  it('serves the nodes\' fork schedules when every feed is down', async () => {
+    getForkMentions.mockRejectedValue(new Error('Fork feeds unavailable: status: down'));
+    await expect(getForks()).rejects.toThrow('Fork feeds unavailable');
+    _setNodeForkScheduleForTests(97, { checkedAt: Date.parse('2026-08-15T00:00:00Z'), url: 'https://rpc', current: { activationTime: 1784601000, forkId: '0x5203e674' }, next: { activationTime: 4102444800, forkId: '0xe660a57e' }, last: null, nextSince: Date.parse('2026-08-15T00:00:00Z') });
+    try {
+      const out = await getForks();
+      expect(out.forks.map(f => f.chains)).toEqual([[97], [97]]);
+      expect(out.feeds).toMatchObject({ status: { ok: false }, node: { ok: true, count: 1 } });
+    } finally {
+      _resetNodeForkSchedulesForTests();
+    }
   });
 
   it('groups a fork across sources and reports where it came from', async () => {

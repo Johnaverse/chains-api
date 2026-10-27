@@ -329,8 +329,22 @@ export async function getForks({ chainId, phase, scheduledOnly = false, include,
  * Every fork entity, unfiltered and uncapped, phase current as of now — for the timeline,
  * which joins provider windows and releases onto them and must see all of them to do it.
  */
+// One empty array, so the fork memo still holds across calls during a feed outage.
+const NO_FEED_MENTIONS = [];
+
 export async function getAllForks() {
-  const { mentions, fetchedAt, feeds: feedStatus } = await getForkMentions();
+  let feedRead;
+  try {
+    feedRead = await getForkMentions();
+  } catch (err) {
+    // Every feed down before its first answer: the nodes' schedules are an independent source,
+    // served alone rather than failing /forks and /timeline with the feeds.
+    if (!nodeForkMentions().length) throw err;
+    logger.warn({ err: err.message }, 'fork feeds unavailable; serving node fork schedules alone');
+    const down = { ok: false, count: 0, filtered: false, oldest: null };
+    feedRead = { mentions: NO_FEED_MENTIONS, fetchedAt: null, feeds: { status: down, forum: down, news: down } };
+  }
+  const { mentions, fetchedAt, feeds: feedStatus } = feedRead;
   const now = Date.now();
   const schedules = [...getNodeForkSchedules().values()];
   // The node schedules read so far: a chain the refresher has not reached, or whose RPCs all

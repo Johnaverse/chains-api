@@ -24,6 +24,11 @@ let schedules = new Map();
 let inFlight = new Set();
 let version = 0;
 
+export function _setNodeForkScheduleForTests(chainId, entry) {
+  schedules.set(chainId, entry);
+  version += 1;
+}
+
 export function _resetNodeForkSchedulesForTests() {
   schedules = new Map();
   inFlight = new Set();

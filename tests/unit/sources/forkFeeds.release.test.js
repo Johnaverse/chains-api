@@ -47,6 +47,11 @@ describe('chains the model chose, for a release naming no network', () => {
       enrichment: { class: 'planned_hard_fork', createdAt: '2025-11-04T10:05:00Z', fork: { ...fusaka, network: null, chainIds: [1] } } });
     const sepolia = release({ id: 's', url: 'https://x/s', chains: [{ chainId: 11155111 }], chainsFrom: 'fork',
       enrichment: { class: 'planned_hard_fork', createdAt: '2025-10-01T10:05:00Z', fork: { ...fusaka, network: 'Ethereum Sepolia', activationAt: '2025-10-14T07:36:00Z' } } });
+    // Two repository chains are kept on the item (fewer than three); the model's choice still wins.
+    const twoChains = release({ id: 'm2', url: 'https://x/m2', chains: [{ chainId: 1 }, { chainId: 11155111 }], chainsFrom: 'repository',
+      enrichment: { class: 'planned_hard_fork', createdAt: '2025-11-04T10:05:00Z', fork: { ...fusaka, network: null, chainIds: [1] } } });
+    expect((await buildForks([...toMentions('release', twoChains), ...toMentions('release', sepolia)], { now: Date.parse('2025-11-05T00:00:00Z'), chainIdsFor: (s) => (s === 'ethereum sepolia' ? [11155111] : []) }))
+      .map(f => [f.chains, f.activationAt]).sort()).toEqual([[[1], '2025-12-03T21:49:11.000Z'], [[11155111], '2025-10-14T07:36:00.000Z']]);
     const mentions = [...toMentions('release', mainnet), ...toMentions('release', sepolia)];
     const out = await buildForks(mentions, { now: Date.parse('2025-11-05T00:00:00Z'), chainIdsFor: (s) => (s === 'ethereum sepolia' ? [11155111] : []) });
     expect(out.map(f => [f.chains, f.activationAt]).sort()).toEqual([[[1], '2025-12-03T21:49:11.000Z'], [[11155111], '2025-10-14T07:36:00.000Z']]);
