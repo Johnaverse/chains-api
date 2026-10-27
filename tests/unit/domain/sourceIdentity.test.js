@@ -49,6 +49,22 @@ describe('sourceIdentity', () => {
     expect([...conflicts.keys()]).toEqual([222]);
   });
 
+  it('still reads a network named only by a common word that is a network\'s own id', () => {
+    // "sepolia" follows ten ecosystems' names, so it is learned as structural — but The Graph
+    // knows a network whose whole id it is, so a source naming the chain just "Sepolia" is not bare.
+    const eco = ['alder', 'birch', 'cedar', 'dogwood', 'elm', 'fir', 'ginkgo', 'hazel', 'ilex', 'juniper'];
+    const registry = eco.flatMap((e, i) => [chains(9000 + i, `${e} Mainnet`, 'X'), chains(9100 + i, `${e} Sepolia Testnet`, 'X')]);
+    const theGraph = { networks: [graph(11155111, 'Sepolia', 'ETH'), graph(77, 'Unrelated Mainnet', 'OTHER')] };
+    const conflicts = findIdentityConflicts({
+      chains: [...registry, chains(11155111, 'Sepolia', 'ETH'), chains(77, 'Sepolia', 'ETH')],
+      chainlist: [chains(11155111, 'Ethereum Sepolia', 'ETH')],
+      theGraph
+    });
+    expect([...conflicts.keys()]).toEqual([77]);
+    // A name made only of structural words no network goes by is still too bare to compare.
+    expect(resolveIdentity({ chains: chains(6, 'Devnet', 'X'), chainlist: chains(6, 'Testnet Network', 'Y') }, KIND, new Set(['sepolia']))).toBeNull();
+  });
+
   it('learns the structural words from chainlist when chains.json is missing', () => {
     const eco = ['alder', 'birch', 'cedar', 'dogwood', 'elm', 'fir', 'ginkgo', 'hazel', 'ilex', 'juniper'];
     const chainlist = [...eco.map((e, i) => chains(9000 + i, `${e} Mainnet`, 'X')), chains(77, 'Alpha Mainnet', 'AAA')];
