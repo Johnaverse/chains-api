@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { cachedData } from '../../store/cache.js';
+import { PROVIDER_INCIDENT_STALE_MS } from '../../../config.js';
 import { aliasTerms } from '../../store/queries.js';
 
 /**
@@ -98,7 +99,10 @@ function buildSummary() {
     lastUpdated: cachedData.lastUpdated,
     count: chains.length,
     chains,
-    l2beat
+    l2beat,
+    // The server's rule for when an open provider incident is stale (providerStats.isStale), so
+    // the dashboard counts the same incidents open as /providers/stats does.
+    incidentStaleAfterMs: PROVIDER_INCIDENT_STALE_MS
   });
   const etag = `"${createHash('sha1').update(body).digest('hex')}"`;
 

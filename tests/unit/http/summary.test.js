@@ -68,6 +68,8 @@ describe('GET /summary', () => {
     const body = res.json();
     expect(body.count).toBe(2);
     expect(body.lastUpdated).toBe('2026-06-01T00:00:00.000Z');
+    // The stale-incident threshold /providers/stats applies, so the dashboard counts alike.
+    expect(body.incidentStaleAfterMs).toBe(72 * 60 * 60 * 1000);
 
     const eth = body.chains.find(c => c.chainId === 1);
     expect(eth).toMatchObject({ name: 'Ethereum Mainnet', shortName: 'eth', tags: ['Beacon'] });

@@ -501,6 +501,7 @@ function applyBulk(payload) {
     const data = payload.data ?? payload;
     state.chains = data.chains ?? data.indexed?.all ?? [];
     state.lastUpdated = data.lastUpdated ?? null;
+    if (Number.isFinite(data.incidentStaleAfterMs) && data.incidentStaleAfterMs > 0) staleOpenMs = data.incidentStaleAfterMs;
     state.byId = new Map(state.chains.map(c => [c.chainId, c]));
     state.l2beatMeta = data.l2beat
         ? {
@@ -1285,14 +1286,16 @@ function isOpen(it) {
     return Boolean(it.status && !['resolved', 'completed', 'closed'].includes(it.status.toLowerCase()));
 }
 
-// Mirrors the API's PROVIDER_INCIDENT_STALE_MS default: an incident the page still marks open
-// with no update for this long is stale. Pinax left its BSC token-api incident at "Identified"
-// on 23 Oct after resolving its two siblings that afternoon, and it read as open for days.
-const STALE_OPEN_MS = 72 * 60 * 60 * 1000;
+// An incident the page still marks open with no update for this long is stale. Pinax left its
+// BSC token-api incident at "Identified" on 23 Oct after resolving its two siblings that
+// afternoon, and it read as open for days. The server's threshold (PROVIDER_INCIDENT_STALE_MS,
+// sent as /summary's `incidentStaleAfterMs`) replaces this default once loaded, so the board
+// and /providers/stats agree.
+let staleOpenMs = 72 * 60 * 60 * 1000;
 
-/** Marked open by its page, but not updated for STALE_OPEN_MS: listed as stale, not open. */
+/** Marked open by its page, but not updated for staleOpenMs: listed as stale, not open. */
 function isStaleOpen(it) {
-    return it.kind !== 'scheduled' && it.ongoing === true && it.whenMs != null && Date.now() - it.whenMs > STALE_OPEN_MS;
+    return it.kind !== 'scheduled' && it.ongoing === true && it.whenMs != null && Date.now() - it.whenMs > staleOpenMs;
 }
 
 // A maintenance window actually running now, as distinct from one still upcoming or already
@@ -2860,7 +2863,7 @@ function incidentCard(it) {
             isStaleOpen(it)
                 ? el('span', {
                     class: 'kind-tag',
-                    title: 'The status page still marks this open, but it has had no update for over three days — likely left unresolved by the operator. Not counted as open.',
+                    title: `The status page still marks this open, but it has had no update for over ${Math.round(staleOpenMs / 3600000)}h — likely left unresolved by the operator. Not counted as open.`,
                     text: `Stale · no update since ${fmtDateTime(it.whenMs)}`
                 })
                 : null,
@@ -3325,7 +3328,7 @@ function providerRow(p, columns, retainedMap) {
             p.staleOngoing > 0
                 ? el('span', {
                     class: 'pill pill-quiet sm',
-                    title: `Still open on the status page with no update for over three days: ${(p.staleIncidents || []).map(s => `${s.title} (last update ${fmtDateTime(Date.parse(s.lastUpdateAt))})`).join('; ')}`,
+                    title: `Still open on the status page with no update for over ${Math.round(staleOpenMs / 3600000)}h: ${(p.staleIncidents || []).map(s => `${s.title} (last update ${fmtDateTime(Date.parse(s.lastUpdateAt))})`).join('; ')}`,
                     text: `${p.staleOngoing} stale`
                 })
                 : null,
