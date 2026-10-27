@@ -854,6 +854,22 @@ describe('MCP Tools - Shared Module', () => {
       expect(data.rpc.healthPercent).toBe(80);
     });
 
+    it('leaves endpoints a provider is throttling us on out of healthPercent', async () => {
+      vi.mocked(dataService.getAllChains).mockReturnValue([]);
+      vi.mocked(dataService.getRpcMonitoringResults).mockReturnValue({
+        lastUpdated: null,
+        totalEndpoints: 100,
+        testedEndpoints: 100,
+        workingEndpoints: 30,
+        failedEndpoints: 30,
+        rateLimitedEndpoints: 40,
+        results: [],
+      });
+
+      const data = JSON.parse((await handleToolCall('get_stats', {})).content[0].text);
+      expect(data.rpc).toMatchObject({ working: 30, failed: 30, rateLimited: 40, healthPercent: 50 });
+    });
+
     it('should return null healthPercent when no endpoints tested', async () => {
       vi.mocked(dataService.getAllChains).mockReturnValue([]);
       vi.mocked(dataService.getRpcMonitoringResults).mockReturnValue({

@@ -298,7 +298,8 @@ function flattenRpcHealthResults() {
       chainId: numericChainId,
       chainName,
       url: result.url,
-      status: result.ok ? 'working' : 'failed',
+      // A provider refusing our volume says nothing about the endpoint: neither working nor failed.
+      status: result.ok ? 'working' : (result.failure === 'rate_limited' ? 'rate_limited' : 'failed'),
       clientVersion: result.clientVersion ?? null,
       blockNumber: result.blockHeight ?? null,
       latencyMs: result.latencyMs ?? null,
@@ -310,7 +311,8 @@ function flattenRpcHealthResults() {
 export function getRpcMonitoringResults() {
   const results = flattenRpcHealthResults();
   const workingEndpoints = results.filter(result => result.status === 'working').length;
-  const failedEndpoints = results.length - workingEndpoints;
+  const rateLimitedEndpoints = results.filter(result => result.status === 'rate_limited').length;
+  const failedEndpoints = results.length - workingEndpoints - rateLimitedEndpoints;
 
   return {
     lastUpdated: cachedData.lastRpcCheck,
@@ -318,6 +320,7 @@ export function getRpcMonitoringResults() {
     testedEndpoints: results.length,
     workingEndpoints,
     failedEndpoints,
+    rateLimitedEndpoints,
     results
   };
 }

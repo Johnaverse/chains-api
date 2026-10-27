@@ -3,6 +3,7 @@ import { cachedData } from '../store/cache.js';
 import { RPC_DEAD_AFTER_MS } from '../../config.js';
 import { NO_ANSWER_FAILURES } from '../../rpcUtil.js';
 import { getAllChains } from '../store/queries.js';
+import { networkTypeClaims, resolveNetworkType, claimsDisagree } from '../domain/networkType.js';
 
 // chainId -> the source's entry, built once per source array. Keyed on the array itself, so a
 // reload (a new array) rebuilds it and nothing is ever stale. Every rule looks chains up by id,
@@ -29,7 +30,14 @@ const theGraphChainId = (n) => {
 };
 const ownChainId = (c) => c?.chainId ?? null;
 
+// A source entry left out of the chain's record because it names another network (rule 20).
+function excludedFromRecord(chainId, source) {
+  return (cachedData.indexed?.identityConflicts ?? [])
+    .some(c => c.chainId === chainId && c.excluded.includes(source));
+}
+
 function getChainFromSource(chainId, source) {
+  if (excludedFromRecord(chainId, source)) return null;
   if (source === 'theGraph') return indexBy(cachedData.theGraph?.networks, theGraphChainId)?.get(chainId);
   if (source === 'chainlist') return indexBy(cachedData.chainlist, ownChainId)?.get(chainId);
   if (source === 'chains') return indexBy(cachedData.chains, ownChainId)?.get(chainId);
@@ -53,19 +61,6 @@ function validateRule1RelationConflicts(chain, errors) {
           graphRelation: graphRel
         });
       }
-
-      const chainlistChain = getChainFromSource(chain.chainId, 'chainlist');
-      if (chainlistChain?.isTestnet === false) {
-        errors.push({
-          rule: 1,
-          chainId: chain.chainId,
-          chainName: chain.name,
-          type: 'relation_source_conflict',
-          message: `Chain ${chain.chainId} (${chain.name}) has testnetOf relation in theGraph but isTestnet=false in chainlist`,
-          graphRelation: graphRel,
-          chainlistData: { isTestnet: chainlistChain.isTestnet }
-        });
-      }
     }
 
     if (graphRel.kind === 'l2Of' && graphRel.chainId) {
@@ -83,33 +78,32 @@ function validateRule1RelationConflicts(chain, errors) {
   });
 }
 
-function validateRule2Slip44Mismatch(chain, errors) {
-  const chainlistChain = getChainFromSource(chain.chainId, 'chainlist');
-  const chainsChain = getChainFromSource(chain.chainId, 'chains');
-
-  if (chainlistChain?.slip44 === 1 && chainlistChain.isTestnet === false) {
-    errors.push({
-      rule: 2,
-      chainId: chain.chainId,
-      chainName: chain.name,
-      type: 'slip44_testnet_mismatch',
-      message: `Chain ${chain.chainId} (${chain.name}) has slip44=1 (testnet indicator) but isTestnet=false in chainlist`,
-      slip44: chainlistChain.slip44,
-      isTestnet: chainlistChain.isTestnet
-    });
-  }
-
-  if (chainsChain?.slip44 === 1 && !chain.tags.includes('Testnet')) {
-    errors.push({
-      rule: 2,
-      chainId: chain.chainId,
-      chainName: chain.name,
-      type: 'slip44_testnet_mismatch',
-      message: `Chain ${chain.chainId} (${chain.name}) has slip44=1 (testnet indicator) in chains.json but not tagged as Testnet`,
-      slip44: chainsChain.slip44,
-      tags: chain.tags
-    });
-  }
+// Sources disagree on mainnet vs test network. The tag follows the strongest claim
+// (src/domain/networkType.js); every claim is listed with its source and field, so the
+// wrong one can be fixed where it was said. `contested` marks a tie at the deciding strength —
+// the tag there is a default, not a finding.
+function validateRule2NetworkTypeClaims(chain, errors) {
+  const claims = networkTypeClaims({
+    chains: getChainFromSource(chain.chainId, 'chains'),
+    chainlist: getChainFromSource(chain.chainId, 'chainlist'),
+    theGraph: getChainFromSource(chain.chainId, 'theGraph')
+  });
+  if (!claimsDisagree(claims)) return;
+  const { isTestnet, decidedBy } = resolveNetworkType(claims);
+  const decided = isTestnet ? 'testnet' : 'mainnet';
+  const contested = claims.some(c => c.strength === decidedBy.strength && c.value !== decidedBy.value);
+  const dissent = claims.filter(c => c.value !== decided);
+  errors.push({
+    rule: 2,
+    chainId: chain.chainId,
+    chainName: chain.name,
+    type: 'network_type_claims_conflict',
+    message: `Chain ${chain.chainId} (${chain.name}): treated as ${decided} per ${decidedBy.source} ${decidedBy.field}, but ${dissent.map(c => `${c.source} ${c.field}`).join(', ')} say${dissent.length === 1 ? 's' : ''} otherwise`,
+    resolved: decided,
+    decidedBy: { source: decidedBy.source, field: decidedBy.field },
+    contested,
+    claims: claims.map(({ source, field, value, said }) => ({ source, field, value, said }))
+  });
 }
 
 function validateRule3NameTestnetMismatch(chain, errors) {
@@ -566,9 +560,29 @@ function validateRule19DeprecatedRpcAnswers(chain, errors) {
   });
 }
 
+// One chain ID, different networks: the record was built from the sources that agree and the
+// rest left out (src/domain/sourceIdentity.js). Listed with every source's name and symbol so a
+// person can tell which registry reused or mistyped the ID.
+function validateRule20ChainIdCollisions(errors) {
+  for (const c of cachedData.indexed?.identityConflicts ?? []) {
+    const chain = cachedData.indexed.byChainId?.[c.chainId];
+    const said = (s) => `${s} "${c.identities[s].name}" (${c.identities[s].symbol ?? 'no symbol'})`;
+    errors.push({
+      rule: 20,
+      chainId: c.chainId,
+      chainName: chain?.name ?? c.identities[c.kept[0]]?.name ?? null,
+      type: 'chain_id_collision',
+      message: `Chain ${c.chainId} is ${c.kept.map(said).join(' / ')} but ${c.excluded.map(said).join(' / ')} — record built from ${c.kept.join(' + ')}; ${c.excluded.join(' + ')} left out`,
+      kept: c.kept,
+      excluded: c.excluded,
+      identities: c.identities
+    });
+  }
+}
+
 function validateChain(chain, errors) {
   validateRule1RelationConflicts(chain, errors);
-  validateRule2Slip44Mismatch(chain, errors);
+  validateRule2NetworkTypeClaims(chain, errors);
   validateRule3NameTestnetMismatch(chain, errors);
   validateRule4TestNetworkNoRelation(chain, errors);
   const statuses = validateRule5StatusConflicts(chain, errors);
@@ -606,10 +620,11 @@ export function validateChainData() {
 
   // Rule 10 is global (iterates L2BEAT projects, not chains).
   validateRule10L2BeatUnknownChains(errors);
+  validateRule20ChainIdCollisions(errors);
 
   const errorsByRule = {
     rule1_relation_conflicts: errors.filter(e => e.rule === 1),
-    rule2_slip44_testnet_mismatch: errors.filter(e => e.rule === 2),
+    rule2_network_type_claims_conflict: errors.filter(e => e.rule === 2),
     rule3_name_testnet_mismatch: errors.filter(e => e.rule === 3),
     rule4_test_network_no_relation: errors.filter(e => e.rule === 4),
     rule5_status_conflicts: errors.filter(e => e.rule === 5),
@@ -626,7 +641,8 @@ export function validateChainData() {
     rule16_rpc_url_in_one_source_only: errors.filter(e => e.rule === 16),
     rule17_active_child_of_deprecated_parent: errors.filter(e => e.rule === 17),
     rule18_no_reachable_rpc: errors.filter(e => e.rule === 18),
-    rule19_deprecated_rpc_answers: errors.filter(e => e.rule === 19)
+    rule19_deprecated_rpc_answers: errors.filter(e => e.rule === 19),
+    rule20_chain_id_collision: errors.filter(e => e.rule === 20)
   };
 
   return {
@@ -634,7 +650,7 @@ export function validateChainData() {
     errorsByRule,
     summary: {
       rule1: errorsByRule.rule1_relation_conflicts.length,
-      rule2: errorsByRule.rule2_slip44_testnet_mismatch.length,
+      rule2: errorsByRule.rule2_network_type_claims_conflict.length,
       rule3: errorsByRule.rule3_name_testnet_mismatch.length,
       rule4: errorsByRule.rule4_test_network_no_relation.length,
       rule5: errorsByRule.rule5_status_conflicts.length,
@@ -651,7 +667,8 @@ export function validateChainData() {
       rule16: errorsByRule.rule16_rpc_url_in_one_source_only.length,
       rule17: errorsByRule.rule17_active_child_of_deprecated_parent.length,
       rule18: errorsByRule.rule18_no_reachable_rpc.length,
-      rule19: errorsByRule.rule19_deprecated_rpc_answers.length
+      rule19: errorsByRule.rule19_deprecated_rpc_answers.length,
+      rule20: errorsByRule.rule20_chain_id_collision.length
     },
     allErrors: errors
   };

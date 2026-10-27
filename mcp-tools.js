@@ -188,7 +188,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'validate_chains',
-      description: 'Validate chain data for potential quality issues across 19 cross-source validation rules (relation conflicts, slip44/name/status mismatches, L2BEAT consistency, RPC drift, deprecated-parent propagation, networks deprecated here but not upstream, live chains with no answering RPC, deprecated chains whose RPC still answers, and more)',
+      description: 'Validate chain data for potential quality issues across 20 cross-source validation rules (relation conflicts, mainnet-vs-testnet claims that disagree — each with the source and field that said it —, one chain ID naming different networks in different sources, slip44/name/status mismatches, L2BEAT consistency, RPC drift, deprecated-parent propagation, networks deprecated here but not upstream, live chains with no answering RPC, deprecated chains whose RPC still answers, and more)',
       inputSchema: {
         type: 'object',
         properties: {},
@@ -1129,7 +1129,10 @@ function handleGetStats() {
   const rpcTested = monitorResults.testedEndpoints;
   const rpcWorking = monitorResults.workingEndpoints;
   const rpcFailed = monitorResults.failedEndpoints || 0;
-  const rpcHealthPercent = rpcTested > 0 ? Math.round((rpcWorking / rpcTested) * 10000) / 100 : null;
+  const rpcRateLimited = monitorResults.rateLimitedEndpoints || 0;
+  // Over the endpoints with a verdict: one a provider is throttling us on has none.
+  const rpcJudged = rpcWorking + rpcFailed;
+  const rpcHealthPercent = rpcJudged > 0 ? Math.round((rpcWorking / rpcJudged) * 10000) / 100 : null;
 
   return textResponse({
     totalChains,
@@ -1145,6 +1148,7 @@ function handleGetStats() {
       tested: rpcTested,
       working: rpcWorking,
       failed: rpcFailed,
+      rateLimited: rpcRateLimited,
       healthPercent: rpcHealthPercent,
     },
     lastUpdated: monitorResults.lastUpdated,
@@ -1187,6 +1191,7 @@ function formatRpcMonitorStatus(status, results) {
     `- Endpoints tested: ${results.testedEndpoints}`,
     `- Working endpoints: ${results.workingEndpoints}`,
     `- Failed endpoints: ${results.failedEndpoints ?? 0}`,
+    `- Rate-limited (provider refusing our checks, not a verdict): ${results.rateLimitedEndpoints ?? 0}`,
     '- Use `get_rpc_monitor_by_id` for per-chain endpoint details.',
   ];
 

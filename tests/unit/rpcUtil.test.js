@@ -121,6 +121,11 @@ describe('rpcUtil - jsonRpcCall', () => {
     expect(await kindOf(async () => ({ ok: false, status: 429 }))).toBe('rate_limited');
     expect(await kindOf(async () => ({ ok: false, status: 530 }))).toBe('http_error');
     expect(await kindOf(async () => ({ ok: true, json: async () => ({ error: { message: 'Method not found' } }) }))).toBe('rpc_error');
+    // A provider refusing our volume, however it words it, is a rate limit — not the endpoint's verdict.
+    const rpcError = (error) => async () => ({ ok: true, json: async () => ({ error }) });
+    expect(await kindOf(rpcError({ code: -32029, message: 'public rate limit exceeded — sign up for free' }))).toBe('rate_limited');
+    expect(await kindOf(rpcError({ message: 'We are not able to process your request at this time. Please contact support' }))).toBe('rate_limited');
+    expect(await kindOf(rpcError({ code: -32005, message: 'request rejected' }))).toBe('rate_limited');
     expect(await kindOf(async () => ({ ok: true, json: async () => { throw new SyntaxError('Unexpected token <'); } }))).toBe('invalid_response');
     // And it says so in words, not as the parser's message.
     vi.mocked(proxyFetch).mockImplementation(async () => ({ ok: true, json: async () => { throw new SyntaxError('Unexpected token \'<\', "<!DOCTYPE "... is not valid JSON'); } }));

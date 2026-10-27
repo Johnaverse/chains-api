@@ -720,7 +720,7 @@ function collapseIdentical(groups) {
  * With no forking network named, the post's chains are kept and the scope's own resolution is
  * added: a HyperEVM window that declares no chain is still a chain 999 fork.
  */
-function memberChainIds({ scope, forkNetwork, named, eventChainIds, chainIdsFor }) {
+function memberChainIds({ scope, forkNetwork, named, eventChainIds, chainIdsFor, chainNamesFor }) {
   if (!forkNetwork) {
     const nameScope = scope !== 'unscoped' && !scope.startsWith('chain:');
     const resolved = nameScope ? (chainIdsFor?.(scope) ?? []) : [];
@@ -732,7 +732,23 @@ function memberChainIds({ scope, forkNetwork, named, eventChainIds, chainIdsFor 
   // exactly this network: an article about "Ethereum" declaring chain 1 must not lend it to
   // the "Ethereum Sepolia" activation, which is not the mainnet date.
   const aboutNetwork = named.length > 0 && named.every(n => n === scope);
-  return aboutNetwork ? eventChainIds : [];
+  if (!aboutNetwork) return [];
+  // ...and only those whose own name carries the network's. A post's chains are everything it
+  // mentioned: Decrypt on Solana's Alpenglow "since Ethereum's Merge" declares chain 1, and
+  // with Solana in no EVM registry that put Solana's fork under Ethereum. QuickNode's Morph
+  // "Hoodi Testnet" window declaring 2910 ("Morph Hoodi Testnet") still places.
+  return chainNamesFor ? eventChainIds.filter(id => namesCarry(chainNamesFor(id), scope)) : eventChainIds;
+}
+
+const nameWordsOf = (text) => String(text ?? '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+
+/** Whether one of a chain's names contains every word of the network scope. */
+function namesCarry(names, scope) {
+  const wanted = nameWordsOf(scope);
+  return wanted.length > 0 && (names ?? []).some(name => {
+    const have = new Set(nameWordsOf(name));
+    return wanted.every(w => have.has(w));
+  });
 }
 
 /**
@@ -777,11 +793,13 @@ export function sortForks(forks) {
  * @param {object} [opts]
  * @param {(chainId:number)=>object|null} [opts.tipFor] chain tip lookup, for height-only forks
  * @param {(scope:string)=>number[]} [opts.chainIdsFor] the chainIds a network scope names
+ * @param {(chainId:number)=>string[]} [opts.chainNamesFor] a chain's registry names, to vet the
+ *   chains a post declares before they place a network the registry could not resolve
  * @param {number} [opts.now]
  * @returns {Promise<object[]>} forks, soonest upcoming first, then unscheduled, then past. Each
  *   carries `kind` (fork | upgrade, see forkKind); filtering on it is the caller's choice.
  */
-export async function buildForks(events = [], { tipFor = null, chainIdsFor = null, now = Date.now(), maxTipLookups = DEFAULT_MAX_TIP_LOOKUPS } = {}) {
+export async function buildForks(events = [], { tipFor = null, chainIdsFor = null, chainNamesFor = null, now = Date.now(), maxTipLookups = DEFAULT_MAX_TIP_LOOKUPS } = {}) {
   let tipBudget = maxTipLookups;
   const groups = new Map();
   for (const event of events) {
@@ -803,7 +821,7 @@ export async function buildForks(events = [], { tipFor = null, chainIdsFor = nul
     for (const scope of scopes) {
       const group = forkGroup(fork, scope);
       if (!group) continue;
-      const chainIds = memberChainIds({ scope, forkNetwork, named, eventChainIds, chainIdsFor });
+      const chainIds = memberChainIds({ scope, forkNetwork, named, eventChainIds, chainIdsFor, chainNamesFor });
       if (!groups.has(group.key)) groups.set(group.key, { ...group, scope, members: [] });
       groups.get(group.key).members.push({ event, fork, chainIds, scope, observedAt });
     }

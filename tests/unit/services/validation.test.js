@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { applyDataToCache, cachedData } from '../../../src/store/cache.js';
 import { validateChainData } from '../../../src/services/validation.js';
+import { indexData } from '../../../src/store/indexer.js';
 
 /**
  * validateChainData() short-circuits to an error when any of the 3 upstream
@@ -516,6 +517,60 @@ describe('validation — L2BEAT cross-source rules', () => {
       expect(report.errorsByRule).toHaveProperty('rule15_slip44_native_symbol_mismatch');
       expect(report.errorsByRule).toHaveProperty('rule16_rpc_url_in_one_source_only');
       expect(report.errorsByRule).toHaveProperty('rule17_active_child_of_deprecated_parent');
+    });
+  });
+
+  describe('source traceability: rules 2 and 20 on the indexed record', () => {
+    // Real shapes: 999 is Wanchain Testnet in chains.json and HyperEVM in the other two;
+    // World Chain carries slip44 = 1 though The Graph states it is a mainnet.
+    const theGraph = { networks: [
+      { id: 'hyper-evm', caip2Id: 'eip155:999', fullName: 'HyperEVM Mainnet', nativeToken: 'HYPE', networkType: 'mainnet', rpcUrls: ['https://rpc.hyperliquid.example'] },
+      { id: 'worldchain', caip2Id: 'eip155:480', fullName: 'World Chain Mainnet', nativeToken: 'ETH', networkType: 'mainnet' }
+    ] };
+    const chainlist = [
+      { chainId: 999, name: 'HyperEVM', nativeCurrency: { symbol: 'HYPE' }, rpc: [{ url: 'https://rpc.hyperliquid.example' }] },
+      { chainId: 480, name: 'World Chain', nativeCurrency: { symbol: 'ETH' }, slip44: 1, isTestnet: false }
+    ];
+    const chains = [
+      { chainId: 999, name: 'Wanchain Testnet', nativeCurrency: { symbol: 'WAN' }, slip44: 1, rpc: ['https://gwan.wanchain.example'] },
+      { chainId: 480, name: 'World Chain', nativeCurrency: { symbol: 'ETH' }, slip44: 1 }
+    ];
+
+    function load() {
+      applyDataToCache({
+        theGraph, chainlist, chains, slip44: {}, l2beat: null,
+        indexed: indexData(theGraph, chainlist, chains, {}, null),
+        rpcHealth: {}, lastUpdated: '2026-10-27T00:00:00.000Z'
+      });
+      return validateChainData();
+    }
+
+    it('keeps a source that names another network out of the record, and reports it with every source\'s word', () => {
+      const report = load();
+      const record = cachedData.indexed.byChainId[999];
+      expect(record.name).toBe('HyperEVM');
+      expect(record.sources).not.toContain('chains');
+      expect(record.rpc).not.toContain('https://gwan.wanchain.example');
+      expect(record.tags).not.toContain('Testnet');
+      expect(findErrorsForRule(report, 20)).toEqual([expect.objectContaining({
+        chainId: 999,
+        type: 'chain_id_collision',
+        kept: ['theGraph', 'chainlist'],
+        excluded: ['chains'],
+        identities: expect.objectContaining({ chains: { name: 'Wanchain Testnet', symbol: 'WAN' } })
+      })]);
+      // The left-out entry raises nothing else: its slip44 is not a claim about HyperEVM.
+      expect(findErrorsForRule(report, 2).map(e => e.chainId)).not.toContain(999);
+    });
+
+    it('tags by the strongest claim and lists the ones it overruled', () => {
+      const report = load();
+      expect(cachedData.indexed.byChainId[480].tags).not.toContain('Testnet');
+      const [worldChain] = findErrorsForRule(report, 2).filter(e => e.chainId === 480);
+      expect(worldChain).toMatchObject({ resolved: 'mainnet', decidedBy: { source: 'theGraph', field: 'networkType' }, contested: false });
+      expect(worldChain.claims.filter(c => c.value === 'testnet').map(c => `${c.source}.${c.field}`).sort())
+        .toEqual(['chainlist.slip44', 'chains.slip44']);
+      expect(report.summary).toHaveProperty('rule20', 1);
     });
   });
 });

@@ -2,6 +2,8 @@ import { attachStatusPages } from '../sources/statusPages.js';
 import { attachForums } from '../sources/forums.js';
 import { attachNetworkResearch } from '../sources/networkResearch.js';
 import { isKnownEolChain } from '../domain/eolChains.js';
+import { findIdentityConflicts, graphChainId } from '../domain/sourceIdentity.js';
+import { networkTypeClaims, resolveNetworkType } from '../domain/networkType.js';
 
 /**
  * Build a mapping of network IDs to chain IDs from The Graph data
@@ -174,11 +176,6 @@ function mergeChainlistEntry(chainData, indexed) {
     };
   }
 
-  if (chainData.slip44 === 1 || chainData.isTestnet === true) {
-    if (!indexed.byChainId[chainId].tags.includes('Testnet')) {
-      indexed.byChainId[chainId].tags.push('Testnet');
-    }
-  }
 }
 
 function extractChainIdFromCaip2Id(caip2Id) {
@@ -216,9 +213,8 @@ function processTheGraphRelation(relation, chainId, indexed, networkIdToChainId)
 
   indexed.byChainId[chainId].relations.push(relationData);
 
-  if (kind === 'testnetOf' && !indexed.byChainId[chainId].tags.includes('Testnet')) {
-    indexed.byChainId[chainId].tags.push('Testnet');
-  } else if (kind === 'l2Of' && !indexed.byChainId[chainId].tags.includes('L2')) {
+  // testnetOf is one of the claims applyNetworkType weighs, not a tag on its own.
+  if (kind === 'l2Of' && !indexed.byChainId[chainId].tags.includes('L2')) {
     indexed.byChainId[chainId].tags.push('L2');
   } else if (kind === 'beaconOf') {
     addBeaconTagToTargetChain(indexed, targetChainId);
@@ -236,14 +232,6 @@ function createOrMergeTheGraphChain(chainId, network, indexed) {
     if (!indexed.byChainId[chainId].relations) indexed.byChainId[chainId].relations = [];
   } else {
     indexed.byChainId[chainId] = createTheGraphChainEntry(chainId, network);
-  }
-}
-
-function addTestnetTagIfApplicable(chainId, network, indexed) {
-  if (network.networkType === 'testnet') {
-    if (!indexed.byChainId[chainId].tags.includes('Testnet')) {
-      indexed.byChainId[chainId].tags.push('Testnet');
-    }
   }
 }
 
@@ -295,7 +283,6 @@ function processTheGraphNetwork(network, indexed, networkIdToChainId) {
 
   if (chainId !== null) {
     createOrMergeTheGraphChain(chainId, network, indexed);
-    addTestnetTagIfApplicable(chainId, network, indexed);
     processTheGraphNetworkRelations(network, chainId, indexed, networkIdToChainId);
     addTheGraphSpecificData(chainId, network, indexed);
     addChainToNameIndex(chainId, network, indexed);
@@ -336,12 +323,6 @@ function indexChainsSource(chains, indexed) {
       // this branch used to merge only slip44, silently dropping it.
       if (chain.status && !indexed.byChainId[chainId].status) {
         indexed.byChainId[chainId].status = chain.status;
-      }
-    }
-
-    if (chain.slip44 === 1) {
-      if (!indexed.byChainId[chainId].tags.includes('Testnet')) {
-        indexed.byChainId[chainId].tags.push('Testnet');
       }
     }
 
@@ -600,20 +581,62 @@ export function indexDefiLlamaSource(defillama, indexed) {
 }
 
 /**
+ * The Testnet tag, from every source's claim (src/domain/networkType.js). Runs once all three
+ * registries are in, so no single source's hint tags a chain the others call a mainnet.
+ */
+function applyNetworkType(indexed, raw) {
+  Object.values(indexed.byChainId).forEach(chain => {
+    const id = chain.chainId;
+    const { isTestnet } = resolveNetworkType(networkTypeClaims({
+      chains: raw.chains.get(id), chainlist: raw.chainlist.get(id), theGraph: raw.theGraph.get(id)
+    }));
+    const has = chain.tags.includes('Testnet');
+    if (isTestnet && !has) chain.tags.unshift('Testnet');
+    if (!isTestnet && has) chain.tags = chain.tags.filter(t => t !== 'Testnet');
+  });
+}
+
+function byChainIdMap(list, idOf) {
+  const map = new Map();
+  for (const entry of list) {
+    const id = idOf(entry);
+    if (Number.isFinite(id) && !map.has(id)) map.set(id, entry);
+  }
+  return map;
+}
+
+/**
  * Index all data into a searchable structure.
  */
 export function indexData(theGraph, chainlist, chains, slip44, l2beat, defillama = null) {
   const indexed = {
     byChainId: {},
     byName: {},
-    all: []
+    all: [],
+    identityConflicts: []
   };
 
-  const networkIdToChainId = buildNetworkIdToChainIdMap(theGraph);
+  // A source naming a different network under a chain ID stays out of that chain's record
+  // (src/domain/sourceIdentity.js); validation rule 20 reports it with each source's word.
+  const conflicts = findIdentityConflicts({ theGraph, chainlist, chains });
+  const excluded = (source, id) => conflicts.get(Number(id))?.excluded.includes(source) ?? false;
+  const cleanChains = Array.isArray(chains) ? chains.filter(c => !excluded('chains', c?.chainId)) : chains;
+  const cleanChainlist = Array.isArray(chainlist) ? chainlist.filter(c => !excluded('chainlist', c?.chainId)) : chainlist;
+  const cleanTheGraph = Array.isArray(theGraph?.networks)
+    ? { ...theGraph, networks: theGraph.networks.filter(n => !excluded('theGraph', graphChainId(n))) }
+    : theGraph;
+  indexed.identityConflicts = [...conflicts].map(([chainId, c]) => ({ chainId, ...c }));
 
-  indexChainsSource(chains, indexed);
-  indexChainlistSource(chainlist, indexed);
-  indexTheGraphSource(theGraph, indexed, networkIdToChainId);
+  const networkIdToChainId = buildNetworkIdToChainIdMap(cleanTheGraph);
+
+  indexChainsSource(cleanChains, indexed);
+  indexChainlistSource(cleanChainlist, indexed);
+  indexTheGraphSource(cleanTheGraph, indexed, networkIdToChainId);
+  applyNetworkType(indexed, {
+    chains: byChainIdMap(Array.isArray(cleanChains) ? cleanChains : [], c => Number(c?.chainId)),
+    chainlist: byChainIdMap(Array.isArray(cleanChainlist) ? cleanChainlist : [], c => Number(c?.chainId)),
+    theGraph: byChainIdMap(cleanTheGraph?.networks ?? [], graphChainId)
+  });
   attachSlip44Info(slip44, indexed);
   attachStatusPages(indexed);
   attachForums(indexed);
