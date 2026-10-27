@@ -4,10 +4,12 @@ import { getForkMentions } from '../../../src/sources/forkFeeds.js';
 import { getExplorerTip } from '../../../src/sources/blockscout.js';
 import { getAllChains } from '../../../src/store/queries.js';
 import { TESTNET_REGISTRY } from '../../fixtures/testnetRegistry.js';
+import { getRepositoryChains } from '../../../src/sources/networkResearch.js';
 
 vi.mock('../../../src/store/queries.js', () => ({ getAllChains: vi.fn(() => []) }));
 
 vi.mock('../../../src/sources/forkFeeds.js', () => ({ getForkMentions: vi.fn() }));
+vi.mock('../../../src/sources/networkResearch.js', () => ({ getRepositoryChains: vi.fn(() => new Map()) }));
 
 let fetchedAt;
 // Feed fork mentions to getForks, stamped with the current fetch time.
@@ -30,6 +32,7 @@ describe('getForks', () => {
     _resetForksMemoForTests();
     getExplorerTip.mockResolvedValue(null);
     getAllChains.mockReturnValue([]);
+    getRepositoryChains.mockReturnValue(new Map());
     fetchedAt = '2026-08-15T00:00:00.000Z';
   });
 
@@ -246,6 +249,181 @@ describe('getForks', () => {
     expect(out.forks.find(f => f.name === 'Glamsterdam').chains).toEqual([11155111]);
     expect(out.forks.find(f => f.name === 'Jovian').chains).toEqual([84532]);
     expect((await getForks({ chainId: 1 })).forks).toHaveLength(0);
+  });
+  it('places a "BSC Chapel Testnet" fork on chain 97, which the registry calls "chapel"', async () => {
+    getAllChains.mockReturnValue(TESTNET_REGISTRY);
+    getRepositoryChains.mockReturnValue(new Map([['github:bnb-chain/bsc', [56, 97]]]));
+    serveMentions([
+      { ...event('bsc', { fork: fork({ name: 'Jenner', network: 'BSC Chapel Testnet', activationAt: '2099-10-29T02:30:00Z' }), affectedChains: ['BSC Chapel Testnet'], page: 'github:bnb-chain/bsc' }), feed: 'release' },
+      // QuickNode's window names it the same way and joins it.
+      { ...event('qn', { fork: fork({ name: 'Jenner', network: 'BSC Chapel Testnet', activationAt: '2099-10-29T02:30:00Z' }), affectedChains: ['BSC Chapel Testnet'] }), feed: 'status' }
+    ]);
+    expect((await getForks()).forks.find(f => f.name === 'Jenner').chains).toEqual([97]);
+    expect((await getForks({ chainId: 56 })).forks).toHaveLength(0);
+  });
+
+  it('places "Morph Hoodi Testnet" on Morph\'s Hoodi, not Ethereum\'s', async () => {
+    getAllChains.mockReturnValue(TESTNET_REGISTRY);
+    serveMentions([
+      { ...event('m', { fork: fork({ name: 'Celadon', network: 'Morph Hoodi Testnet', activationAt: '2099-10-28T06:00:00Z' }), affectedChains: ['Morph Hoodi Testnet'] }), feed: 'status' }
+    ]);
+    expect((await getForks()).forks.find(f => f.name === 'Celadon').chains).toEqual([2910]);
+  });
+
+  describe('placing a client release by its repository', () => {
+    // Each on its own day: one activation shared across networks merges them into one fork.
+    let day = 0;
+    const release = (id, repo, network, name = 'F1') =>
+      ({ ...event(id, { fork: fork({ name, network, activationAt: `2099-10-${String(++day).padStart(2, '0')}T02:30:00Z` }), page: repo }), feed: 'release' });
+    const registry = [
+      { chainId: 50, name: 'XDC Network', shortName: 'xdc' },
+      { chainId: 51, name: 'XDC Apothem Network', shortName: 'txdc', tags: ['Testnet'] },
+      { chainId: 102030, name: 'Creditcoin', shortName: 'ctc' },
+      { chainId: 102031, name: 'Creditcoin Testnet', shortName: 'ctctest', tags: ['Testnet'] },
+      { chainId: 102032, name: 'Creditcoin Devnet', shortName: 'ctcdev', tags: ['Testnet'] },
+      { chainId: 4160, name: 'Algorand', shortName: 'algo' },
+      { chainId: 5700, name: 'Syscoin Tanenbaum Testnet', shortName: 'tsys', tags: ['Testnet'] },
+      { chainId: 57, name: 'Syscoin Mainnet', shortName: 'sys' },
+      { chainId: 16, name: 'Songbird Testnet Coston', shortName: 'cflr', tags: ['Testnet'] },
+      { chainId: 114, name: 'Flare Testnet Coston2', shortName: 'c2flr', tags: ['Testnet'] },
+      { chainId: 42429, name: 'Tempo Testnet Andantino (Deprecated)', status: 'deprecated', tags: ['Testnet'] },
+      { chainId: 42431, name: 'Tempo Testnet Moderato', tags: ['Testnet'] },
+      { chainId: 4217, name: 'Tempo Mainnet' },
+      { chainId: 96, name: 'KUB Mainnet', shortName: 'kub' },
+      { chainId: 100000, name: 'QuarkChain Mainnet Root' },
+      { chainId: 100001, name: 'QuarkChain Mainnet Shard 0' },
+      { chainId: 100002, name: 'QuarkChain Mainnet Shard 1' },
+      { chainId: 2039, name: 'Aleph Zero', shortName: 'aleph' },
+      { chainId: 1, name: 'Ethereum Mainnet' },
+      { chainId: 100, name: 'Gnosis' },
+      { chainId: 11155111, name: 'Sepolia', tags: ['Testnet'] },
+      { chainId: 560048, name: 'Ethereum Hoodi', tags: ['Testnet'] },
+      { chainId: 17000, name: 'Ethereum Holesky', tags: ['Testnet'] },
+      { chainId: 1666600000, name: 'Harmony Mainnet Shard 0', shortName: 'one', aliases: ['one'] },
+      { chainId: 2810, name: 'Morph Hoodi', tags: ['Testnet'] }
+    ];
+    const repos = new Map([
+      ['github:xinfinorg/xdposchain', [50, 51]],
+      ['github:gluwa/creditcoin3', [102030, 102031, 102032]],
+      ['github:algorand/go-algorand', [4160]],
+      ['github:syscoin/syscoin', [57, 5700]],
+      ['github:flare-foundation/go-flare', [16, 114]],
+      ['github:tempoxyz/tempo', [4217, 42429, 42431]],
+      ['github:kub-chain/bkc', [96]],
+      ['github:quarkchain/goquarkchain', [100000, 100001, 100002]],
+      ['github:sigp/lighthouse', [1, 100]],
+      ['github:paradigmxyz/reth', [1, 11155111, 560048, 17000]],
+      ['github:morph-l2/morph', [2810]]
+    ]);
+    const placed = async (...mentions) => {
+      getAllChains.mockReturnValue(registry);
+      getRepositoryChains.mockReturnValue(repos);
+      serveMentions(mentions);
+      return (await getForks({ limit: 200 })).forks;
+    };
+    const on = (forks, name) => forks.find(f => f.name === name)?.chains;
+
+    it('picks the chain among the repository\'s that the release names, in its own words', async () => {
+      const forks = await placed(
+        release('a', 'github:xinfinorg/xdposchain', 'XDPoSChain Testnet', 'Prague'),
+        release('b', 'github:gluwa/creditcoin3', 'Creditcoin3 Devnet', 'OsakaDev'),
+        release('c', 'github:gluwa/creditcoin3', 'Creditcoin3 Testnet', 'OsakaTest'),
+        release('d', 'github:syscoin/syscoin', 'Tanenbaum', 'Liberty'),
+        release('e', 'github:flare-foundation/go-flare', 'Coston', 'GraniteC'),
+        release('f', 'github:flare-foundation/go-flare', 'Coston2', 'GraniteC2'),
+        release('g', 'github:kub-chain/bkc', 'Bitkub Chain', 'Erawan')
+      );
+      expect(on(forks, 'Prague')).toEqual([51]);
+      expect(on(forks, 'OsakaDev')).toEqual([102032]);
+      expect(on(forks, 'OsakaTest')).toEqual([102031]);
+      expect(on(forks, 'Liberty')).toEqual([5700]);
+      // The word itself over a longer one containing it.
+      expect(on(forks, 'GraniteC')).toEqual([16]);
+      expect(on(forks, 'GraniteC2')).toEqual([114]);
+      expect(on(forks, 'Erawan')).toEqual([96]);
+    });
+
+    it('keeps a dated fork on the nearest chain rather than none', async () => {
+      const forks = await placed(
+        // A test network the repository does not run lands on its mainnet.
+        release('a', 'github:algorand/go-algorand', 'Algorand Betanet', 'v43'),
+        // Two testnets carry the name: the live one, not the deprecated one.
+        release('b', 'github:tempoxyz/tempo', 'Tempo Testnet', 'T9'),
+        // Naming no network, a release is about the client's mainnet: QuarkChain's root chain,
+        // the fewest words over its shards.
+        release('c', 'github:tempoxyz/tempo', null, 'T8'),
+        release('e', 'github:quarkchain/goquarkchain', null, 'QRoot'),
+        // A test network the registry does not list is filed under the network it tests.
+        release('d', 'github:aleph-zero-foundation/aleph-node', 'Aleph Zero Testnet', 'A0')
+      );
+      expect(on(forks, 'v43')).toEqual([4160]);
+      expect(on(forks, 'T9')).toEqual([42431]);
+      expect(on(forks, 'T8')).toEqual([4217]);
+      expect(on(forks, 'A0')).toEqual([2039]);
+      expect(on(forks, 'QRoot')).toEqual([100000]);
+    });
+
+    it('leaves it unplaced, saying why, when nothing narrows it enough', async () => {
+      const forks = await placed(
+        // A client two mainnets run, its notes naming neither.
+        release('a', 'github:sigp/lighthouse', null, 'Q1'),
+        release('b', 'github:chainx-org/chainx', null, 'Rent'),
+        { ...event('c', { fork: fork({ name: 'Protocol 30', activationAt: '2099-10-29T00:00:00Z' }), affectedChains: ['Stellar'], page: 'xlm' }) }
+      );
+      expect(forks.find(f => f.name === 'Q1')).toMatchObject({ chains: [], unplaced: { reason: 'ambiguous', repositories: ['github:sigp/lighthouse'] } });
+      expect(forks.find(f => f.name === 'Q1').unplaced.candidates.map(c => c.chainId)).toEqual([1, 100]);
+      expect(forks.find(f => f.name === 'Rent')).toMatchObject({ chains: [], unplaced: { reason: 'no_network_named', candidates: [] } });
+      expect(forks.find(f => f.name === 'Protocol 30')).toMatchObject({ chains: [], unplaced: { reason: 'no_matching_chain', candidates: [] } });
+    });
+
+    it('guesses only for a project\'s own client, and never from another network\'s name', async () => {
+      const forks = await placed(
+        // A network none of a multi-network client's chains is called: no Sepolia or chain 1 fork.
+        release('a', 'github:paradigmxyz/reth', 'Fusaka Devnet-3', 'FusakaD3'),
+        // A test network named after another project's network is not that network.
+        release('b', 'github:paradigmxyz/reth', 'One Testnet', 'OneT')
+      );
+      expect(forks.find(f => f.name === 'FusakaD3')).toMatchObject({ chains: [], unplaced: { reason: 'ambiguous' } });
+      expect(on(forks, 'OneT')).toEqual([]);
+    });
+
+    it('folds a fork placed only by its repository into the one a name placed at that moment', async () => {
+      const at = '2099-11-01T12:00:00Z';
+      getAllChains.mockReturnValue(registry);
+      getRepositoryChains.mockReturnValue(repos);
+      serveMentions([
+        { ...event('ef', { fork: fork({ name: 'Glamsterdam', network: 'Ethereum Hoodi', activationAt: at }), affectedChains: ['Ethereum Hoodi'], page: 'ef' }), feed: 'news' },
+        // A rollup client's release of Ethereum's fork, in its own words.
+        { ...event('m', { fork: fork({ name: 'Glamsterdam', network: 'Hoodi Testnet', activationAt: at }), page: 'github:morph-l2/morph' }), feed: 'release' }
+      ]);
+      const glam = (await getForks()).forks.filter(f => f.name === 'Glamsterdam');
+      expect(glam).toHaveLength(1);
+      expect(glam[0].chains).toEqual([560048]);
+    });
+
+    it('lets a repository guess yield to a name when an earlier merge joins them', async () => {
+      const forks = await placed(
+        // Unscoped: guessed onto Tempo mainnet by the repository alone.
+        { ...event('a', { fork: fork({ name: 'T9', activationAt: '2099-11-05T15:00:00Z' }), page: 'github:tempoxyz/tempo' }), feed: 'release' },
+        { ...event('b', { fork: fork({ name: 'T9', network: 'Tempo Testnet Moderato', activationAt: '2099-11-05T15:00:00Z' }), affectedChains: ['Tempo Testnet Moderato'], page: 'tempo' }), feed: 'news' }
+      );
+      const t9 = forks.filter(f => f.name === 'T9');
+      expect(t9).toHaveLength(1);
+      expect(t9[0].chains).toEqual([42431]);
+    });
+
+    it('keeps a bare "Testnet" for picking among the repository\'s chains', async () => {
+      const forks = await placed(release('a', 'github:gluwa/creditcoin3', 'Testnet', 'OsakaBare'));
+      expect(on(forks, 'OsakaBare')).toEqual([102031]);
+    });
+
+    it('serves the unplaced ones as a review queue', async () => {
+      await placed(release('a', 'github:xinfinorg/xdposchain', 'XDPoSChain Testnet', 'Prague'), release('b', 'github:sigp/lighthouse', null, 'Q1'));
+      const all = await getForks();
+      expect(all.unplacedCount).toBe(1);
+      expect(all.forks.find(f => f.name === 'Prague').unplaced).toBeUndefined();
+      expect((await getForks({ unplaced: true })).forks.map(f => f.name)).toEqual(['Q1']);
+    });
   });
 
   describe('review fixes', () => {

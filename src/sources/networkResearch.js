@@ -208,6 +208,50 @@ export function getNodeHardware(chainId) {
   };
 }
 
+let repositoryChains = { from: null, overrides: null, value: null };
+
+// A research repository link as the feeds name its source: `github:owner/repo`, `gitlab:owner/repo`
+// (PulseChain's clients are on GitLab, recorded by URL only).
+function repositorySourceId(r) {
+  const m = /^https?:\/\/(github|gitlab)\.com\/([^/\s]+\/[^/\s#?]+)/i.exec(r?.url ?? '');
+  if (m) return `${m[1]}:${m[2].replace(/\.git$/, '')}`.toLowerCase();
+  return typeof r?.repo === 'string' && r.repo.includes('/') ? `github:${r.repo}`.toLowerCase() : null;
+}
+
+/**
+ * The chains each client repository runs, by lower-cased source id (`github:owner/repo`, the
+ * same id a release event carries as its status page): the research's own
+ * repository links. A release from bnb-chain/bsc is about chain 56 or 97 and nothing else, which
+ * is what lets a fork placed only by release notes find its chain when the notes name the network
+ * in words the registry does not use ("BSC Chapel Testnet").
+ */
+export function getRepositoryChains() {
+  if (repositoryChains.from === dataset && repositoryChains.overrides === registryOverrides) return repositoryChains.value;
+  const linked = new Map();
+  for (const [chainId, entry] of dataset.byChainId) {
+    for (const r of entry?.repositories ?? []) {
+      const repo = repositorySourceId(r);
+      if (!repo) continue;
+      if (!linked.has(repo)) linked.set(repo, new Set());
+      linked.get(repo).add(chainId);
+    }
+  }
+  // The registry review's corrections, as the feed applies them: a dead repository is out, and
+  // links it found wrong are dropped (`keep` limits, `drop` removes) or missing ones added.
+  for (const [id, o] of Object.entries(registryOverrides?.repositories ?? {})) {
+    const repo = id.toLowerCase();
+    if (o?.exclude === true) { linked.delete(repo); continue; }
+    let ids = linked.get(repo) ?? new Set();
+    if (Array.isArray(o?.keep)) ids = new Set([...ids].filter((c) => o.keep.includes(c)));
+    for (const c of Array.isArray(o?.drop) ? o.drop : []) ids.delete(c);
+    for (const c of Object.keys(o?.add ?? {})) if (Number.isSafeInteger(Number(c))) ids.add(Number(c));
+    if (ids.size) linked.set(repo, ids); else linked.delete(repo);
+  }
+  const value = new Map([...linked].map(([repo, ids]) => [repo, [...ids]]));
+  repositoryChains = { from: dataset, overrides: registryOverrides, value };
+  return value;
+}
+
 /**
  * The raw repository inputs chains-client-feed builds its client registry from: per chain,
  * the research's node/client repositories verbatim, plus the hardware research's sources and

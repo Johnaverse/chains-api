@@ -3,7 +3,7 @@
   "info": {
     "title": "Chains API",
     "description": "Aggregated blockchain chain data from five external sources (TheGraph, Chainlist, Chain ID Network, SLIP-0044, L2BEAT): chain metadata, relations, RPC endpoints and health, L2 scaling, and operator status.",
-    "version": "1.7.80"
+    "version": "1.7.81"
   },
   "components": {
     "schemas": {}
@@ -1891,6 +1891,16 @@
             "name": "include",
             "required": false,
             "description": "upgrades: also list ordinary software updates that carried a fork marker (kind \"upgrade\" — client releases, RPC patches, infra work). Excluded by default; byKind counts both either way."
+          },
+          {
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "in": "query",
+            "name": "unplaced",
+            "required": false,
+            "description": "Only forks placed on no chain, each with `unplaced`: the reason (ambiguous, no_network_named, no_matching_chain), the client repositories that reported it and the chains those run. The review queue for fork placement."
           },
           {
             "schema": {
