@@ -270,6 +270,23 @@ describe('getForks', () => {
     expect((await getForks()).forks.find(f => f.name === 'Celadon').chains).toEqual([2910]);
   });
 
+  it('files a mainnet name under the mainnet, though the testnet shares it without "Testnet"', async () => {
+    getAllChains.mockReturnValue(TESTNET_REGISTRY);
+    serveMentions([
+      { ...event('p', { fork: fork({ name: 'Pasteur', network: 'BNB Smart Chain', activationAt: '2099-08-25T02:30:00Z' }), affectedChains: ['BNB Smart Chain'] }), feed: 'news' }
+    ]);
+    expect((await getForks()).forks.find(f => f.name === 'Pasteur').chains).toEqual([56]);
+  });
+
+  it('places Morph\'s "Hoodi Testnet" release on Morph Hoodi, not Ethereum Hoodi', async () => {
+    getAllChains.mockReturnValue(TESTNET_REGISTRY);
+    getRepositoryChains.mockReturnValue(new Map([['github:morph-l2/morph', [2818, 2910]]]));
+    serveMentions([
+      { ...event('m', { fork: fork({ name: 'Celadon', network: 'Hoodi Testnet', activationAt: '2099-10-28T06:00:00Z' }), page: 'github:morph-l2/morph' }), feed: 'release' }
+    ]);
+    expect((await getForks()).forks.find(f => f.name === 'Celadon').chains).toEqual([2910]);
+  });
+
   describe('placing a client release by its repository', () => {
     // Each on its own day: one activation shared across networks merges them into one fork.
     let day = 0;
@@ -410,6 +427,17 @@ describe('getForks', () => {
       const t9 = forks.filter(f => f.name === 'T9');
       expect(t9).toHaveLength(1);
       expect(t9[0].chains).toEqual([42431]);
+    });
+
+    it('lets a guess by kind alone yield to one by the network a release named', async () => {
+      const at = '2099-11-06T15:00:00Z';
+      const forks = await placed(
+        { ...event('a', { fork: fork({ name: 'T13', network: 'Moderato Testnet', activationAt: at }), page: 'github:tempoxyz/tempo' }), url: 'https://example/v1.17.0#moderato', feed: 'release' },
+        { ...event('b', { fork: fork({ name: 'T13', activationAt: at }), page: 'github:tempoxyz/tempo' }), url: 'https://example/v1.17.0', feed: 'release' }
+      );
+      const t13 = forks.filter(f => f.name === 'T13');
+      expect(t13).toHaveLength(1);
+      expect(t13[0].chains).toEqual([42431]);
     });
 
     it('keeps a bare "Testnet" for picking among the repository\'s chains', async () => {

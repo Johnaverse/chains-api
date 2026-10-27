@@ -555,6 +555,8 @@ describe('forks across status, forum and news feeds', () => {
     // The whole name without "testnet" first: Morph's Hoodi, not Ethereum's.
     expect(scopeLookups('morph hoodi testnet')).toEqual(['morph hoodi testnet', 'morph hoodi', 'hoodi testnet']);
     expect(scopeLookups('ethereum testnet')).not.toContain('ethereum');
+    // ...and never down to a bare test word: Morph's "Hoodi Testnet" is not Ethereum's "hoodi".
+    expect(scopeLookups('hoodi testnet')).not.toContain('hoodi');
     expect(registryScopes('Base Sepolia Testnet')).toEqual(['base sepolia testnet', 'base sepolia']);
     expect(registryScopes('Ethereum Mainnet')).toEqual(['ethereum']);
   });

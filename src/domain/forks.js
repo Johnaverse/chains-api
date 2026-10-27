@@ -279,8 +279,10 @@ export function scopeLookups(scope) {
   // The whole name without its "testnet" before the tail: "Morph Hoodi Testnet" is the
   // registry's "Morph Hoodi" (2910), not Ethereum's Hoodi. Only while it still names a test
   // network — "Ethereum Testnet" never becomes "ethereum".
+  // A bare test word alone is not it: "Hoodi Testnet" from Morph is no more Ethereum's "hoodi".
   const bare = scope.replace(/ testnet$/, '');
-  return [...new Set([scope, ...(bare !== scope && mentionsTestNetwork(bare) ? [bare] : []), tail])];
+  const keep = bare !== scope && bare.includes(' ') && mentionsTestNetwork(bare);
+  return [...new Set([scope, ...(keep ? [bare] : []), tail])];
 }
 
 /**
@@ -501,12 +503,18 @@ function anchorDistance(a, b) {
 function mergeInto(groups, target, source) {
   target.members.push(...source.members);
   groups.delete(source.key);
-  // A repository's guess at the network yields to a name's, whichever merge joined them: an
-  // unscoped Tempo "T9" release guessed onto mainnet, folded into the T9 named on the testnet,
-  // must not list the testnet's activation under mainnet too.
-  if (target.members.some(m => m.chainIds.length && !m.placedByRepository)) {
-    for (const m of target.members) if (m.placedByRepository) m.chainIds = [];
-  }
+  // A guess at the network yields to firmer placement, whichever merge joined them: a name
+  // over a repository's pick, and a pick by a network the release named over one by kind with
+  // none named. An unscoped Tempo "T13" mention guessed onto mainnet, folded into the T13 the
+  // same release names for Moderato, must not list Moderato's activation under mainnet too.
+  const firmest = Math.max(...target.members.filter(m => m.chainIds.length).map(placementStrength));
+  for (const m of target.members) if (m.placedByRepository && placementStrength(m) < firmest) m.chainIds = [];
+}
+
+/** 2 placed by a name, 1 by its repository and a named network, 0 by its repository alone. */
+function placementStrength(m) {
+  if (!m.placedByRepository) return 2;
+  return m.scope === 'unscoped' ? 0 : 1;
 }
 
 /** Groups indexed by `kind:ident`, the part of the key that is the same across scopes. */

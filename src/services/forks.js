@@ -57,6 +57,7 @@ function chainNames(chain) {
 
 function chainResolver(chains) {
   const byScope = new Map();
+  const testIds = new Set(chains.filter(isTestChain).map((c) => c.chainId));
   for (const chain of chains) {
     if (!Number.isFinite(chain?.chainId)) continue;
     for (const name of chainNames(chain)) {
@@ -70,8 +71,13 @@ function chainResolver(chains) {
     // "mainnet" is The Graph's id for Ethereum, not a name a fork notice means Ethereum by.
     if (BARE_NETWORK.test(scope ?? '')) return [];
     // Most specific first: "ethereum sepolia", then "sepolia" (the registry's name for 11155111).
+    // A name that says no test network means the mainnet when both match: "BNB Smart Chain"
+    // is indexed for 97 too (its "BNB Smart Chain Testnet" with the qualifier dropped), and
+    // BSC's mainnet Pasteur was listed in chain 97's history.
+    const wantMain = !mentionsTestNetwork(scope);
     for (const candidate of scopeLookups(scope)) {
-      const ids = [...(byScope.get(candidate) ?? [])];
+      let ids = [...(byScope.get(candidate) ?? [])];
+      if (wantMain && ids.some((id) => !testIds.has(id))) ids = ids.filter((id) => !testIds.has(id));
       if (ids.length) return ids.length <= MAX_CHAINS_PER_SCOPE ? ids : [];
     }
     return [];
