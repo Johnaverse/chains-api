@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { learnNetworkWords, isTestNetworkWord, mentionsTestNetwork, isNetworkName, chainOfBareName } from '../../../src/domain/networkWords.js';
+import { learnNetworkWords, isTestNetworkWord, mentionsTestNetwork, isNetworkName, chainOfBareName, kindWordsOf, isKindWord } from '../../../src/domain/networkWords.js';
+import { KIND_REGISTRY } from '../../fixtures/structuralWords.js';
 import { TESTNET_REGISTRY } from '../../fixtures/testnetRegistry.js';
 
 const test = (chainId, name, extra = {}) => ({ chainId, name, tags: ['Testnet'], ...extra });
@@ -40,5 +41,28 @@ describe('test-network words, learned from the registry', () => {
     expect(chainOfBareName('hoodi')?.chainId).toBe(560048);
     expect(chainOfBareName('chapel')?.chainId).toBe(97);
     expect(chainOfBareName('nowhere')).toBeNull();
+  });
+});
+
+describe('kind words, learned from the registry', () => {
+  it('learns a word many unrelated ecosystems put after their own name', () => {
+    const kind = kindWordsOf(KIND_REGISTRY);
+    expect([...kind].sort()).toEqual(['blockchain', 'chain', 'evm', 'mainnet', 'network', 'protocol', 'testnet']);
+  });
+
+  it('does not learn a project word that repeats inside one ecosystem, or a leading one', () => {
+    const skale = Array.from({ length: 16 }, (_, i) => ({ chainId: 7000 + i, name: `Skale Hub ${i}` }));
+    const leading = ['alder', 'birch', 'cedar', 'dogwood', 'elm', 'fir', 'ginkgo', 'hazel', 'ilex', 'juniper']
+      .map((eco, i) => ({ chainId: 8000 + i, name: `Zeta ${eco}` }));
+    const kind = kindWordsOf([...KIND_REGISTRY, ...skale, ...leading]);
+    expect(kind.has('hub')).toBe(false);
+    expect(kind.has('zeta')).toBe(false);
+    expect(kind.has('mainnet')).toBe(true);
+  });
+
+  it('serves what learnNetworkWords last learned', () => {
+    learnNetworkWords([...TESTNET_REGISTRY, ...KIND_REGISTRY]);
+    expect(isKindWord('Chain')).toBe(true);
+    expect(isKindWord('ethereum')).toBe(false);
   });
 });

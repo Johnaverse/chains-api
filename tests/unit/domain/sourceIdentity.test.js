@@ -1,6 +1,10 @@
 import { resolveIdentity, findIdentityConflicts } from '../../../src/domain/sourceIdentity.js';
+import { kindWordsOf } from '../../../src/domain/networkWords.js';
 
 const chains = (chainId, name, symbol) => ({ chainId, name, nativeCurrency: symbol ? { symbol } : undefined });
+// Structural words are learned from how many unrelated ecosystems name their chains with them.
+const KIND = kindWordsOf(['alder', 'birch', 'cedar', 'dogwood', 'elm', 'fir', 'ginkgo', 'hazel', 'ilex', 'juniper']
+  .flatMap((eco) => ['Mainnet', 'Testnet', 'Devnet', 'Network', 'Chain'].map((k) => ({ name: `${eco} ${k}` }))));
 const graph = (chainId, fullName, nativeToken, extra = {}) => ({ id: fullName.toLowerCase().replace(/\s+/g, '-'), caip2Id: `eip155:${chainId}`, fullName, nativeToken, ...extra });
 
 describe('sourceIdentity', () => {
@@ -33,7 +37,7 @@ describe('sourceIdentity', () => {
     expect(resolveIdentity({ chains: chains(88, 'Viction', 'VIC'), chainlist: chains(88, 'Viction Mainnet', 'TOMO') })).toBeNull();
     // Too little to compare: no symbol on one side, or only structural words.
     expect(resolveIdentity({ chains: chains(5, 'Alpha', 'A'), chainlist: chains(5, 'Beta') })).toBeNull();
-    expect(resolveIdentity({ chains: chains(6, 'Devnet', 'X'), chainlist: chains(6, 'Testnet Network', 'Y') })).toBeNull();
+    expect(resolveIdentity({ chains: chains(6, 'Devnet', 'X'), chainlist: chains(6, 'Testnet Network', 'Y') }, KIND)).toBeNull();
   });
 
   it('finds conflicts across the raw payloads, by EVM chain ID', () => {
@@ -43,5 +47,13 @@ describe('sourceIdentity', () => {
       theGraph: { networks: [graph(1, 'Ethereum Mainnet', 'ETH'), { id: 'solana', caip2Id: 'solana:5eyk', fullName: 'Solana' }] }
     });
     expect([...conflicts.keys()]).toEqual([222]);
+  });
+
+  it('learns the structural words from chainlist when chains.json is missing', () => {
+    const eco = ['alder', 'birch', 'cedar', 'dogwood', 'elm', 'fir', 'ginkgo', 'hazel', 'ilex', 'juniper'];
+    const chainlist = [...eco.map((e, i) => chains(9000 + i, `${e} Mainnet`, 'X')), chains(77, 'Alpha Mainnet', 'AAA')];
+    const theGraph = { networks: [graph(77, 'Beta Mainnet', 'BBB')] };
+    // Sharing only "mainnet" does not make Alpha and Beta one network.
+    expect([...findIdentityConflicts({ chains: [], chainlist, theGraph }).keys()]).toEqual([77]);
   });
 });

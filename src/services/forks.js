@@ -5,7 +5,8 @@ import { getAllChains } from '../store/queries.js';
 import { getRepositoryChains } from '../sources/networkResearch.js';
 import { logger } from '../util/logger.js';
 import { learnForkNames } from '../domain/forkNames.js';
-import { learnNetworkWords, mentionsTestNetwork } from '../domain/networkWords.js';
+import { learnForkWords } from '../domain/forkWords.js';
+import { learnNetworkWords, mentionsTestNetwork, isKindWord, isTestNetworkWord, chainOfBareName } from '../domain/networkWords.js';
 
 /**
  * Serves fork entities: the read side of src/domain/forks.js.
@@ -84,8 +85,10 @@ function chainResolver(chains) {
   };
 }
 
-// Words that say what kind of network a scope is, not which one.
-const KIND_WORDS = new Set(['mainnet', 'testnet', 'devnet', 'network', 'networks', 'chain', 'chains', 'blockchain', 'net', 'protocol', 'the', 'of', 'deprecated']);
+// Words that say what kind of network a scope is, not which one, learned from the registry
+// (networkWords.js). A test-network word stays a name word: "Creditcoin Devnet" is told from
+// "Creditcoin Testnet", and "Base Sepolia" from "Base", by the word itself.
+const kindOnly = (w) => isKindWord(w) && !isTestNetworkWord(w);
 // The most chains a client can run and still be one project's (a mainnet, a testnet or two).
 const PROJECT_CLIENT_CHAINS = 3;
 
@@ -98,11 +101,12 @@ const PROJECT_CLIENT_CHAINS = 3;
  * from every chain's history — so among those the closest is taken rather than none:
  *   1. the chains whose names (or the repository's) carry the most of the network's words, a
  *      word carried when one contains the other ("vechainthor" / "vechain", "bitkub" / "kub");
- *      — the word itself counting over a longer or shorter one ("coston" is Coston, not Coston2);
- *   2. among them, the network's kind (a test-network word or "devnet", else mainnet), then its
- *      kind word ("Creditcoin3 Devnet" is "Creditcoin Devnet", not "Creditcoin Testnet"), a live
- *      network over a deprecated one ("Tempo Testnet" is Moderato, not Andantino), then the
- *      fewest name words the network did not say ("Metal" is Metal C-Chain, not Metal Tahoe);
+ *      — the word itself counting over a longer or shorter one ("coston" is Coston, not Coston2),
+ *      test-network words included ("Creditcoin3 Devnet" is "Creditcoin Devnet", not "Creditcoin
+ *      Testnet"), structural words left out ("Chain", "Network", "EVM": kindWordsOf);
+ *   2. among them, the network's kind (test or main), a live network over a deprecated one
+ *      ("Tempo Testnet" is Moderato, not Andantino), then the fewest name words the network did
+ *      not say ("Metal" is Metal C-Chain, not Metal Tahoe), then the fewest kind words;
  *   3. a release naming no network, or a network none of them is called ("Pacific-1"), is
  *      read by kind alone — only from a project's own client running a few chains;
  * A test-network fork landing on its mainnet ("Algorand Betanet" on Algorand) is accepted as the
@@ -114,29 +118,37 @@ export function repositoryResolver(chains, repoChains) {
   const byId = new Map(chains.filter((c) => Number.isFinite(c?.chainId)).map((c) => [c.chainId, c]));
   const wordsByChain = new Map();
   const wordsFor = (chain) => {
-    if (!wordsByChain.has(chain.chainId)) wordsByChain.set(chain.chainId, [...new Set(chainNames(chain).flatMap(nameWordsOf))]);
+    // "evm-324" is the registry's placeholder for an unnamed chain, not a name.
+    if (!wordsByChain.has(chain.chainId)) wordsByChain.set(chain.chainId, [...new Set(chainNames(chain).filter((n) => !/^evm-\d+$/.test(n)).flatMap(nameWordsOf))]);
     return wordsByChain.get(chain.chainId);
   };
   return (repo, scope) => {
     const candidates = (repoChains?.get(repo) ?? []).map((id) => byId.get(id)).filter(Boolean);
     if (!candidates.length) return [];
     const scopeWords = nameWordsOf(scope);
-    const words = scopeWords.filter((w) => !KIND_WORDS.has(w) && !/^\d+$/.test(w));
-    const kindWords = scopeWords.filter((w) => w === 'testnet' || w === 'devnet');
-    const wantTest = Boolean(scope) && (mentionsTestNetwork(scope) || kindWords.length > 0);
+    const words = scopeWords.filter((w) => !kindOnly(w) && !/^\d+$/.test(w));
+    const wantTest = Boolean(scope) && mentionsTestNetwork(scope);
     const repoWords = nameWordsOf(repo.replace(/^[a-z]+:/, '')).filter((w) => w.length >= 3);
     // 2 for the word itself, 1 for a word containing it or contained in it.
     const carried = (own, w) => (own.includes(w) ? 2 : own.some((o) => o.length >= 3 && w.length >= 3 && (o.includes(w) || w.includes(o))) ? 1 : 0);
     const scored = candidates.map((chain) => {
       const all = wordsFor(chain);
-      const own = all.filter((w) => !KIND_WORDS.has(w));
-      const named = words.reduce((sum, w) => sum + Math.max(carried(own, w), carried(repoWords, w)), 0);
+      const own = all.filter((w) => !kindOnly(w));
+      // A test word many ecosystems use ("testnet", "sepolia") counts half: "Boba BNB Testnet" is
+      // nearer Boba BNB than Boba Sepolia (alias "boba-testnet").
+      const score = (w) => Math.max(carried(own, w), carried(repoWords, w));
+      const named = words.reduce((sum, w) => sum + score(w) / (isKindWord(w) ? 2 : 1), 0);
+      // Whether a word naming a network, not only a kind of one, matched: "Testnet" or "Fusaka
+      // Testnet" says which of go-ethereum's chains no more than no network at all. "Sepolia" is
+      // common too, but the registry's id for a network of its own.
+      const identified = words.some((w) => (!isKindWord(w) || chainOfBareName(w)) && score(w) > 0);
       // A retired network loses to its live successor ("Tempo Testnet Andantino (Deprecated)").
-      const kind = (isTestChain(chain) === wantTest ? 4 : 0) + (kindWords.length && kindWords.every((w) => all.includes(w)) ? 2 : 0)
-        + (chain.status === 'deprecated' || all.includes('deprecated') ? 0 : 1);
+      const kind = (isTestChain(chain) === wantTest ? 2 : 0) + (chain.status === 'deprecated' ? 0 : 1);
       // Name words the network did not say: "Metal C-Chain" over "Metal Tahoe C-Chain" for "Metal".
       const extra = own.filter((o) => !words.some((w) => carried([o], w))).length;
-      return { chain, named, kind, extra };
+      // Then the kind words it did not say: "Shibarium" over "Shibarium Beta" (named networks only).
+      const extraKind = all.filter((o) => kindOnly(o) && !scopeWords.includes(o)).length;
+      return { chain, named, identified, kind, extra, extraKind };
     });
     const pick = (list, by) => { const top = Math.max(...list.map(by)); return list.filter((n) => by(n) === top); };
     const byName = pick(scored, (n) => n.named);
@@ -144,9 +156,12 @@ export function repositoryResolver(chains, repoChains) {
     // "Sei Network"): only a project's own client — a mainnet and a testnet or two — is narrow
     // enough to read its kind as the answer. A release of go-ethereum or reth naming "Fusaka
     // Devnet-3" is no Sepolia or chain 1 fork.
-    const guessing = !scope || byName[0].named === 0;
+    const guessing = !scope || !byName.some((n) => n.identified);
     if (guessing && candidates.length > PROJECT_CLIENT_CHAINS) return [];
-    const best = pick(pick(byName, (n) => n.kind), (n) => -n.extra);
+    const nearest = pick(pick(byName, (n) => n.kind), (n) => -n.extra);
+    // Kind words only break a tie on a network that was named: with none named, "Gnosis" is no
+    // likelier than "Ethereum Mainnet" for being shorter.
+    const best = guessing ? nearest : pick(nearest, (n) => -n.extraKind);
     // A tie on a network that was named is that network listed twice (two 0G Galileo testnets).
     return best.length <= (guessing ? 1 : MAX_CHAINS_PER_SCOPE) ? best.map((n) => n.chain.chainId) : [];
   };
@@ -230,8 +245,10 @@ async function builtForks(mentions, fetchedAt) {
   const chains = getAllChains();
   const repoChains = getRepositoryChains();
   if (memo.forks && memo.mentions === mentions && memo.fetchedAt === fetchedAt && memo.chains === chains && memo.repoChains === repoChains) return memo.forks;
-  // Which words name a test network comes from the registry (networkWords.js).
+  // Which words name a test network, or only a kind of network, comes from the registry
+  // (networkWords.js); which words of a fork's name are generic, from the feeds (forkWords.js).
   learnNetworkWords(chains);
+  learnForkWords(mentions);
   const byId = new Map(chains.map((c) => [c.chainId, c]));
   const forks = (await buildForks(mentions.map((m) => qualifyBareNetwork(m, byId)), { tipFor, chainIdsFor: chainResolver(chains), chainNamesFor: chainNamesLookup(chains), repoChainIdsFor: repositoryResolver(chains, repoChains) }))
     .map((fork) => present(fork, unplacedReason(fork, repoChains, byId)));

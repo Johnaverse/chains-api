@@ -4,6 +4,8 @@ import { getAllForks } from '../../../src/services/forks.js';
 import { learnForkNames, _resetForkNamesForTests } from '../../../src/domain/forkNames.js';
 import { learnNetworkWords } from '../../../src/domain/networkWords.js';
 import { TESTNET_REGISTRY } from '../../fixtures/testnetRegistry.js';
+import { learnForkWords } from '../../../src/domain/forkWords.js';
+import { FORK_TITLE_MENTIONS } from '../../fixtures/structuralWords.js';
 import { getUpgradeTimeline } from '../../../src/services/upgrades.js';
 import { getClientReleases, clientFeedConfigured } from '../../../src/sources/clientFeed.js';
 import { getWeb3News } from '../../../src/sources/web3News.js';
@@ -475,6 +477,7 @@ describe('buildTimeline — news', () => {
 
 describe('name helpers', () => {
   it('reads every name a fork answers to', () => {
+    learnForkWords(FORK_TITLE_MENTIONS);
     expect(forkAliases('nv29 (Solstice)')).toEqual(['nv29 solstice', 'nv29', 'solstice']);
     expect(forkAliases('Gloas')).toEqual(['gloas']);
     learnForkNames([{ name: 'Glamsterdam', aliases: ['Gloas'], events: [{}] }]);
