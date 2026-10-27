@@ -11,6 +11,7 @@ import {
   getNetworkResearchInfo,
   attachNetworkResearch,
   getRepositoryInputs,
+  getRepositoryChains,
   loadClientRegistryOverrides, loadClientLineage,
   _setNetworkResearchForTests
 } from '../../../src/sources/networkResearch.js';
@@ -460,5 +461,35 @@ describe('getRepositoryInputs (chains-client-feed registry source)', () => {
     useFixtures();
     getRepositoryInputs().networks.find(n => n.chainId === 8453).repositories[0].url = 'x';
     expect(getRepositoryInputs().networks.find(n => n.chainId === 8453).repositories[0].url).toBe(repo.url);
+  });
+});
+
+describe('getRepositoryChains', () => {
+  afterEach(() => _setNetworkResearchForTests());
+
+  it('maps each repository to its chains, with the registry review applied', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'repo-chains-'));
+    try {
+      const research = join(dir, 'research.json');
+      const overrides = join(dir, 'overrides.json');
+      const repo = (r) => ({ repo: r, url: `https://github.com/${r}` });
+      writeFileSync(research, JSON.stringify({ networks: [
+        { chainId: 56, repositories: [repo('bnb-chain/bsc')] },
+        { chainId: 97, repositories: [repo('bnb-chain/bsc'), repo('dead/repo')] },
+        { chainId: 1101, repositories: [repo('0xPolygon/zkevm-node')] }
+      ] }));
+      writeFileSync(overrides, JSON.stringify({ repositories: {
+        'github:dead/repo': { exclude: true },
+        'github:0xpolygon/zkevm-node': { drop: [1101] },
+        'github:bnb-chain/bsc': { add: { 5611: 'node' } }
+      } }));
+      _setNetworkResearchForTests(research, undefined, undefined, undefined, overrides);
+      const map = getRepositoryChains();
+      expect(map.get('bnb-chain/bsc').sort((a, b) => a - b)).toEqual([56, 97, 5611]);
+      expect(map.has('dead/repo')).toBe(false);
+      expect(map.has('0xpolygon/zkevm-node')).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

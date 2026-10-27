@@ -725,7 +725,22 @@ function collapseIdentical(groups) {
  * With no forking network named, the post's chains are kept and the scope's own resolution is
  * added: a HyperEVM window that declares no chain is still a chain 999 fork.
  */
-function memberChainIds({ scope, forkNetwork, named, eventChainIds, chainIdsFor, chainNamesFor }) {
+function memberChainIds({ event, scope, forkNetwork, named, eventChainIds, chainIdsFor, chainNamesFor, repoChainIdsFor }) {
+  const ids = namedChainIds({ scope, forkNetwork, named, eventChainIds, chainIdsFor, chainNamesFor });
+  if (ids.length || !repoChainIdsFor || scope.startsWith('chain:')) return ids;
+  // Nothing the names say places it: a client release is still about the chains its repository
+  // runs, and the network it names picks among those ("BSC Chapel Testnet" from bnb-chain/bsc).
+  const repo = releaseRepoOf(event);
+  return repo ? repoChainIdsFor(repo, scope === 'unscoped' ? null : scope) : ids;
+}
+
+/** The `owner/repo` a client-release event came from, else null. */
+function releaseRepoOf(event) {
+  const id = event?.statusPage?.id;
+  return typeof id === 'string' && id.startsWith('github:') ? id.slice('github:'.length).toLowerCase() : null;
+}
+
+function namedChainIds({ scope, forkNetwork, named, eventChainIds, chainIdsFor, chainNamesFor }) {
   if (!forkNetwork) {
     const nameScope = scope !== 'unscoped' && !scope.startsWith('chain:');
     const resolved = nameScope ? (chainIdsFor?.(scope) ?? []) : [];
@@ -800,11 +815,13 @@ export function sortForks(forks) {
  * @param {(scope:string)=>number[]} [opts.chainIdsFor] the chainIds a network scope names
  * @param {(chainId:number)=>string[]} [opts.chainNamesFor] a chain's registry names, to vet the
  *   chains a post declares before they place a network the registry could not resolve
+ * @param {(repo:string, scope:string|null)=>number[]} [opts.repoChainIdsFor] the chains a client
+ *   release places a fork on when no name did: its repository's chains, picked by the network
  * @param {number} [opts.now]
  * @returns {Promise<object[]>} forks, soonest upcoming first, then unscheduled, then past. Each
  *   carries `kind` (fork | upgrade, see forkKind); filtering on it is the caller's choice.
  */
-export async function buildForks(events = [], { tipFor = null, chainIdsFor = null, chainNamesFor = null, now = Date.now(), maxTipLookups = DEFAULT_MAX_TIP_LOOKUPS } = {}) {
+export async function buildForks(events = [], { tipFor = null, chainIdsFor = null, chainNamesFor = null, repoChainIdsFor = null, now = Date.now(), maxTipLookups = DEFAULT_MAX_TIP_LOOKUPS } = {}) {
   let tipBudget = maxTipLookups;
   const groups = new Map();
   for (const event of events) {
@@ -826,7 +843,7 @@ export async function buildForks(events = [], { tipFor = null, chainIdsFor = nul
     for (const scope of scopes) {
       const group = forkGroup(fork, scope);
       if (!group) continue;
-      const chainIds = memberChainIds({ scope, forkNetwork, named, eventChainIds, chainIdsFor, chainNamesFor });
+      const chainIds = memberChainIds({ event, scope, forkNetwork, named, eventChainIds, chainIdsFor, chainNamesFor, repoChainIdsFor });
       if (!groups.has(group.key)) groups.set(group.key, { ...group, scope, members: [] });
       groups.get(group.key).members.push({ event, fork, chainIds, scope, observedAt });
     }

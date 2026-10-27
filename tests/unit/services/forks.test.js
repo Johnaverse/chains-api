@@ -4,10 +4,12 @@ import { getForkMentions } from '../../../src/sources/forkFeeds.js';
 import { getExplorerTip } from '../../../src/sources/blockscout.js';
 import { getAllChains } from '../../../src/store/queries.js';
 import { TESTNET_REGISTRY } from '../../fixtures/testnetRegistry.js';
+import { getRepositoryChains } from '../../../src/sources/networkResearch.js';
 
 vi.mock('../../../src/store/queries.js', () => ({ getAllChains: vi.fn(() => []) }));
 
 vi.mock('../../../src/sources/forkFeeds.js', () => ({ getForkMentions: vi.fn() }));
+vi.mock('../../../src/sources/networkResearch.js', () => ({ getRepositoryChains: vi.fn(() => new Map()) }));
 
 let fetchedAt;
 // Feed fork mentions to getForks, stamped with the current fetch time.
@@ -30,6 +32,7 @@ describe('getForks', () => {
     _resetForksMemoForTests();
     getExplorerTip.mockResolvedValue(null);
     getAllChains.mockReturnValue([]);
+    getRepositoryChains.mockReturnValue(new Map());
     fetchedAt = '2026-08-15T00:00:00.000Z';
   });
 
@@ -254,6 +257,69 @@ describe('getForks', () => {
     ]);
     expect((await getForks()).forks.find(f => f.name === 'Jenner').chains).toEqual([97]);
     expect((await getForks({ chainId: 56 })).forks).toHaveLength(0);
+  });
+
+  describe('placing a client release by its repository', () => {
+    // Each on its own day: one activation shared across networks merges them into one fork.
+    let day = 0;
+    const release = (id, repo, network, name = 'F1') =>
+      ({ ...event(id, { fork: fork({ name, network, activationAt: `2099-10-${String(++day).padStart(2, '0')}T02:30:00Z` }), page: `github:${repo}` }), feed: 'release' });
+    const registry = [
+      { chainId: 50, name: 'XDC Network', shortName: 'xdc' },
+      { chainId: 51, name: 'XDC Apothem Network', shortName: 'txdc', tags: ['Testnet'] },
+      { chainId: 102030, name: 'Creditcoin', shortName: 'ctc' },
+      { chainId: 102031, name: 'Creditcoin Testnet', shortName: 'ctctest', tags: ['Testnet'] },
+      { chainId: 102032, name: 'Creditcoin Devnet', shortName: 'ctcdev', tags: ['Testnet'] },
+      { chainId: 4160, name: 'Algorand', shortName: 'algo' },
+      { chainId: 5700, name: 'Syscoin Tanenbaum Testnet', shortName: 'tsys', tags: ['Testnet'] },
+      { chainId: 57, name: 'Syscoin Mainnet', shortName: 'sys' }
+    ];
+    const repos = new Map([
+      ['xinfinorg/xdposchain', [50, 51]],
+      ['gluwa/creditcoin3', [102030, 102031, 102032]],
+      ['algorand/go-algorand', [4160]],
+      ['syscoin/syscoin', [57, 5700]],
+      ['tempoxyz/tempo', [50]]
+    ]);
+    const placed = async (...mentions) => {
+      getAllChains.mockReturnValue(registry);
+      getRepositoryChains.mockReturnValue(repos);
+      serveMentions(mentions);
+      return (await getForks({ limit: 200 })).forks;
+    };
+
+    it('picks the chain among the repository\'s that the release names, in its own words', async () => {
+      const forks = await placed(
+        release('a', 'xinfinorg/xdposchain', 'XDPoSChain Testnet', 'Prague'),
+        release('b', 'gluwa/creditcoin3', 'Creditcoin3 Devnet', 'Osaka'),
+        release('c', 'gluwa/creditcoin3', 'Creditcoin3 Testnet', 'Osaka'),
+        release('d', 'syscoin/syscoin', 'Tanenbaum', 'Liberty')
+      );
+      const on = (name, network) => forks.find(f => f.name === name && f.network === network)?.chains;
+      expect(on('Prague', 'xdposchain testnet')).toEqual([51]);
+      expect(on('Osaka', 'creditcoin3 devnet')).toEqual([102032]);
+      expect(on('Osaka', 'creditcoin3 testnet')).toEqual([102031]);
+      expect(on('Liberty', 'tanenbaum')).toEqual([5700]);
+    });
+
+    it('leaves it unplaced, saying why, when the name is another network or none is named', async () => {
+      const forks = await placed(
+        release('a', 'algorand/go-algorand', 'Algorand Betanet', 'v43'),
+        release('b', 'tempoxyz/tempo', null, 'T8'),
+        { ...event('c', { fork: fork({ name: 'Protocol 30', activationAt: '2099-10-29T00:00:00Z' }), affectedChains: ['Stellar'], page: 'xlm' }) }
+      );
+      expect(forks.find(f => f.name === 'v43')).toMatchObject({ chains: [], unplaced: { reason: 'ambiguous', repositories: ['algorand/go-algorand'], candidates: [{ chainId: 4160, name: 'Algorand', testnet: false }] } });
+      expect(forks.find(f => f.name === 'T8')).toMatchObject({ chains: [], unplaced: { reason: 'no_network_named' } });
+      expect(forks.find(f => f.name === 'Protocol 30')).toMatchObject({ chains: [], unplaced: { reason: 'not_in_registry', candidates: [] } });
+    });
+
+    it('serves the unplaced ones as a review queue', async () => {
+      await placed(release('a', 'xinfinorg/xdposchain', 'XDPoSChain Testnet', 'Prague'), release('b', 'algorand/go-algorand', 'Algorand Betanet', 'v43'));
+      const all = await getForks();
+      expect(all.unplacedCount).toBe(1);
+      expect(all.forks.find(f => f.name === 'Prague').unplaced).toBeUndefined();
+      expect((await getForks({ unplaced: true })).forks.map(f => f.name)).toEqual(['v43']);
+    });
   });
 
   describe('review fixes', () => {

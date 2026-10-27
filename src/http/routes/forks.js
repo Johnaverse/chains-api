@@ -34,6 +34,11 @@ export async function forksRoutes(fastify) {
             enum: ['upgrades'],
             description: 'upgrades: also list ordinary software updates that carried a fork marker (kind "upgrade" — client releases, RPC patches, infra work). Excluded by default; byKind counts both either way.'
           },
+          unplaced: {
+            type: 'boolean',
+            default: false,
+            description: 'Only forks placed on no chain, each with `unplaced`: the reason (not_in_registry, no_network_named, ambiguous), the client repositories that reported it and the chains those run. The review queue for fork placement.'
+          },
           limit: { type: 'integer', minimum: 1, maximum: 200, default: 50 }
         }
       }

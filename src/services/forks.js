@@ -2,6 +2,7 @@ import { getForkMentions } from '../sources/forkFeeds.js';
 import { getExplorerTip } from '../sources/blockscout.js';
 import { buildForks, forkPhase, sortForks, FORK_PHASE, FORK_KIND, registryScopes, scopeLookups, normalizeForkName } from '../domain/forks.js';
 import { getAllChains } from '../store/queries.js';
+import { getRepositoryChains } from '../sources/networkResearch.js';
 import { logger } from '../util/logger.js';
 import { learnForkNames } from '../domain/forkNames.js';
 import { learnNetworkWords, mentionsTestNetwork } from '../domain/networkWords.js';
@@ -77,6 +78,50 @@ function chainResolver(chains) {
   };
 }
 
+// Words that say what kind of network a scope is, not which one.
+const KIND_WORDS = new Set(['mainnet', 'testnet', 'devnet', 'network', 'networks', 'chain', 'chains', 'net', 'protocol', 'the', 'of']);
+const wordsOf = (text) => String(text ?? '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+
+/**
+ * The chains a client release places a fork on when no name did, from its repository's chains.
+ * Release notes name networks in their own words: bnb-chain/bsc says "BSC Chapel Testnet" for
+ * the chain the registry calls "BNB Smart Chain Testnet" and "chapel", XDPoSChain says
+ * "XDPoSChain Testnet" for XDC Apothem, kub-chain/bkc says "KUB Chain" for "KUB Mainnet". The
+ * repository narrows the registry to a handful of chains, and the network's words pick among
+ * them: every word must be carried by the chain's names or the repository's ("XDPoSChain"), so
+ * "Algorand Betanet" is not chain 4160 "Algorand". Several left, the network's kind decides —
+ * a test-network word, else mainnet, as an unqualified name always means here — then its kind
+ * word ("Creditcoin3 Devnet" is "Creditcoin Devnet", not "Creditcoin Testnet"). One left of
+ * the other kind is refused only on the network's own word: a "Testnet" is never a chain named
+ * "Mainnet", and a bare "Tanenbaum" may well be "Syscoin Tanenbaum Testnet". A release naming
+ * no network is not placed — nearcore's protocol versions are NEAR's, and the research links
+ * the repository only to Aurora, which runs on it. Anything ambiguous resolves to nothing, as a
+ * name shared by too many chains does.
+ */
+export function repositoryResolver(chains, repoChains) {
+  const byId = new Map(chains.filter((c) => Number.isFinite(c?.chainId)).map((c) => [c.chainId, c]));
+  return (repo, scope) => {
+    if (!scope) return [];
+    const candidates = (repoChains?.get(repo) ?? []).map((id) => byId.get(id)).filter(Boolean);
+    const scopeWords = wordsOf(scope);
+    const words = scopeWords.filter((w) => !KIND_WORDS.has(w) && !/^\d+$/.test(w));
+    const kindWords = scopeWords.filter((w) => w === 'testnet' || w === 'devnet' || w === 'mainnet');
+    const repoWords = new Set(wordsOf(repo));
+    const wantTest = mentionsTestNetwork(scope) || scopeWords.includes('devnet');
+    const named = candidates.map((chain) => ({ chain, own: new Set(chainNames(chain).flatMap(wordsOf)) }))
+      .filter(({ own }) => words.every((w) => own.has(w) || repoWords.has(w)));
+    if (named.length === 1) {
+      const { chain, own } = named[0];
+      const contradicts = wantTest ? own.has('mainnet') : (scopeWords.includes('mainnet') && isTestChain(chain));
+      return contradicts ? [] : [chain.chainId];
+    }
+    const rank = ({ chain, own }) => (isTestChain(chain) === wantTest ? 2 : 0) + (kindWords.length && kindWords.every((w) => own.has(w)) ? 1 : 0);
+    const top = Math.max(0, ...named.map(rank));
+    const best = named.filter((n) => rank(n) === top);
+    return top >= 2 && best.length === 1 ? [best[0].chain.chainId] : [];
+  };
+}
+
 function chainNamesLookup(chains) {
   const byId = new Map(chains.filter((c) => Number.isFinite(c?.chainId)).map((c) => [c.chainId, chainNames(c)]));
   return (chainId) => byId.get(chainId) ?? [];
@@ -143,22 +188,24 @@ export function qualifyBareNetwork(mention, byId) {
  * every call cost ~1s of CPU at 1,500 unnamed mentions. Phase depends on the clock, so it is
  * re-derived per call from the memoized activation rather than cached with it.
  */
-let memo = { mentions: null, fetchedAt: null, chains: null, forks: null };
+let memo = { mentions: null, fetchedAt: null, chains: null, repoChains: null, forks: null };
 
 export function _resetForksMemoForTests() {
-  memo = { mentions: null, fetchedAt: null, chains: null, forks: null };
+  memo = { mentions: null, fetchedAt: null, chains: null, repoChains: null, forks: null };
 }
 
 async function builtForks(mentions, fetchedAt) {
   const chains = getAllChains();
-  if (memo.forks && memo.mentions === mentions && memo.fetchedAt === fetchedAt && memo.chains === chains) return memo.forks;
+  const repoChains = getRepositoryChains();
+  if (memo.forks && memo.mentions === mentions && memo.fetchedAt === fetchedAt && memo.chains === chains && memo.repoChains === repoChains) return memo.forks;
   // Which words name a test network comes from the registry (networkWords.js).
   learnNetworkWords(chains);
   const byId = new Map(chains.map((c) => [c.chainId, c]));
-  const forks = (await buildForks(mentions.map((m) => qualifyBareNetwork(m, byId)), { tipFor, chainIdsFor: chainResolver(chains), chainNamesFor: chainNamesLookup(chains) })).map(present);
+  const forks = (await buildForks(mentions.map((m) => qualifyBareNetwork(m, byId)), { tipFor, chainIdsFor: chainResolver(chains), chainNamesFor: chainNamesLookup(chains), repoChainIdsFor: repositoryResolver(chains, repoChains) }))
+    .map((fork) => present(fork, unplacedReason(fork, repoChains, byId)));
   // What the feeds show about which names are one fork: read by the timeline and latest release.
   learnForkNames(forks);
-  memo = { mentions, fetchedAt, chains, forks };
+  memo = { mentions, fetchedAt, chains, repoChains, forks };
   return forks;
 }
 
@@ -171,13 +218,16 @@ async function builtForks(mentions, fetchedAt) {
  * @param {boolean} [opts.scheduledOnly] drop forks with no known activation time
  * @param {string} [opts.include] `upgrades` to also list ordinary software updates that carried
  *   a fork marker (kind 'upgrade'); excluded by default
+ * @param {boolean} [opts.unplaced] only forks on no chain, each with `unplaced` saying why
  * @param {number} [opts.limit]
  */
-export async function getForks({ chainId, phase, scheduledOnly = false, include, limit = DEFAULT_LIMIT } = {}) {
+export async function getForks({ chainId, phase, scheduledOnly = false, include, unplaced = false, limit = DEFAULT_LIMIT } = {}) {
   const { forks, fetchedAt, feeds } = await getAllForks();
 
   let filtered = forks;
   if (chainId != null) filtered = filtered.filter((f) => f.chains.includes(Number(chainId)));
+  // The review queue: forks on no chain, each saying why (unplacedReason).
+  if (unplaced) filtered = filtered.filter((f) => f.unplaced);
   // Counted before the kind filter, so a caller sees how many upgrades were left out.
   const byKind = countByKind(filtered);
   // Ordinary software updates that carried a fork marker — 7 of 9 live "forks" were these —
@@ -215,6 +265,8 @@ export async function getForks({ chainId, phase, scheduledOnly = false, include,
     // fork vs upgrade, over everything matched by chain — upgrades included or not.
     byKind,
     upgradesIncluded: includeUpgrades,
+    // Forks on no chain, over everything matched: `?unplaced=true` lists them with the reason.
+    unplacedCount: filtered.filter((f) => f.unplaced).length,
     forks: sliced
   };
 }
@@ -257,9 +309,28 @@ function countByKind(forks) {
  * `publishedMs` in particular must not survive: it is an internal sort key, and
  * handleGetLiveIncidents already strips it for the same reason.
  */
-function present(fork) {
+/**
+ * Why a fork is on no chain, for a person to settle: the network it names is in no registry
+ * (Stellar, Zcash), no network was named (a release saying only "T8"), or the client's
+ * repository runs several chains and the name picks none of them — `candidates` lists those,
+ * and a candidate the network plainly is (XDC Apothem for "XDPoSChain Testnet", untagged as a
+ * test network) points at the registry entry to fix. Null when the fork is placed.
+ */
+function unplacedReason(fork, repoChains, byId) {
+  if (fork.chains?.length) return null;
+  const repos = (fork.sources ?? []).filter((s) => s.startsWith('github:')).map((s) => s.slice('github:'.length).toLowerCase());
+  const candidates = [...new Set(repos.flatMap((r) => repoChains?.get(r) ?? []))]
+    .filter((id) => byId.has(id))
+    .map((id) => ({ chainId: id, name: byId.get(id).name ?? null, testnet: isTestChain(byId.get(id)) }));
+  const named = publicNetwork(fork.network) != null;
+  const reason = !named ? 'no_network_named' : candidates.length ? 'ambiguous' : 'not_in_registry';
+  return { reason, repositories: repos, candidates };
+}
+
+function present(fork, unplaced = null) {
   return {
     ...fork,
+    ...(unplaced ? { unplaced } : {}),
     // `unscoped` and `chain:8453` are grouping keys, not network names. Exposing them put an
     // internal identifier in front of a reader who was told this field names the network.
     network: publicNetwork(fork.network),

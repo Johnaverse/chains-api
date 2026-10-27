@@ -217,6 +217,41 @@ export function getNodeHardware(chainId) {
  * normalisation and linking, so this stays a projection of the checked-in files. `overrides`
  * is the curated correction set, verbatim (see loadClientRegistryOverrides), or null.
  */
+let repositoryChains = { from: null, overrides: null, value: null };
+
+/**
+ * The chains each client repository runs, by lower-cased `owner/repo`: the research's own
+ * repository links. A release from bnb-chain/bsc is about chain 56 or 97 and nothing else, which
+ * is what lets a fork placed only by release notes find its chain when the notes name the network
+ * in words the registry does not use ("BSC Chapel Testnet").
+ */
+export function getRepositoryChains() {
+  if (repositoryChains.from === dataset && repositoryChains.overrides === registryOverrides) return repositoryChains.value;
+  const linked = new Map();
+  for (const [chainId, entry] of dataset.byChainId) {
+    for (const r of entry?.repositories ?? []) {
+      const repo = typeof r?.repo === 'string' ? r.repo.toLowerCase() : null;
+      if (!repo) continue;
+      if (!linked.has(repo)) linked.set(repo, new Set());
+      linked.get(repo).add(chainId);
+    }
+  }
+  // The registry review's corrections, as the feed applies them: a dead repository is out, and
+  // links it found wrong are dropped (`keep` limits, `drop` removes) or missing ones added.
+  for (const [id, o] of Object.entries(registryOverrides?.repositories ?? {})) {
+    const repo = id.replace(/^github:/, '').toLowerCase();
+    if (o?.exclude === true) { linked.delete(repo); continue; }
+    let ids = linked.get(repo) ?? new Set();
+    if (Array.isArray(o?.keep)) ids = new Set([...ids].filter((c) => o.keep.includes(c)));
+    for (const c of Array.isArray(o?.drop) ? o.drop : []) ids.delete(c);
+    for (const c of Object.keys(o?.add ?? {})) if (Number.isSafeInteger(Number(c))) ids.add(Number(c));
+    if (ids.size) linked.set(repo, ids); else linked.delete(repo);
+  }
+  const value = new Map([...linked].map(([repo, ids]) => [repo, [...ids]]));
+  repositoryChains = { from: dataset, overrides: registryOverrides, value };
+  return value;
+}
+
 export function getRepositoryInputs(nameFor = () => null) {
   const chainIds = new Set([...dataset.byChainId.keys(), ...hardware.byChainId.keys()]);
   const networks = [];
