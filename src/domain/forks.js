@@ -275,7 +275,12 @@ export function scopeLookups(scope) {
   if (typeof scope !== 'string' || !scope) return [];
   const words = scope.split(' ');
   const tail = words.slice(1).join(' ');
-  return words.length > 1 && mentionsTestNetwork(tail) ? [scope, tail] : [scope];
+  if (words.length < 2 || !mentionsTestNetwork(tail)) return [scope];
+  // The whole name without its "testnet" before the tail: "Morph Hoodi Testnet" is the
+  // registry's "Morph Hoodi" (2910), not Ethereum's Hoodi. Only while it still names a test
+  // network — "Ethereum Testnet" never becomes "ethereum".
+  const bare = scope.replace(/ testnet$/, '');
+  return [...new Set([scope, ...(bare !== scope && mentionsTestNetwork(bare) ? [bare] : []), tail])];
 }
 
 /**
@@ -496,6 +501,12 @@ function anchorDistance(a, b) {
 function mergeInto(groups, target, source) {
   target.members.push(...source.members);
   groups.delete(source.key);
+  // A repository's guess at the network yields to a name's, whichever merge joined them: an
+  // unscoped Tempo "T9" release guessed onto mainnet, folded into the T9 named on the testnet,
+  // must not list the testnet's activation under mainnet too.
+  if (target.members.some(m => m.chainIds.length && !m.placedByRepository)) {
+    for (const m of target.members) if (m.placedByRepository) m.chainIds = [];
+  }
 }
 
 /** Groups indexed by `kind:ident`, the part of the key that is the same across scopes. */
@@ -673,7 +684,6 @@ function mergeUnplacedIntoPlaced(groups) {
     })());
     if (matches.length !== 1) continue;
     const [target] = matches;
-    for (const m of g.members) if (m.placedByRepository) m.chainIds = [];
     target.scopes = [...new Set([...(target.scopes ?? [target.scope]), ...(g.scopes ?? [g.scope])])];
     mergeInto(groups, target, g);
   }
@@ -731,7 +741,10 @@ function memberChainIds({ event, scope, forkNetwork, named, eventChainIds, chain
   if (ids.length || !repo || scope.startsWith('chain:')) return { chainIds: ids, fallback: false };
   // Nothing the names say places it: a client release is still about the chains its repository
   // runs, and the network it names picks among those ("BSC Chapel Testnet" from bnb-chain/bsc).
-  const byRepo = repoChainIdsFor?.(repo, scope === 'unscoped' ? null : scope) ?? [];
+  // A bare "Testnet" the network was dropped for (qualifyBareNetwork) still says which of the
+  // client's chains: Creditcoin's "Testnet" release is 102031, not mainnet.
+  const repoScope = scope === 'unscoped' ? (event?.enrichment?.fork?.qualifier ?? null) : scope;
+  const byRepo = repoChainIdsFor?.(repo, repoScope) ?? [];
   if (byRepo.length || !forkNetwork) return { chainIds: byRepo, fallback: true };
   // Last, a test network the registry does not list is filed under the network it tests, when
   // the release's own repository is that network's ("Aleph Zero Testnet" from aleph-node is

@@ -201,7 +201,9 @@ export function qualifyBareNetwork(mention, byId) {
       ...mention.enrichment,
       chains: keepChains ? (mention.enrichment.chains ?? []).filter((id) => matching.includes(id)) : [],
       ...(affectedChains !== undefined ? { affectedChains } : {}),
-      fork: { ...fork, network }
+      // The qualifier stays for picking among the release's own repository chains, which is
+      // not a network name anywhere else.
+      fork: { ...fork, network, ...(network ? {} : { qualifier: bare }) }
     }
   };
 }

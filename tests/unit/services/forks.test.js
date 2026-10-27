@@ -262,6 +262,14 @@ describe('getForks', () => {
     expect((await getForks({ chainId: 56 })).forks).toHaveLength(0);
   });
 
+  it('places "Morph Hoodi Testnet" on Morph\'s Hoodi, not Ethereum\'s', async () => {
+    getAllChains.mockReturnValue(TESTNET_REGISTRY);
+    serveMentions([
+      { ...event('m', { fork: fork({ name: 'Celadon', network: 'Morph Hoodi Testnet', activationAt: '2099-10-28T06:00:00Z' }), affectedChains: ['Morph Hoodi Testnet'] }), feed: 'status' }
+    ]);
+    expect((await getForks()).forks.find(f => f.name === 'Celadon').chains).toEqual([2910]);
+  });
+
   describe('placing a client release by its repository', () => {
     // Each on its own day: one activation shared across networks merges them into one fork.
     let day = 0;
@@ -391,6 +399,22 @@ describe('getForks', () => {
       const glam = (await getForks()).forks.filter(f => f.name === 'Glamsterdam');
       expect(glam).toHaveLength(1);
       expect(glam[0].chains).toEqual([560048]);
+    });
+
+    it('lets a repository guess yield to a name when an earlier merge joins them', async () => {
+      const forks = await placed(
+        // Unscoped: guessed onto Tempo mainnet by the repository alone.
+        { ...event('a', { fork: fork({ name: 'T9', activationAt: '2099-11-05T15:00:00Z' }), page: 'github:tempoxyz/tempo' }), feed: 'release' },
+        { ...event('b', { fork: fork({ name: 'T9', network: 'Tempo Testnet Moderato', activationAt: '2099-11-05T15:00:00Z' }), affectedChains: ['Tempo Testnet Moderato'], page: 'tempo' }), feed: 'news' }
+      );
+      const t9 = forks.filter(f => f.name === 'T9');
+      expect(t9).toHaveLength(1);
+      expect(t9[0].chains).toEqual([42431]);
+    });
+
+    it('keeps a bare "Testnet" for picking among the repository\'s chains', async () => {
+      const forks = await placed(release('a', 'github:gluwa/creditcoin3', 'Testnet', 'OsakaBare'));
+      expect(on(forks, 'OsakaBare')).toEqual([102031]);
     });
 
     it('serves the unplaced ones as a review queue', async () => {

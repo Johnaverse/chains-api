@@ -552,6 +552,9 @@ describe('forks across status, forum and news feeds', () => {
   it('looks a qualified test network up by its registry name too', () => {
     expect(scopeLookups('ethereum sepolia')).toEqual(['ethereum sepolia', 'sepolia']);
     expect(scopeLookups('ethereum classic')).toEqual(['ethereum classic']);
+    // The whole name without "testnet" first: Morph's Hoodi, not Ethereum's.
+    expect(scopeLookups('morph hoodi testnet')).toEqual(['morph hoodi testnet', 'morph hoodi', 'hoodi testnet']);
+    expect(scopeLookups('ethereum testnet')).not.toContain('ethereum');
     expect(registryScopes('Base Sepolia Testnet')).toEqual(['base sepolia testnet', 'base sepolia']);
     expect(registryScopes('Ethereum Mainnet')).toEqual(['ethereum']);
   });
