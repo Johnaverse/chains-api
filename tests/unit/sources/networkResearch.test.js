@@ -476,7 +476,9 @@ describe('getRepositoryChains', () => {
       writeFileSync(research, JSON.stringify({ networks: [
         { chainId: 56, repositories: [repo('bnb-chain/bsc')] },
         { chainId: 97, repositories: [repo('bnb-chain/bsc'), repo('dead/repo')] },
-        { chainId: 1101, repositories: [repo('0xPolygon/zkevm-node')] }
+        { chainId: 1101, repositories: [repo('0xPolygon/zkevm-node')] },
+        // PulseChain's clients are on GitLab, recorded by URL alone.
+        { chainId: 943, repositories: [{ repo: null, url: 'https://gitlab.com/pulsechaincom/go-pulse' }] }
       ] }));
       writeFileSync(overrides, JSON.stringify({ repositories: {
         'github:dead/repo': { exclude: true },
@@ -485,9 +487,10 @@ describe('getRepositoryChains', () => {
       } }));
       _setNetworkResearchForTests(research, undefined, undefined, undefined, overrides);
       const map = getRepositoryChains();
-      expect(map.get('bnb-chain/bsc').sort((a, b) => a - b)).toEqual([56, 97, 5611]);
-      expect(map.has('dead/repo')).toBe(false);
-      expect(map.has('0xpolygon/zkevm-node')).toBe(false);
+      expect(map.get('github:bnb-chain/bsc').sort((a, b) => a - b)).toEqual([56, 97, 5611]);
+      expect(map.has('github:dead/repo')).toBe(false);
+      expect(map.has('github:0xpolygon/zkevm-node')).toBe(false);
+      expect(map.get('gitlab:pulsechaincom/go-pulse')).toEqual([943]);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

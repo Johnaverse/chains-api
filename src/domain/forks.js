@@ -1,4 +1,4 @@
-import { mentionsTestNetwork } from './networkWords.js';
+import { mentionsTestNetwork, isTestNetworkWord } from './networkWords.js';
 import { canonicalForkId } from './forkNames.js';
 
 /**
@@ -731,13 +731,19 @@ function memberChainIds({ event, scope, forkNetwork, named, eventChainIds, chain
   // Nothing the names say places it: a client release is still about the chains its repository
   // runs, and the network it names picks among those ("BSC Chapel Testnet" from bnb-chain/bsc).
   const repo = releaseRepoOf(event);
-  return repo ? repoChainIdsFor(repo, scope === 'unscoped' ? null : scope) : ids;
+  const byRepo = repo ? repoChainIdsFor(repo, scope === 'unscoped' ? null : scope) : [];
+  if (byRepo.length || !forkNetwork) return byRepo;
+  // Last, a test network the registry does not list is filed under the network it tests: a
+  // dated fork on no chain is missing from every history, which is the worse error. "Aleph Zero
+  // Testnet" is chain 2039 "Aleph Zero" then.
+  const tested = scope.split(' ').filter((w) => !isTestNetworkWord(w) && w !== 'devnet').join(' ');
+  return tested && tested !== scope ? (chainIdsFor?.(tested) ?? []) : [];
 }
 
-/** The `owner/repo` a client-release event came from, else null. */
+/** The repository a client-release event came from (`github:owner/repo`), else null. */
 function releaseRepoOf(event) {
   const id = event?.statusPage?.id;
-  return typeof id === 'string' && id.startsWith('github:') ? id.slice('github:'.length).toLowerCase() : null;
+  return typeof id === 'string' && /^(github|gitlab):[^/]+\/./.test(id) ? id.toLowerCase() : null;
 }
 
 function namedChainIds({ scope, forkNetwork, named, eventChainIds, chainIdsFor, chainNamesFor }) {

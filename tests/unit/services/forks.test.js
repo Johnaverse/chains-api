@@ -263,7 +263,7 @@ describe('getForks', () => {
     // Each on its own day: one activation shared across networks merges them into one fork.
     let day = 0;
     const release = (id, repo, network, name = 'F1') =>
-      ({ ...event(id, { fork: fork({ name, network, activationAt: `2099-10-${String(++day).padStart(2, '0')}T02:30:00Z` }), page: `github:${repo}` }), feed: 'release' });
+      ({ ...event(id, { fork: fork({ name, network, activationAt: `2099-10-${String(++day).padStart(2, '0')}T02:30:00Z` }), page: repo }), feed: 'release' });
     const registry = [
       { chainId: 50, name: 'XDC Network', shortName: 'xdc' },
       { chainId: 51, name: 'XDC Apothem Network', shortName: 'txdc', tags: ['Testnet'] },
@@ -272,14 +272,30 @@ describe('getForks', () => {
       { chainId: 102032, name: 'Creditcoin Devnet', shortName: 'ctcdev', tags: ['Testnet'] },
       { chainId: 4160, name: 'Algorand', shortName: 'algo' },
       { chainId: 5700, name: 'Syscoin Tanenbaum Testnet', shortName: 'tsys', tags: ['Testnet'] },
-      { chainId: 57, name: 'Syscoin Mainnet', shortName: 'sys' }
+      { chainId: 57, name: 'Syscoin Mainnet', shortName: 'sys' },
+      { chainId: 16, name: 'Songbird Testnet Coston', shortName: 'cflr', tags: ['Testnet'] },
+      { chainId: 114, name: 'Flare Testnet Coston2', shortName: 'c2flr', tags: ['Testnet'] },
+      { chainId: 42429, name: 'Tempo Testnet Andantino (Deprecated)', status: 'deprecated', tags: ['Testnet'] },
+      { chainId: 42431, name: 'Tempo Testnet Moderato', tags: ['Testnet'] },
+      { chainId: 4217, name: 'Tempo Mainnet' },
+      { chainId: 96, name: 'KUB Mainnet', shortName: 'kub' },
+      { chainId: 100000, name: 'QuarkChain Mainnet Root' },
+      { chainId: 100001, name: 'QuarkChain Mainnet Shard 0' },
+      { chainId: 100002, name: 'QuarkChain Mainnet Shard 1' },
+      { chainId: 2039, name: 'Aleph Zero', shortName: 'aleph' },
+      { chainId: 1, name: 'Ethereum Mainnet' },
+      { chainId: 100, name: 'Gnosis' }
     ];
     const repos = new Map([
-      ['xinfinorg/xdposchain', [50, 51]],
-      ['gluwa/creditcoin3', [102030, 102031, 102032]],
-      ['algorand/go-algorand', [4160]],
-      ['syscoin/syscoin', [57, 5700]],
-      ['tempoxyz/tempo', [50]]
+      ['github:xinfinorg/xdposchain', [50, 51]],
+      ['github:gluwa/creditcoin3', [102030, 102031, 102032]],
+      ['github:algorand/go-algorand', [4160]],
+      ['github:syscoin/syscoin', [57, 5700]],
+      ['github:flare-foundation/go-flare', [16, 114]],
+      ['github:tempoxyz/tempo', [4217, 42429, 42431]],
+      ['github:kub-chain/bkc', [96]],
+      ['github:quarkchain/goquarkchain', [100000, 100001, 100002]],
+      ['github:sigp/lighthouse', [1, 100]]
     ]);
     const placed = async (...mentions) => {
       getAllChains.mockReturnValue(registry);
@@ -287,38 +303,67 @@ describe('getForks', () => {
       serveMentions(mentions);
       return (await getForks({ limit: 200 })).forks;
     };
+    const on = (forks, name) => forks.find(f => f.name === name)?.chains;
 
     it('picks the chain among the repository\'s that the release names, in its own words', async () => {
       const forks = await placed(
-        release('a', 'xinfinorg/xdposchain', 'XDPoSChain Testnet', 'Prague'),
-        release('b', 'gluwa/creditcoin3', 'Creditcoin3 Devnet', 'Osaka'),
-        release('c', 'gluwa/creditcoin3', 'Creditcoin3 Testnet', 'Osaka'),
-        release('d', 'syscoin/syscoin', 'Tanenbaum', 'Liberty')
+        release('a', 'github:xinfinorg/xdposchain', 'XDPoSChain Testnet', 'Prague'),
+        release('b', 'github:gluwa/creditcoin3', 'Creditcoin3 Devnet', 'OsakaDev'),
+        release('c', 'github:gluwa/creditcoin3', 'Creditcoin3 Testnet', 'OsakaTest'),
+        release('d', 'github:syscoin/syscoin', 'Tanenbaum', 'Liberty'),
+        release('e', 'github:flare-foundation/go-flare', 'Coston', 'GraniteC'),
+        release('f', 'github:flare-foundation/go-flare', 'Coston2', 'GraniteC2'),
+        release('g', 'github:kub-chain/bkc', 'Bitkub Chain', 'Erawan')
       );
-      const on = (name, network) => forks.find(f => f.name === name && f.network === network)?.chains;
-      expect(on('Prague', 'xdposchain testnet')).toEqual([51]);
-      expect(on('Osaka', 'creditcoin3 devnet')).toEqual([102032]);
-      expect(on('Osaka', 'creditcoin3 testnet')).toEqual([102031]);
-      expect(on('Liberty', 'tanenbaum')).toEqual([5700]);
+      expect(on(forks, 'Prague')).toEqual([51]);
+      expect(on(forks, 'OsakaDev')).toEqual([102032]);
+      expect(on(forks, 'OsakaTest')).toEqual([102031]);
+      expect(on(forks, 'Liberty')).toEqual([5700]);
+      // The word itself over a longer one containing it.
+      expect(on(forks, 'GraniteC')).toEqual([16]);
+      expect(on(forks, 'GraniteC2')).toEqual([114]);
+      expect(on(forks, 'Erawan')).toEqual([96]);
     });
 
-    it('leaves it unplaced, saying why, when the name is another network or none is named', async () => {
+    it('keeps a dated fork on the nearest chain rather than none', async () => {
       const forks = await placed(
-        release('a', 'algorand/go-algorand', 'Algorand Betanet', 'v43'),
-        release('b', 'tempoxyz/tempo', null, 'T8'),
+        // A test network the repository does not run lands on its mainnet.
+        release('a', 'github:algorand/go-algorand', 'Algorand Betanet', 'v43'),
+        // Two testnets carry the name: the live one, not the deprecated one.
+        release('b', 'github:tempoxyz/tempo', 'Tempo Testnet', 'T9'),
+        // Naming no network, a release is about the client's mainnet: QuarkChain's root chain,
+        // the fewest words over its shards.
+        release('c', 'github:tempoxyz/tempo', null, 'T8'),
+        release('e', 'github:quarkchain/goquarkchain', null, 'QRoot'),
+        // A test network the registry does not list is filed under the network it tests.
+        release('d', 'github:aleph-zero-foundation/aleph-node', 'Aleph Zero Testnet', 'A0')
+      );
+      expect(on(forks, 'v43')).toEqual([4160]);
+      expect(on(forks, 'T9')).toEqual([42431]);
+      expect(on(forks, 'T8')).toEqual([4217]);
+      expect(on(forks, 'A0')).toEqual([2039]);
+      expect(on(forks, 'QRoot')).toEqual([100000]);
+    });
+
+    it('leaves it unplaced, saying why, when nothing narrows it enough', async () => {
+      const forks = await placed(
+        // A client two mainnets run, its notes naming neither.
+        release('a', 'github:sigp/lighthouse', null, 'Q1'),
+        release('b', 'github:chainx-org/chainx', null, 'Rent'),
         { ...event('c', { fork: fork({ name: 'Protocol 30', activationAt: '2099-10-29T00:00:00Z' }), affectedChains: ['Stellar'], page: 'xlm' }) }
       );
-      expect(forks.find(f => f.name === 'v43')).toMatchObject({ chains: [], unplaced: { reason: 'ambiguous', repositories: ['algorand/go-algorand'], candidates: [{ chainId: 4160, name: 'Algorand', testnet: false }] } });
-      expect(forks.find(f => f.name === 'T8')).toMatchObject({ chains: [], unplaced: { reason: 'no_network_named' } });
-      expect(forks.find(f => f.name === 'Protocol 30')).toMatchObject({ chains: [], unplaced: { reason: 'not_in_registry', candidates: [] } });
+      expect(forks.find(f => f.name === 'Q1')).toMatchObject({ chains: [], unplaced: { reason: 'ambiguous', repositories: ['github:sigp/lighthouse'] } });
+      expect(forks.find(f => f.name === 'Q1').unplaced.candidates.map(c => c.chainId)).toEqual([1, 100]);
+      expect(forks.find(f => f.name === 'Rent')).toMatchObject({ chains: [], unplaced: { reason: 'no_network_named', candidates: [] } });
+      expect(forks.find(f => f.name === 'Protocol 30')).toMatchObject({ chains: [], unplaced: { reason: 'no_matching_chain', candidates: [] } });
     });
 
     it('serves the unplaced ones as a review queue', async () => {
-      await placed(release('a', 'xinfinorg/xdposchain', 'XDPoSChain Testnet', 'Prague'), release('b', 'algorand/go-algorand', 'Algorand Betanet', 'v43'));
+      await placed(release('a', 'github:xinfinorg/xdposchain', 'XDPoSChain Testnet', 'Prague'), release('b', 'github:sigp/lighthouse', null, 'Q1'));
       const all = await getForks();
       expect(all.unplacedCount).toBe(1);
       expect(all.forks.find(f => f.name === 'Prague').unplaced).toBeUndefined();
-      expect((await getForks({ unplaced: true })).forks.map(f => f.name)).toEqual(['v43']);
+      expect((await getForks({ unplaced: true })).forks.map(f => f.name)).toEqual(['Q1']);
     });
   });
 

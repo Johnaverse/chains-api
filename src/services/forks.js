@@ -79,46 +79,57 @@ function chainResolver(chains) {
 }
 
 // Words that say what kind of network a scope is, not which one.
-const KIND_WORDS = new Set(['mainnet', 'testnet', 'devnet', 'network', 'networks', 'chain', 'chains', 'net', 'protocol', 'the', 'of']);
+const KIND_WORDS = new Set(['mainnet', 'testnet', 'devnet', 'network', 'networks', 'chain', 'chains', 'blockchain', 'net', 'protocol', 'the', 'of', 'deprecated']);
 const wordsOf = (text) => String(text ?? '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
 
 /**
  * The chains a client release places a fork on when no name did, from its repository's chains.
  * Release notes name networks in their own words: bnb-chain/bsc says "BSC Chapel Testnet" for
- * the chain the registry calls "BNB Smart Chain Testnet" and "chapel", XDPoSChain says
- * "XDPoSChain Testnet" for XDC Apothem, kub-chain/bkc says "KUB Chain" for "KUB Mainnet". The
- * repository narrows the registry to a handful of chains, and the network's words pick among
- * them: every word must be carried by the chain's names or the repository's ("XDPoSChain"), so
- * "Algorand Betanet" is not chain 4160 "Algorand". Several left, the network's kind decides —
- * a test-network word, else mainnet, as an unqualified name always means here — then its kind
- * word ("Creditcoin3 Devnet" is "Creditcoin Devnet", not "Creditcoin Testnet"). One left of
- * the other kind is refused only on the network's own word: a "Testnet" is never a chain named
- * "Mainnet", and a bare "Tanenbaum" may well be "Syscoin Tanenbaum Testnet". A release naming
- * no network is not placed — nearcore's protocol versions are NEAR's, and the research links
- * the repository only to Aurora, which runs on it. Anything ambiguous resolves to nothing, as a
- * name shared by too many chains does.
+ * the chain the registry calls "BNB Smart Chain Testnet" and "chapel", vechain/thor says
+ * "VeChainThor", kub-chain/bkc "Bitkub Chain" for "KUB Mainnet". The repository narrows the
+ * registry to the handful of chains that client runs, and a dated fork on none of them is lost
+ * from every chain's history — so among those the closest is taken rather than none:
+ *   1. the chains whose names (or the repository's) carry the most of the network's words, a
+ *      word carried when one contains the other ("vechainthor" / "vechain", "bitkub" / "kub");
+ *      — the word itself counting over a longer or shorter one ("coston" is Coston, not Coston2);
+ *   2. among them, the network's kind (a test-network word or "devnet", else mainnet), then its
+ *      kind word ("Creditcoin3 Devnet" is "Creditcoin Devnet", not "Creditcoin Testnet"), a live
+ *      network over a deprecated one ("Tempo Testnet" is Moderato, not Andantino), then the
+ *      fewest name words the network did not say ("Metal" is Metal C-Chain, not Metal Tahoe);
+ *   3. a release naming no network is about the client's mainnet, when it runs one.
+ * A test-network fork landing on its mainnet ("Algorand Betanet" on Algorand) is accepted as the
+ * nearer error. Up to MAX_CHAINS_PER_SCOPE chains left tied on a named network are all kept; more,
+ * or any tie with no network named, is a client many networks run (go-ethereum, Lighthouse)
+ * whose notes did not say which, and places nothing.
  */
 export function repositoryResolver(chains, repoChains) {
   const byId = new Map(chains.filter((c) => Number.isFinite(c?.chainId)).map((c) => [c.chainId, c]));
   return (repo, scope) => {
-    if (!scope) return [];
     const candidates = (repoChains?.get(repo) ?? []).map((id) => byId.get(id)).filter(Boolean);
+    if (!candidates.length) return [];
     const scopeWords = wordsOf(scope);
     const words = scopeWords.filter((w) => !KIND_WORDS.has(w) && !/^\d+$/.test(w));
-    const kindWords = scopeWords.filter((w) => w === 'testnet' || w === 'devnet' || w === 'mainnet');
-    const repoWords = new Set(wordsOf(repo));
-    const wantTest = mentionsTestNetwork(scope) || scopeWords.includes('devnet');
-    const named = candidates.map((chain) => ({ chain, own: new Set(chainNames(chain).flatMap(wordsOf)) }))
-      .filter(({ own }) => words.every((w) => own.has(w) || repoWords.has(w)));
-    if (named.length === 1) {
-      const { chain, own } = named[0];
-      const contradicts = wantTest ? own.has('mainnet') : (scopeWords.includes('mainnet') && isTestChain(chain));
-      return contradicts ? [] : [chain.chainId];
-    }
-    const rank = ({ chain, own }) => (isTestChain(chain) === wantTest ? 2 : 0) + (kindWords.length && kindWords.every((w) => own.has(w)) ? 1 : 0);
-    const top = Math.max(0, ...named.map(rank));
-    const best = named.filter((n) => rank(n) === top);
-    return top >= 2 && best.length === 1 ? [best[0].chain.chainId] : [];
+    const kindWords = scopeWords.filter((w) => w === 'testnet' || w === 'devnet');
+    const wantTest = Boolean(scope) && (mentionsTestNetwork(scope) || kindWords.length > 0);
+    const repoWords = wordsOf(repo.replace(/^[a-z]+:/, '')).filter((w) => w.length >= 3);
+    // 2 for the word itself, 1 for a word containing it or contained in it.
+    const carried = (own, w) => (own.includes(w) ? 2 : own.some((o) => o.length >= 3 && w.length >= 3 && (o.includes(w) || w.includes(o))) ? 1 : 0);
+    const scored = candidates.map((chain) => {
+      const all = [...new Set(chainNames(chain).flatMap(wordsOf))];
+      const own = all.filter((w) => !KIND_WORDS.has(w));
+      const named = words.reduce((sum, w) => sum + Math.max(carried(own, w), carried(repoWords, w)), 0);
+      // A retired network loses to its live successor ("Tempo Testnet Andantino (Deprecated)").
+      const kind = (isTestChain(chain) === wantTest ? 4 : 0) + (kindWords.length && kindWords.every((w) => all.includes(w)) ? 2 : 0)
+        + (chain.status === 'deprecated' || all.includes('deprecated') ? 0 : 1);
+      // Name words the network did not say: "Metal C-Chain" over "Metal Tahoe C-Chain" for "Metal".
+      const extra = own.filter((o) => !words.some((w) => carried([o], w))).length;
+      return { chain, named, kind, extra };
+    });
+    const pick = (list, by) => { const top = Math.max(...list.map(by)); return list.filter((n) => by(n) === top); };
+    const best = pick(pick(pick(scored, (n) => n.named), (n) => n.kind), (n) => -n.extra);
+    // A tie on a named network is that network listed twice (two Tempo testnets); with none
+    // named it is a client many networks run, and the notes did not say which.
+    return best.length <= (scope ? MAX_CHAINS_PER_SCOPE : 1) ? best.map((n) => n.chain.chainId) : [];
   };
 }
 
@@ -310,20 +321,18 @@ function countByKind(forks) {
  * handleGetLiveIncidents already strips it for the same reason.
  */
 /**
- * Why a fork is on no chain, for a person to settle: the network it names is in no registry
- * (Stellar, Zcash), no network was named (a release saying only "T8"), or the client's
- * repository runs several chains and the name picks none of them — `candidates` lists those,
- * and a candidate the network plainly is (XDC Apothem for "XDPoSChain Testnet", untagged as a
- * test network) points at the registry entry to fix. Null when the fork is placed.
+ * Why a fork is on no chain, for a person to settle: `ambiguous` when the reporting client runs
+ * more chains than its notes narrow to (go-ethereum, QuarkChain's shards) — `candidates` lists
+ * them; `no_network_named` when nothing says which network; `no_matching_chain` when no registry
+ * chain carries the network's name (Stellar and Zcash are in no EVM registry). Null when the fork is placed.
  */
 function unplacedReason(fork, repoChains, byId) {
   if (fork.chains?.length) return null;
-  const repos = (fork.sources ?? []).filter((s) => s.startsWith('github:')).map((s) => s.slice('github:'.length).toLowerCase());
+  const repos = (fork.sources ?? []).filter((s) => /^(github|gitlab):/.test(s)).map((s) => s.toLowerCase());
   const candidates = [...new Set(repos.flatMap((r) => repoChains?.get(r) ?? []))]
     .filter((id) => byId.has(id))
     .map((id) => ({ chainId: id, name: byId.get(id).name ?? null, testnet: isTestChain(byId.get(id)) }));
-  const named = publicNetwork(fork.network) != null;
-  const reason = !named ? 'no_network_named' : candidates.length ? 'ambiguous' : 'not_in_registry';
+  const reason = candidates.length ? 'ambiguous' : publicNetwork(fork.network) == null ? 'no_network_named' : 'no_matching_chain';
   return { reason, repositories: repos, candidates };
 }
 
