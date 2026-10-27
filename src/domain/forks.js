@@ -275,7 +275,12 @@ export function scopeLookups(scope) {
   if (typeof scope !== 'string' || !scope) return [];
   const words = scope.split(' ');
   const tail = words.slice(1).join(' ');
-  return words.length > 1 && mentionsTestNetwork(tail) ? [scope, tail] : [scope];
+  if (words.length < 2 || !mentionsTestNetwork(tail)) return [scope];
+  // "BSC Chapel Testnet" is chain 97, which the registry knows only as "chapel" and "BNB Smart
+  // Chain Chapel". The tail without its "testnet" is tried too while it still names a test
+  // network on its own — "one testnet" must not become Harmony's "one".
+  const bareTail = tail.replace(/ testnet$/, '');
+  return [...new Set([scope, tail, ...(mentionsTestNetwork(bareTail) ? [bareTail] : [])])];
 }
 
 /**

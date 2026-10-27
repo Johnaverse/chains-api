@@ -247,6 +247,14 @@ describe('getForks', () => {
     expect(out.forks.find(f => f.name === 'Jovian').chains).toEqual([84532]);
     expect((await getForks({ chainId: 1 })).forks).toHaveLength(0);
   });
+  it('places a "BSC Chapel Testnet" fork on chain 97, which the registry calls "chapel"', async () => {
+    getAllChains.mockReturnValue(TESTNET_REGISTRY);
+    serveMentions([
+      { ...event('bsc', { fork: fork({ name: 'Jenner', network: 'BSC Chapel Testnet', activationAt: '2099-10-29T02:30:00Z' }), affectedChains: ['BSC Chapel Testnet'] }), feed: 'release' }
+    ]);
+    expect((await getForks()).forks.find(f => f.name === 'Jenner').chains).toEqual([97]);
+    expect((await getForks({ chainId: 56 })).forks).toHaveLength(0);
+  });
 
   describe('review fixes', () => {
     const classed = (e, c) => ({ ...e, enrichment: { ...e.enrichment, class: c } });
