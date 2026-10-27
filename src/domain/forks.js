@@ -656,6 +656,40 @@ function mergeSameActivation(groups) {
 }
 
 /**
+ * An unnamed fork known only by its chain — a node's eth_config schedule, which gives a time
+ * and a fork id but no name — is the named fork placed on that chain at the same height or
+ * second: BSC Chapel's nodes scheduling 0xe660a57e for 2026-10-29 02:30:00 UTC is Jenner, which
+ * bnb-chain/bsc's release names for that instant. Scopes differ ("chain:97" against "bsc chapel
+ * testnet"), so the same-scope fold above never met them. The exact match first, else the only
+ * named fork on the chain within UNNAMED_MATCH_MS (Chiliz Spicy's nodes at 15:00 against a post
+ * saying 16:00 — the node's time then wins as the newest claim); never two candidates, and a
+ * day-only date never decides it. With none, it stays a fork of its own: dated, on its chain,
+ * unnamed.
+ */
+function foldChainScopedIntoNamed(groups) {
+  const exactAnchors = (members) => {
+    const anchors = { blocks: new Set(), times: [] };
+    for (const m of members) {
+      const { block, time } = memberAnchor(m);
+      if (block !== null) anchors.blocks.add(block);
+      if (Number.isFinite(time) && !isDateOnly(m.fork.activationAt)) anchors.times.push(time);
+    }
+    return anchors;
+  };
+  const named = [...groups.values()].filter(g => g.kind === 'name').map(g => ({ g, a: exactAnchors(g.members) }));
+  for (const group of [...groups.values()]) {
+    if (group.kind === 'name' || !group.scope.startsWith('chain:')) continue;
+    const chainId = Number(group.scope.slice('chain:'.length));
+    const anchors = exactAnchors(group.members);
+    const near = named.filter(x => groups.has(x.g.key) && x.g.members.some(m => m.chainIds.includes(chainId)))
+      .map(x => ({ g: x.g, d: anchorDistance(anchors, x.a) })).filter(x => x.d !== null);
+    const exact = near.filter(x => x.d === 0);
+    const targets = exact.length ? exact : near;
+    if (targets.length === 1) mergeInto(groups, targets[0].g, group);
+  }
+}
+
+/**
  * A fork whose network resolved to no chain ("Hoodi Testnet" — whose? Ethereum's, or a rollup's
  * own Hoodi testnet) that names the same fork, activating at the same exact instant or height,
  * as exactly ONE fork placed on chains, is that fork: the shared moment says which network it
@@ -895,6 +929,7 @@ export async function buildForks(events = [], { tipFor = null, chainIdsFor = nul
   clusterUnnamed(groups);
   collapseIdentical(groups);
   mergeSameActivation(groups);
+  foldChainScopedIntoNamed(groups);
   mergeUnplacedIntoPlaced(groups);
 
   const forks = [];

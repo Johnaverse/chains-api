@@ -751,3 +751,40 @@ describe('fork review fixes', () => {
     expect(forksOf({ fork: null })).toEqual([]);
   });
 });
+
+describe('a node fork schedule (eth_config) on its chain', () => {
+  // As nodeForkSchedule.js serves it: a time and a fork id on one chain, no name.
+  const node = (id, chainId, activationAt) => ({
+    ...event(id, { fork: fork({ activationAt, state: 'scheduled', forkId: '0xe660a57e' }), chains: [chainId], page: 'node:eth_config', publishedAt: '2026-10-27T12:00:00Z' }),
+    feed: 'node', enrichment: { class: 'planned_hard_fork', chains: [chainId], fork: fork({ activationAt, state: 'scheduled', forkId: '0xe660a57e' }) }
+  });
+  const chapel = (scope) => (scope === 'bsc chapel testnet' ? [97] : []);
+  const release = { ...event('rel', { fork: fork({ name: 'Jenner', network: 'BSC Chapel Testnet', activationAt: '2026-10-29T02:30:00Z', state: 'scheduled' }), chains: [], page: 'github:bnb-chain/bsc', publishedAt: '2026-10-20T00:00:00Z' }), feed: 'release' };
+  const opts = { now: Date.parse('2026-10-27T12:00:00Z'), chainIdsFor: chapel };
+
+  it('joins the named fork placed on that chain at the same second', async () => {
+    const out = await buildForks([release, node('n1', 97, '2026-10-29T02:30:00Z')], opts);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ name: 'Jenner', chains: [97], activationAt: '2026-10-29T02:30:00.000Z' });
+    expect(out[0].events.map(e => e.id).sort()).toEqual(['n1', 'rel']);
+  });
+
+  it('stands as a dated fork of its own when nothing names it', async () => {
+    const out = await buildForks([node('n1', 97, '2026-10-29T02:30:00Z')], opts);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ name: null, kind: 'fork', chains: [97], activationAt: '2026-10-29T02:30:00.000Z' });
+  });
+
+  it('joins the one named fork within hours, and its time wins', async () => {
+    const out = await buildForks([release, node('n1', 97, '2026-10-29T01:30:00Z')], opts);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ name: 'Jenner', activationAt: '2026-10-29T01:30:00.000Z' });
+  });
+
+  it('does not join a named fork a day away, two in range, or one on another chain', async () => {
+    expect(await buildForks([release, node('n1', 97, '2026-10-30T05:30:00Z')], opts)).toHaveLength(2);
+    expect(await buildForks([release, node('n1', 56, '2026-10-29T02:30:00Z')], opts)).toHaveLength(2);
+    const other = { ...release, id: 'rel2', title: 't-rel2', enrichment: { fork: fork({ name: 'Other', network: 'BSC Chapel Testnet', activationAt: '2026-10-29T03:30:00Z', state: 'scheduled' }) } };
+    expect(await buildForks([release, other, node('n1', 97, '2026-10-29T03:00:00Z')], opts)).toHaveLength(3);
+  });
+});
