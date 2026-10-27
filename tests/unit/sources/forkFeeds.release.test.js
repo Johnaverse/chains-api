@@ -39,6 +39,20 @@ describe('chains the client feed\'s model chose', () => {
   });
 });
 
+describe('chains the model chose, for a release naming no network', () => {
+  it('scope its fork, so mainnet and Sepolia keep their own dates', async () => {
+    // geth runs many networks: the feed lists none for a release whose notes name none, and the
+    // model chose mainnet. The only other Fusaka is Sepolia's, a month earlier.
+    const mainnet = release({ id: 'm', url: 'https://x/m', chains: [{ chainId: 1 }, { chainId: 11155111 }, { chainId: 560048 }], chainsFrom: 'repository',
+      enrichment: { class: 'planned_hard_fork', createdAt: '2025-11-04T10:05:00Z', fork: { ...fusaka, network: null, chainIds: [1] } } });
+    const sepolia = release({ id: 's', url: 'https://x/s', chains: [{ chainId: 11155111 }], chainsFrom: 'fork',
+      enrichment: { class: 'planned_hard_fork', createdAt: '2025-10-01T10:05:00Z', fork: { ...fusaka, network: 'Ethereum Sepolia', activationAt: '2025-10-14T07:36:00Z' } } });
+    const mentions = [...toMentions('release', mainnet), ...toMentions('release', sepolia)];
+    const out = await buildForks(mentions, { now: Date.parse('2025-11-05T00:00:00Z'), chainIdsFor: (s) => (s === 'ethereum sepolia' ? [11155111] : []) });
+    expect(out.map(f => [f.chains, f.activationAt]).sort()).toEqual([[[1], '2025-12-03T21:49:11.000Z'], [[11155111], '2025-10-14T07:36:00.000Z']]);
+  });
+});
+
 describe('client release feed', () => {
   beforeEach(() => {
     vi.clearAllMocks();

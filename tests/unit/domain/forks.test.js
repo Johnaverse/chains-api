@@ -787,6 +787,14 @@ describe('a node fork schedule (eth_config) on its chain', () => {
     expect(out.map(f => [f.activationAt, f.state]).sort()).toEqual([['2026-10-29T00:30:00.000Z', 'completed'], ['2026-10-29T02:30:00.000Z', 'scheduled']]);
   });
 
+  it('gives a named fork one node activation: the exact one, the earlier fork stays apart', async () => {
+    const done = { ...node('c', 97, '2026-10-29T00:30:00Z'), enrichment: { class: 'planned_hard_fork', chains: [97], fork: fork({ activationAt: '2026-10-29T00:30:00Z', state: 'completed', forkId: '0x5203e674' }) } };
+    const out = await buildForks([done, node('n', 97, '2026-10-29T02:30:00Z'), release], { ...opts, now: Date.parse('2026-10-29T01:00:00Z') });
+    expect(out).toHaveLength(2);
+    expect(out.find(f => f.name === 'Jenner')).toMatchObject({ activationAt: '2026-10-29T02:30:00.000Z', state: 'scheduled' });
+    expect(out.find(f => f.name === null)).toMatchObject({ activationAt: '2026-10-29T00:30:00.000Z', state: 'completed' });
+  });
+
   it('moves no other chain\'s time: a near match joins only a fork on this chain alone', async () => {
     // One announcement giving chains 97 and 1 the same instant; chain 97's nodes say an hour later.
     const both = (scope) => (scope === 'bsc chapel testnet' ? [97, 1] : []);

@@ -262,6 +262,11 @@ function scopesOf(event) {
   if (named.length) return { scopes: named, forkNetwork: null, named };
   const chainIds = (event?.chains ?? []).map(c => c.chainId).filter(id => Number.isFinite(id));
   if (chainIds.length) return { scopes: [...new Set(chainIds.map(id => `chain:${id}`))], forkNetwork: null, named };
+  // The chains chains-client-feed's model chose for the fork, when the item names no network and
+  // declares no chain of its own (a client many networks run): a mainnet release is chain 1's,
+  // never folded into the one Sepolia fork of that name as if it were unscoped.
+  const chosen = (event?.enrichment?.fork?.chainIds ?? []).filter(id => Number.isFinite(id));
+  if (chosen.length) return { scopes: [...new Set(chosen.map(id => `chain:${id}`))], forkNetwork: null, named };
   // No network identity at all. Still groupable by codename, which is better than discarding
   // the fork — it just cannot be split per network.
   return { scopes: ['unscoped'], forkNetwork: null, named };
@@ -688,18 +693,26 @@ function foldChainScopedIntoNamed(groups) {
     return anchors;
   };
   const named = [...groups.values()].filter(g => g.kind === 'name').map(g => ({ g, a: exactAnchors(g.members) }));
-  for (const group of [...groups.values()]) {
-    if (group.kind === 'name' || !group.scope.startsWith('chain:')) continue;
-    const chainId = Number(group.scope.slice('chain:'.length));
-    const anchors = exactAnchors(group.members);
-    const near = named.filter(x => groups.has(x.g.key) && x.g.members.some(m => m.chainIds.includes(chainId)))
-      .map(x => ({ g: x.g, d: anchorDistance(anchors, x.a) })).filter(x => x.d !== null);
-    const exact = near.filter(x => x.d === 0);
-    // Moving a fork's time is only for one placed on this chain alone: an announcement giving
-    // chains 1 and 97 the same instant must not move chain 1's because chain 97's nodes differ.
-    const onlyHere = (g) => g.members.every(m => m.chainIds.every(id => id === chainId));
-    const targets = exact.length ? exact : near.filter(x => onlyHere(x.g));
-    if (targets.length === 1) mergeInto(groups, targets[0].g, group);
+  const pending = [...groups.values()].filter(g => g.kind !== 'name' && g.scope.startsWith('chain:'))
+    .map(g => ({ g, chainId: Number(g.scope.slice('chain:'.length)), anchors: exactAnchors(g.members) }));
+  // A named fork is one activation per chain: once a node activation joined it there, another
+  // (the chain's previous fork, hours earlier) does not.
+  const taken = new Set();
+  // Moving a fork's time is only for one placed on this chain alone: an announcement giving
+  // chains 1 and 97 the same instant must not move chain 1's because chain 97's nodes differ.
+  const onlyHere = (g, chainId) => g.members.every(m => m.chainIds.every(id => id === chainId));
+  // Exact matches first, so a near one never takes the fork an exact one names.
+  for (const exactPass of [true, false]) {
+    for (const p of pending) {
+      if (!groups.has(p.g.key)) continue;
+      const targets = named.filter(x => groups.has(x.g.key) && !taken.has(`${x.g.key}@${p.chainId}`)
+        && x.g.members.some(m => m.chainIds.includes(p.chainId)))
+        .map(x => ({ g: x.g, d: anchorDistance(p.anchors, x.a) }))
+        .filter(x => (exactPass ? x.d === 0 : x.d === 1 && onlyHere(x.g, p.chainId)));
+      if (targets.length !== 1) continue;
+      taken.add(`${targets[0].g.key}@${p.chainId}`);
+      mergeInto(groups, targets[0].g, p.g);
+    }
   }
 }
 
