@@ -127,5 +127,8 @@ function sanitize(item, now) {
     activationTime: Number.isSafeInteger(f?.activationTime) && f.activationTime > 0 && f.activationTime * 1000 <= 8.64e15 ? f.activationTime : null,
     activationBlock: Number.isSafeInteger(f?.activationBlock) && f.activationBlock > 0 ? f.activationBlock : null
   })).filter((f) => f.name && (f.activationTime || f.activationBlock));
-  return { status, askedAt: now, name: item.name.trim(), repo, path: typeof item.path === 'string' ? item.path : null, url, forks };
+  // When the feed last read the code: the claim's time, so an old reading never outranks a newer
+  // reschedule from another source.
+  const readAt = typeof item.readAt === 'string' && Number.isFinite(Date.parse(item.readAt)) ? Date.parse(item.readAt) : now;
+  return { status, askedAt: now, readAt: Math.min(readAt, now), name: item.name.trim(), repo, path: typeof item.path === 'string' ? item.path : null, url, forks };
 }

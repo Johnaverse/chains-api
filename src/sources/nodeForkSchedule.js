@@ -143,7 +143,7 @@ export function nodeForkMentions({ now = Date.now(), nameOf = () => null, source
         }
       });
     }
-    mentions.push(...sourceMentions(chainId, sources, { now, chain: nameOf(chainId) ?? `chain ${chainId}`, checkedAt: s.checkedAt }));
+    mentions.push(...sourceMentions(chainId, sources, { now, chain: nameOf(chainId) ?? `chain ${chainId}` }));
   }
   return mentions;
 }
@@ -154,7 +154,7 @@ export function nodeForkMentions({ now = Date.now(), nameOf = () => null, source
  * the chain by `chainIds`, so a fork the feeds no longer hold (Tempo's T8–T10, Ethereum's BPO2)
  * is still in the chain's history.
  */
-function sourceMentions(chainId, sources, { now, chain, checkedAt }) {
+function sourceMentions(chainId, sources, { now, chain }) {
   const out = [];
   const seen = new Set();
   for (const source of sources) {
@@ -163,21 +163,25 @@ function sourceMentions(chainId, sources, { now, chain, checkedAt }) {
       if (seen.has(key)) continue;
       seen.add(key);
       const at = f.activationTime ? new Date(f.activationTime * 1000).toISOString() : null;
-      const done = at ? Date.parse(at) <= now : null;
+      // A height-only fork's state is unknown here: whether the chain reached the height is the
+      // explorer's to say (resolveForkActivation), never assumed done.
+      const state = at ? (Date.parse(at) <= now ? 'completed' : 'scheduled') : null;
+      // Claimed when the feed read the code, not when the node was last asked.
+      const readAt = new Date(source.readAt ?? source.askedAt ?? now).toISOString();
       out.push({
         id: `source:${chainId}:${source.repo ?? 'unknown'}:${key}`,
         feed: 'source',
         title: `${chain}: ${f.name} ${at ? `at ${at}` : `at block ${f.activationBlock}`} (${source.repo ?? 'client code'}${source.path ? ` ${source.path}` : ''})`,
         url: source.url ?? null,
-        publishedAt: new Date(checkedAt).toISOString(),
-        updatedAt: new Date(checkedAt).toISOString(),
+        publishedAt: readAt,
+        updatedAt: readAt,
         status: null,
         chains: [{ chainId }],
         statusPage: { id: `source:${source.repo ?? 'unknown'}`, name: source.repo ?? 'Client code', kind: 'source' },
         weight: null,
         enrichment: {
           class: 'planned_hard_fork',
-          createdAt: new Date(checkedAt).toISOString(),
+          createdAt: readAt,
           affectedChains: [],
           chains: [chainId],
           fork: {
@@ -185,7 +189,7 @@ function sourceMentions(chainId, sources, { now, chain, checkedAt }) {
             network: null,
             activationAt: at,
             activationBlock: at ? null : f.activationBlock,
-            state: done === false ? 'scheduled' : 'completed',
+            state,
             chainIds: [chainId]
           }
         }

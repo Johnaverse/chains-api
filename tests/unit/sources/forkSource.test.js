@@ -83,5 +83,17 @@ describe('fork names from client code (chains-client-feed /fork-source)', () => 
       ['Jenner', '2026-10-29T02:30:00.000Z', 'scheduled', [97]]
     ]);
     expect(source[0]).toMatchObject({ url: jenner.url, statusPage: { id: 'source:bnb-chain/bsc', kind: 'source' } });
+    // Claimed when the feed read the code, not when the node was last asked.
+    expect(source[0].publishedAt).toBe(new Date(NOW).toISOString());
+  });
+
+  it('dates a history entry by the feed\'s reading, and leaves a height-only fork\'s state unknown', async () => {
+    const readAt = '2026-10-20T00:00:00.000Z';
+    getFeed.mockResolvedValueOnce(reply([{ ...jenner, readAt, forks: [{ name: 'Lorentz', activationTime: null, activationBlock: 48000000 }] }]));
+    await requestForkSources([{ chainId: 97, time: 1793241000 }], { now: NOW });
+    _setNodeForkScheduleForTests(97, { checkedAt: NOW + 3600_000, url: 'https://rpc', current: { activationTime: 1793241000, forkId: '0xe660a57e' }, next: null, last: null });
+    const [lorentz] = nodeForkMentions({ now: NOW + 3600_000, sourceOf: forkSourceOf }).filter((m) => m.feed === 'source');
+    expect(lorentz.publishedAt).toBe(readAt);
+    expect(lorentz.enrichment.fork).toMatchObject({ name: 'Lorentz', activationAt: null, activationBlock: 48000000, state: null });
   });
 });
