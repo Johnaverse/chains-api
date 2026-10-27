@@ -275,12 +275,7 @@ export function scopeLookups(scope) {
   if (typeof scope !== 'string' || !scope) return [];
   const words = scope.split(' ');
   const tail = words.slice(1).join(' ');
-  if (words.length < 2 || !mentionsTestNetwork(tail)) return [scope];
-  // "BSC Chapel Testnet" is chain 97, which the registry knows only as "chapel" and "BNB Smart
-  // Chain Chapel". The tail without its "testnet" is tried too while it still names a test
-  // network on its own — "one testnet" must not become Harmony's "one".
-  const bareTail = tail.replace(/ testnet$/, '');
-  return [...new Set([scope, tail, ...(mentionsTestNetwork(bareTail) ? [bareTail] : [])])];
+  return words.length > 1 && mentionsTestNetwork(tail) ? [scope, tail] : [scope];
 }
 
 /**
@@ -655,11 +650,15 @@ function mergeUnplacedIntoPlaced(groups) {
     }
     return { blocks, times };
   };
+  // A fork placed only by its client's repository is still a guess at the network: it folds
+  // into the one a name placed at the same moment, as an unplaced one does — a rollup client's
+  // "Hoodi Testnet" release of Ethereum's fork is Ethereum Hoodi's, not the rollup testnet's.
+  const placedByName = (g) => g.members.some(m => m.chainIds.length && !m.placedByRepository);
   const placed = [];
   const unplaced = [];
   for (const g of groups.values()) {
     if (g.kind !== 'name') continue;
-    (g.members.some(m => m.chainIds.length) ? placed : unplaced).push(g);
+    (placedByName(g) ? placed : unplaced).push(g);
   }
   if (!unplaced.length || !placed.length) return;
   const names = (g) => new Set(g.members.map(m => forkIdentity(m.fork?.name)).filter(Boolean).map(canonicalForkId));
@@ -674,6 +673,7 @@ function mergeUnplacedIntoPlaced(groups) {
     })());
     if (matches.length !== 1) continue;
     const [target] = matches;
+    for (const m of g.members) if (m.placedByRepository) m.chainIds = [];
     target.scopes = [...new Set([...(target.scopes ?? [target.scope]), ...(g.scopes ?? [g.scope])])];
     mergeInto(groups, target, g);
   }
@@ -727,17 +727,21 @@ function collapseIdentical(groups) {
  */
 function memberChainIds({ event, scope, forkNetwork, named, eventChainIds, chainIdsFor, chainNamesFor, repoChainIdsFor }) {
   const ids = namedChainIds({ scope, forkNetwork, named, eventChainIds, chainIdsFor, chainNamesFor });
-  if (ids.length || !repoChainIdsFor || scope.startsWith('chain:')) return ids;
+  const repo = releaseRepoOf(event);
+  if (ids.length || !repo || scope.startsWith('chain:')) return { chainIds: ids, fallback: false };
   // Nothing the names say places it: a client release is still about the chains its repository
   // runs, and the network it names picks among those ("BSC Chapel Testnet" from bnb-chain/bsc).
-  const repo = releaseRepoOf(event);
-  const byRepo = repo ? repoChainIdsFor(repo, scope === 'unscoped' ? null : scope) : [];
-  if (byRepo.length || !forkNetwork) return byRepo;
-  // Last, a test network the registry does not list is filed under the network it tests: a
-  // dated fork on no chain is missing from every history, which is the worse error. "Aleph Zero
-  // Testnet" is chain 2039 "Aleph Zero" then.
-  const tested = scope.split(' ').filter((w) => !isTestNetworkWord(w) && w !== 'devnet').join(' ');
-  return tested && tested !== scope ? (chainIdsFor?.(tested) ?? []) : [];
+  const byRepo = repoChainIdsFor?.(repo, scope === 'unscoped' ? null : scope) ?? [];
+  if (byRepo.length || !forkNetwork) return { chainIds: byRepo, fallback: true };
+  // Last, a test network the registry does not list is filed under the network it tests, when
+  // the release's own repository is that network's ("Aleph Zero Testnet" from aleph-node is
+  // chain 2039 "Aleph Zero"): a dated fork on no chain is missing from every history. Only then
+  // — "one testnet" from some client is not Harmony's "one", nor a news post's "Ethereum
+  // devnet" Ethereum mainnet.
+  const tested = scope.split(' ').filter((w) => !isTestNetworkWord(w) && w !== 'devnet');
+  const repoWords = new Set(nameWordsOf(repo.replace(/^[a-z]+:/, '')));
+  if (!tested.length || tested.length === scope.split(' ').length || !tested.some((w) => repoWords.has(w))) return { chainIds: [], fallback: false };
+  return { chainIds: chainIdsFor?.(tested.join(' ')) ?? [], fallback: true };
 }
 
 /** The repository a client-release event came from (`github:owner/repo`), else null. */
@@ -766,7 +770,7 @@ function namedChainIds({ scope, forkNetwork, named, eventChainIds, chainIdsFor, 
   return chainNamesFor ? eventChainIds.filter(id => namesCarry(chainNamesFor(id), scope)) : eventChainIds;
 }
 
-const nameWordsOf = (text) => String(text ?? '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+export const nameWordsOf = (text) => String(text ?? '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
 
 /** Whether one of a chain's names contains every word of the network scope. */
 function namesCarry(names, scope) {
@@ -849,9 +853,9 @@ export async function buildForks(events = [], { tipFor = null, chainIdsFor = nul
     for (const scope of scopes) {
       const group = forkGroup(fork, scope);
       if (!group) continue;
-      const chainIds = memberChainIds({ event, scope, forkNetwork, named, eventChainIds, chainIdsFor, chainNamesFor, repoChainIdsFor });
+      const { chainIds, fallback } = memberChainIds({ event, scope, forkNetwork, named, eventChainIds, chainIdsFor, chainNamesFor, repoChainIdsFor });
       if (!groups.has(group.key)) groups.set(group.key, { ...group, scope, members: [] });
-      groups.get(group.key).members.push({ event, fork, chainIds, scope, observedAt });
+      groups.get(group.key).members.push({ event, fork, chainIds, scope, observedAt, ...(fallback ? { placedByRepository: true } : {}) });
     }
   }
 

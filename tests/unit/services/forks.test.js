@@ -252,8 +252,11 @@ describe('getForks', () => {
   });
   it('places a "BSC Chapel Testnet" fork on chain 97, which the registry calls "chapel"', async () => {
     getAllChains.mockReturnValue(TESTNET_REGISTRY);
+    getRepositoryChains.mockReturnValue(new Map([['github:bnb-chain/bsc', [56, 97]]]));
     serveMentions([
-      { ...event('bsc', { fork: fork({ name: 'Jenner', network: 'BSC Chapel Testnet', activationAt: '2099-10-29T02:30:00Z' }), affectedChains: ['BSC Chapel Testnet'] }), feed: 'release' }
+      { ...event('bsc', { fork: fork({ name: 'Jenner', network: 'BSC Chapel Testnet', activationAt: '2099-10-29T02:30:00Z' }), affectedChains: ['BSC Chapel Testnet'], page: 'github:bnb-chain/bsc' }), feed: 'release' },
+      // QuickNode's window names it the same way and joins it.
+      { ...event('qn', { fork: fork({ name: 'Jenner', network: 'BSC Chapel Testnet', activationAt: '2099-10-29T02:30:00Z' }), affectedChains: ['BSC Chapel Testnet'] }), feed: 'status' }
     ]);
     expect((await getForks()).forks.find(f => f.name === 'Jenner').chains).toEqual([97]);
     expect((await getForks({ chainId: 56 })).forks).toHaveLength(0);
@@ -284,7 +287,12 @@ describe('getForks', () => {
       { chainId: 100002, name: 'QuarkChain Mainnet Shard 1' },
       { chainId: 2039, name: 'Aleph Zero', shortName: 'aleph' },
       { chainId: 1, name: 'Ethereum Mainnet' },
-      { chainId: 100, name: 'Gnosis' }
+      { chainId: 100, name: 'Gnosis' },
+      { chainId: 11155111, name: 'Sepolia', tags: ['Testnet'] },
+      { chainId: 560048, name: 'Ethereum Hoodi', tags: ['Testnet'] },
+      { chainId: 17000, name: 'Ethereum Holesky', tags: ['Testnet'] },
+      { chainId: 1666600000, name: 'Harmony Mainnet Shard 0', shortName: 'one', aliases: ['one'] },
+      { chainId: 2810, name: 'Morph Hoodi', tags: ['Testnet'] }
     ];
     const repos = new Map([
       ['github:xinfinorg/xdposchain', [50, 51]],
@@ -295,7 +303,9 @@ describe('getForks', () => {
       ['github:tempoxyz/tempo', [4217, 42429, 42431]],
       ['github:kub-chain/bkc', [96]],
       ['github:quarkchain/goquarkchain', [100000, 100001, 100002]],
-      ['github:sigp/lighthouse', [1, 100]]
+      ['github:sigp/lighthouse', [1, 100]],
+      ['github:paradigmxyz/reth', [1, 11155111, 560048, 17000]],
+      ['github:morph-l2/morph', [2810]]
     ]);
     const placed = async (...mentions) => {
       getAllChains.mockReturnValue(registry);
@@ -356,6 +366,31 @@ describe('getForks', () => {
       expect(forks.find(f => f.name === 'Q1').unplaced.candidates.map(c => c.chainId)).toEqual([1, 100]);
       expect(forks.find(f => f.name === 'Rent')).toMatchObject({ chains: [], unplaced: { reason: 'no_network_named', candidates: [] } });
       expect(forks.find(f => f.name === 'Protocol 30')).toMatchObject({ chains: [], unplaced: { reason: 'no_matching_chain', candidates: [] } });
+    });
+
+    it('guesses only for a project\'s own client, and never from another network\'s name', async () => {
+      const forks = await placed(
+        // A network none of a multi-network client's chains is called: no Sepolia or chain 1 fork.
+        release('a', 'github:paradigmxyz/reth', 'Fusaka Devnet-3', 'FusakaD3'),
+        // A test network named after another project's network is not that network.
+        release('b', 'github:paradigmxyz/reth', 'One Testnet', 'OneT')
+      );
+      expect(forks.find(f => f.name === 'FusakaD3')).toMatchObject({ chains: [], unplaced: { reason: 'ambiguous' } });
+      expect(on(forks, 'OneT')).toEqual([]);
+    });
+
+    it('folds a fork placed only by its repository into the one a name placed at that moment', async () => {
+      const at = '2099-11-01T12:00:00Z';
+      getAllChains.mockReturnValue(registry);
+      getRepositoryChains.mockReturnValue(repos);
+      serveMentions([
+        { ...event('ef', { fork: fork({ name: 'Glamsterdam', network: 'Ethereum Hoodi', activationAt: at }), affectedChains: ['Ethereum Hoodi'], page: 'ef' }), feed: 'news' },
+        // A rollup client's release of Ethereum's fork, in its own words.
+        { ...event('m', { fork: fork({ name: 'Glamsterdam', network: 'Hoodi Testnet', activationAt: at }), page: 'github:morph-l2/morph' }), feed: 'release' }
+      ]);
+      const glam = (await getForks()).forks.filter(f => f.name === 'Glamsterdam');
+      expect(glam).toHaveLength(1);
+      expect(glam[0].chains).toEqual([560048]);
     });
 
     it('serves the unplaced ones as a review queue', async () => {

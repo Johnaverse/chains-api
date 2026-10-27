@@ -1,6 +1,6 @@
 import { getForkMentions } from '../sources/forkFeeds.js';
 import { getExplorerTip } from '../sources/blockscout.js';
-import { buildForks, forkPhase, sortForks, FORK_PHASE, FORK_KIND, registryScopes, scopeLookups, normalizeForkName } from '../domain/forks.js';
+import { buildForks, forkPhase, sortForks, FORK_PHASE, FORK_KIND, registryScopes, scopeLookups, normalizeForkName, nameWordsOf } from '../domain/forks.js';
 import { getAllChains } from '../store/queries.js';
 import { getRepositoryChains } from '../sources/networkResearch.js';
 import { logger } from '../util/logger.js';
@@ -80,7 +80,8 @@ function chainResolver(chains) {
 
 // Words that say what kind of network a scope is, not which one.
 const KIND_WORDS = new Set(['mainnet', 'testnet', 'devnet', 'network', 'networks', 'chain', 'chains', 'blockchain', 'net', 'protocol', 'the', 'of', 'deprecated']);
-const wordsOf = (text) => String(text ?? '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+// The most chains a client can run and still be one project's (a mainnet, a testnet or two).
+const PROJECT_CLIENT_CHAINS = 3;
 
 /**
  * The chains a client release places a fork on when no name did, from its repository's chains.
@@ -96,26 +97,32 @@ const wordsOf = (text) => String(text ?? '').toLowerCase().split(/[^a-z0-9]+/).f
  *      kind word ("Creditcoin3 Devnet" is "Creditcoin Devnet", not "Creditcoin Testnet"), a live
  *      network over a deprecated one ("Tempo Testnet" is Moderato, not Andantino), then the
  *      fewest name words the network did not say ("Metal" is Metal C-Chain, not Metal Tahoe);
- *   3. a release naming no network is about the client's mainnet, when it runs one.
+ *   3. a release naming no network, or a network none of them is called ("Pacific-1"), is
+ *      read by kind alone — only from a project's own client running a few chains;
  * A test-network fork landing on its mainnet ("Algorand Betanet" on Algorand) is accepted as the
  * nearer error. Up to MAX_CHAINS_PER_SCOPE chains left tied on a named network are all kept; more,
- * or any tie with no network named, is a client many networks run (go-ethereum, Lighthouse)
- * whose notes did not say which, and places nothing.
+ * a tie read by kind alone, or a client many networks run (go-ethereum, Lighthouse) whose notes
+ * did not say which, places nothing.
  */
 export function repositoryResolver(chains, repoChains) {
   const byId = new Map(chains.filter((c) => Number.isFinite(c?.chainId)).map((c) => [c.chainId, c]));
+  const wordsByChain = new Map();
+  const wordsFor = (chain) => {
+    if (!wordsByChain.has(chain.chainId)) wordsByChain.set(chain.chainId, [...new Set(chainNames(chain).flatMap(nameWordsOf))]);
+    return wordsByChain.get(chain.chainId);
+  };
   return (repo, scope) => {
     const candidates = (repoChains?.get(repo) ?? []).map((id) => byId.get(id)).filter(Boolean);
     if (!candidates.length) return [];
-    const scopeWords = wordsOf(scope);
+    const scopeWords = nameWordsOf(scope);
     const words = scopeWords.filter((w) => !KIND_WORDS.has(w) && !/^\d+$/.test(w));
     const kindWords = scopeWords.filter((w) => w === 'testnet' || w === 'devnet');
     const wantTest = Boolean(scope) && (mentionsTestNetwork(scope) || kindWords.length > 0);
-    const repoWords = wordsOf(repo.replace(/^[a-z]+:/, '')).filter((w) => w.length >= 3);
+    const repoWords = nameWordsOf(repo.replace(/^[a-z]+:/, '')).filter((w) => w.length >= 3);
     // 2 for the word itself, 1 for a word containing it or contained in it.
     const carried = (own, w) => (own.includes(w) ? 2 : own.some((o) => o.length >= 3 && w.length >= 3 && (o.includes(w) || w.includes(o))) ? 1 : 0);
     const scored = candidates.map((chain) => {
-      const all = [...new Set(chainNames(chain).flatMap(wordsOf))];
+      const all = wordsFor(chain);
       const own = all.filter((w) => !KIND_WORDS.has(w));
       const named = words.reduce((sum, w) => sum + Math.max(carried(own, w), carried(repoWords, w)), 0);
       // A retired network loses to its live successor ("Tempo Testnet Andantino (Deprecated)").
@@ -126,10 +133,16 @@ export function repositoryResolver(chains, repoChains) {
       return { chain, named, kind, extra };
     });
     const pick = (list, by) => { const top = Math.max(...list.map(by)); return list.filter((n) => by(n) === top); };
-    const best = pick(pick(pick(scored, (n) => n.named), (n) => n.kind), (n) => -n.extra);
-    // A tie on a named network is that network listed twice (two Tempo testnets); with none
-    // named it is a client many networks run, and the notes did not say which.
-    return best.length <= (scope ? MAX_CHAINS_PER_SCOPE : 1) ? best.map((n) => n.chain.chainId) : [];
+    const byName = pick(scored, (n) => n.named);
+    // Nothing the network says names any of the chains (no network named, or "Pacific-1" for
+    // "Sei Network"): only a project's own client — a mainnet and a testnet or two — is narrow
+    // enough to read its kind as the answer. A release of go-ethereum or reth naming "Fusaka
+    // Devnet-3" is no Sepolia or chain 1 fork.
+    const guessing = !scope || byName[0].named === 0;
+    if (guessing && candidates.length > PROJECT_CLIENT_CHAINS) return [];
+    const best = pick(pick(byName, (n) => n.kind), (n) => -n.extra);
+    // A tie on a network that was named is that network listed twice (two 0G Galileo testnets).
+    return best.length <= (guessing ? 1 : MAX_CHAINS_PER_SCOPE) ? best.map((n) => n.chain.chainId) : [];
   };
 }
 

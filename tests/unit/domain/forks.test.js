@@ -552,9 +552,6 @@ describe('forks across status, forum and news feeds', () => {
   it('looks a qualified test network up by its registry name too', () => {
     expect(scopeLookups('ethereum sepolia')).toEqual(['ethereum sepolia', 'sepolia']);
     expect(scopeLookups('ethereum classic')).toEqual(['ethereum classic']);
-    // BSC's Jenner on "BSC Chapel Testnet": the registry has chain 97 as "chapel".
-    expect(scopeLookups('bsc chapel testnet')).toEqual(['bsc chapel testnet', 'chapel testnet', 'chapel']);
-    expect(scopeLookups('arbitrum one testnet')).not.toContain('one');
     expect(registryScopes('Base Sepolia Testnet')).toEqual(['base sepolia testnet', 'base sepolia']);
     expect(registryScopes('Ethereum Mainnet')).toEqual(['ethereum']);
   });

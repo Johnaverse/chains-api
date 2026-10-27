@@ -208,15 +208,6 @@ export function getNodeHardware(chainId) {
   };
 }
 
-/**
- * The raw repository inputs chains-client-feed builds its client registry from: per chain,
- * the research's node/client repositories verbatim, plus the hardware research's sources and
- * the client name, version and evidence of each profile (requirements left out — the feed
- * only links clients to repositories). Only chains with either are listed. The research file
- * carries no names, so `nameFor` fills them from the chain registry. The feed owns the
- * normalisation and linking, so this stays a projection of the checked-in files. `overrides`
- * is the curated correction set, verbatim (see loadClientRegistryOverrides), or null.
- */
 let repositoryChains = { from: null, overrides: null, value: null };
 
 // A research repository link as the feeds name its source: `github:owner/repo`, `gitlab:owner/repo`
@@ -261,6 +252,15 @@ export function getRepositoryChains() {
   return value;
 }
 
+/**
+ * The raw repository inputs chains-client-feed builds its client registry from: per chain,
+ * the research's node/client repositories verbatim, plus the hardware research's sources and
+ * the client name, version and evidence of each profile (requirements left out — the feed
+ * only links clients to repositories). Only chains with either are listed. The research file
+ * carries no names, so `nameFor` fills them from the chain registry. The feed owns the
+ * normalisation and linking, so this stays a projection of the checked-in files. `overrides`
+ * is the curated correction set, verbatim (see loadClientRegistryOverrides), or null.
+ */
 export function getRepositoryInputs(nameFor = () => null) {
   const chainIds = new Set([...dataset.byChainId.keys(), ...hardware.byChainId.keys()]);
   const networks = [];

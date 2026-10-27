@@ -37,7 +37,7 @@ export async function forksRoutes(fastify) {
           unplaced: {
             type: 'boolean',
             default: false,
-            description: 'Only forks placed on no chain, each with `unplaced`: the reason (not_in_registry, no_network_named, ambiguous), the client repositories that reported it and the chains those run. The review queue for fork placement.'
+            description: 'Only forks placed on no chain, each with `unplaced`: the reason (ambiguous, no_network_named, no_matching_chain), the client repositories that reported it and the chains those run. The review queue for fork placement.'
           },
           limit: { type: 'integer', minimum: 1, maximum: 200, default: 50 }
         }
