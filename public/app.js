@@ -4553,7 +4553,7 @@ async function loadChainHardforks(chainId, section) {
         const ev = evidenceOf(f);
         const when = Number.isFinite(at)
             ? new Date(at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
-            : 'date TBA';
+            : undatedWhenText(f);
         const counts = [
             f.counts?.releases ? `${f.counts.releases} release${f.counts.releases === 1 ? '' : 's'}` : null,
             f.counts?.providerUpdates ? `${f.counts.providerUpdates} provider${f.counts.providerUpdates === 1 ? '' : 's'}` : null,
@@ -6527,6 +6527,7 @@ const TL_EVIDENCE = {
     // Fork activations (see /forks).
     stated: { label: 'stated', cls: 'ev-exact', title: 'A source stated the activation time — the network, a client release or a provider.' },
     observed: { label: 'observed', cls: 'ev-approx', title: 'Derived from a block height the chain has already reached.' },
+    block: { label: 'block height', cls: 'ev-approx', title: 'Activates at a stated block height. No date or time is stated, and none is estimated from the chain\'s block rate.' },
     estimated: { label: 'estimated', cls: 'ev-approx', title: 'A block height still ahead, times the average block rate — approximate.' },
     released: { label: 'release date', cls: 'ev-exact', title: 'No rollout window was posted; this is when the client released it.' }
 };
@@ -6538,13 +6539,23 @@ const TL_TYPES = [
     ['maintenance', 'Maintenance']
 ];
 const TL_TYPE_LABEL = { hardfork: 'hardfork', software_update: 'software update', maintenance: 'maintenance' };
-function evidenceOf(u) { return TL_EVIDENCE[u.activationEvidence] ?? TL_EVIDENCE.announced; }
+function evidenceOf(u) {
+    return TL_EVIDENCE[u.activationEvidence] ?? (activationBlockOf(u) != null ? TL_EVIDENCE.block : TL_EVIDENCE.announced);
+}
+// An undated fork's stated height. Only a fork with no date, no time and no height is TBA.
+function activationBlockOf(u) {
+    return timelineActivationMs(u) == null && Number.isFinite(u.activationBlock) ? u.activationBlock : null;
+}
+function undatedWhenText(u) {
+    const block = activationBlockOf(u);
+    return block != null ? `block ${block.toLocaleString()}` : 'date TBA';
+}
 function isDated(u) { return timelineActivationMs(u) != null; }
 
 const TL_STREAMS = [
     ['all', 'All events'],
     ['upcoming', 'Upcoming'],
-    ['undated', 'Date TBA'],
+    ['undated', 'No date'],
     ['active', 'In progress'],
     ['fallout', 'With fallout'],
     ['done', 'Completed']
@@ -7051,6 +7062,9 @@ function renderTimelineRows(items, now) {
         const tb = timelineActivationMs(b) ?? 0;
         const aP = timelinePending(a, now), bP = timelinePending(b, now);
         if (aP !== bP) return aP ? -1 : 1;
+        // Undated: a stated height ahead of TBA, so each keeps one day separator.
+        const aB = activationBlockOf(a) != null, bB = activationBlockOf(b) != null;
+        if (ta === tb && aB !== bB) return aB ? -1 : 1;
         return aP ? ta - tb : tb - ta;
     });
 
@@ -7062,7 +7076,7 @@ function renderTimelineRows(items, now) {
             // once for what is still to come and once for what already ran.
             // Qualify the pending one or the two runs read as a rendering bug.
             const actMs = timelineActivationMs(u);
-            const day = timelineDayBucket(actMs, now);
+            const day = activationBlockOf(u) != null ? 'At a block height · no date' : timelineDayBucket(actMs, now);
             const bucket = timelinePending(u, now) ? `${day} · scheduled` : day;
             if (bucket !== lastBucket) {
                 lastBucket = bucket;
@@ -7237,7 +7251,7 @@ function timelineRow(u, now) {
     const when = u.phase === 'cancelled'
         ? el('span', { class: 'tlx-when past', text: 'called off' })
         : actMs == null
-        ? el('span', { class: 'tlx-when tlx-when-tba', title: ev.title, text: 'date TBA' })
+        ? el('span', { class: activationBlockOf(u) != null ? 'tlx-when tlx-when-block mono' : 'tlx-when tlx-when-tba', title: ev.title, text: undatedWhenText(u) })
         : pending
             ? el('span', { class: 'tlx-when mono tl-countdown', 'data-at': String(actMs), text: countdownText(actMs - now) })
             : el('span', {

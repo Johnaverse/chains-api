@@ -1729,6 +1729,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .ev-approx { background: var(--tint); color: var(--ink-3); }
 .ev-unknown { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn-text); }
 .tlx-when-tba { flex-shrink: 0; width: 92px; font-size: var(--fs-200); font-weight: 500; color: var(--warn-text); cursor: help; }
+.tlx-when.tlx-when-block { flex-shrink: 0; width: 92px; font-size: var(--fs-100); color: var(--ink-2); cursor: help; overflow-wrap: anywhere; }
 .tl-fallout-open { flex-shrink: 0; font-size: var(--fs-100); color: var(--critical-text); font-weight: 500; }
 .tlx-omitted {
     padding: 5px var(--sp-3); font-size: var(--fs-100); color: var(--warn-text);
