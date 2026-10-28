@@ -102,10 +102,13 @@ function refreshProfileBulk() {
     const b = profile.bulk;
     if (!b || profileChainId !== b.chainId) return;
     profile.renderedBulk = bulkKey();
+    // The detail fetched for the previous generation must not stand in for this one.
+    profile.cache.delete(`/chains/${b.chainId}`);
     const l2b = state.l2beat.get(b.chainId);
     if (l2b?.tvs != null) b.kpi.value = l2bKpi(l2b); else delete b.kpi.value;
     profileFetch(`/chains/${b.chainId}`).catch(() => ({})).then(d => {
-        if (profileChainId !== b.chainId) return;
+        // Still this render, still on screen: a reader who left, or a re-render, drops it.
+        if (activeView !== 'chain' || profile.bulk !== b) return;
         const c = { ...(state.byId.get(b.chainId) || { chainId: b.chainId }), ...(d || {}) };
         renderProfileHero(b.hero, c);
         b.activityCard.querySelector('.pf-body')?.remove();
@@ -962,12 +965,17 @@ const HW_STATUS_TEXT = {
     not_found: 'No published hardware requirements found',
     inaccessible: 'Requirements page could not be read'
 };
-const HW_COMPONENTS = [['cpu', 'CPU'], ['memory', 'Memory'], ['storage', 'Storage'], ['network', 'Network'], ['operating_system', 'OS'], ['other', 'Other']];
+// Display order and names for the components most profiles use. Any other component the data
+// carries (gpu, os, …) is shown too, after these, under its own name.
+const HW_COMPONENT_LABEL = { cpu: 'CPU', gpu: 'GPU', memory: 'Memory', storage: 'Storage', network: 'Network', operating_system: 'OS', os: 'OS' };
+const HW_COMPONENT_ORDER = ['cpu', 'gpu', 'memory', 'storage', 'network', 'operating_system', 'os'];
 const HW_SCOPE_TEXT = { exact_network: 'this network', project_family: 'project-wide', historical_network: 'historical network', uncertain: 'scope uncertain' };
 const HW_QUALIFIER = { at_least: '≥ ', at_most: '≤ ', approximately: '~ ', minimum: '≥ ' };
 const words = v => String(v ?? '').replace(/_/g, ' ');
 
 function hwValue(r) {
+    // A yes/no requirement ("public_ip": true) is the requirement's name, or its absence.
+    if (typeof r.value === 'boolean') return r.value ? words(r.metric) : `no ${words(r.metric)}`;
     const unit = r.unit ? ` ${r.unit}` : '';
     const v = r.qualifier === 'range' && (r.min != null || r.max != null)
         ? `${r.min ?? '?'}–${r.max ?? '?'}${unit}`
@@ -997,9 +1005,11 @@ function hwProfile(p, shared) {
         })
     ]);
     const rows = [];
-    for (const [key, label] of HW_COMPONENTS) {
-        const reqs = (p.requirements || []).filter(r => r.component === key);
-        if (!reqs.length) continue;
+    const present = [...new Set((p.requirements || []).map(r => r.component || 'other'))];
+    const rank = c => (HW_COMPONENT_ORDER.includes(c) ? HW_COMPONENT_ORDER.indexOf(c) : c === 'other' ? 1e9 : 1e6);
+    for (const key of present.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))) {
+        const reqs = (p.requirements || []).filter(r => (r.component || 'other') === key);
+        const label = HW_COMPONENT_LABEL[key] || words(key).replace(/^./, ch => ch.toUpperCase());
         rows.push(el('div', { class: 'pf-hw-row' }, [
             el('span', { class: 'pf-hw-label', text: label }),
             el('span', { class: 'pf-hw-values' }, reqs.flatMap((r, i) => [
