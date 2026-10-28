@@ -111,8 +111,6 @@ function refreshProfileBulk() {
         if (activeView !== 'chain' || profile.bulk !== b) return;
         const c = { ...(state.byId.get(b.chainId) || { chainId: b.chainId }), ...(d || {}) };
         renderProfileHero(b.hero, c);
-        b.activityCard.querySelector('.pf-body')?.remove();
-        b.activityCard.classList.add('hidden');
         renderProfileActivity(b.activityCard, c, l2b, b.kpi);
         b.drawKpis();
     });
@@ -247,13 +245,18 @@ async function renderChainProfile(chainId, { keepScroll = false } = {}) {
     const detail = profileFetch(`/chains/${chainId}`).catch(err => (err.status === 404 ? null : {}));
     const settled = (path) => profileFetch(path).then(v => ({ ok: true, v }), err => ({ ok: false, err }));
 
+    const generation = profile.renderedBulk;
     detail.then(d => {
         if (!live()) return;
         if (d === null && !known) { renderProfileMissing(root, chainId); return; }
         const c = { ...(known || { chainId }), ...(d || {}) };
-        renderProfileHero(hero, c);
         renderProfileIdentity(identityCard, c);
-        renderProfileActivity(activityCard, c, l2b, kpi);
+        // The header and scaling figures belong to a bulk generation: once a newer one has
+        // refreshed them (refreshProfileBulk), this older answer leaves them alone.
+        if (profile.renderedBulk === generation) {
+            renderProfileHero(hero, c);
+            renderProfileActivity(activityCard, c, state.l2beat.get(chainId), kpi);
+        }
         drawKpis();
         // renderResearch shows the card only when there is something it renders (a block holding
         // only node-hardware sizing stays hidden).
@@ -926,6 +929,11 @@ function renderProfileEvents(card, d) {
 
 // ── scaling & activity ───────────────────────────────────────────────────
 function renderProfileActivity(card, c, l2b, kpi) {
+    // Replaces what an earlier render put here.
+    card.querySelector('.pf-body')?.remove();
+    card.classList.add('hidden');
+    delete kpi.users;
+    delete kpi.txcost;
     const m = c.l2Metrics;
     if (!l2b && !m) return;
     const body = cardBody(card);
