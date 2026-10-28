@@ -139,6 +139,15 @@ export const L2BEAT_REFRESH_INTERVAL_MS = parseIntEnv('L2BEAT_REFRESH_INTERVAL_M
 export const DATA_CACHE_ENABLED = parseBooleanEnv('DATA_CACHE_ENABLED', true);
 export const DATA_CACHE_FILE = parseStringEnv('DATA_CACHE_FILE', '.cache/chains-api-data.json');
 
+// MariaDB for state that must outlive a pod: RPC health per chain (src/store/rpcHealthDb.js).
+// Used when host, user and password are all set; otherwise that state stays in files beside
+// DATA_CACHE_FILE, which last only as long as the container's disk.
+export const CHAINS_API_DB_HOST = parseStringEnv('CHAINS_API_DB_HOST', '');
+export const CHAINS_API_DB_PORT = parseIntEnv('CHAINS_API_DB_PORT', 3306);
+export const CHAINS_API_DB_NAME = parseStringEnv('CHAINS_API_DB_NAME', 'chains_api');
+export const CHAINS_API_DB_USER = parseStringEnv('CHAINS_API_DB_USER', '');
+export const CHAINS_API_DB_PASSWORD = parseStringEnv('CHAINS_API_DB_PASSWORD', '');
+
 // CORS
 export const CORS_ORIGIN = parseStringEnv('CORS_ORIGIN', '*');
 

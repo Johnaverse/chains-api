@@ -342,6 +342,7 @@ Each tool returns JSON data that can be used by AI assistants to answer question
 ### Data Cache
 - `DATA_CACHE_ENABLED`: Enable disk-backed startup cache (default: `true`)
 - `DATA_CACHE_FILE`: Snapshot file path used for stale-first startup (default: `.cache/chains-api-data.json`)
+- `CHAINS_API_DB_HOST`, `CHAINS_API_DB_PORT` (3306), `CHAINS_API_DB_NAME` (`chains_api`), `CHAINS_API_DB_USER`, `CHAINS_API_DB_PASSWORD`: MariaDB for RPC health, used when host, user and password are set. One row per chain in `rpc_health` (created at startup): its endpoint statuses, written when a chain's up/down state changes, and the time of every check. Every replica reads and writes the same rows, so a new pod serves the last known health at once and sweeps the chains that waited longest first. Without a database, or while it is unreachable, health is kept in per-chain files beside `DATA_CACHE_FILE`.
 
 ### Assistant (Optional)
 An LLM chat assistant over the whole registry plus live incidents, exposed at `POST /assistant/chat` and consumed by the dashboard's floating **chat overlay** (corner button, available on every view). It runs a tool-use loop against any OpenAI-compatible server (Ollama, vLLM, LM Studio) and stays disabled until configured:

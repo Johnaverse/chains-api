@@ -42,6 +42,7 @@ import { applyDataToCache, cachedData } from '../../../src/store/cache.js';
 import { isPrivateRpc, _resetPrivateRpcsForTests } from '../../../src/store/privateRpcStore.js';
 import {
   processChainRpc,
+  buildSweepQueue,
   processL2BeatBatch,
   tickOnce,
   getChainRefresherStatus,
@@ -574,10 +575,11 @@ describe('chainRefresher', () => {
       expect(persistChainRpcHealth).toHaveBeenCalledTimes(1);
       expect(persistChainRpcHealth).toHaveBeenCalledWith(1, expect.arrayContaining([
         expect.objectContaining({ url: 'http://rpc.one', ok: true })
-      ]));
+      ]), expect.objectContaining({ changed: true, checkedAt: expect.any(Number) }));
+      expect(cachedData.rpcCheckedAt[1]).toEqual(expect.any(String));
     });
 
-    it('does not persist when only the block height advances (no state change)', async () => {
+    it('records the check but not a change when only the block height advances', async () => {
       seedCacheWith([seedChain(1, ['http://rpc.one'])]);
       // Prior cached state: same URL, already up.
       cachedData.rpcHealth = { 1: [{ url: 'http://rpc.one', ok: true, blockHeight: 16 }] };
@@ -587,7 +589,20 @@ describe('chainRefresher', () => {
 
       await processChainRpc(1);
 
-      expect(persistChainRpcHealth).not.toHaveBeenCalled();
+      // The check time is recorded (it orders the next pod's sweep); the statuses are unchanged.
+      expect(persistChainRpcHealth).toHaveBeenCalledTimes(1);
+      expect(persistChainRpcHealth.mock.calls[0][2]).toMatchObject({ changed: false });
+    });
+
+    it('sweeps the longest-waiting chains first: never checked, then the oldest checks', () => {
+      seedCacheWith([seedChain(1, []), seedChain(2, []), seedChain(3, []), seedChain(4, [])]);
+      cachedData.rpcCheckedAt = { 1: '2026-10-28T10:00:00.000Z', 2: '2026-10-28T08:00:00.000Z', 4: '2026-10-28T09:00:00.000Z' };
+      const jobs = buildSweepQueue();
+      expect(jobs[0]).toEqual({ type: 'l2beat_batch' });
+      expect(jobs.slice(1).map(j => j.chainId)).toEqual([3, 2, 4, 1]);
+      // With no check times at all, registry order.
+      cachedData.rpcCheckedAt = {};
+      expect(buildSweepQueue().slice(1).map(j => j.chainId)).toEqual([1, 2, 3, 4]);
     });
 
     it('overlap guard: a tick in flight is skipped, not queued behind itself', async () => {

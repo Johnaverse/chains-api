@@ -12,7 +12,9 @@ vi.mock('node:fs/promises', () => fsMock);
 
 vi.mock('../../../config.js', () => ({
   DATA_CACHE_ENABLED: true,
-  DATA_CACHE_FILE: '.cache/test-data.json'
+  DATA_CACHE_FILE: '.cache/test-data.json',
+  // No database: RPC health stays in the file store.
+  CHAINS_API_DB_HOST: '', CHAINS_API_DB_PORT: 3306, CHAINS_API_DB_NAME: 'chains_api', CHAINS_API_DB_USER: '', CHAINS_API_DB_PASSWORD: '',
 }));
 
 import {
@@ -73,7 +75,7 @@ describe('persistChainRpcHealth', () => {
 describe('loadAllRpcHealthFromDisk', () => {
   it('returns empty when the directory does not exist', async () => {
     fsMock.readdir.mockRejectedValueOnce(Object.assign(new Error('nope'), { code: 'ENOENT' }));
-    expect(await loadAllRpcHealthFromDisk()).toEqual({ byChainId: {}, lastCheckedAt: null });
+    expect(await loadAllRpcHealthFromDisk()).toEqual({ byChainId: {}, checkedAtByChainId: {}, lastCheckedAt: null });
   });
 
   it('loads per-chain files and tracks the newest checkedAt', async () => {
