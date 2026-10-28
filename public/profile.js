@@ -263,7 +263,9 @@ async function renderChainProfile(chainId, { keepScroll = false } = {}) {
         if (c.research) {
             renderResearch(c.research, researchCard);
             const r = c.research;
-            const when = r.checkedAt || r.updatedAt;
+            // The same order renderResearch's footer uses: a forum- or channel-only block has its
+            // own check date, and updatedAt is the dataset's, not this network's.
+            const when = r.checkedAt || r.forumsCheckedAt || r.channelsCheckedAt || r.updatedAt;
             setCardMeta(researchCard, [r.coverage && `${r.coverage} coverage`, r.auditStatus && `audit ${r.auditStatus}`, when && `checked ${relTime(when)}`].filter(Boolean).join(' · '));
         }
         renderProfileHardware(hardwareCard, c.research?.hardware);
@@ -980,19 +982,27 @@ const HW_COMPONENT_ORDER = ['cpu', 'gpu', 'memory', 'storage', 'network', 'opera
 const HW_SCOPE_TEXT = { exact_network: 'this network', project_family: 'project-wide', historical_network: 'historical network', uncertain: 'scope uncertain' };
 const HW_QUALIFIER = { at_least: '≥ ', at_most: '≤ ', approximately: '~ ', minimum: '≥ ' };
 const words = v => String(v ?? '').replace(/_/g, ' ');
+// Metrics whose text value says what it is ("NVMe SSD", "Ubuntu 22.04", "AMD EPYC").
+const HW_SELF_NAMED = new Set(['storage_type', 'os_version', 'version', 'model']);
 
 function hwValue(r) {
-    // A yes/no requirement ("public_ip": true) is the requirement's name, or its absence.
-    if (typeof r.value === 'boolean') return r.value ? words(r.metric) : `no ${words(r.metric)}`;
+    // A yes/no requirement ("public_ip": true) is the requirement's name, or its absence; with the
+    // generic metric it is the component itself ("GPU: not required").
+    if (typeof r.value === 'boolean') {
+        if (r.metric === 'other') return r.value ? 'required' : 'not required';
+        return r.value ? words(r.metric) : `no ${words(r.metric)}`;
+    }
     const unit = r.unit ? ` ${r.unit}` : '';
     const v = r.qualifier === 'range' && (r.min != null || r.max != null)
         ? `${r.min ?? '?'}–${r.max ?? '?'}${unit}`
         : `${HW_QUALIFIER[r.qualifier] ?? ''}${typeof r.value === 'number' ? r.value.toLocaleString() : (r.value ?? '?')}${r.value != null ? unit : ''}`;
     // The metric is named unless it is what the component means by default.
     const plain = { cpu: ['cores'], memory: ['capacity'], storage: ['capacity'], network: ['bandwidth'], operating_system: ['os_version'] };
-    // …or when the unit already says it ("8 threads", "50,000 IOPS"), or the value is text.
+    // …or when the unit already says it ("8 threads", "50,000 IOPS"), or the value names itself
+    // (a drive type, an OS, a model). Other text values keep it: "growth ~100 GB / 6 months".
     const said = r.unit && String(r.unit).toLowerCase().includes(String(r.metric).toLowerCase());
-    const metric = plain[r.component]?.includes(r.metric) || r.metric === 'other' || said || typeof r.value === 'string' ? '' : `${words(r.metric)} `;
+    const selfNamed = typeof r.value === 'string' && HW_SELF_NAMED.has(r.metric);
+    const metric = plain[r.component]?.includes(r.metric) || r.metric === 'other' || said || selfNamed ? '' : `${words(r.metric)} `;
     return `${metric}${v}${r.qualifier === 'suggested' ? ' (suggested)' : ''}`;
 }
 
@@ -1030,7 +1040,35 @@ function hwProfile(p, shared) {
         head,
         ...rows,
         p.notes ? longNote(p.notes) : null,
+        p.dependencies?.length ? hwDependencies(p.dependencies) : null,
         p.evidence?.length ? el('div', { class: 'pf-hw-note' }, p.evidence.slice(0, 3).flatMap((u, i) => [i ? ' · ' : null, extLink(u, safeHost(u) || 'source')])) : null
+    ]);
+}
+
+// Services a profile also needs that its own figures do not cover (Etherlink's operator-run
+// Tezos L1 node): when, where it may run, and whether its sizing is published or included.
+function hwSizing(v) {
+    const t = String(v || '');
+    if (t.startsWith('not_established')) return 'sizing not published, not in the figures above';
+    if (t.startsWith('included') || t.startsWith('covered')) return 'included in the figures above';
+    return t ? words(t) : null;
+}
+function hwHosting(d) {
+    if (typeof d.hosting === 'string') return /\s/.test(d.hosting) ? d.hosting : words(d.hosting);
+    if (d.selfHosted === true) return 'self-hosted';
+    if (d.selfHosted === false) return 'may be a remote service';
+    return null;
+}
+function hwDependencies(deps) {
+    return el('div', { class: 'pf-hw-deps' }, [
+        el('div', { class: 'pf-hw-label', text: 'Also needs' }),
+        ...deps.map(d => el('div', { class: 'pf-hw-dep' }, [
+            el('span', { class: 'pf-hw-dep-name', text: d.component || 'Another service' }),
+            d.clientOptions?.length ? el('span', { text: ` (one of ${d.clientOptions.join(', ')})` }) : null,
+            el('div', { class: 'dim', text: [d.requiredWhen && `when: ${d.requiredWhen}`, hwHosting(d), hwSizing(d.sizing)].filter(Boolean).join(' · ') }),
+            d.notes ? longNote(d.notes) : null,
+            d.sources?.length ? el('div', { class: 'pf-hw-note' }, d.sources.slice(0, 3).flatMap((u, i) => [i ? ' · ' : null, extLink(u, safeHost(u) || 'source')])) : null
+        ]))
     ]);
 }
 

@@ -70,6 +70,10 @@ describe('hwValue', () => {
     expect(hwValue({ component: 'network', metric: 'bandwidth', value: null, unit: 'Gbps', qualifier: 'range', min: 1, max: 10 })).toBe('1–10 Gbps');
     expect(hwValue({ component: 'storage', metric: 'bandwidth', value: 500, unit: 'MB/s', qualifier: 'at_least' })).toBe('bandwidth ≥ 500 MB/s');
     expect(hwValue({ component: 'network', metric: 'public_ip', value: true, qualifier: 'as_stated' })).toBe('public ip');
+    // Text values keep a label that says what they are; the self-describing ones do not.
+    expect(hwValue({ component: 'storage', metric: 'growth', value: '~100 GB / 6 months', qualifier: 'as_stated' })).toBe('growth ~100 GB / 6 months');
+    expect(hwValue({ component: 'network', metric: 'ports', value: '26656 TCP', qualifier: 'as_stated' })).toBe('ports 26656 TCP');
+    expect(hwValue({ component: 'gpu', metric: 'other', value: false, qualifier: 'as_stated' })).toBe('not required');
   });
 });
 
