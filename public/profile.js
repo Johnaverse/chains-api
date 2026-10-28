@@ -212,13 +212,14 @@ async function renderChainProfile(chainId, { keepScroll = false } = {}) {
     const forumCard = profileCard('Recent forum posts');
     const activityCard = profileCard('Scaling & activity', { wide: true });
     const researchCard = profileCard('Research', { wide: true });
+    const hardwareCard = profileCard('Node hardware', { wide: true });
     const qualityCard = profileCard('Data quality', { wide: true });
     const rawCard = profileCard('All data', { wide: true, meta: 'raw API records' });
     root.appendChild(el('div', { class: 'pf-grid' }, [
         graphCard, identityCard, incidentCard, rpcCard, liveClientCard, softwareCard,
-        forkCard, eventCard, forumCard, activityCard, researchCard, qualityCard, rawCard
+        forkCard, eventCard, forumCard, activityCard, researchCard, hardwareCard, qualityCard, rawCard
     ]));
-    for (const card of [softwareCard, forumCard, activityCard, researchCard]) card.classList.add('hidden');
+    for (const card of [softwareCard, forumCard, activityCard, researchCard, hardwareCard]) card.classList.add('hidden');
 
     // Headline figures, filled as their sources answer.
     const kpi = {};
@@ -253,7 +254,13 @@ async function renderChainProfile(chainId, { keepScroll = false } = {}) {
         drawKpis();
         // renderResearch shows the card only when there is something it renders (a block holding
         // only node-hardware sizing stays hidden).
-        if (c.research) renderResearch(c.research, researchCard);
+        if (c.research) {
+            renderResearch(c.research, researchCard);
+            const r = c.research;
+            const when = r.checkedAt || r.updatedAt;
+            setCardMeta(researchCard, [r.coverage && `${r.coverage} coverage`, r.auditStatus && `audit ${r.auditStatus}`, when && `checked ${relTime(when)}`].filter(Boolean).join(' · '));
+        }
+        renderProfileHardware(hardwareCard, c.research?.hardware);
     });
 
     settled(`/relations/${chainId}/graph?depth=2`).then(r => {
@@ -942,6 +949,108 @@ function renderProfileActivity(card, c, l2b, kpi) {
         }
         if (m.url) body.appendChild(detailRow('Source', extLink(m.url, 'growthepie')));
     }
+    card.classList.remove('hidden');
+}
+
+// ── node hardware ─────────────────────────────────────────────────────────
+// research.hardware: the sizing a network's own documentation publishes, per node role and
+// level, each requirement with its qualifier and source. Shown as the documents state it; units
+// are not converted.
+const HW_STATUS_TEXT = {
+    documented: 'Documented by the project',
+    partial: 'Partly documented',
+    not_found: 'No published hardware requirements found',
+    inaccessible: 'Requirements page could not be read'
+};
+const HW_COMPONENTS = [['cpu', 'CPU'], ['memory', 'Memory'], ['storage', 'Storage'], ['network', 'Network'], ['operating_system', 'OS'], ['other', 'Other']];
+const HW_SCOPE_TEXT = { exact_network: 'this network', project_family: 'project-wide', historical_network: 'historical network', uncertain: 'scope uncertain' };
+const HW_QUALIFIER = { at_least: '≥ ', at_most: '≤ ', approximately: '~ ', minimum: '≥ ' };
+const words = v => String(v ?? '').replace(/_/g, ' ');
+
+function hwValue(r) {
+    const unit = r.unit ? ` ${r.unit}` : '';
+    const v = r.qualifier === 'range' && (r.min != null || r.max != null)
+        ? `${r.min ?? '?'}–${r.max ?? '?'}${unit}`
+        : `${HW_QUALIFIER[r.qualifier] ?? ''}${typeof r.value === 'number' ? r.value.toLocaleString() : (r.value ?? '?')}${r.value != null ? unit : ''}`;
+    // The metric is named unless it is what the component means by default.
+    const plain = { cpu: ['cores'], memory: ['capacity'], storage: ['capacity'], network: ['bandwidth'], operating_system: ['os_version'] };
+    // …or when the unit already says it ("8 threads", "50,000 IOPS"), or the value is text.
+    const said = r.unit && String(r.unit).toLowerCase().includes(String(r.metric).toLowerCase());
+    const metric = plain[r.component]?.includes(r.metric) || r.metric === 'other' || said || typeof r.value === 'string' ? '' : `${words(r.metric)} `;
+    return `${metric}${v}${r.qualifier === 'suggested' ? ' (suggested)' : ''}`;
+}
+
+function hwTitle(p) { return [words(p.role), words(p.level)].filter(x => x && x !== 'unspecified').join(' · ') || 'node'; }
+// Profiles sharing a role and level (Ethereum's attester and local-builder validators) are told
+// apart by their own id.
+function hwProfile(p, shared) {
+    const title = shared ? `${hwTitle(p)} · ${words(String(p.id || '').replace(/-(minimum|recommended|example)$/, '')).replace(/-/g, ' ')}` : hwTitle(p);
+    const head = el('div', { class: 'pf-hw-head' }, [
+        el('span', { class: 'pf-hw-title', text: title }),
+        p.client ? el('span', { class: 'pf-hw-client', text: [p.client, p.clientVersion].filter(Boolean).join(' ') }) : null,
+        el('span', { class: 'pill-meta', title: 'What the requirement applies to', text: HW_SCOPE_TEXT[p.scope] || words(p.scope) }),
+        p.deployment && p.deployment !== 'unknown' ? el('span', { class: 'pill-meta', text: words(p.deployment) }) : null,
+        el('span', {
+            class: `pill-meta pf-hw-verify pf-hw-${p.verification}`,
+            title: p.verificationNotes || null,
+            text: p.verification === 'confirmed' ? 'verified' : words(p.verification)
+        })
+    ]);
+    const rows = [];
+    for (const [key, label] of HW_COMPONENTS) {
+        const reqs = (p.requirements || []).filter(r => r.component === key);
+        if (!reqs.length) continue;
+        rows.push(el('div', { class: 'pf-hw-row' }, [
+            el('span', { class: 'pf-hw-label', text: label }),
+            el('span', { class: 'pf-hw-values' }, reqs.flatMap((r, i) => [
+                i ? ' · ' : null,
+                el('span', { title: [r.notes, r.source && `Source: ${r.source}`].filter(Boolean).join('\n') || null, text: hwValue(r) + (r.notes && r.notes.length <= 24 ? ` (${r.notes})` : '') })
+            ]))
+        ]));
+    }
+    return el('div', { class: 'pf-hw-profile' }, [
+        head,
+        ...rows,
+        p.notes ? longNote(p.notes) : null,
+        p.evidence?.length ? el('div', { class: 'pf-hw-note' }, p.evidence.slice(0, 3).flatMap((u, i) => [i ? ' · ' : null, extLink(u, safeHost(u) || 'source')])) : null
+    ]);
+}
+
+// Research notes run to a paragraph or more: the first lines, the rest behind a toggle.
+const NOTE_SHOWN_CHARS = 220;
+function longNote(text) {
+    if (text.length <= NOTE_SHOWN_CHARS) return el('p', { class: 'dim pf-hw-note', text });
+    const cut = text.lastIndexOf(' ', NOTE_SHOWN_CHARS);
+    const rest = el('span', { class: 'hidden', text: text.slice(cut) });
+    const more = el('button', { class: 'pf-note-more', type: 'button', 'aria-expanded': 'false', text: 'Show more' });
+    const dots = el('span', { text: '… ' });
+    more.addEventListener('click', () => {
+        const open = rest.classList.toggle('hidden') === false;
+        dots.textContent = open ? ' ' : '… ';
+        more.textContent = open ? 'Show less' : 'Show more';
+        more.setAttribute('aria-expanded', String(open));
+    });
+    return el('p', { class: 'dim pf-hw-note' }, [text.slice(0, cut), rest, dots, more]);
+}
+
+function renderProfileHardware(card, hw) {
+    card.querySelector('.pf-body')?.remove();
+    if (!hw) { card.classList.add('hidden'); return; }
+    const body = cardBody(card);
+    const profiles = hw.profiles || [];
+    setCardMeta(card, [HW_STATUS_TEXT[hw.status] || words(hw.status), hw.checkedAt && `checked ${relTime(hw.checkedAt)}`].filter(Boolean).join(' · '));
+    if (profiles.length) {
+        const count = new Map();
+        for (const p of profiles) count.set(hwTitle(p), (count.get(hwTitle(p)) || 0) + 1);
+        body.appendChild(el('div', { class: 'pf-hw-grid' }, profiles.map(p => hwProfile(p, count.get(hwTitle(p)) > 1))));
+    } else {
+        body.appendChild(emptyNote(`${HW_STATUS_TEXT[hw.status] || 'No hardware requirements on record'} for this network.`));
+    }
+    if (hw.notes) body.appendChild(longNote(hw.notes));
+    if (hw.sources?.length) {
+        body.appendChild(detailRow('Sources', hw.sources.map(src => extLink(src.url, src.title || safeHost(src.url)))));
+    }
+    body.appendChild(el('div', { class: 'r-foot dim', text: 'As the project documents it, per node role; units as published. Project-wide figures may cover several networks of the family.' }));
     card.classList.remove('hidden');
 }
 

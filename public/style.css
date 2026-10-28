@@ -2051,3 +2051,18 @@ a.tlx-row-title:hover { color: var(--accent-hover); }
 .pf-alert.is-critical .pf-alert-kind { color: var(--critical-text); }
 .pf-alert-text { flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; }
 .pf-alert-more { font-size: var(--fs-200); white-space: nowrap; }
+
+/* Node hardware: one block per published profile (role · level), requirements by component. */
+.pf-hw-grid { display: grid; gap: var(--sp-3); grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); }
+.pf-hw-profile { border: 1px solid var(--rule); border-radius: var(--r-sm); padding: var(--sp-3); display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.pf-hw-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2); margin-bottom: 2px; }
+.pf-hw-title { font-weight: 600; text-transform: capitalize; }
+.pf-hw-verify.pf-hw-confirmed { color: var(--good-text); }
+.pf-hw-verify.pf-hw-unresolved { color: var(--warn-text); }
+.pf-hw-row { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: var(--sp-2); font-size: var(--fs-200); }
+.pf-hw-label { color: var(--ink-3); }
+.pf-hw-values { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.pf-hw-values [title] { cursor: help; }
+.pf-hw-note { font-size: var(--fs-100); overflow-wrap: anywhere; }
+.pf-hw-client { font-size: var(--fs-100); color: var(--ink-2); overflow-wrap: anywhere; }
+.pf-note-more { background: none; border: 0; padding: 0; color: var(--link, var(--ink-1)); font: inherit; text-decoration: underline; cursor: pointer; }

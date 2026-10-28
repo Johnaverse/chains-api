@@ -54,3 +54,20 @@ describe('nextForkOf', () => {
     expect(nextForkOf([{ phase: 'past' }, { phase: 'unscheduled' }])).toBeNull();
   });
 });
+
+describe('hwValue', () => {
+  const { hwValue } = (() => {
+    const ctx = vm.createContext({ state: { byId: new Map(), l2beat: new Map() } });
+    vm.runInContext(`${code}; this.api = { hwValue };`, ctx);
+    return ctx.api;
+  })();
+
+  it('writes a requirement as the document states it, without repeating the unit', () => {
+    expect(hwValue({ component: 'cpu', metric: 'cores', value: 2, unit: 'cores', qualifier: 'at_least' })).toBe('≥ 2 cores');
+    expect(hwValue({ component: 'cpu', metric: 'threads', value: 16, unit: 'threads', qualifier: 'as_stated' })).toBe('16 threads');
+    expect(hwValue({ component: 'storage', metric: 'iops', value: 50000, unit: 'IOPS', qualifier: 'at_least' })).toBe(`≥ ${(50000).toLocaleString()} IOPS`);
+    expect(hwValue({ component: 'storage', metric: 'storage_type', value: 'NVMe SSD', unit: null, qualifier: 'as_stated' })).toBe('NVMe SSD');
+    expect(hwValue({ component: 'network', metric: 'bandwidth', value: null, unit: 'Gbps', qualifier: 'range', min: 1, max: 10 })).toBe('1–10 Gbps');
+    expect(hwValue({ component: 'storage', metric: 'bandwidth', value: 500, unit: 'MB/s', qualifier: 'at_least' })).toBe('bandwidth ≥ 500 MB/s');
+  });
+});
