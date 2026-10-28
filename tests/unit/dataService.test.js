@@ -4,6 +4,8 @@ import { logger } from '../../src/util/logger.js';
 
 // Mock config before importing dataService
 vi.mock('../../config.js', () => ({
+  // No database: RPC health stays in the file store.
+  CHAINS_API_DB_HOST: '', CHAINS_API_DB_PORT: 3306, CHAINS_API_DB_NAME: 'chains_api', CHAINS_API_DB_USER: '', CHAINS_API_DB_PASSWORD: '',
   DATA_SOURCE_THE_GRAPH: 'https://example.com/thegraph.json',
   DATA_SOURCE_CHAINLIST: 'https://example.com/chainlist.json',
   DATA_SOURCE_CHAINS: 'https://example.com/chains.json',
@@ -2183,6 +2185,7 @@ describe('initializeDataOnStartup with disk cache', () => {
 
     vi.doMock('node:fs/promises', () => fsMock);
     vi.doMock('../../config.js', () => ({
+      CHAINS_API_DB_HOST: '', CHAINS_API_DB_PORT: 3306, CHAINS_API_DB_NAME: 'chains_api', CHAINS_API_DB_USER: '', CHAINS_API_DB_PASSWORD: '',
       DATA_SOURCE_THE_GRAPH: 'https://example.com/thegraph.json',
       DATA_SOURCE_CHAINLIST: 'https://example.com/chainlist.json',
       DATA_SOURCE_CHAINS: 'https://example.com/chains.json',

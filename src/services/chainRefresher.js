@@ -296,6 +296,8 @@ export async function processChainRpc(chainId) {
   }
   cachedData.rpcHealth[chainId] = publicResults;
   chain.lastTested = now;
+  if (!cachedData.rpcCheckedAt) cachedData.rpcCheckedAt = {};
+  cachedData.rpcCheckedAt[chainId] = now;
   // The chain's fork schedule as its nodes hold it, from an endpoint that served blocks in this
   // pass (eth_config, nodeForkSchedule.js) — not one deferred by a provider's rate-limit backoff,
   // which keeps its earlier result above. Paced by its own interval; fire-and-forget.
@@ -307,12 +309,13 @@ export async function processChainRpc(chainId) {
   // would otherwise leave lastRpcCheck (and /clients lastUpdated) null.
   cachedData.lastRpcCheck = chain.lastTested;
 
-  // Live, incremental persistence: write only this chain's state, and only
-  // when an endpoint's up/down status actually changed (not on every block
-  // advance). Fire-and-forget; the store logs its own failures.
-  if (rpcStateChanged(previous, publicResults)) {
-    persistChainRpcHealth(chainId, publicResults).catch(() => {});
-  }
+  // Live, incremental persistence of this chain alone: its statuses when an endpoint's up/down
+  // state changed (not on every block advance), and in the database also the time of every
+  // check, which orders the next pod's first sweep. Fire-and-forget; the store logs failures.
+  persistChainRpcHealth(chainId, publicResults, {
+    changed: rpcStateChanged(previous, publicResults),
+    checkedAt: Date.parse(now)
+  }).catch(() => {});
 
   incCounter('chains_api_rpc_check_total', { outcome: 'completed' }, probed.length);
 }
@@ -396,10 +399,20 @@ export async function processL2BeatBatch() {
 
 // ───────────────────────── scheduler ─────────────────────────
 
-function buildSweepQueue() {
+// Longest-waiting first: chains never checked, then the oldest checks, the rest in registry
+// order. A restart resumes where checking left off (rpcCheckedAt is restored from the store)
+// instead of starting again at the registry's first chain.
+export function buildSweepQueue() {
   const chains = cachedData.indexed?.all || [];
+  const checkedAt = cachedData.rpcCheckedAt || {};
+  const at = c => {
+    const t = Date.parse(checkedAt[c.chainId] || '');
+    return Number.isFinite(t) ? t : -Infinity;
+  };
+  const ordered = chains.map((c, i) => ({ c, i, t: at(c) }))
+    .sort((a, b) => a.t - b.t || a.i - b.i);
   const jobs = [{ type: 'l2beat_batch' }];
-  for (const c of chains) {
+  for (const { c } of ordered) {
     jobs.push({ type: 'chain_rpc', chainId: c.chainId });
   }
   return jobs;

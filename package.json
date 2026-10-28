@@ -1,6 +1,6 @@
 {
   "name": "chains-api",
-  "version": "1.7.94",
+  "version": "1.7.95",
   "description": "API query service for blockchain chain data from multiple sources",
   "main": "index.js",
   "type": "module",
@@ -48,6 +48,7 @@
     "express": "^5.2.1",
     "fastify": "^5.12.0",
     "https-proxy-agent": "^9.1.0",
+    "mariadb": "^3.5.4",
     "pino": "^10.3.1",
     "ws": "^8.21.3"
   },

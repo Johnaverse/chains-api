@@ -17,7 +17,7 @@ import {
   writeSnapshotToDiskAtomic,
   DATA_CACHE_PATH
 } from '../store/snapshot.js';
-import { loadAllRpcHealthFromDisk } from '../store/rpcHealthStore.js';
+import { loadAllRpcHealth } from '../store/rpcHealthStore.js';
 import { loadPrivateRpcsFromDisk, stripPrivateRpcs } from '../store/privateRpcStore.js';
 import { logger } from '../util/logger.js';
 
@@ -189,9 +189,11 @@ export async function refreshAllSources() {
  * snapshot.
  */
 async function overlayDiskRpcHealth() {
-  const { byChainId, lastCheckedAt } = await loadAllRpcHealthFromDisk();
+  const { byChainId, checkedAtByChainId, lastCheckedAt } = await loadAllRpcHealth();
   if (Object.keys(byChainId).length === 0) return;
   cachedData.rpcHealth = byChainId;
+  // When each chain was last checked: the refresher re-checks the longest-waiting first.
+  cachedData.rpcCheckedAt = { ...(checkedAtByChainId || {}) };
   stripPrivateRpcs(null, cachedData.rpcHealth);
   if (lastCheckedAt) cachedData.lastRpcCheck = lastCheckedAt;
   logger.info({ chains: Object.keys(byChainId).length }, 'Loaded cached RPC-health state');

@@ -2,6 +2,7 @@ import { mkdir, writeFile, rename, readdir, readFile, rm } from 'node:fs/promise
 import { dirname, join, resolve } from 'node:path';
 import { DATA_CACHE_ENABLED, DATA_CACHE_FILE } from '../../config.js';
 import { logger } from '../util/logger.js';
+import { saveChainRpcHealthDb, loadAllRpcHealthDb } from './rpcHealthDb.js';
 
 /**
  * Per-chain RPC-health persistence.
@@ -37,8 +38,19 @@ export function rpcStateChanged(prev, next) {
   return false;
 }
 
-/** Atomically persist one chain's endpoint statuses. Best-effort. */
-export async function persistChainRpcHealth(chainId, results) {
+/**
+ * Record one chain's check. In MariaDB when configured (rpcHealthDb.js): the results when
+ * `changed`, otherwise only the check time. Without it, or when it fails, the per-chain file is
+ * written — only on a change, as before. Best-effort.
+ */
+export async function persistChainRpcHealth(chainId, results, { changed = true, checkedAt = Date.now() } = {}) {
+  if (await saveChainRpcHealthDb(chainId, results, { changed, checkedAt })) return;
+  if (!changed) return;
+  await writeChainRpcHealthFile(chainId, results);
+}
+
+/** Atomically write one chain's endpoint statuses beside the data snapshot. */
+async function writeChainRpcHealthFile(chainId, results) {
   if (!DATA_CACHE_ENABLED) return;
   const file = join(RPC_HEALTH_DIR, `${chainId}.json`);
   const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
@@ -58,11 +70,18 @@ export async function persistChainRpcHealth(chainId, results) {
 }
 
 /**
- * Load every persisted chain's RPC health on startup.
- * Returns { byChainId: { [chainId]: results[] }, lastCheckedAt }.
+ * Load every persisted chain's RPC health on startup: from MariaDB when it answers, else from
+ * the files. Returns { byChainId: { [chainId]: results[] }, checkedAtByChainId, lastCheckedAt }.
  */
+export async function loadAllRpcHealth() {
+  const fromDb = await loadAllRpcHealthDb();
+  if (fromDb) return fromDb;
+  return loadAllRpcHealthFromDisk();
+}
+
+/** The file store's copy: { byChainId, checkedAtByChainId, lastCheckedAt }. */
 export async function loadAllRpcHealthFromDisk() {
-  const empty = { byChainId: {}, lastCheckedAt: null };
+  const empty = { byChainId: {}, checkedAtByChainId: {}, lastCheckedAt: null };
   if (!DATA_CACHE_ENABLED) return empty;
 
   let files;
@@ -89,13 +108,17 @@ export async function loadAllRpcHealthFromDisk() {
   }));
 
   const byChainId = {};
+  const checkedAtByChainId = {};
   let lastCheckedAt = null;
   for (const parsed of parsedEntries) {
     if (!parsed) continue;
     byChainId[parsed.chainId] = parsed.results;
+    // A file is rewritten only on a state change, so its time is the last change, which is
+    // also the latest check it can vouch for.
+    if (parsed.checkedAt) checkedAtByChainId[parsed.chainId] = parsed.checkedAt;
     if (parsed.checkedAt && (!lastCheckedAt || parsed.checkedAt > lastCheckedAt)) {
       lastCheckedAt = parsed.checkedAt;
     }
   }
-  return { byChainId, lastCheckedAt };
+  return { byChainId, checkedAtByChainId, lastCheckedAt };
 }
