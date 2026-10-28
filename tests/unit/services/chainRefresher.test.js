@@ -131,6 +131,8 @@ describe('chainRefresher', () => {
         return method === 'web3_clientVersion' ? 'Geth/v1' : '0x10';
       });
       await processChainRpc(1);
+      // Nor is the provider asked for eth_config by the fork-schedule read.
+      expect(refreshNodeForkSchedule).toHaveBeenLastCalledWith(1, []);
       jsonRpcCall.mockClear();
       await processChainRpc(10);
       expect(jsonRpcCall).not.toHaveBeenCalled();

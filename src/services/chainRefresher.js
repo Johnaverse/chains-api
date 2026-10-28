@@ -299,7 +299,8 @@ export async function processChainRpc(chainId) {
   // The chain's fork schedule as its nodes hold it, from an endpoint that served blocks in this
   // pass (eth_config, nodeForkSchedule.js) — not one deferred by a provider's rate-limit backoff,
   // which keeps its earlier result above. Paced by its own interval; fire-and-forget.
-  refreshNodeForkSchedule(Number(chainId), probed.filter(r => r.ok && !r.authRequired).map(r => r.url)).catch(() => {});
+  // Nor one whose provider this batch just backed off (a throttled eth_chainId, a sibling's 429).
+  refreshNodeForkSchedule(Number(chainId), probed.filter(r => r.ok && !r.authRequired && !isThrottled(r.url, Date.now())).map(r => r.url)).catch(() => {});
   // Freshness signal for /clients and /rpc-monitor. Stamped per chain as
   // results are written — not at sweep end — because a full sweep can abort
   // mid-pass on a data-version change (so onSweepEnd may never run), which
