@@ -121,6 +121,8 @@ async function renderChainProfile(chainId, { keepScroll = false } = {}) {
     const known = state.byId.get(chainId);
     const hero = el('div', { class: 'pf-hero' });
     const kpis = el('div', { class: 'stat-row pf-kpis', 'aria-live': 'polite' });
+    // Warnings above everything else: what is wrong now, and the next hardfork to prepare for.
+    const alerts = el('div', { class: 'pf-alerts', role: 'status', 'aria-live': 'polite' });
     root.append(
         el('nav', { class: 'pf-crumbs', 'aria-label': 'Breadcrumb' }, [
             el('a', {
@@ -128,7 +130,7 @@ async function renderChainProfile(chainId, { keepScroll = false } = {}) {
                 onclick: e => { if (e.button === 0 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); switchView('networks'); } }
             })
         ]),
-        hero, kpis
+        hero, alerts, kpis
     );
     renderProfileHero(hero, known || { chainId });
 
@@ -162,7 +164,9 @@ async function renderChainProfile(chainId, { keepScroll = false } = {}) {
     };
     const relCounts = relationCounts(chainId);
     if (relCounts) kpi.relations = { label: 'Related networks', value: fmtNum(relCounts.total), sub: relCounts.sub };
+    profile.alerts = { node: alerts, chainId, nextFork: null, incidentCard };
     profile.incidents = { card: incidentCard, chainId, kpi, drawKpis: () => drawKpis() };
+    drawProfileAlerts();
     renderProfileIncidents(incidentCard, chainId, kpi);
     const l2b = state.l2beat.get(chainId);
     if (l2b?.tvs != null) kpi.value = { label: 'Value secured', value: fmtUsd(l2b.tvs), sub: [l2b.stage, 'L2BEAT'].filter(Boolean).join(' · '), hint: 'Total value secured, from L2BEAT' };
@@ -214,6 +218,9 @@ async function renderChainProfile(chainId, { keepScroll = false } = {}) {
         if (!live()) return;
         renderProfileForks(forkCard, r.ok ? r.v : null, kpi);
         drawKpis();
+        profile.alerts.nextFork = nextForkOf(r.ok ? r.v.forks : []);
+        profile.alerts.forkCard = forkCard;
+        drawProfileAlerts();
     });
     // One request per type: /timeline applies its limit before any filtering here, so hardforks
     // must not use up the rows this card shows.
@@ -317,6 +324,59 @@ function refreshProfileIncidents() {
     p.card.querySelector('.pf-body')?.remove();
     renderProfileIncidents(p.card, p.chainId, p.kpi);
     p.drawKpis();
+    drawProfileAlerts();
+}
+
+// ── warnings ─────────────────────────────────────────────────────────────
+// The soonest fork still to come: dated ones by date, then any with only a height.
+function nextForkOf(forks = []) {
+    const upcoming = forks.filter(f => f.phase === 'upcoming');
+    const at = f => Date.parse(f.activationAt || '');
+    return upcoming.filter(f => Number.isFinite(at(f))).sort((a, b) => at(a) - at(b))[0]
+        || upcoming.find(f => Number.isFinite(f.activationBlock)) || upcoming[0] || null;
+}
+const ALERT_INCIDENTS_SHOWN = 3;
+function drawProfileAlerts() {
+    const a = profile.alerts;
+    if (!a || profileChainId !== a.chainId) return;
+    clear(a.node);
+    const jump = card => e => { e.preventDefault(); card?.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+    const open = state.openByChain.get(a.chainId) || [];
+    for (const it of open.slice(0, ALERT_INCIDENTS_SHOWN)) {
+        const sev = severityOf(it);
+        const dur = durationInfo(it);
+        const serious = sev.key === 'critical' || sev.key === 'major';
+        a.node.appendChild(el('div', { class: `pf-alert ${serious ? 'is-critical' : 'is-warn'}` }, [
+            el('span', { class: 'pf-alert-kind', text: it.isProvider ? 'RPC provider incident' : 'Open incident' }),
+            el('span', { class: 'pf-alert-text' }, [
+                it.url ? extLink(it.url, it.openedTitle || it.title) : el('span', { text: it.openedTitle || it.title }),
+                el('span', { class: 'dim', text: ` · ${[it.spName, it.status, dur?.text].filter(Boolean).join(' · ')}` })
+            ]),
+            el('span', { class: `sev sev-${sev.key}` }, [el('span', { class: 'sev-mark' }), sev.label])
+        ]));
+    }
+    if (open.length > ALERT_INCIDENTS_SHOWN) {
+        a.node.appendChild(el('a', {
+            class: 'pf-alert-more', href: '#', text: `${open.length - ALERT_INCIDENTS_SHOWN} more open incident${open.length - ALERT_INCIDENTS_SHOWN === 1 ? '' : 's'} →`,
+            onclick: jump(a.incidentCard)
+        }));
+    }
+    const f = a.nextFork;
+    if (f) {
+        const ms = Date.parse(f.activationAt || '');
+        const when = Number.isFinite(ms) ? `${countdownText(ms - Date.now())} · ${forkWhen(f)}` : forkWhen(f);
+        const link = (f.events || []).find(e => e.url)?.url;
+        const software = [...new Set((f.events || []).filter(e => e.release).map(e => `${e.release.repo?.split('/').pop()} ${e.release.version}`))].slice(0, 3);
+        a.node.appendChild(el('div', { class: 'pf-alert is-warn' }, [
+            el('span', { class: 'pf-alert-kind', text: 'Next hardfork' }),
+            el('span', { class: 'pf-alert-text' }, [
+                link ? extLink(link, f.name || 'Unnamed fork') : el('strong', { text: f.name || 'Unnamed fork' }),
+                el('span', { text: ` — ${when}` }),
+                software.length ? el('span', { class: 'dim', text: ` · upgrade to ${software.join(', ')}` }) : null
+            ]),
+            el('a', { class: 'pf-alert-more', href: '#', text: 'All hardforks →', onclick: jump(a.forkCard) })
+        ]));
+    }
 }
 function renderProfileIncidents(card, chainId, kpi) {
     const body = cardBody(card);
@@ -719,8 +779,7 @@ function forkWhen(f) {
             ? new Date(at).toLocaleDateString(undefined, { dateStyle: 'medium', timeZone: 'UTC' })
             : fmtDateTime(at);
     }
-    // A stated height is an activation point even with no date; only a fork with neither is TBA.
-    return Number.isFinite(f.activationBlock) ? `block ${f.activationBlock.toLocaleString()}` : 'date TBA';
+    return undatedWhenText(f);
 }
 function renderProfileForks(card, d, kpi) {
     const body = cardBody(card);

@@ -5,8 +5,8 @@ import vm from 'node:vm';
 // The profile page's relation logic, run from public/profile.js itself.
 const code = readFileSync(new URL('../../../public/profile.js', import.meta.url), 'utf8');
 const context = vm.createContext({ state: { byId: new Map(), l2beat: new Map() } });
-vm.runInContext(`${code}; this.api = { relationRolesOf };`, context);
-const { relationRolesOf } = context.api;
+vm.runInContext(`${code}; this.api = { relationRolesOf, nextForkOf };`, context);
+const { relationRolesOf, nextForkOf } = context.api;
 
 describe('relationRolesOf', () => {
   // Ethereum (1) with OP (10) as an L2, Sepolia (11155111) as its testnet, and an L3 (999) on OP
@@ -38,5 +38,19 @@ describe('relationRolesOf', () => {
     expect(direct.get(1)).toMatchObject({ role: 'parent' });
     expect(direct.get(999)).toMatchObject({ role: 'child' });
     expect(second.get(11155111)).toMatchObject({ anchor: 1, role: 'testnet' });
+  });
+});
+
+describe('nextForkOf', () => {
+  it('warns about the soonest upcoming fork, a dated one before one with only a height', () => {
+    const forks = [
+      { name: 'Done', phase: 'past', activationAt: '2026-01-01T00:00:00Z' },
+      { name: 'Later', phase: 'upcoming', activationAt: '2026-12-01T00:00:00Z' },
+      { name: 'Height', phase: 'upcoming', activationAt: null, activationBlock: 5000 },
+      { name: 'Soon', phase: 'upcoming', activationAt: '2026-11-05T18:00:00Z' }
+    ];
+    expect(nextForkOf(forks).name).toBe('Soon');
+    expect(nextForkOf(forks.filter(f => f.activationAt == null || f.phase === 'past')).name).toBe('Height');
+    expect(nextForkOf([{ phase: 'past' }, { phase: 'unscheduled' }])).toBeNull();
   });
 });

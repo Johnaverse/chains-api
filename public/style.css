@@ -2035,3 +2035,19 @@ a.tlx-row-title:hover { color: var(--accent-hover); }
 .pf-rel-sub > summary::-webkit-details-marker { display: none; }
 .pf-rel-sub[open] { flex-basis: 100%; white-space: normal; }
 .pf-rel-sub[open] > .pf-chips { margin: var(--sp-1) 0 var(--sp-2) var(--sp-3); padding-left: var(--sp-2); border-left: 1px solid var(--rule); }
+
+/* Profile warnings: an open incident on this chain or its RPC providers, and the next
+   hardfork. A tinted row with a coloured edge — the label says what it is, never colour alone. */
+.pf-alerts { display: flex; flex-direction: column; gap: var(--sp-2); margin-bottom: var(--sp-4); }
+.pf-alerts:empty { display: none; }
+.pf-alert {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-3);
+    padding: var(--sp-2) var(--sp-4); border-radius: var(--r-md); border: 1px solid var(--rule);
+    border-left-width: 3px; font-size: var(--fs-300);
+}
+.pf-alert.is-warn { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 9%, var(--surface-1)); }
+.pf-alert.is-critical { border-left-color: var(--critical); background: color-mix(in srgb, var(--critical) 9%, var(--surface-1)); }
+.pf-alert-kind { font-size: var(--fs-100); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--warn-text); white-space: nowrap; }
+.pf-alert.is-critical .pf-alert-kind { color: var(--critical-text); }
+.pf-alert-text { flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; }
+.pf-alert-more { font-size: var(--fs-200); white-space: nowrap; }
