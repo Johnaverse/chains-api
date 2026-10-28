@@ -2069,3 +2069,5 @@ a.tlx-row-title:hover { color: var(--accent-hover); }
 .pf-hw-deps { margin-top: var(--sp-1); padding-top: var(--sp-2); border-top: 1px dashed var(--rule); display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-200); }
 .pf-hw-dep { border-left: 2px solid var(--warn); padding-left: var(--sp-2); }
 .pf-hw-dep-name { font-weight: 600; }
+.pf-hw-caveat { font-size: var(--fs-200); overflow-wrap: anywhere; }
+.pf-hw-caveat .pf-hw-label { font-size: var(--fs-100); }
