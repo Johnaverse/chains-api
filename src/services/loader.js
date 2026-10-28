@@ -8,7 +8,7 @@ import { fetchData } from '../transport/fetch.js';
 import { parseSLIP44 } from '../sources/slip44.js';
 import { fetchL2Beat } from '../sources/l2beat.js';
 import { fetchDefiLlama } from '../sources/defillama.js';
-import { indexData } from '../store/indexer.js';
+import { indexData, applyNetworkType, rawEntriesByChainId } from '../store/indexer.js';
 import { cachedData, applyDataToCache } from '../store/cache.js';
 import { attachNetworkResearch } from '../sources/networkResearch.js';
 import { attachForums } from '../sources/forums.js';
@@ -225,6 +225,12 @@ export async function initializeDataOnStartup(options = {}) {
       attachNetworkResearch(cachedData.indexed);
       // Same for the forum registry: the snapshot carries the old build's forumUrl values.
       attachForums(cachedData.indexed);
+      // And the Testnet tags, with the classification context validation reads them by
+      // (learned words, parent types, hint reliability): process state a snapshot does not carry.
+      // Only with the raw registries in the snapshot: without them every claim is missing.
+      if (Array.isArray(cachedData.chains) && cachedData.chains.length && Array.isArray(cachedData.chainlist)) {
+        applyNetworkType(cachedData.indexed, rawEntriesByChainId({ chains: cachedData.chains, chainlist: cachedData.chainlist, theGraph: cachedData.theGraph }));
+      }
       cachedData.indexed.all = Object.values(cachedData.indexed.byChainId);
       await overlayDiskRpcHealth();
       startupInitialized = true;

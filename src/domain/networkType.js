@@ -34,7 +34,7 @@ function nameClaim(source, name) {
  * @param {{chains?:object, chainlist?:object, theGraph?:object}} entries each source's raw entry
  */
 // Hostnames of a chain's RPC, explorer and faucet URLs, split into words.
-function hostWords(entries) {
+function hostWords(entries, theGraph) {
   const urls = [];
   for (const entry of entries) {
     if (!entry) continue;
@@ -42,6 +42,9 @@ function hostWords(entries) {
     for (const e of entry.explorers ?? []) urls.push(e?.url);
     for (const f of entry.faucets ?? []) urls.push(f);
   }
+  // The Graph's own endpoint lists, which the index serves too.
+  for (const r of theGraph?.rpcUrls ?? []) urls.push(r);
+  for (const e of theGraph?.explorerUrls ?? []) urls.push(typeof e === 'string' ? e : e?.url);
   const words = new Set();
   for (const url of urls) {
     if (typeof url !== 'string' || url.includes('${')) continue;
@@ -107,7 +110,7 @@ export function networkTypeClaims({ chains, chainlist, theGraph } = {}, { isTest
   // The project's own hostnames: `testnet-rpc.atleta.network`, `pre-rpc.bt.io` beside
   // `testnet.bttcscan.com`, `mainnet.superseed.xyz`. Test words are the registry's learned ones.
   if (isTestWord) {
-    const words = hostWords([chains, chainlist]);
+    const words = hostWords([chains, chainlist], theGraph);
     const test = [...words].find((w) => isTestWord(w));
     if (test) claims.push({ source: 'endpoints', field: 'hosts', value: 'testnet', strength: CLAIM_STRENGTH.hint, said: test });
     else if ([...words].some((w) => MAIN_NAME.test(w))) claims.push({ source: 'endpoints', field: 'hosts', value: 'mainnet', strength: CLAIM_STRENGTH.hint, said: 'mainnet' });

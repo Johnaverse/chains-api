@@ -107,6 +107,20 @@ describe('chainRefresher', () => {
       expect(silent).toMatchObject({ ok: true, blockHeight: 16 });
     });
 
+    it('backs a provider off when it rate-limits the chain-id question, keeping the block verdict', async () => {
+      seedCacheWith([seedChain(1, ['https://a.limited.example']), seedChain(10, ['https://b.limited.example'])]);
+      jsonRpcCall.mockImplementation(async (_url, method) => {
+        if (method === 'eth_chainId') throw Object.assign(new Error('HTTP 429'), { kind: 'rate_limited', status: 429 });
+        return method === 'web3_clientVersion' ? 'Geth/v1' : '0x10';
+      });
+      await processChainRpc(1);
+      expect(cachedData.rpcHealth[1][0]).toMatchObject({ ok: true, blockHeight: 16 });
+      jsonRpcCall.mockClear();
+      await processChainRpc(10);
+      // Same provider (limited.example): deferred, not probed.
+      expect(jsonRpcCall).not.toHaveBeenCalled();
+    });
+
     it('never probes an RPC URL that is not publicly routable', async () => {
       // Registry URLs are community-submitted, and this sweep runs unattended. A crafted entry
       // pointing at a cluster address would otherwise have the refresher reach inside the

@@ -4,7 +4,7 @@ import { attachNetworkResearch } from '../sources/networkResearch.js';
 import { isKnownEolChain } from '../domain/eolChains.js';
 import { findIdentityConflicts, graphChainId } from '../domain/sourceIdentity.js';
 import { networkTypeClaims, resolveNetworkType, learnHintReliability, setNetworkTypeContext } from '../domain/networkType.js';
-import { learnNetworkWords, isTestNetworkWord } from '../domain/networkWords.js';
+import { learnNetworkWords, testNetworkWords } from '../domain/networkWords.js';
 
 /**
  * Build a mapping of network IDs to chain IDs from The Graph data
@@ -585,30 +585,77 @@ export function indexDefiLlamaSource(defillama, indexed) {
  * The Testnet tag, from every source's claim (src/domain/networkType.js). Runs once all three
  * registries are in, so no single source's hint tags a chain the others call a mainnet.
  */
-function applyNetworkType(indexed, raw) {
-  const chains = Object.values(indexed.byChainId);
-  const entriesOf = (id) => ({ chains: raw.chains.get(id), chainlist: raw.chainlist.get(id), theGraph: raw.theGraph.get(id) });
-  // Test-network words, learned from the sources' tags as they stand (networkWords.js), read in
-  // each chain's own hostnames.
-  learnNetworkWords(chains);
-  // First pass: each chain by its own claims, no hostnames and no parent — the parent's type
-  // the second pass reads a chain's relation by.
-  setNetworkTypeContext({});
-  const first = new Map(chains.map(chain => [chain.chainId, resolveNetworkType(networkTypeClaims(entriesOf(chain.chainId)))]));
-  const typeOf = (id) => {
-    const r = first.get(id);
-    return r?.decidedBy ? (r.isTestnet ? 'testnet' : 'mainnet') : null;
-  };
-  setNetworkTypeContext({ isTestWord: isTestNetworkWord, typeOf });
-  const claimsOf = new Map(chains.map(chain => [chain.chainId, networkTypeClaims(entriesOf(chain.chainId))]));
-  // How far each hint can be trusted, from where a source states the type outright.
-  learnHintReliability(claimsOf.values());
-  chains.forEach(chain => {
-    const { isTestnet } = resolveNetworkType(claimsOf.get(chain.chainId));
+export function applyNetworkType(indexed, raw) {
+  const decided = classifyNetworkTypes(indexed, raw);
+  Object.values(indexed.byChainId).forEach(chain => {
+    const isTestnet = decided.get(chain.chainId)?.isTestnet === true;
+    if (!Array.isArray(chain.tags)) chain.tags = [];
     const has = chain.tags.includes('Testnet');
     if (isTestnet && !has) chain.tags.unshift('Testnet');
     if (!isTestnet && has) chain.tags = chain.tags.filter(t => t !== 'Testnet');
   });
+}
+
+/** Raw source entries by chain id, as the indexer and the snapshot path both read them. */
+export function rawEntriesByChainId({ chains, chainlist, theGraph }) {
+  return {
+    chains: byChainIdMap(Array.isArray(chains) ? chains : [], c => Number(c?.chainId)),
+    chainlist: byChainIdMap(Array.isArray(chainlist) ? chainlist : [], c => Number(c?.chainId)),
+    theGraph: byChainIdMap(theGraph?.networks ?? [], graphChainId)
+  };
+}
+
+/**
+ * Mainnet or test network for every chain, and the context (learned test words, decided types,
+ * hint reliability) that validation's rule 2 reads the same claims with. Also run on a snapshot
+ * loaded at startup, which was indexed by another process.
+ *   1. Each chain's own claims — no parent, no hostnames — with hint reliability trained on them.
+ *   2. Test-network words learned from those decisions (no chain is tagged yet when this runs),
+ *      kept as this index's fixed set.
+ *   3. The full claims: hostnames, and the parent's type resolved recursively, so an L3 sees its
+ *      L2's inferred type; a cycle falls back to the first pass. Reliability is retrained on them.
+ * @returns {Map<number, {isTestnet:boolean, decidedBy:object|null}>}
+ */
+export function classifyNetworkTypes(indexed, raw) {
+  const ids = [...new Set([...Object.keys(indexed.byChainId).map(Number), ...raw.chains.keys(), ...raw.chainlist.keys(), ...raw.theGraph.keys()])];
+  const entriesOf = (id) => ({ chains: raw.chains.get(id), chainlist: raw.chainlist.get(id), theGraph: raw.theGraph.get(id) });
+  const typeIn = (map) => (id) => {
+    const r = map.get(id);
+    return r?.decidedBy ? (r.isTestnet ? 'testnet' : 'mainnet') : null;
+  };
+
+  setNetworkTypeContext({});
+  const own = new Map(ids.map(id => [id, networkTypeClaims(entriesOf(id))]));
+  learnHintReliability(own.values());
+  const first = new Map(ids.map(id => [id, resolveNetworkType(own.get(id))]));
+
+  const provisional = Object.values(indexed.byChainId).map(chain => ({
+    ...chain,
+    tags: [...(first.get(chain.chainId)?.isTestnet ? ['Testnet'] : []), ...(chain.tags ?? []).filter(t => t !== 'Testnet')]
+  }));
+  learnNetworkWords(provisional);
+  const words = new Set(testNetworkWords());
+  const isTestWord = (w) => words.has(String(w ?? '').toLowerCase());
+
+  learnHintReliability(ids.map(id => networkTypeClaims(entriesOf(id), { isTestWord, typeOf: typeIn(first) })));
+  const final = new Map();
+  const visiting = new Set();
+  const resolveFinal = (id) => {
+    if (final.has(id)) return final.get(id);
+    if (visiting.has(id) || !own.has(id)) return first.get(id) ?? null;
+    visiting.add(id);
+    const typeOf = (parent) => {
+      const r = resolveFinal(parent);
+      return r?.decidedBy ? (r.isTestnet ? 'testnet' : 'mainnet') : null;
+    };
+    const decided = resolveNetworkType(networkTypeClaims(entriesOf(id), { isTestWord, typeOf }));
+    visiting.delete(id);
+    final.set(id, decided);
+    return decided;
+  };
+  for (const id of ids) resolveFinal(id);
+  setNetworkTypeContext({ isTestWord, typeOf: typeIn(final) });
+  return final;
 }
 
 function byChainIdMap(list, idOf) {
@@ -647,11 +694,7 @@ export function indexData(theGraph, chainlist, chains, slip44, l2beat, defillama
   indexChainsSource(cleanChains, indexed);
   indexChainlistSource(cleanChainlist, indexed);
   indexTheGraphSource(cleanTheGraph, indexed, networkIdToChainId);
-  applyNetworkType(indexed, {
-    chains: byChainIdMap(Array.isArray(cleanChains) ? cleanChains : [], c => Number(c?.chainId)),
-    chainlist: byChainIdMap(Array.isArray(cleanChainlist) ? cleanChainlist : [], c => Number(c?.chainId)),
-    theGraph: byChainIdMap(cleanTheGraph?.networks ?? [], graphChainId)
-  });
+  applyNetworkType(indexed, rawEntriesByChainId({ chains: cleanChains, chainlist: cleanChainlist, theGraph: cleanTheGraph }));
   attachSlip44Info(slip44, indexed);
   attachStatusPages(indexed);
   attachForums(indexed);

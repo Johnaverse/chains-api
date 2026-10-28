@@ -257,6 +257,12 @@ describe('validation — L2BEAT cross-source rules', () => {
       expect(findErrorsForRule(validateChainData(), 15).map(e => e.chainId)).toEqual([88]);
     });
 
+    it('keeps flagging a coin type\'s owner whatever other chains use it', () => {
+      // An unrelated chain on 889 with another currency does not make Viction's TOMO a convention.
+      seedCache({ chains: [chain(88, 'Viction', 'VIC', 889, 'TOMO'), chain(99, 'Unrelated', 'XYZ', 889, 'TOMO')] });
+      expect(findErrorsForRule(validateChainData(), 15).map(e => e.chainId).sort()).toEqual([88, 99]);
+    });
+
     it('counts errors and notices apart', () => {
       seedCache({
         chains: [chain(88, 'Viction', 'VIC', 889, 'TOMO')],
@@ -273,7 +279,7 @@ describe('validation — L2BEAT cross-source rules', () => {
     it('reports an endpoint listed for a chain that serves another, and nothing else', () => {
       seedCache({
         chains: [
-          { chainId: 42429, name: 'Tempo Testnet Andantino (Deprecated)', tags: ['Testnet'], relations: [], status: 'deprecated' },
+          { chainId: 42429, name: 'Tempo Testnet Andantino (Deprecated)', tags: ['Testnet'], relations: [], status: 'deprecated', rpc: ['https://rpc.testnet.tempo.xyz'] },
           { chainId: 42431, name: 'Tempo Testnet Moderato', tags: ['Testnet'], relations: [] }
         ],
         rpcHealth: {
@@ -288,6 +294,14 @@ describe('validation — L2BEAT cross-source rules', () => {
       // Not "a deprecated chain still serves blocks": its endpoint is another chain's.
       expect(findErrorsForRule(report, 19)).toHaveLength(0);
       expect(report.summary.rule21).toBe(1);
+    });
+
+    it('forgets an endpoint the chain no longer lists', () => {
+      seedCache({
+        chains: [{ chainId: 42429, name: 'Andantino', tags: ['Testnet'], relations: [], rpc: [] }],
+        rpcHealth: { 42429: [{ url: 'https://rpc.testnet.tempo.xyz', ok: false, failure: 'wrong_chain', servedChainId: 42431 }] }
+      });
+      expect(findErrorsForRule(validateChainData(), 21)).toHaveLength(0);
     });
   });
 

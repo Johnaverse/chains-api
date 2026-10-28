@@ -104,7 +104,7 @@ function noteProviderResponses(results, now) {
   for (const r of results) {
     const provider = providerOf(r.url);
     if (!provider) continue;
-    if (r.failure === 'rate_limited') {
+    if (r.failure === 'rate_limited' || r.throttled) {
       const prev = throttledProviders.get(provider);
       const backoffMs = prev ? Math.min(prev.backoffMs * 2, THROTTLE_BACKOFF_MAX_MS) : THROTTLE_BACKOFF_MS;
       throttledProviders.set(provider, { until: now + backoffMs, backoffMs });
@@ -173,7 +173,11 @@ async function checkRpcEndpoint(url, chainId = null) {
   if (chainId != null && result.blockHeight !== null) {
     try {
       servedChainId = parseBlockHeight(await jsonRpcCall(url, 'eth_chainId', { timeoutMs: RPC_CHECK_TIMEOUT_MS }));
-    } catch { /* no answer: judged on its blocks */ }
+    } catch (err) {
+      // No answer: judged on its blocks. A refusal of our volume still backs the provider off
+      // (noteProviderResponses), though the endpoint served its block.
+      if (err?.kind === 'rate_limited') result.throttled = true;
+    }
   }
   if (servedChainId != null && servedChainId !== Number(chainId)) {
     result.servedChainId = servedChainId;

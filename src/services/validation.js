@@ -428,26 +428,30 @@ function validateRule14NativeCurrencyMismatch(chain, errors) {
 // Coin types several chains use with different native currencies: a derivation path borrowed
 // by convention (EVM chains take Ethereum's 60, BNB-based ones 714), not the chain's own coin.
 // Learned from the registry per validation run, so a coin type joins as more chains share it.
-function sharedCoinTypes(chains) {
-  const symbols = new Map();
+// A coin type is borrowed by a chain when ANOTHER chain using it has the coin type's own symbol as
+// its currency: c8ntinuum (CTM) on 60, which Ethereum (ETH) owns. Viction (VIC) on 889,
+// registered as TOMO, is flagged — no chain with TOMO uses 889 — however many others also do.
+function coinTypeOwners(chains) {
+  const owners = new Map(); // coin type -> chain ids whose currency is its SLIP-44 symbol
   for (const c of chains) {
     const type = c.slip44Info?.coinType;
+    const own = c.slip44Info?.symbol;
     const sym = c.nativeCurrency?.symbol;
-    if (type == null || !sym) continue;
-    if (!symbols.has(type)) symbols.set(type, new Set());
-    symbols.get(type).add(String(sym).toUpperCase());
+    if (type == null || !own || !sym || String(own).toUpperCase() !== String(sym).toUpperCase()) continue;
+    if (!owners.has(type)) owners.set(type, new Set());
+    owners.get(type).add(c.chainId);
   }
-  return new Set([...symbols].filter(([, set]) => set.size > 1).map(([type]) => type));
+  return owners;
 }
 
-function validateRule15Slip44NativeSymbolMismatch(chain, errors, shared = new Set()) {
+function validateRule15Slip44NativeSymbolMismatch(chain, errors, owners = new Map()) {
   const slip44Symbol = chain.slip44Info?.symbol;
   const nativeSymbol = chain.nativeCurrency?.symbol;
 
   if (!slip44Symbol || !nativeSymbol) return;
   if (slip44Symbol.toUpperCase() === nativeSymbol.toUpperCase()) return;
-  // Only a coin type of the chain's own can say its currency is misnamed.
-  if (shared.has(chain.slip44Info?.coinType)) return;
+  // A coin type another chain owns was borrowed: the derivation path, not this chain's coin.
+  if ([...(owners.get(chain.slip44Info?.coinType) ?? [])].some(id => id !== chain.chainId)) return;
 
   errors.push({
     rule: 15,
@@ -586,7 +590,10 @@ function validateRule19DeprecatedRpcAnswers(chain, errors) {
 // the registry entry is wrong, not the endpoint — Tempo's deprecated Andantino listing Moderato's
 // RPC read as "a deprecated chain still serves blocks" (rule 19) before the check existed.
 function validateRule21RpcServesAnotherChain(chain, errors) {
-  const wrong = (cachedData.rpcHealth?.[chain.chainId] ?? []).filter(r => r.failure === 'wrong_chain' && Number.isFinite(r.servedChainId));
+  // Only URLs the chain still lists: a reload keeps rpcHealth, and an endpoint the registry has
+  // since removed is no longer its error.
+  const listed = new Set((chain.rpc ?? []).map(r => (typeof r === 'string' ? r : r?.url)).filter(Boolean));
+  const wrong = (cachedData.rpcHealth?.[chain.chainId] ?? []).filter(r => r.failure === 'wrong_chain' && Number.isFinite(r.servedChainId) && listed.has(r.url));
   if (wrong.length === 0) return;
   const nameOf = (id) => cachedData.indexed?.byChainId?.[id]?.name ?? null;
   errors.push({
@@ -633,7 +640,7 @@ function validateChain(chain, errors, context = {}) {
   validateRule12RpcBlockHeightDrift(chain, errors);
   validateRule13NameDisagreement(chain, errors);
   validateRule14NativeCurrencyMismatch(chain, errors);
-  validateRule15Slip44NativeSymbolMismatch(chain, errors, context.sharedCoinTypes);
+  validateRule15Slip44NativeSymbolMismatch(chain, errors, context.coinTypeOwners);
   validateRule16RpcUrlInOneSourceOnly(chain, errors);
   validateRule17ActiveChildOfDeprecatedParent(chain, errors, cachedData.indexed.byChainId);
   validateRule18NoReachableRpc(chain, errors);
@@ -657,7 +664,7 @@ export function validateChainData() {
   learnNetworkWords(cachedData.indexed.all ? getAllChains() : Object.values(cachedData.indexed.byChainId));
 
   const chains = Object.values(cachedData.indexed.byChainId);
-  const context = { sharedCoinTypes: sharedCoinTypes(chains) };
+  const context = { coinTypeOwners: coinTypeOwners(chains) };
   chains.forEach(chain => {
     validateChain(chain, errors, context);
   });
