@@ -58,9 +58,12 @@ describe('rpcHealthDb', () => {
     expect(pool.rows.get(7)).toMatchObject({ checked_at: 5, changed_at: 5 });
   });
 
-  it('degrades to null / false when the database is unreachable', async () => {
-    _setCreatePoolForTests(async () => { throw new Error('ECONNREFUSED'); });
+  it('degrades to null / false when the database is unreachable, without retrying every call', async () => {
+    const failing = vi.fn(async () => { throw new Error('ECONNREFUSED'); });
+    _setCreatePoolForTests(failing);
     expect(await saveChainRpcHealthDb(1, [], { changed: true })).toBe(false);
     expect(await loadAllRpcHealthDb()).toBeNull();
+    expect(await saveChainRpcHealthDb(2, [], { changed: true })).toBe(false);
+    expect(failing).toHaveBeenCalledTimes(1);
   });
 });

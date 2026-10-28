@@ -27,7 +27,11 @@ let createPoolImpl = defaultCreatePool;
 let pool = null;
 let initPromise = null;
 let lastWarnAt = 0;
+let retryAt = 0;
 const WARN_EVERY_MS = 60000;
+// After a failed connect, the file store is used for this long before trying again — not on
+// every chain check (about one a second).
+const RETRY_AFTER_MS = 60000;
 
 export function rpcHealthDbConfigured() {
   return Boolean(CHAINS_API_DB_HOST && CHAINS_API_DB_USER && CHAINS_API_DB_PASSWORD);
@@ -53,6 +57,7 @@ async function defaultCreatePool() {
 /** The pool, with the table created; null when unconfigured or unreachable (warned once). */
 export async function rpcHealthDb() {
   if (!rpcHealthDbConfigured()) return null;
+  if (!initPromise && Date.now() < retryAt) return null;
   initPromise ??= (async () => {
     try {
       const p = await createPoolImpl();
@@ -61,8 +66,9 @@ export async function rpcHealthDb() {
       logger.info({ host: CHAINS_API_DB_HOST, database: CHAINS_API_DB_NAME }, 'RPC health stored in MariaDB');
       return p;
     } catch (err) {
-      logger.warn({ err: err.message }, 'RPC health database unavailable; using the file store');
-      // Retry on a later call rather than never.
+      warn(err, 'RPC health database unavailable; using the file store');
+      // Retry later rather than never, and not on every call meanwhile.
+      retryAt = Date.now() + RETRY_AFTER_MS;
       initPromise = null;
       return null;
     }
@@ -144,4 +150,5 @@ export function _setCreatePoolForTests(fn) {
   pool = null;
   initPromise = null;
   lastWarnAt = 0;
+  retryAt = 0;
 }
