@@ -184,7 +184,8 @@ async function renderChainProfile(chainId, { keepScroll = false } = {}) {
     stopProfileHead();
     profile.graphResize?.disconnect();
     clear(root);
-    if (!keepScroll) byId('view-chain')?.scrollTo(0, 0);
+    // The document scrolls, not the view: a profile opened from the foot of another starts at its top.
+    if (!keepScroll) window.scrollTo(0, 0);
 
     const known = state.byId.get(chainId);
     const hero = el('div', { class: 'pf-hero' });
@@ -985,6 +986,10 @@ const words = v => String(v ?? '').replace(/_/g, ' ');
 // Metrics whose text value says what it is ("NVMe SSD", "Ubuntu 22.04", "AMD EPYC").
 const HW_SELF_NAMED = new Set(['storage_type', 'os_version', 'version', 'model']);
 
+// "a few cores per VDF" with unit "cores": the text already says it.
+function textHasUnit(r) {
+    return typeof r.value === 'string' && r.unit && r.value.toLowerCase().includes(String(r.unit).toLowerCase());
+}
 function hwValue(r) {
     // A yes/no requirement ("public_ip": true) is the requirement's name, or its absence; with the
     // generic metric it is the component itself ("GPU: not required").
@@ -995,7 +1000,7 @@ function hwValue(r) {
     const unit = r.unit ? ` ${r.unit}` : '';
     const v = r.qualifier === 'range' && (r.min != null || r.max != null)
         ? `${r.min ?? '?'}–${r.max ?? '?'}${unit}`
-        : `${HW_QUALIFIER[r.qualifier] ?? ''}${typeof r.value === 'number' ? r.value.toLocaleString() : (r.value ?? '?')}${r.value != null ? unit : ''}`;
+        : `${HW_QUALIFIER[r.qualifier] ?? ''}${typeof r.value === 'number' ? r.value.toLocaleString() : (r.value ?? '?')}${r.value != null && !textHasUnit(r) ? unit : ''}`;
     // The metric is named unless it is what the component means by default.
     const plain = { cpu: ['cores'], memory: ['capacity'], storage: ['capacity'], network: ['bandwidth'], operating_system: ['os_version'] };
     // …or when the unit already says it ("8 threads", "50,000 IOPS"), or the value names itself
@@ -1038,11 +1043,41 @@ function hwProfile(p, shared) {
     }
     return el('div', { class: 'pf-hw-profile' }, [
         head,
+        ...hwCaveats(p),
         ...rows,
         p.notes ? longNote(p.notes) : null,
         p.dependencies?.length ? hwDependencies(p.dependencies) : null,
         p.evidence?.length ? el('div', { class: 'pf-hw-note' }, p.evidence.slice(0, 3).flatMap((u, i) => [i ? ' · ' : null, extLink(u, safeHost(u) || 'source')])) : null
     ]);
+}
+
+// What a profile applies to beyond role and level: the condition it is for, how far its sizing
+// was established, the era of state it serves, a snapshot it starts from, and the role it is a
+// prerequisite for.
+const HW_PROFILE_SIZING = { not_established: 'sizing not established', partial: 'sizing partly established' };
+function hwSnapshot(a) {
+    const sizes = (a.sizes || []).map(z => `${z.value} ${z.unit}`).join(' / ');
+    const what = [words(a.type), a.file, sizes].filter(Boolean).join(' · ');
+    return el('div', { class: 'pf-hw-caveat' }, [
+        el('span', { class: 'pf-hw-label', text: 'Snapshot ' }),
+        a.url ? extLink(a.url, what || safeHost(a.url)) : el('span', { text: what })
+    ]);
+}
+function hwCaveats(p) {
+    const out = [];
+    const line = (label, text) => out.push(el('div', { class: 'pf-hw-caveat' }, [el('span', { class: 'pf-hw-label', text: `${label} ` }), el('span', { text })]));
+    if (p.requiredWhen) line('Applies when', p.requiredWhen);
+    if (p.historicalStateEra) line('Era', `${p.historicalStateEra} state`);
+    if (HW_PROFILE_SIZING[p.sizing]) out.push(el('div', { class: 'pf-hw-caveat dim', text: HW_PROFILE_SIZING[p.sizing] }));
+    if (p.snapshotArtifact) out.push(hwSnapshot(p.snapshotArtifact));
+    for (const pre of p.prerequisiteFor || []) {
+        out.push(el('div', { class: 'pf-hw-caveat' }, [
+            el('span', { class: 'pf-hw-label', text: 'Prerequisite for ' }),
+            el('span', { text: [words(pre.role), pre.requiredWhen].filter(Boolean).join(' — ') }),
+            pre.notes ? longNote(pre.notes) : null
+        ]));
+    }
+    return out;
 }
 
 // Services a profile also needs that its own figures do not cover (Etherlink's operator-run

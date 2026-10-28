@@ -74,6 +74,7 @@ describe('hwValue', () => {
     expect(hwValue({ component: 'storage', metric: 'growth', value: '~100 GB / 6 months', qualifier: 'as_stated' })).toBe('growth ~100 GB / 6 months');
     expect(hwValue({ component: 'network', metric: 'ports', value: '26656 TCP', qualifier: 'as_stated' })).toBe('ports 26656 TCP');
     expect(hwValue({ component: 'gpu', metric: 'other', value: false, qualifier: 'as_stated' })).toBe('not required');
+    expect(hwValue({ component: 'cpu', metric: 'cores', value: 'a few cores per VDF', unit: 'cores', qualifier: 'as_stated' })).toBe('a few cores per VDF');
   });
 });
 
