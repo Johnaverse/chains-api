@@ -18,9 +18,11 @@ function trimUrl(token) {
 export const linksIn = (text) => [...String(text).matchAll(INLINE_TOKENS)].filter((m) => m[3] != null).map((m) => trimUrl(m[3]));
 
 // Fields whose value IS a link (a URL field, or a list of them): `url`, `infoURL`, `sourceUrl`,
-// `href`, `link`, `website`, `homepage`. A URL-shaped `summary` or `title` is free text a source
-// wrote, so it is not one.
-const LINK_FIELD = /(?:^|[_-])(?:urls?|uris?|hrefs?|links?|website|homepage)$|(?:Url|URL|Uri)s?$/i;
+// `href`, `link`, `website`, `homepage`; research citations (`sources`, `evidence` — hardware
+// profiles, dependencies, research items); endpoint lists (`rpc`, `firehose`, `substreams`). A
+// URL-shaped `summary` or `title` is free text a source wrote, so it is not one. Only a value that
+// is wholly a URL is taken, whatever the field.
+const LINK_FIELD = /(?:^|[_-])(?:urls?|uris?|hrefs?|links?|website|homepage|sources|evidence|rpc|firehose|substreams)$|(?:Url|URL|Uri)s?$/i;
 
 /**
  * The http(s) URLs a tool result gives in its link fields — an incident's `url`, a chain's
@@ -60,6 +62,14 @@ export function fieldLinks(text) {
  * neither.
  */
 export function limitLinks(text, trusted) {
+  // The dashboard renders each line, and each cell of a table row, on its own (public/app.js
+  // renderMarkdown): a code or bold span never reaches across them, so neither does this.
+  return String(text).split('\n').map((line) => (/^\s*\|/.test(line)
+    ? line.split('|').map((cell) => limitInline(cell, trusted)).join('|')
+    : limitInline(line, trusted))).join('\n');
+}
+
+function limitInline(text, trusted) {
   return String(text).replace(INLINE_TOKENS, (whole, code, bold, raw) => {
     if (raw == null) return whole;
     const url = trimUrl(raw);

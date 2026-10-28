@@ -97,6 +97,26 @@ describe('third-party text in tool results (OWASP LLM01/LLM06)', () => {
     expect(limitLinks('Docs: https://docs.example. RPC: `https://rpc.other.example`', trusted)).toBe('Docs: https://docs.example. RPC: `https://rpc.other.example`');
   });
 
+  it('checks each line and table cell, as the dashboard renders them', () => {
+    const none = new Set();
+    // Bold and code never span lines or cells on the dashboard, so they shelter nothing there.
+    expect(limitLinks('**Notice\nhttps://evil.example/claim\n**', none)).toBe('**Notice\nevil.example (link not from a source)\n**');
+    expect(limitLinks('`a\nhttps://evil.example/x\n`', none)).toBe('`a\nevil.example (link not from a source)\n`');
+    expect(limitLinks('| **a | https://evil.example/x | b** |', none)).toBe('| **a | evil.example (link not from a source) | b** |');
+    // Within one line they still do.
+    expect(limitLinks('RPC: `https://rpc.example`', none)).toBe('RPC: `https://rpc.example`');
+  });
+
+  it('trusts citation and endpoint fields as link fields', () => {
+    const result = JSON.stringify({
+      profiles: [{ sources: ['https://docs.example/hw'], dependencies: [{ sources: ['https://docs.example/l1'] }] }],
+      research: { items: [{ evidence: ['https://paper.example/1'] }] },
+      rpc: ['https://rpc.example'], firehose: ['https://fh.example'], substreams: ['https://ss.example'],
+      notes: 'https://evil.example/in-free-text'
+    });
+    expect(fieldLinks(result).sort()).toEqual(['https://docs.example/hw', 'https://docs.example/l1', 'https://fh.example', 'https://paper.example/1', 'https://rpc.example', 'https://ss.example']);
+  });
+
   it('trims a long run of punctuation in linear time', () => {
     const started = Date.now();
     limitLinks(`https://x.example/${'!'.repeat(50000)}x`, new Set());
