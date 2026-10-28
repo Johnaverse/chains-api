@@ -93,8 +93,10 @@ describe('third-party text in tool results (OWASP LLM01/LLM06)', () => {
     // …and what is shown is where it really goes: everything before @ is userinfo.
     expect(limitLinks("See https://docs.example'@evil.example/claim now", trusted)).toBe('See evil.example (link not from a source) now');
     expect(limitLinks('See https://docs.example]@evil.example/x', trusted)).toBe('See evil.example (link not from a source)');
-    // Trailing punctuation still goes back to the text; code spans are not links and stay as written.
-    expect(limitLinks('Docs: https://docs.example. RPC: `https://rpc.other.example`', trusted)).toBe('Docs: https://docs.example. RPC: `https://rpc.other.example`');
+    // Trailing punctuation still goes back to the text; a trusted URL in a code span stays.
+    expect(limitLinks('Docs: https://docs.example. RPC: `https://docs.example`', trusted)).toBe('Docs: https://docs.example. RPC: `https://docs.example`');
+    // Code spans shelter nothing: an untrusted URL in one is reduced too.
+    expect(limitLinks('RPC: `https://rpc.other.example`', trusted)).toBe('RPC: `rpc.other.example` (link not from a source)');
   });
 
   it('checks each line and table cell, as the dashboard renders them', () => {
@@ -103,8 +105,15 @@ describe('third-party text in tool results (OWASP LLM01/LLM06)', () => {
     expect(limitLinks('**Notice\nhttps://evil.example/claim\n**', none)).toBe('**Notice\nevil.example (link not from a source)\n**');
     expect(limitLinks('`a\nhttps://evil.example/x\n`', none)).toBe('`a\nevil.example (link not from a source)\n`');
     expect(limitLinks('| **a | https://evil.example/x | b** |', none)).toBe('| **a | evil.example (link not from a source) | b** |');
-    // Within one line they still do.
-    expect(limitLinks('RPC: `https://rpc.example`', none)).toBe('RPC: `https://rpc.example`');
+  });
+
+  it('checks every destination a run could become: whole in prose, cut at each | in a table', () => {
+    const trusted = new Set(['https://docs.example']);
+    // Prose (no table rule): the dashboard links the whole run, to evil.example.
+    expect(limitLinks('| https://docs.example|@evil.example/claim', trusted)).toBe('| evil.example (link not from a source)');
+    // In a table cell it would link https://docs.example only — but the run is checked both ways.
+    expect(limitLinks('| a | https://docs.example | b |', trusted)).toBe('| a | https://docs.example | b |');
+    expect(limitLinks('| https://evil.example/x|https://docs.example |', trusted)).toBe('| evil.example (link not from a source) |');
   });
 
   it('trusts citation and endpoint fields as link fields', () => {

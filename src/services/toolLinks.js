@@ -4,9 +4,6 @@
  * link fields before truncation) and the loop (assistant.js).
  */
 
-// The dashboard's own inline tokens (public/app.js INLINE_MD): a code span, bold, or a bare URL —
-// only the last is made a link, so only it is checked, cut exactly as the dashboard cuts it.
-const INLINE_TOKENS = /`([^`]+)`|\*\*([^*]+)\*\*|(https?:\/\/[^\s<)]+)/g;
 const TRAILING = new Set(['.', ',', ';', ':', '!', '?', "'", '"']);
 // Trailing punctuation goes back to the text, as on the dashboard. A loop, not /[…]+$/, which is
 // quadratic on a long run of punctuation.
@@ -15,7 +12,6 @@ function trimUrl(token) {
   while (end > 0 && TRAILING.has(token[end - 1])) end--;
   return token.slice(0, end);
 }
-export const linksIn = (text) => [...String(text).matchAll(INLINE_TOKENS)].filter((m) => m[3] != null).map((m) => trimUrl(m[3]));
 
 // Fields whose value IS a link (a URL field, or a list of them): `url`, `infoURL`, `sourceUrl`,
 // `href`, `link`, `website`, `homepage`; research citations (`sources`, `evidence` — hardware
@@ -38,7 +34,7 @@ export function fieldLinks(text) {
   }
   const out = [];
   const take = (v) => {
-    if (typeof v === 'string' && /^https?:\/\/\S+$/.test(v.trim())) out.push(trimUrl(v.trim()));
+    if (typeof v === 'string' && /^https?:\/\/\S+$/.test(v.trim())) out.push(trimForCheck(v.trim()));
     else if (Array.isArray(v)) v.forEach(take);
   };
   const walk = (v) => {
@@ -54,29 +50,44 @@ export function fieldLinks(text) {
   return out;
 }
 
+// Every run the dashboard could make a link of: its URL pattern (public/app.js INLINE_MD) without
+// the code/bold alternatives — a link never extends past such a run.
+const LINK_RUNS = /https?:\/\/[^\s<)]+/g;
+// Also cut when checking: a URL ending in a code or bold span's closing mark is that URL.
+const CHECK_TRAILING = new Set([...TRAILING, '`', '*']);
+function trimForCheck(token) {
+  let end = token.length;
+  while (end > 0 && CHECK_TRAILING.has(token[end - 1])) end--;
+  return token.slice(0, end);
+}
+
 /**
  * The answer with only links it may carry: those a tool result gave in a link field, or the user
  * wrote. The dashboard turns bare URLs into links, so a phishing link a planted forum post talked
- * the model into repeating would otherwise reach the reader clickable (OWASP LLM01/LLM06). Others
- * become their host, marked as such. Code and bold spans are left alone: the dashboard links
- * neither.
+ * the model into repeating would otherwise reach the reader clickable (OWASP LLM01/LLM06).
+ *
+ * Not a mirror of the renderer — every mismatch with it was a way through. Each maximal run is
+ * checked as every destination it could become: the whole run (prose), and the run cut at each
+ * `|` (a table cell); code and bold spans make no shorter link, only none. A run is kept only when
+ * every one is trusted; otherwise it becomes its host, "(link not from a source)", with no scheme
+ * left for the dashboard to link.
  */
-export function limitLinks(text, trusted) {
-  // The dashboard renders each line, and each cell of a table row, on its own (public/app.js
-  // renderMarkdown): a code or bold span never reaches across them, so neither does this.
-  return String(text).split('\n').map((line) => (/^\s*\|/.test(line)
-    ? line.split('|').map((cell) => limitInline(cell, trusted)).join('|')
-    : limitInline(line, trusted))).join('\n');
-}
+/** The links the user wrote, as the check compares them. */
+export const linksIn = (text) => (String(text).match(LINK_RUNS) ?? []).map((raw) => trimForCheck(trimUrl(raw)));
 
-function limitInline(text, trusted) {
-  return String(text).replace(INLINE_TOKENS, (whole, code, bold, raw) => {
-    if (raw == null) return whole;
+export function limitLinks(text, trusted) {
+  return String(text).replace(LINK_RUNS, (raw) => {
     const url = trimUrl(raw);
     const tail = raw.slice(url.length);
-    if (trusted.has(url)) return whole;
+    const candidates = [trimForCheck(url)];
+    for (let i = raw.indexOf('|'); i !== -1; i = raw.indexOf('|', i + 1)) candidates.push(trimForCheck(raw.slice(0, i)));
+    const destinations = candidates.filter((c) => /^https?:\/\/./.test(c));
+    if (destinations.every((c) => trusted.has(c))) return raw;
+    // A code or bold span's closing mark stays right after the host, so the span still closes.
+    const checked = trimForCheck(url);
+    const marks = url.slice(checked.length);
     let host = null;
-    try { host = new URL(url).host; } catch { /* not a URL */ }
-    return `${host ?? 'a link'} (link not from a source)${tail}`;
+    try { host = new URL(checked).host; } catch { /* not a URL */ }
+    return `${host ?? 'a link'}${marks} (link not from a source)${tail}`;
   });
 }
