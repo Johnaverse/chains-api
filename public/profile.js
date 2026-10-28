@@ -19,6 +19,9 @@ const profile = {
     depth: 2,
     hiddenRoles: new Set(),
     graphResize: null,
+    // The profile's block-head poller, apart from the drawer's: opening a client in the drawer
+    // over the profile stops the drawer's timer, which must not freeze this one.
+    headTimer: null,
     pageTitle: null
 };
 const PROFILE_CACHE_MS = 60000;
@@ -62,8 +65,32 @@ function openChainProfile(chainId, opts = {}) {
     renderChainProfile(chainId, { keepScroll: same });
 }
 
+function stopProfileHead() {
+    if (profile.headTimer) { clearInterval(profile.headTimer); profile.headTimer = null; }
+}
+function startProfileHead(urls, cell) {
+    stopProfileHead();
+    let liveUrl = null;
+    const poll = async () => {
+        const timer = profile.headTimer;
+        for (const u of (liveUrl ? [liveUrl, ...urls] : urls)) {
+            const n = await rpcBlockNumber(u);
+            if (timer !== profile.headTimer) return;
+            if (n != null) {
+                liveUrl = u;
+                cell.textContent = `#${n.toLocaleString()}`;
+                cell.title = `Polled directly from your browser via ${safeHost(u) || u}`;
+                return;
+            }
+        }
+        if (timer === profile.headTimer && !liveUrl) cell.textContent = 'unreachable from this browser';
+    };
+    profile.headTimer = setInterval(poll, 5000);
+    poll();
+}
+
 function leaveChainProfile() {
-    stopBlockHead();
+    stopProfileHead();
     Viz.hideTip();
     profile.graphResize?.disconnect();
     profile.graphResize = null;
@@ -112,8 +139,10 @@ async function renderChainProfile(chainId, { keepScroll = false } = {}) {
     const root = byId('chainProfile');
     if (!root) return;
     const token = ++profile.renderToken;
-    const live = () => token === profile.renderToken && chainOnScreen(chainId);
-    stopBlockHead();
+    // The profile's own answers count only while the profile shows this chain, not when the
+    // same chain is open in the drawer.
+    const live = () => token === profile.renderToken && activeView === 'chain' && profileChainId === chainId;
+    stopProfileHead();
     profile.graphResize?.disconnect();
     clear(root);
     if (!keepScroll) byId('view-chain')?.scrollTo(0, 0);
@@ -733,7 +762,7 @@ function renderProfileRpc(card, chainId, mon, eps, kpi) {
     const head = el('span', { class: 'mono', text: '…' });
     body.appendChild(detailRow('Block head', head));
     const browserUrls = [...new Set([...working.map(r => r.url), ...listed])].filter(u => u.startsWith('http') && !u.includes('${'));
-    if (browserUrls.length) startBlockHead(browserUrls, head); else head.textContent = '—';
+    if (browserUrls.length) startProfileHead(browserUrls, head); else head.textContent = '—';
 
     if (!urls.length) body.appendChild(emptyNote('No RPC endpoints in any registry.'));
     const order = u => {
@@ -840,9 +869,11 @@ function renderProfileActivity(card, c, l2b, kpi) {
     if (m) {
         if (m.chainType) row('Chain type', m.chainType);
         if (!l2b && m.stack) row('Stack', m.stack);
-        if (m.users != null) {
-            row('Active addresses', fmtNum(m.users), 'Daily active addresses, from growthepie');
-            kpi.users = { label: 'Active addresses', value: fmtNum(m.users), sub: 'daily · growthepie' };
+        const daa = m.metrics?.daa;
+        if (Number.isFinite(daa?.value)) {
+            const asOf = daa.date ? ` on ${daa.date}` : '';
+            row('Daily active addresses', fmtNum(daa.value), `Daily active addresses${asOf}, from growthepie`);
+            kpi.users = { label: 'Daily active addresses', value: fmtNum(daa.value), sub: `${daa.date || 'latest day'} · growthepie` };
         }
         if (m.txcostMedianUsd != null) {
             row('Median tx cost', `$${m.txcostMedianUsd}`, 'Median transaction fee, from growthepie');
