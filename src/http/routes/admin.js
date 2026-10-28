@@ -226,12 +226,23 @@ export async function adminRoutes(fastify) {
     }
   });
 
-  fastify.get('/validate', async (_request, reply) => {
+  fastify.get('/validate', {
+    schema: {
+      querystring: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          chainId: { type: 'integer', description: 'Only the findings about this chain (a chain profile reads these, not the whole report)' }
+        }
+      }
+    }
+  }, async (request, reply) => {
     const validationResults = validateChainData();
     if (validationResults.error) {
       return sendError(reply, 503, validationResults.error);
     }
-    return validationResults;
+    const { chainId } = request.query;
+    return chainId == null ? validationResults : findingsForChain(validationResults, chainId);
   });
 
   // Separate from /validate rather than folded into it: that one is synchronous over the
@@ -328,3 +339,15 @@ export async function adminRoutes(fastify) {
     };
   });
 }
+
+// One chain's slice of the report: its findings, by rule, with only the rules that have any.
+export function findingsForChain(results, chainId) {
+  const allErrors = (results.allErrors || []).filter(e => e.chainId === chainId);
+  const errorsByRule = {};
+  for (const [rule, list] of Object.entries(results.errorsByRule || {})) {
+    const mine = (list || []).filter(e => e.chainId === chainId);
+    if (mine.length) errorsByRule[rule] = mine;
+  }
+  return { chainId, totalErrors: allErrors.length, errorsByRule, allErrors };
+}
+

@@ -842,6 +842,8 @@ The latest release of one client repository, answering the questions an operator
 
 Errors: **400** for a repo that is not `owner/repo` or a GitHub/GitLab URL; **404** when the feed records no release for the repository (or component); 502/503 as above.
 
+**Chain profile pages:** every network has a page at `<dashboard>/chains/<id>` (e.g. `https://www.johnaverse.cc/chains-api/chains/1`, or `/ui/chains/1` on the API), opened from the chain drawer's *Full profile* link or any related-chain link. It gathers `/chains/:id`, `/relations/:id/graph` (an interactive relationship graph, direct and second hop, with the same relations listed by source), `/endpoints/:id` joined to `/rpc-monitor/:id`, `/clients/:id`, `/client-releases/networks/:id`, `/forks` and `/timeline` for the chain, open incidents, L2BEAT and growthepie figures, research, `/validate?chainId=` findings and the raw records. GitHub Pages has no rewrites, so the deploy writes `404.html` as the app with a `<base>` at the site root; the API serves `/ui/chains/:id` the same way (`src/http/appShell.js`).
+
 **Dashboard:** Activity → **Releases** lists `/client-releases?limit=200` (the *Forks only* toggle re-reads with `fork=true`) with chain and client filters; each card shows the repo linked to its release, version/tag, `pre-release` / `mandatory` badges, published time, the AI summary, a fork line (name, network, activation — a time only when one was stated, plus block/epoch/slot/timestamp — and state) and its chains (labelled *Repository networks* when the notes named none). The chain drawer gains a **Clients** section from `/client-releases/networks/:chainId`, where *Supports N networks* expands the client's other networks (each opens that chain). Both stay hidden when the API answers 503.
 
 ### `POST /reload`
@@ -858,6 +860,8 @@ Reload data from all sources.
 
 ### `GET /validate`
 Validate chain data for potential human errors across all three data sources.
+
+`?chainId=<id>` returns only that chain's findings (`chainId`, `totalErrors`, `errorsByRule` with the rules that have any, `allErrors`) — what a chain's profile page reads.
 
 This endpoint analyzes the chain data and identifies potential inconsistencies or errors based on the following rules:
 

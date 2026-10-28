@@ -592,7 +592,8 @@ function initAppbarHeight() {
 }
 
 // ─────────────────────────────── tabs / routing ──────────────────────────
-const VIEWS = ['overview', 'networks', 'graph', 'incidents', 'providers', 'timeline', 'news', 'forum', 'releases'];
+// 'chain' is a network's profile page (profile.js), reached by its own path rather than a tab.
+const VIEWS = ['overview', 'networks', 'graph', 'incidents', 'providers', 'timeline', 'news', 'forum', 'releases', 'chain'];
 // The five feed views share one top-level "Activity" tab; the strip built by
 // initSubTabs() inside each of their sections picks between them. URLs are
 // untouched — ?view=news still deep-links, it just lights up Activity + News.
@@ -604,6 +605,22 @@ let searchQuery = '';
 let openChainId = null;
 // The client whose detail the drawer shows (registry id, e.g. github:bnb-chain/bsc), when it shows one.
 let openClientId = null;
+// The chain whose profile page is open, at <base>chains/<id>.
+let profileChainId = null;
+// Where the app lives: /chains-api/ on Pages, /ui/ on the API. A profile URL is a path under it,
+// and the copy of the page served there carries a <base> pointing back here.
+const APP_BASE = new URL('./', document.baseURI).pathname;
+function profilePathId(pathname = location.pathname) {
+    if (!pathname.startsWith(`${APP_BASE}chains/`)) return null;
+    const m = /^(\d+)\/?$/.exec(pathname.slice(APP_BASE.length + 'chains/'.length));
+    return m ? Number(m[1]) : null;
+}
+function profileHref(chainId) { return `${APP_BASE}chains/${chainId}`; }
+// Whether a chain's detail is on screen — in the drawer or on its profile page. Loaders check it
+// after their fetch so a slow answer for a chain no longer shown is dropped.
+function chainOnScreen(chainId) {
+    return openChainId === chainId || (activeView === 'chain' && profileChainId === chainId);
+}
 
 function initTabs() {
     const tabs = [...document.querySelectorAll('#tabs .tab')];
@@ -652,7 +669,8 @@ function initSubTabs() {
 }
 
 function switchView(view, opts = {}) {
-    if (!VIEWS.includes(view)) view = DEFAULT_VIEW;
+    if (!VIEWS.includes(view) || (view === 'chain' && profileChainId == null)) view = DEFAULT_VIEW;
+    if (activeView === 'chain' && view !== 'chain') leaveChainProfile();
     activeView = view;
     // The Activity tab remembers the feed the reader was on: its dataset.view
     // is updated to the current feed, which also makes the generic
@@ -731,10 +749,12 @@ function applySearch() {
 function updateUrl({ push = false } = {}) {
     const u = new URL(location.href);
     const set = (k, v) => { if (v == null || v === '') u.searchParams.delete(k); else u.searchParams.set(k, v); };
-    set('view', activeView === DEFAULT_VIEW ? null : activeView);
+    const onProfile = activeView === 'chain' && profileChainId != null;
+    u.pathname = onProfile ? profileHref(profileChainId) : APP_BASE;
+    set('view', activeView === DEFAULT_VIEW || onProfile ? null : activeView);
     set('q', searchQuery || null);
-    set('chain', openChainId);
-    set('client', openClientId);
+    set('chain', onProfile ? null : openChainId);
+    set('client', onProfile ? null : openClientId);
     history[push ? 'pushState' : 'replaceState'](null, '', u);
 }
 
@@ -744,6 +764,13 @@ function applyUrlState() {
     searchQuery = q.trim().toLowerCase();
     const input = byId('searchInput');
     if (input && input.value !== q) input.value = q;
+    const profileId = profilePathId();
+    if (profileId != null) {
+        closeDrawer({ fromUrl: true });
+        openChainProfile(profileId, { fromUrl: true });
+        return;
+    }
+    profileChainId = null;
     switchView(params.get('view') || DEFAULT_VIEW, { fromUrl: true });
 
     const chain = params.get('chain');
@@ -4023,7 +4050,8 @@ function openChainDetail(chainId, opts = {}) {
     body.appendChild(el('div', { class: 'd-header' }, [
         el('div', {}, [
             el('h2', { id: 'drawerTitle', text: c.name || `Chain ${c.chainId}` }),
-            badges
+            badges,
+            profileLink(chainId, 'Full profile →', 'd-profile-link')
         ])
     ]));
 
@@ -4151,7 +4179,7 @@ function openChainDetail(chainId, opts = {}) {
 async function loadChainDetail(chainId, box, researchSec) {
     let d = state.byId.get(chainId) || {};
     try { d = { ...d, ...(await api(`/chains/${chainId}`)) }; } catch { /* render what we have */ }
-    if (openChainId !== chainId) return;
+    if (!chainOnScreen(chainId)) return;
     clear(box);
     if (d.family) {
         box.appendChild(detailRow('Family', el('span', {
@@ -4488,7 +4516,7 @@ async function loadForumNews(chainId, box, section) {
         if (!res.ok) return;
         let posts = (await res.json()).news || [];
         posts = [...new Map(posts.map(p => [forumThreadKey(p.url), p])).values()].slice(0, 4);
-        if (openChainId !== chainId || !posts.length) return;
+        if (!chainOnScreen(chainId) || !posts.length) return;
         clear(box);
         for (const p of posts) {
             box.appendChild(el('div', { class: 'forum-post' }, [
@@ -4508,7 +4536,7 @@ const DRAWER_FORK_ROWS = 8;
 async function loadChainHardforks(chainId, section) {
     let d;
     try { d = await api(`/timeline?chainId=${chainId}&type=hardfork&limit=100`); } catch { return; }
-    if (openChainId !== chainId) return;
+    if (!chainOnScreen(chainId)) return;
     const forks = d.entries || [];
     if (!forks.length) return;
     const list = el('div', { class: 'fork-list' });
@@ -4571,7 +4599,7 @@ async function loadLiveRpc(chainId, box, headCell) {
     if (endpointsRes.status === 'fulfilled' && endpointsRes.value) {
         staticUrls = usable(endpointsRes.value.rpc || []);
     }
-    if (openChainId !== chainId) return;
+    if (!chainOnScreen(chainId)) return;
 
     const working = results.filter(r => r.status === 'working' || r.ok === true);
     const failed = results.filter(r => r.status === 'failed');
@@ -4624,7 +4652,7 @@ async function loadLiveRpc(chainId, box, headCell) {
 async function loadLiveClients(chainId, box) {
     try {
         const d = await api(`/clients/${chainId}`);
-        if (openChainId !== chainId) return;
+        if (!chainOnScreen(chainId)) return;
         const clients = d.clients || [];
         if (!clients.length) { box.textContent = 'No client data yet.'; return; }
         clear(box);
@@ -4771,7 +4799,8 @@ async function sendAssistantMessage(text) {
     setAssistantBusy(true);
     const thinking = appendChatThinking();
     try {
-        const context = { view: activeView, ...(openChainId != null ? { chainId: openChainId } : {}) };
+        const shownChain = openChainId ?? (activeView === 'chain' ? profileChainId : null);
+        const context = { view: activeView, ...(shownChain != null ? { chainId: shownChain } : {}) };
         let res = await apiPost('/assistant/chat', { messages: assistant.messages, context });
         // Slow runs return 202 + a job id; poll so a reverse-proxy timeout can
         // never kill a long-held request.
@@ -6418,7 +6447,7 @@ async function loadNetworkClients(chainId, sec) {
         if (isFeedAbsent(err)) setClientFeedConfigured(false);
         return;   // section stays hidden
     }
-    if (openChainId !== chainId) return;
+    if (!chainOnScreen(chainId)) return;
     const clients = (Array.isArray(d.clients) ? d.clients : []).filter(c => c && (c.repo || c.names?.length));
     if (!clients.length) return;
     while (sec.children.length > 1) sec.removeChild(sec.lastChild);
