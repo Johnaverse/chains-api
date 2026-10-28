@@ -164,6 +164,9 @@ function sourceMentions(chainId, sources, { now, chain }) {
       const key = `${f.name.toLowerCase()}|${f.activationTime ?? ''}|${f.activationBlock ?? ''}`;
       if (seen.has(key)) continue;
       seen.add(key);
+      // A placeholder in the code (a fork parked at 2050-01-01) is no more a schedule than in
+      // the node's answer; a height-only entry is kept for the explorer to date.
+      if (f.activationTime && f.activationTime * 1000 - now > NODE_FORK_SCHEDULE_MAX_AHEAD_MS) continue;
       const at = f.activationTime ? new Date(f.activationTime * 1000).toISOString() : null;
       // A height-only fork's state is unknown here: whether the chain reached the height is the
       // explorer's to say (resolveForkActivation), never assumed done.
