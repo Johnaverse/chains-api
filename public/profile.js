@@ -19,9 +19,11 @@ const profile = {
     depth: 2,
     hiddenRoles: new Set(),
     graphResize: null,
-    // The profile's block-head poller, apart from the drawer's: opening a client in the drawer
-    // over the profile stops the drawer's timer, which must not freeze this one.
-    headTimer: null,
+    // The profile's block-head poller (app.js startHeadPoller), apart from the drawer's: opening
+    // a client in the drawer over the profile stops the drawer's, which must not freeze this one.
+    head: { timer: null },
+    // The chain the page was last built for; null while a deep link waits for the bulk data.
+    renderedChain: null,
     pageTitle: null
 };
 const PROFILE_CACHE_MS = 60000;
@@ -57,37 +59,33 @@ function chainProfileLink(chainId) {
 }
 
 function openChainProfile(chainId, opts = {}) {
-    if (openChainId != null) closeDrawer({ fromUrl: true });
     const same = activeView === 'chain' && profileChainId === chainId;
+    // Already showing this chain (history, or applyBulk re-applying the URL): keep the page as
+    // it is — expanded sections, an open drawer — unless it was built before the bulk data.
+    if (same && opts.fromUrl && profile.renderedChain === chainId) return;
+    if (openChainId != null) closeDrawer({ fromUrl: true });
     profileChainId = chainId;
     switchView('chain', { fromUrl: true });
     if (!opts.fromUrl) updateUrl({ push: true });
+    // A deep link opens before the bulk data (names, types, relations, L2BEAT) has loaded. Build
+    // once it has — applyBulk re-applies the URL — or once it has failed (renderPendingProfile).
+    if (!state.chains.length) {
+        profile.renderedChain = null;
+        const root = byId('chainProfile');
+        if (root && !root.querySelector('.pf-loading')) {
+            clear(root);
+            root.appendChild(el('p', { class: 'dim pf-loading', text: 'Loading network…' }));
+        }
+        return;
+    }
     renderChainProfile(chainId, { keepScroll: same });
 }
+// The bulk load failed: build the profile from the per-chain endpoints alone.
+function renderPendingProfile() {
+    if (activeView === 'chain' && profileChainId != null && profile.renderedChain == null) renderChainProfile(profileChainId);
+}
 
-function stopProfileHead() {
-    if (profile.headTimer) { clearInterval(profile.headTimer); profile.headTimer = null; }
-}
-function startProfileHead(urls, cell) {
-    stopProfileHead();
-    let liveUrl = null;
-    const poll = async () => {
-        const timer = profile.headTimer;
-        for (const u of (liveUrl ? [liveUrl, ...urls] : urls)) {
-            const n = await rpcBlockNumber(u);
-            if (timer !== profile.headTimer) return;
-            if (n != null) {
-                liveUrl = u;
-                cell.textContent = `#${n.toLocaleString()}`;
-                cell.title = `Polled directly from your browser via ${safeHost(u) || u}`;
-                return;
-            }
-        }
-        if (timer === profile.headTimer && !liveUrl) cell.textContent = 'unreachable from this browser';
-    };
-    profile.headTimer = setInterval(poll, 5000);
-    poll();
-}
+function stopProfileHead() { stopHeadPoller(profile.head); }
 
 function leaveChainProfile() {
     stopProfileHead();
@@ -139,6 +137,9 @@ async function renderChainProfile(chainId, { keepScroll = false } = {}) {
     const root = byId('chainProfile');
     if (!root) return;
     const token = ++profile.renderToken;
+    // A different chain starts with every relation shown, whatever the last one filtered.
+    if (profile.renderedChain !== chainId) { profile.hiddenRoles.clear(); profile.depth = 2; }
+    profile.renderedChain = chainId;
     // The profile's own answers count only while the profile shows this chain, not when the
     // same chain is open in the drawer.
     const live = () => token === profile.renderToken && activeView === 'chain' && profileChainId === chainId;
@@ -212,8 +213,9 @@ async function renderChainProfile(chainId, { keepScroll = false } = {}) {
         renderProfileIdentity(identityCard, c);
         renderProfileActivity(activityCard, c, l2b, kpi);
         drawKpis();
+        // renderResearch shows the card only when there is something it renders (a block holding
+        // only node-hardware sizing stays hidden).
         if (c.research) renderResearch(c.research, researchCard);
-        researchCard.classList.toggle('hidden', !c.research);
     });
 
     settled(`/relations/${chainId}/graph?depth=2`).then(r => {
@@ -747,13 +749,19 @@ function renderProfileRpc(card, chainId, mon, eps, kpi) {
     const listed = (eps?.rpc || []).map(u => (typeof u === 'string' ? u : u?.url)).filter(Boolean);
     const urls = [...new Set([...probed.keys(), ...listed])];
     const working = [...probed.values()].filter(r => r.status === 'working');
-    if (mon?.totalEndpoints) {
+    // A rate-limited probe is no verdict (the provider refused our volume), so like /stats the
+    // figure judges only endpoints that answered or failed.
+    const judged = [...probed.values()].filter(r => r.status === 'working' || r.status === 'failed');
+    const limited = probed.size - judged.length;
+    if (judged.length) {
         kpi.rpc = {
-            label: 'RPC endpoints', value: `${working.length} / ${probed.size}`,
-            sub: `working of probed · ${fmtNum(urls.length)} listed`,
-            tone: working.length ? (working.length === probed.size ? 'good' : 'warn') : 'critical',
-            meter: probed.size ? (working.length / probed.size) * 100 : null
+            label: 'RPC endpoints', value: `${working.length} / ${judged.length}`,
+            sub: `working of probed${limited ? ` · ${limited} rate-limited` : ''} · ${fmtNum(urls.length)} listed`,
+            tone: working.length ? (working.length === judged.length ? 'good' : 'warn') : 'critical',
+            meter: (working.length / judged.length) * 100
         };
+    } else if (limited) {
+        kpi.rpc = { label: 'RPC endpoints', value: '—', sub: `${limited} probed, all rate-limited · ${fmtNum(urls.length)} listed` };
     } else if (urls.length) {
         kpi.rpc = { label: 'RPC endpoints', value: fmtNum(urls.length), sub: 'listed, not yet probed' };
     }
@@ -762,19 +770,20 @@ function renderProfileRpc(card, chainId, mon, eps, kpi) {
     const head = el('span', { class: 'mono', text: '…' });
     body.appendChild(detailRow('Block head', head));
     const browserUrls = [...new Set([...working.map(r => r.url), ...listed])].filter(u => u.startsWith('http') && !u.includes('${'));
-    if (browserUrls.length) startProfileHead(browserUrls, head); else head.textContent = '—';
+    if (browserUrls.length) startHeadPoller(profile.head, browserUrls, head); else head.textContent = '—';
 
     if (!urls.length) body.appendChild(emptyNote('No RPC endpoints in any registry.'));
     const order = u => {
         const r = probed.get(u);
-        return r ? (r.status === 'working' ? 0 : 1) : u.includes('${') ? 3 : 2;
+        return r ? ({ working: 0, failed: 1 }[r.status] ?? 2) : u.includes('${') ? 4 : 3;
     };
     const rows = urls.sort((a, b) => order(a) - order(b)).map(u => {
         const r = probed.get(u);
         const keyed = u.includes('${');
-        const status = r ? r.status : keyed ? 'needs key' : 'listed';
+        const status = r ? (r.status === 'rate_limited' ? 'rate-limited' : r.status) : keyed ? 'needs key' : 'listed';
+        const dot = r?.status === 'working' ? 'dot-ok' : r?.status === 'failed' ? 'dot-bad' : 'dot-idle';
         return el('div', { class: 'pf-rpc-row' }, [
-            el('span', { class: `dot ${r ? (r.status === 'working' ? 'dot-ok' : 'dot-bad') : 'dot-idle'}` }),
+            el('span', { class: `dot ${dot}` }),
             el('span', { class: 'pf-rpc-url code', title: u, text: u }),
             el('span', { class: 'pf-rpc-state', text: status }),
             el('span', { class: 'pf-rpc-meta dim', text: [r?.blockNumber != null ? `#${r.blockNumber.toLocaleString()}` : null, clientNameVersion(r?.clientVersion), r?.error].filter(Boolean).join(' · ') })

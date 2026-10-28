@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import { createRequire } from 'node:module';
 import { buildApp } from '../../index.js';
+import { clearValidationReport } from '../../src/services/validationReport.js';
 import * as dataService from '../../dataService.js';
 import * as fsPromises from 'node:fs/promises';
 
@@ -1049,6 +1050,9 @@ describe('API Endpoints', () => {
   });
 
   describe('GET /validate', () => {
+    // The report is cached per data load; each test sets its own.
+    beforeEach(() => clearValidationReport());
+
     it('should return validation results for chain data', async () => {
       const response = await app.inject({
         method: 'GET',

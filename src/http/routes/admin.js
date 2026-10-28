@@ -13,6 +13,7 @@ import { getNetworkResearchInfo } from '../../sources/networkResearch.js';
 import { loadData } from '../../services/loader.js';
 import { startRpcHealthCheck, getRpcMonitoringStatus } from '../../services/rpcHealth.js';
 import { validateChainData } from '../../services/validation.js';
+import { validationReport, findingsForChain } from '../../services/validationReport.js';
 import { runIncidentSentinel, inspectCachedIncidents } from '../../services/incidentSentinel.js';
 import { tokenMatches } from '../../util/token.js';
 import { getL2BeatRefreshStatus } from '../../services/l2beatRefresher.js';
@@ -237,7 +238,7 @@ export async function adminRoutes(fastify) {
       }
     }
   }, async (request, reply) => {
-    const validationResults = validateChainData();
+    const validationResults = validationReport(validateChainData);
     if (validationResults.error) {
       return sendError(reply, 503, validationResults.error);
     }
@@ -339,15 +340,3 @@ export async function adminRoutes(fastify) {
     };
   });
 }
-
-// One chain's slice of the report: its findings, by rule, with only the rules that have any.
-export function findingsForChain(results, chainId) {
-  const allErrors = (results.allErrors || []).filter(e => e.chainId === chainId);
-  const errorsByRule = {};
-  for (const [rule, list] of Object.entries(results.errorsByRule || {})) {
-    const mine = (list || []).filter(e => e.chainId === chainId);
-    if (mine.length) errorsByRule[rule] = mine;
-  }
-  return { chainId, totalErrors: allErrors.length, errorsByRule, allErrors };
-}
-

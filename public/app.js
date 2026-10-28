@@ -536,6 +536,7 @@ function applyBulk(payload) {
 
 function showLoadError() {
     byId('loadErrorBanner')?.classList.remove('hidden');
+    if (typeof renderPendingProfile === 'function') renderPendingProfile();
     const o = byId('loadingOverlay');
     if (o) {
         o.querySelector('.spinner')?.classList.add('hidden');
@@ -612,6 +613,14 @@ let profileChainId = null;
 // Where the app lives: /chains-api/ on Pages, /ui/ on the API. A profile URL is a path under it,
 // and the copy of the page served there carries a <base> pointing back here.
 const APP_BASE = new URL('./', document.baseURI).pathname;
+// Relative URLs (the lazily loaded graph library, the summary.json fallback) must keep resolving
+// at the app root after history moves the address to <base>chains/<id>; without a <base> they
+// would follow the address. The profile copy of the page carries one already.
+if (!document.querySelector('base')) {
+    const base = document.createElement('base');
+    base.href = APP_BASE;
+    document.head.prepend(base);
+}
 function profilePathId(pathname = location.pathname) {
     if (!pathname.startsWith(`${APP_BASE}chains/`)) return null;
     const m = /^(\d+)\/?$/.exec(pathname.slice(APP_BASE.length + 'chains/'.length));
@@ -673,7 +682,7 @@ function initSubTabs() {
 
 function switchView(view, opts = {}) {
     if (!VIEWS.includes(view) || (view === 'chain' && profileChainId == null)) view = DEFAULT_VIEW;
-    if (activeView === 'chain' && view !== 'chain') leaveChainProfile();
+    if (activeView === 'chain' && view !== 'chain' && typeof leaveChainProfile === 'function') leaveChainProfile();
     activeView = view;
     // The Activity tab remembers the feed the reader was on: its dataset.view
     // is updated to the current feed, which also makes the generic
@@ -768,7 +777,7 @@ function applyUrlState() {
     const input = byId('searchInput');
     if (input && input.value !== q) input.value = q;
     const profileId = profilePathId();
-    if (profileId != null) {
+    if (profileId != null && typeof openChainProfile === 'function') {
         closeDrawer({ fromUrl: true });
         openChainProfile(profileId, { fromUrl: true });
         return;
@@ -890,7 +899,7 @@ async function loadStatusPages() {
     } catch { /* the drawer simply omits the status-page link */ }
     finally {
         statusPagesReady = true;
-        refreshProfileIncidents();
+        if (typeof refreshProfileIncidents === 'function') refreshProfileIncidents();
     }
 }
 
@@ -1268,7 +1277,7 @@ function repaintIncidentSurfaces() {
     if (activeView === 'networks') {
         try { renderChainsTable(); } catch (err) { console.error('table render failed', err); }
     }
-    if (activeView === 'chain') refreshProfileIncidents();
+    if (activeView === 'chain' && typeof refreshProfileIncidents === 'function') refreshProfileIncidents();
     // Node colours depend on which chains have an open incident.
     if (graphEmphasizeIncidents && myGraph) applyGraphFilter();
 }
@@ -4059,7 +4068,8 @@ function openChainDetail(chainId, opts = {}) {
         el('div', {}, [
             el('h2', { id: 'drawerTitle', text: c.name || `Chain ${c.chainId}` }),
             badges,
-            profileLink(chainId, 'Full profile →', 'd-profile-link')
+            // profile.js may be missing (a cached page from before it): the drawer works without.
+            typeof profileLink === 'function' ? profileLink(chainId, 'Full profile →', 'd-profile-link') : null
         ])
     ]));
 
@@ -4684,17 +4694,23 @@ async function loadLiveClients(chainId, box) {
 }
 
 // ─── client-side block-head polling ──────────────────────────────────────
-let blockHeadTimer = null;
-let blockHeadToken = 0;
-function stopBlockHead() {
-    if (blockHeadTimer) { clearInterval(blockHeadTimer); blockHeadTimer = null; }
+// One poller per surface (the drawer's here, the profile's in profile.js), so closing one never
+// freezes the other. Each sweep tries the endpoints in turn with a short timeout, and a sweep
+// still running when the next tick comes is not doubled.
+const BLOCK_HEAD_TRIES = 8;
+const BLOCK_HEAD_TIMEOUT_MS = 4000;
+const drawerHead = { timer: null };
+function stopHeadPoller(slot) {
+    if (slot.timer) { clearInterval(slot.timer); slot.timer = null; }
 }
+function stopBlockHead() { stopHeadPoller(drawerHead); }
 async function rpcBlockNumber(url) {
     try {
         const res = await fetch(url, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] })
+            body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }),
+            signal: AbortSignal.timeout(BLOCK_HEAD_TIMEOUT_MS)
         });
         if (!res.ok) return null;
         const d = await res.json();
@@ -4702,26 +4718,33 @@ async function rpcBlockNumber(url) {
         return Number.isFinite(n) ? n : null;
     } catch { return null; }
 }
-function startBlockHead(urls, cell) {
-    stopBlockHead();
-    const token = ++blockHeadToken;
+function startHeadPoller(slot, urls, cell) {
+    stopHeadPoller(slot);
+    const tries = urls.slice(0, BLOCK_HEAD_TRIES);
     let liveUrl = null;
+    let busy = false;
+    let timer = null;
     const poll = async () => {
-        for (const u of (liveUrl ? [liveUrl, ...urls] : urls)) {
-            const n = await rpcBlockNumber(u);
-            if (token !== blockHeadToken) return;
-            if (n != null) {
-                liveUrl = u;
-                cell.textContent = `#${n.toLocaleString()}`;
-                cell.title = `Polled directly from your browser via ${safeHost(u) || u}`;
-                return;
+        if (busy) return;
+        busy = true;
+        try {
+            for (const u of (liveUrl ? [liveUrl, ...tries.filter(x => x !== liveUrl)] : tries)) {
+                const n = await rpcBlockNumber(u);
+                if (timer !== slot.timer) return;
+                if (n != null) {
+                    liveUrl = u;
+                    cell.textContent = `#${n.toLocaleString()}`;
+                    cell.title = `Polled directly from your browser via ${safeHost(u) || u}`;
+                    return;
+                }
             }
-        }
-        if (token === blockHeadToken && !liveUrl) cell.textContent = 'unreachable from this browser';
+            if (timer === slot.timer && !liveUrl) cell.textContent = 'unreachable from this browser';
+        } finally { busy = false; }
     };
+    timer = slot.timer = setInterval(poll, 5000);
     poll();
-    blockHeadTimer = setInterval(poll, 5000);
 }
+function startBlockHead(urls, cell) { startHeadPoller(drawerHead, urls, cell); }
 
 // ═════════════════════════════════════════════════════════════════════════
 // Assistant

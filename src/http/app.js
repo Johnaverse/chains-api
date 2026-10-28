@@ -280,8 +280,11 @@ export async function buildApp(options = {}) {
 
   // A chain's profile page: the same app, at a path of its own (public/profile.js).
   const profilePage = appShell(join(__dir, '..', '..', 'public', 'index.html'), '/ui/');
-  fastify.get('/ui/chains/:id', { schema: { params: { type: 'object', properties: { id: { type: 'string', pattern: '^\\d+$' } } } } },
-    async (_request, reply) => reply.type('text/html; charset=utf-8').send(await profilePage()));
+  // With or without a trailing slash, as the page itself accepts both.
+  for (const path of ['/ui/chains/:id', '/ui/chains/:id/']) {
+    fastify.get(path, { schema: { params: { type: 'object', properties: { id: { type: 'string', pattern: '^\\d+$' } } } } },
+      async (_request, reply) => reply.type('text/html; charset=utf-8').send(await profilePage()));
+  }
 
   await fastify.register(rateLimit, {
     max: RATE_LIMIT_MAX,

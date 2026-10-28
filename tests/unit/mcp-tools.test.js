@@ -711,6 +711,18 @@ describe('MCP Tools - Shared Module', () => {
       expect(data.totalErrors).toBe(2);
     });
 
+    it('returns one chain\'s findings with chainId', async () => {
+      vi.mocked(dataService.validateChainData).mockReturnValue({
+        totalErrors: 2,
+        errorsByRule: { rule1: [{ chainId: 1 }], rule2: [{ chainId: 2 }] },
+        summary: {},
+        allErrors: [{ chainId: 1 }, { chainId: 2 }],
+      });
+      const data = JSON.parse((await handleToolCall('validate_chains', { chainId: 1 })).content[0].text);
+      expect(data).toEqual({ chainId: 1, totalErrors: 1, errorsByRule: { rule1: [{ chainId: 1 }] }, allErrors: [{ chainId: 1 }] });
+      expect((await handleToolCall('validate_chains', { chainId: 'x' })).isError).toBe(true);
+    });
+
     it('should return error when data not loaded', async () => {
       vi.mocked(dataService.validateChainData).mockReturnValue({
         error: 'Data not loaded. Please reload data sources first.',
