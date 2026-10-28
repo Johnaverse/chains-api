@@ -1084,6 +1084,7 @@ describe('API Endpoints', () => {
       expect(response.json()).toEqual({
         chainId: 1,
         totalErrors: 1,
+        bySeverity: { error: 1, notice: 0 },
         errorsByRule: { rule1_relation_conflicts: [{ rule: 1, chainId: 1, message: 'a' }] },
         allErrors: [{ rule: 1, chainId: 1, message: 'a' }]
       });

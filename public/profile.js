@@ -899,13 +899,20 @@ function renderProfileQuality(card, chainId, d) {
     if (!d) { body.appendChild(emptyNote('Validation results could not be read.')); return; }
     // Filtered here too: an API from before ?chainId answers with the whole report.
     const findings = (d.allErrors || []).filter(f => f.chainId === chainId);
-    setCardMeta(card, findings.length ? `${findings.length} finding${findings.length === 1 ? '' : 's'}` : 'no findings');
+    const notices = findings.filter(f => f.severity === 'notice').length;
+    setCardMeta(card, findings.length
+        ? `${findings.length - notices} error${findings.length - notices === 1 ? '' : 's'} · ${notices} notice${notices === 1 ? '' : 's'}`
+        : 'no findings');
     if (!findings.length) {
         body.appendChild(emptyNote('No validation rule flags this network: its sources agree with each other and with its probed RPC endpoints.'));
         return;
     }
     body.appendChild(moreList(findings.map(f => el('div', { class: 'pf-finding' }, [
-        el('span', { class: `pill ${f.severity === 'notice' ? 'pill-stage' : 'pill-deprecated'}`, text: `rule ${f.rule}` }),
+        el('span', {
+            class: `pill ${f.severity === 'notice' ? 'pill-stage' : 'pill-deprecated'}`,
+            title: f.severity === 'notice' ? 'Notice: worth knowing, not wrong' : 'Error: a source should fix it',
+            text: `rule ${f.rule} · ${f.severity === 'notice' ? 'notice' : 'error'}`
+        }),
         el('span', { text: f.message || f.type })
     ])), { shown: 6 }));
     body.appendChild(el('div', { class: 'r-foot dim', text: 'Where the sources disagree with each other or with what the chain serves. Each one is a candidate fix upstream.' }));

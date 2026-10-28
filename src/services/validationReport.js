@@ -29,5 +29,7 @@ export function findingsForChain(results, chainId) {
     const mine = (list || []).filter(e => e.chainId === chainId);
     if (mine.length) errorsByRule[rule] = mine;
   }
-  return { chainId, totalErrors: allErrors.length, errorsByRule, allErrors };
+  const bySeverity = { error: 0, notice: 0 };
+  for (const e of allErrors) bySeverity[e.severity === 'notice' ? 'notice' : 'error'] += 1;
+  return { chainId, totalErrors: allErrors.length, bySeverity, errorsByRule, allErrors };
 }

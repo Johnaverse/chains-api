@@ -37,7 +37,7 @@ describe('findingsForChain', () => {
       errorsByRule: { rule1: [{ rule: 1, chainId: 1 }], rule21: [{ rule: 21, chainId: 10 }] }
     };
     expect(findingsForChain(report, 1)).toEqual({
-      chainId: 1, totalErrors: 1, errorsByRule: { rule1: [{ rule: 1, chainId: 1 }] }, allErrors: [{ rule: 1, chainId: 1 }]
+      chainId: 1, totalErrors: 1, bySeverity: { error: 1, notice: 0 }, errorsByRule: { rule1: [{ rule: 1, chainId: 1 }] }, allErrors: [{ rule: 1, chainId: 1 }]
     });
   });
 });

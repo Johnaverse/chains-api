@@ -3,7 +3,8 @@ import { attachForums } from '../sources/forums.js';
 import { attachNetworkResearch } from '../sources/networkResearch.js';
 import { isKnownEolChain } from '../domain/eolChains.js';
 import { findIdentityConflicts, graphChainId } from '../domain/sourceIdentity.js';
-import { networkTypeClaims, resolveNetworkType } from '../domain/networkType.js';
+import { networkTypeClaims, resolveNetworkType, learnHintReliability, setNetworkTypeContext } from '../domain/networkType.js';
+import { learnNetworkWords, testNetworkWords } from '../domain/networkWords.js';
 
 /**
  * Build a mapping of network IDs to chain IDs from The Graph data
@@ -584,16 +585,115 @@ export function indexDefiLlamaSource(defillama, indexed) {
  * The Testnet tag, from every source's claim (src/domain/networkType.js). Runs once all three
  * registries are in, so no single source's hint tags a chain the others call a mainnet.
  */
-function applyNetworkType(indexed, raw) {
+export function applyNetworkType(indexed, raw) {
+  const decided = classifyNetworkTypes(indexed, raw);
   Object.values(indexed.byChainId).forEach(chain => {
-    const id = chain.chainId;
-    const { isTestnet } = resolveNetworkType(networkTypeClaims({
-      chains: raw.chains.get(id), chainlist: raw.chainlist.get(id), theGraph: raw.theGraph.get(id)
-    }));
+    const isTestnet = decided.get(chain.chainId)?.isTestnet === true;
+    if (!Array.isArray(chain.tags)) chain.tags = [];
     const has = chain.tags.includes('Testnet');
     if (isTestnet && !has) chain.tags.unshift('Testnet');
     if (!isTestnet && has) chain.tags = chain.tags.filter(t => t !== 'Testnet');
   });
+}
+
+/**
+ * Raw source entries by chain id, as the indexer and the snapshot path both read them, without the
+ * entries an identity conflict left out of a record (`identityConflicts`: {chainId, excluded}).
+ */
+export function rawEntriesByChainId({ chains, chainlist, theGraph }, identityConflicts = []) {
+  const excluded = new Set((identityConflicts ?? []).flatMap(c => (c.excluded ?? []).map(source => `${source}:${c.chainId}`)));
+  const keep = (source, map) => {
+    for (const id of [...map.keys()]) if (excluded.has(`${source}:${id}`)) map.delete(id);
+    return map;
+  };
+  return {
+    chains: keep('chains', byChainIdMap(Array.isArray(chains) ? chains : [], c => Number(c?.chainId))),
+    chainlist: keep('chainlist', byChainIdMap(Array.isArray(chainlist) ? chainlist : [], c => Number(c?.chainId))),
+    theGraph: keep('theGraph', byChainIdMap(theGraph?.networks ?? [], graphChainId))
+  };
+}
+
+// Each chain's parent as the sources file it (chains.json's, else chainlist's): `eip155-<id>`.
+function parentIdOf(raw, id) {
+  const entry = raw.chains.get(id)?.parent ? raw.chains.get(id) : raw.chainlist.get(id);
+  const m = /^eip155-(\d+)$/.exec(String(entry?.parent?.chain ?? ''));
+  return m ? Number(m[1]) : null;
+}
+
+// Chains on a parent cycle (A under B under A): their parents give no hint, here and in
+// validation alike, so neither can decide the other.
+function parentCycles(raw, ids) {
+  const onCycle = new Set();
+  const done = new Set();
+  for (const start of ids) {
+    const path = [];
+    const index = new Map();
+    let id = start;
+    while (id != null && !done.has(id) && !index.has(id)) {
+      index.set(id, path.length);
+      path.push(id);
+      id = parentIdOf(raw, id);
+    }
+    if (id != null && index.has(id)) for (const c of path.slice(index.get(id))) onCycle.add(c);
+    for (const c of path) done.add(c);
+  }
+  return onCycle;
+}
+
+/**
+ * Mainnet or test network for every chain, and the context (learned test words, decided types,
+ * hint reliability) that validation's rule 2 reads the same claims with. Also run on a snapshot
+ * loaded at startup, which was indexed by another process.
+ *   1. Each chain's own claims — no parent, no hostnames — with hint reliability trained on them.
+ *   2. Test-network words learned from those decisions (no chain is tagged yet when this runs),
+ *      kept as this index's fixed set.
+ *   3. The full claims: hostnames, and the parent's type resolved recursively, so an L3 sees its
+ *      L2's inferred type; a parent on a parent cycle gives no hint. Reliability is retrained on them.
+ * @returns {Map<number, {isTestnet:boolean, decidedBy:object|null}>}
+ */
+export function classifyNetworkTypes(indexed, raw) {
+  const ids = [...new Set([...Object.keys(indexed.byChainId).map(Number), ...raw.chains.keys(), ...raw.chainlist.keys(), ...raw.theGraph.keys()])];
+  const entriesOf = (id) => ({ chains: raw.chains.get(id), chainlist: raw.chainlist.get(id), theGraph: raw.theGraph.get(id) });
+  const cyclic = parentCycles(raw, ids);
+  const typeIn = (map) => (id) => {
+    if (cyclic.has(id)) return null;
+    const r = map.get(id);
+    return r?.decidedBy ? (r.isTestnet ? 'testnet' : 'mainnet') : null;
+  };
+
+  setNetworkTypeContext({});
+  const own = new Map(ids.map(id => [id, networkTypeClaims(entriesOf(id))]));
+  learnHintReliability(own.values());
+  const first = new Map(ids.map(id => [id, resolveNetworkType(own.get(id))]));
+
+  const provisional = Object.values(indexed.byChainId).map(chain => ({
+    ...chain,
+    tags: [...(first.get(chain.chainId)?.isTestnet ? ['Testnet'] : []), ...(chain.tags ?? []).filter(t => t !== 'Testnet')]
+  }));
+  learnNetworkWords(provisional);
+  const words = new Set(testNetworkWords());
+  const isTestWord = (w) => words.has(String(w ?? '').toLowerCase());
+
+  learnHintReliability(ids.map(id => networkTypeClaims(entriesOf(id), { isTestWord, typeOf: typeIn(first) })));
+  const final = new Map();
+  const visiting = new Set();
+  const resolveFinal = (id) => {
+    if (final.has(id)) return final.get(id);
+    if (visiting.has(id) || !own.has(id)) return first.get(id) ?? null;
+    visiting.add(id);
+    const typeOf = (parent) => {
+      if (cyclic.has(parent)) return null;
+      const r = resolveFinal(parent);
+      return r?.decidedBy ? (r.isTestnet ? 'testnet' : 'mainnet') : null;
+    };
+    const decided = resolveNetworkType(networkTypeClaims(entriesOf(id), { isTestWord, typeOf }));
+    visiting.delete(id);
+    final.set(id, decided);
+    return decided;
+  };
+  for (const id of ids) resolveFinal(id);
+  setNetworkTypeContext({ isTestWord, typeOf: typeIn(final) });
+  return final;
 }
 
 function byChainIdMap(list, idOf) {
@@ -632,11 +732,7 @@ export function indexData(theGraph, chainlist, chains, slip44, l2beat, defillama
   indexChainsSource(cleanChains, indexed);
   indexChainlistSource(cleanChainlist, indexed);
   indexTheGraphSource(cleanTheGraph, indexed, networkIdToChainId);
-  applyNetworkType(indexed, {
-    chains: byChainIdMap(Array.isArray(cleanChains) ? cleanChains : [], c => Number(c?.chainId)),
-    chainlist: byChainIdMap(Array.isArray(cleanChainlist) ? cleanChainlist : [], c => Number(c?.chainId)),
-    theGraph: byChainIdMap(cleanTheGraph?.networks ?? [], graphChainId)
-  });
+  applyNetworkType(indexed, rawEntriesByChainId({ chains: cleanChains, chainlist: cleanChainlist, theGraph: cleanTheGraph }));
   attachSlip44Info(slip44, indexed);
   attachStatusPages(indexed);
   attachForums(indexed);

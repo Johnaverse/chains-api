@@ -24,6 +24,12 @@ import {
 beforeEach(() => vi.clearAllMocks());
 
 describe('rpcStateChanged', () => {
+  it('counts a change in which other chain an endpoint serves', () => {
+    const prev = [{ url: 'a', ok: false, failure: 'wrong_chain', servedChainId: 42431 }];
+    expect(rpcStateChanged(prev, [{ url: 'a', ok: false, failure: 'wrong_chain', servedChainId: 42431 }])).toBe(false);
+    expect(rpcStateChanged(prev, [{ url: 'a', ok: false, failure: 'wrong_chain', servedChainId: 4217 }])).toBe(true);
+  });
+
   it('is true when there is no prior state', () => {
     expect(rpcStateChanged(undefined, [{ url: 'a', ok: true }])).toBe(true);
   });

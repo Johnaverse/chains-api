@@ -3,7 +3,7 @@ import { cachedData } from '../store/cache.js';
 import { RPC_DEAD_AFTER_MS } from '../../config.js';
 import { NO_ANSWER_FAILURES } from '../../rpcUtil.js';
 import { getAllChains } from '../store/queries.js';
-import { networkTypeClaims, resolveNetworkType, claimsDisagree } from '../domain/networkType.js';
+import { networkTypeClaims, resolveNetworkType, claimsDisagree, getHintReliability, CLAIM_STRENGTH } from '../domain/networkType.js';
 
 // chainId -> the source's entry, built once per source array. Keyed on the array itself, so a
 // reload (a new array) rebuilds it and nothing is ever stale. Every rule looks chains up by id,
@@ -102,7 +102,12 @@ function validateRule2NetworkTypeClaims(chain, errors) {
     resolved: decided,
     decidedBy: { source: decidedBy.source, field: decidedBy.field },
     contested,
-    claims: claims.map(({ source, field, value, said }) => ({ source, field, value, said }))
+    // Each hint's learned accuracy where the type is stated (networkType.js), so a reviewer sees
+    // why the decision went the way it did.
+    claims: claims.map(({ source, field, value, said, strength }) => {
+      const r = strength === CLAIM_STRENGTH.hint ? getHintReliability().get(`${source}.${field}=${value}`) : null;
+      return { source, field, value, said, ...(r ? { accuracy: `${r.agree}/${r.total}` } : {}) };
+    })
   });
 }
 
@@ -395,7 +400,7 @@ function validateRule13NameDisagreement(chain, errors) {
     chainId: chain.chainId,
     chainName: chain.name,
     type: 'name_disagreement',
-    severity: 'info', // advisory; the rule is a substring-based heuristic
+    severity: 'notice', // advisory; the rule is a substring-based heuristic
     message: `Chain ${chain.chainId}: chains.json name "${chainsName}" disagrees with theGraph fullName "${theGraphName}"`,
     chainsName,
     theGraphName
@@ -420,12 +425,33 @@ function validateRule14NativeCurrencyMismatch(chain, errors) {
   });
 }
 
-function validateRule15Slip44NativeSymbolMismatch(chain, errors) {
+// Coin types several chains use with different native currencies: a derivation path borrowed
+// by convention (EVM chains take Ethereum's 60, BNB-based ones 714), not the chain's own coin.
+// Learned from the registry per validation run, so a coin type joins as more chains share it.
+// A coin type is borrowed by a chain when ANOTHER chain using it has the coin type's own symbol as
+// its currency: c8ntinuum (CTM) on 60, which Ethereum (ETH) owns. Viction (VIC) on 889,
+// registered as TOMO, is flagged — no chain with TOMO uses 889 — however many others also do.
+function coinTypeOwners(chains) {
+  const owners = new Map(); // coin type -> chain ids whose currency is its SLIP-44 symbol
+  for (const c of chains) {
+    const type = c.slip44Info?.coinType;
+    const own = c.slip44Info?.symbol;
+    const sym = c.nativeCurrency?.symbol;
+    if (type == null || !own || !sym || String(own).toUpperCase() !== String(sym).toUpperCase()) continue;
+    if (!owners.has(type)) owners.set(type, new Set());
+    owners.get(type).add(c.chainId);
+  }
+  return owners;
+}
+
+function validateRule15Slip44NativeSymbolMismatch(chain, errors, owners = new Map()) {
   const slip44Symbol = chain.slip44Info?.symbol;
   const nativeSymbol = chain.nativeCurrency?.symbol;
 
   if (!slip44Symbol || !nativeSymbol) return;
   if (slip44Symbol.toUpperCase() === nativeSymbol.toUpperCase()) return;
+  // A coin type another chain owns was borrowed: the derivation path, not this chain's coin.
+  if ([...(owners.get(chain.slip44Info?.coinType) ?? [])].some(id => id !== chain.chainId)) return;
 
   errors.push({
     rule: 15,
@@ -560,6 +586,26 @@ function validateRule19DeprecatedRpcAnswers(chain, errors) {
   });
 }
 
+// An RPC endpoint listed for this chain that serves another one (eth_chainId, chainRefresher.js):
+// the registry entry is wrong, not the endpoint — Tempo's deprecated Andantino listing Moderato's
+// RPC read as "a deprecated chain still serves blocks" (rule 19) before the check existed.
+function validateRule21RpcServesAnotherChain(chain, errors) {
+  // Only URLs the chain still lists: a reload keeps rpcHealth, and an endpoint the registry has
+  // since removed is no longer its error.
+  const listed = new Set((chain.rpc ?? []).map(r => (typeof r === 'string' ? r : r?.url)).filter(Boolean));
+  const wrong = (cachedData.rpcHealth?.[chain.chainId] ?? []).filter(r => r.failure === 'wrong_chain' && Number.isFinite(r.servedChainId) && listed.has(r.url));
+  if (wrong.length === 0) return;
+  const nameOf = (id) => cachedData.indexed?.byChainId?.[id]?.name ?? null;
+  errors.push({
+    rule: 21,
+    chainId: chain.chainId,
+    chainName: chain.name,
+    type: 'rpc_serves_another_chain',
+    message: `Chain ${chain.chainId} (${chain.name}) lists ${wrong.length} RPC endpoint(s) that serve another chain: ${wrong.map(r => `${r.url} → ${r.servedChainId}${nameOf(r.servedChainId) ? ` (${nameOf(r.servedChainId)})` : ''}`).join(', ')}`,
+    endpoints: wrong.map(r => ({ url: r.url, servedChainId: r.servedChainId, servedChainName: nameOf(r.servedChainId) }))
+  });
+}
+
 // One chain ID, different networks: the record was built from the sources that agree and the
 // rest left out (src/domain/sourceIdentity.js). Listed with every source's name and symbol so a
 // person can tell which registry reused or mistyped the ID.
@@ -580,7 +626,7 @@ function validateRule20ChainIdCollisions(errors) {
   }
 }
 
-function validateChain(chain, errors) {
+function validateChain(chain, errors, context = {}) {
   validateRule1RelationConflicts(chain, errors);
   validateRule2NetworkTypeClaims(chain, errors);
   validateRule3NameTestnetMismatch(chain, errors);
@@ -594,12 +640,15 @@ function validateChain(chain, errors) {
   validateRule12RpcBlockHeightDrift(chain, errors);
   validateRule13NameDisagreement(chain, errors);
   validateRule14NativeCurrencyMismatch(chain, errors);
-  validateRule15Slip44NativeSymbolMismatch(chain, errors);
+  validateRule15Slip44NativeSymbolMismatch(chain, errors, context.coinTypeOwners);
   validateRule16RpcUrlInOneSourceOnly(chain, errors);
   validateRule17ActiveChildOfDeprecatedParent(chain, errors, cachedData.indexed.byChainId);
   validateRule18NoReachableRpc(chain, errors);
   validateRule19DeprecatedRpcAnswers(chain, errors);
+  validateRule21RpcServesAnotherChain(chain, errors);
 }
+
+const NOTICE_RULES = new Set([11, 13, 16]);
 
 export function validateChainData() {
   if (!cachedData.indexed || !cachedData.theGraph || !cachedData.chainlist || !cachedData.chains) {
@@ -614,8 +663,10 @@ export function validateChainData() {
   // The same array the other services learn from, so the memo holds between them.
   learnNetworkWords(cachedData.indexed.all ? getAllChains() : Object.values(cachedData.indexed.byChainId));
 
-  Object.values(cachedData.indexed.byChainId).forEach(chain => {
-    validateChain(chain, errors);
+  const chains = Object.values(cachedData.indexed.byChainId);
+  const context = { coinTypeOwners: coinTypeOwners(chains) };
+  chains.forEach(chain => {
+    validateChain(chain, errors, context);
   });
 
   // Rule 10 is global (iterates L2BEAT projects, not chains).
@@ -642,11 +693,19 @@ export function validateChainData() {
     rule17_active_child_of_deprecated_parent: errors.filter(e => e.rule === 17),
     rule18_no_reachable_rpc: errors.filter(e => e.rule === 18),
     rule19_deprecated_rpc_answers: errors.filter(e => e.rule === 19),
-    rule20_chain_id_collision: errors.filter(e => e.rule === 20)
+    rule20_chain_id_collision: errors.filter(e => e.rule === 20),
+    rule21_rpc_serves_another_chain: errors.filter(e => e.rule === 21)
   };
+
+  // Errors are wrong data a source should fix; notices are worth knowing but not wrong: a risk
+  // signal (11), two spellings of one name (13), an endpoint only one source lists (16).
+  for (const e of errors) e.severity ??= NOTICE_RULES.has(e.rule) ? 'notice' : 'error';
+  const bySeverity = { error: 0, notice: 0 };
+  for (const e of errors) bySeverity[e.severity === 'notice' ? 'notice' : 'error'] += 1;
 
   return {
     totalErrors: errors.length,
+    bySeverity,
     errorsByRule,
     summary: {
       rule1: errorsByRule.rule1_relation_conflicts.length,
@@ -668,7 +727,8 @@ export function validateChainData() {
       rule17: errorsByRule.rule17_active_child_of_deprecated_parent.length,
       rule18: errorsByRule.rule18_no_reachable_rpc.length,
       rule19: errorsByRule.rule19_deprecated_rpc_answers.length,
-      rule20: errorsByRule.rule20_chain_id_collision.length
+      rule20: errorsByRule.rule20_chain_id_collision.length,
+      rule21: errorsByRule.rule21_rpc_serves_another_chain.length
     },
     allErrors: errors
   };

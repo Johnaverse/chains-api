@@ -75,7 +75,7 @@ src/services/                   ← background tasks
   ├─ chainRefresher.js          (unified rolling RPC + L2BEAT refresher)
   ├─ rpcHealth.js               (RPC liveness checks)
   ├─ l2beatRefresher.js         (legacy shim → chainRefresher)
-  ├─ validation.js              (20 cross-source validation rules)
+  ├─ validation.js              (21 cross-source validation rules)
   ├─ assistant.js               (LLM tool-use harness for /assistant/chat)
   ├─ assistantTools.js          (mcp-tools → OpenAI tools adapter + AJV arg validation)
   └─ loader.js                  (initial data load)
@@ -250,7 +250,7 @@ Services: `chains-api` (port 3000) and `chains-api-mcp` (port 3001). Both have h
 | GET | `/keywords` | Indexed search keywords |
 | GET | `/stats` | Aggregate counts: totals by tag, plus `byStatus` / `activeChains` / `deprecatedChains` and RPC health |
 | GET | `/summary` | Slim dashboard projection (chains + L2BEAT headline), ETag/304 |
-| GET | `/validate` | Run 20 cross-source validation rules |
+| GET | `/validate` | Run 21 cross-source validation rules |
 | GET | `/export` | Export cached data |
 | GET | `/metrics` | Prometheus exposition (counters + gauges) |
 | GET | `/refresher` | Unified refresher cursor + queue depth |
