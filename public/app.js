@@ -497,6 +497,8 @@ async function loadBulk() {
 
 // Accepts both /summary ({chains, l2beat}) and /export ({data:{indexed:{all}}}).
 let statusPagesLoaded = false;
+// True once /status-pages has answered (or failed): until then "no status page" is unknown.
+let statusPagesReady = false;
 function applyBulk(payload) {
     const data = payload.data ?? payload;
     state.chains = data.chains ?? data.indexed?.all ?? [];
@@ -616,8 +618,9 @@ function profilePathId(pathname = location.pathname) {
     return m ? Number(m[1]) : null;
 }
 function profileHref(chainId) { return `${APP_BASE}chains/${chainId}`; }
-// Whether a chain's detail is on screen — in the drawer or on its profile page. Loaders check it
-// after their fetch so a slow answer for a chain no longer shown is dropped.
+// Whether a chain's detail is on screen — in the drawer or on its profile page. The loaders the
+// two share check it after their fetch so a slow answer for a chain no longer shown is dropped;
+// the drawer-only ones (RPC, block head, live clients) check the drawer alone.
 function chainOnScreen(chainId) {
     return openChainId === chainId || (activeView === 'chain' && profileChainId === chainId);
 }
@@ -885,6 +888,10 @@ async function loadStatusPages() {
             }
         }
     } catch { /* the drawer simply omits the status-page link */ }
+    finally {
+        statusPagesReady = true;
+        refreshProfileIncidents();
+    }
 }
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -1261,6 +1268,7 @@ function repaintIncidentSurfaces() {
     if (activeView === 'networks') {
         try { renderChainsTable(); } catch (err) { console.error('table render failed', err); }
     }
+    if (activeView === 'chain') refreshProfileIncidents();
     // Node colours depend on which chains have an open incident.
     if (graphEmphasizeIncidents && myGraph) applyGraphFilter();
 }
@@ -4179,7 +4187,7 @@ function openChainDetail(chainId, opts = {}) {
 async function loadChainDetail(chainId, box, researchSec) {
     let d = state.byId.get(chainId) || {};
     try { d = { ...d, ...(await api(`/chains/${chainId}`)) }; } catch { /* render what we have */ }
-    if (!chainOnScreen(chainId)) return;
+    if (openChainId !== chainId) return;
     clear(box);
     if (d.family) {
         box.appendChild(detailRow('Family', el('span', {
@@ -4536,7 +4544,7 @@ const DRAWER_FORK_ROWS = 8;
 async function loadChainHardforks(chainId, section) {
     let d;
     try { d = await api(`/timeline?chainId=${chainId}&type=hardfork&limit=100`); } catch { return; }
-    if (!chainOnScreen(chainId)) return;
+    if (openChainId !== chainId) return;
     const forks = d.entries || [];
     if (!forks.length) return;
     const list = el('div', { class: 'fork-list' });
@@ -4599,7 +4607,7 @@ async function loadLiveRpc(chainId, box, headCell) {
     if (endpointsRes.status === 'fulfilled' && endpointsRes.value) {
         staticUrls = usable(endpointsRes.value.rpc || []);
     }
-    if (!chainOnScreen(chainId)) return;
+    if (openChainId !== chainId) return;
 
     const working = results.filter(r => r.status === 'working' || r.ok === true);
     const failed = results.filter(r => r.status === 'failed');
@@ -4652,7 +4660,7 @@ async function loadLiveRpc(chainId, box, headCell) {
 async function loadLiveClients(chainId, box) {
     try {
         const d = await api(`/clients/${chainId}`);
-        if (!chainOnScreen(chainId)) return;
+        if (openChainId !== chainId) return;
         const clients = d.clients || [];
         if (!clients.length) { box.textContent = 'No client data yet.'; return; }
         clear(box);

@@ -2030,3 +2030,7 @@ a.tlx-row-title:hover { color: var(--accent-hover); }
     font-size: var(--fs-100); line-height: 1.45; white-space: pre;
 }
 .pf-g-more { fill: var(--ink-3); font-style: italic; }
+.pf-rel-sub > summary { cursor: pointer; list-style: none; }
+.pf-rel-sub > summary::-webkit-details-marker { display: none; }
+.pf-rel-sub[open] { flex-basis: 100%; white-space: normal; }
+.pf-rel-sub[open] > .pf-chips { margin: var(--sp-1) 0 var(--sp-2) var(--sp-3); padding-left: var(--sp-2); border-left: 1px solid var(--rule); }

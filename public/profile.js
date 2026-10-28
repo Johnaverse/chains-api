@@ -83,6 +83,8 @@ function setCardMeta(card, text) {
     meta.textContent = text;
 }
 function emptyNote(text) { return el('p', { class: 'dim pf-empty', text }); }
+// Explorers come as { name, url } or as a bare URL string, depending on the source.
+function explorerOf(x) { return typeof x === 'string' ? { url: x, name: null } : (x || {}); }
 function extLink(url, text) {
     const href = safeUrl(url);
     return href ? el('a', { href, target: '_blank', rel: 'noopener', text: text || safeHost(url) || url }) : el('span', { text: text || url });
@@ -160,6 +162,7 @@ async function renderChainProfile(chainId, { keepScroll = false } = {}) {
     };
     const relCounts = relationCounts(chainId);
     if (relCounts) kpi.relations = { label: 'Related networks', value: fmtNum(relCounts.total), sub: relCounts.sub };
+    profile.incidents = { card: incidentCard, chainId, kpi, drawKpis: () => drawKpis() };
     renderProfileIncidents(incidentCard, chainId, kpi);
     const l2b = state.l2beat.get(chainId);
     if (l2b?.tvs != null) kpi.value = { label: 'Value secured', value: fmtUsd(l2b.tvs), sub: [l2b.stage, 'L2BEAT'].filter(Boolean).join(' · '), hint: 'Total value secured, from L2BEAT' };
@@ -212,9 +215,12 @@ async function renderChainProfile(chainId, { keepScroll = false } = {}) {
         renderProfileForks(forkCard, r.ok ? r.v : null, kpi);
         drawKpis();
     });
-    settled(`/timeline?chainId=${chainId}&limit=200`).then(r => {
+    // One request per type: /timeline applies its limit before any filtering here, so hardforks
+    // must not use up the rows this card shows.
+    Promise.all(['software_update', 'maintenance'].map(type => settled(`/timeline?chainId=${chainId}&type=${type}&limit=100`))).then(rs => {
         if (!live()) return;
-        renderProfileEvents(eventCard, r.ok ? r.v : null);
+        const ok = rs.filter(r => r.ok);
+        renderProfileEvents(eventCard, ok.length ? { entries: ok.flatMap(r => r.v.entries || []) } : null);
     });
     const forumBox = cardBody(forumCard);
     loadForumNews(chainId, forumBox, forumCard);
@@ -253,15 +259,16 @@ function renderProfileHero(hero, c) {
     ].filter(Boolean);
     const links = [];
     if (c.infoURL) links.push(extLink(c.infoURL, safeHost(c.infoURL) || 'Website'));
-    for (const x of (c.explorers || []).slice(0, 3)) links.push(extLink(x.url, x.name || safeHost(x.url)));
+    for (const x of (c.explorers || []).map(explorerOf).filter(x => x.url).slice(0, 3)) links.push(extLink(x.url, x.name || safeHost(x.url)));
     if (c.defillama?.twitter) links.push(extLink(`https://x.com/${c.defillama.twitter}`, `@${c.defillama.twitter}`));
     if (c.forumUrl) links.push(extLink(c.forumUrl, 'Forum'));
-    hero.append(
+    // Native append() writes a null as the text "null", unlike el(): leave the absent ones out.
+    hero.append(...[
         el('h2', { class: 'pf-title', text: name }),
         badges,
         facts.length ? el('p', { class: 'pf-facts mono', text: facts.join(' · ') }) : null,
         links.length ? el('div', { class: 'pf-links' }, links) : null
-    );
+    ].filter(Boolean));
     if (c.statusReason) hero.appendChild(el('p', { class: 'dim pf-facts', text: c.statusReason }));
 }
 
@@ -287,7 +294,8 @@ function renderProfileIdentity(card, c) {
             text: `$${c.price.usd.toLocaleString()}${typeof c.price.marketCap === 'number' ? ` · market cap ${fmtUsd(c.price.marketCap)}` : ''}${c.price.stale ? ' · stale' : ''}`
         }));
     }
-    if (c.explorers?.length) row('Explorers', c.explorers.map(x => extLink(x.url, x.name || safeHost(x.url))));
+    const explorers = (c.explorers || []).map(explorerOf).filter(x => x.url);
+    if (explorers.length) row('Explorers', explorers.map(x => extLink(x.url, x.name || safeHost(x.url))));
     if (c.infoURL) row('Website', extLink(c.infoURL));
     if (c.forumUrl) row('Forum', extLink(c.forumUrl));
     if (c.defillama?.github?.length) row('GitHub', c.defillama.github.slice(0, 8).map(g => extLink(`https://github.com/${g}`, g)));
@@ -302,14 +310,29 @@ function renderProfileIdentity(card, c) {
 }
 
 // ── incidents ─────────────────────────────────────────────────────────────
+// Redrawn whenever the incident feed or the status-page list changes (app.js calls in).
+function refreshProfileIncidents() {
+    const p = profile.incidents;
+    if (!p || activeView !== 'chain' || profileChainId !== p.chainId) return;
+    p.card.querySelector('.pf-body')?.remove();
+    renderProfileIncidents(p.card, p.chainId, p.kpi);
+    p.drawKpis();
+}
 function renderProfileIncidents(card, chainId, kpi) {
     const body = cardBody(card);
     const open = state.openByChain.get(chainId) || [];
     const sp = state.statusPagesByChain.get(chainId);
     if (sp) body.appendChild(detailRow('Status page', extLink(sp.url, safeHost(sp.url) || sp.name)));
+    else if (!statusPagesReady) body.appendChild(detailRow('Status page', el('span', { class: 'dim', text: 'loading…' })));
     if (!open.length) {
+        // Zero is only a finding once the feed has been read.
+        if (!incidents.backfilled) {
+            body.appendChild(emptyNote('The incident feed has not answered yet.'));
+            kpi.incidents = { label: 'Open incidents', value: '—', sub: 'incident feed not read yet' };
+            return;
+        }
         body.appendChild(emptyNote(sp ? 'No open incidents on its status page or its RPC providers.' : 'No open incidents from the status feeds.'));
-        kpi.incidents = { label: 'Open incidents', value: '0', sub: sp ? 'status page watched' : 'no status page known', tone: 'good' };
+        kpi.incidents = { label: 'Open incidents', value: '0', sub: sp ? 'status page watched' : statusPagesReady ? 'no status page known' : 'RPC providers watched', tone: 'good' };
         return;
     }
     kpi.incidents = { label: 'Open incidents', value: fmtNum(open.length), sub: `${open.filter(it => it.isProvider).length} from RPC providers`, tone: 'warn' };
@@ -340,6 +363,7 @@ const ROLE_OF_TO = { parentOf: 'child', l2Of: 'parent', mainnetOf: 'testnet', te
 const ROLE_INVERSE = { child: 'parent', parent: 'child', testnet: 'mainnet', mainnet: 'testnet' };
 const ROLE_ORDER = ['parent', 'mainnet', 'testnet', 'child'];
 const ROLE_LABEL = { parent: 'Settles on', mainnet: 'Testnet of', testnet: 'Testnets', child: 'L2s / L3s' };
+const ROLE_SHORT = { parent: 'parent', mainnet: 'mainnet', testnet: 'testnet', child: 'L2' };
 
 // Each node's relation to the centre (direct) or to the direct neighbour it hangs off (second hop).
 function relationRolesOf(g, center) {
@@ -606,10 +630,18 @@ function renderRelationList(direct, second) {
             .sort((a, b) => tvsOf(b.chainId) - tvsOf(a.chainId) || a.chainId - b.chainId);
         if (!group.length) continue;
         const items = group.map(n => {
-            const below = [...second.values()].filter(k => k.anchor === n.chainId);
-            return el('span', { class: 'pf-rel-item', title: n.source ? `Source: ${n.source}` : null }, [
-                chainProfileLink(n.chainId),
-                below.length ? el('span', { class: 'chip-count', text: ` +${below.length}` }) : null
+            const link = el('span', { title: n.source ? `Source: ${n.source}` : null }, [chainProfileLink(n.chainId)]);
+            const below = [...second.values()].filter(k => k.anchor === n.chainId)
+                .sort((a, b) => tvsOf(b.chainId) - tvsOf(a.chainId) || nameOf(a).localeCompare(nameOf(b)));
+            if (!below.length) return el('span', { class: 'pf-rel-item' }, [link]);
+            // Its own relations, every one (the graph draws only the first few): name, what it
+            // is to this neighbour, and the source that says so.
+            return el('details', { class: 'pf-rel-item pf-rel-sub' }, [
+                el('summary', {}, [link, el('span', { class: 'chip-count', text: ` +${below.length}` })]),
+                el('div', { class: 'pf-chips' }, below.map(k => el('span', {
+                    class: 'pf-rel-item',
+                    title: `${ROLE_LABEL[k.role]} of ${nameOf(n)}${k.source ? ` · source: ${k.source}` : ''}`
+                }, [chainProfileLink(k.chainId), el('span', { class: 'dim', text: ` ${ROLE_SHORT[k.role]}` })])))
             ]);
         });
         wrap.appendChild(detailRow(`${ROLE_LABEL[role]} (${group.length})`, moreList(items, { shown: 24, cls: 'pf-chips' })));
@@ -643,7 +675,7 @@ function renderProfileRpc(card, chainId, mon, eps, kpi) {
     const browserUrls = [...new Set([...working.map(r => r.url), ...listed])].filter(u => u.startsWith('http') && !u.includes('${'));
     if (browserUrls.length) startBlockHead(browserUrls, head); else head.textContent = '—';
 
-    if (!urls.length) { body.appendChild(emptyNote('No RPC endpoints in any registry.')); return; }
+    if (!urls.length) body.appendChild(emptyNote('No RPC endpoints in any registry.'));
     const order = u => {
         const r = probed.get(u);
         return r ? (r.status === 'working' ? 0 : 1) : u.includes('${') ? 3 : 2;
@@ -659,7 +691,7 @@ function renderProfileRpc(card, chainId, mon, eps, kpi) {
             el('span', { class: 'pf-rpc-meta dim', text: [r?.blockNumber != null ? `#${r.blockNumber.toLocaleString()}` : null, clientNameVersion(r?.clientVersion), r?.error].filter(Boolean).join(' · ') })
         ]);
     });
-    body.appendChild(moreList(rows, { shown: 10 }));
+    if (rows.length) body.appendChild(moreList(rows, { shown: 10 }));
     const extra = [['Firehose', eps?.firehose], ['Substreams', eps?.substreams]].filter(([, l]) => l?.length);
     for (const [label, list] of extra) body.appendChild(detailRow(label, el('span', { class: 'code', text: list.join(', ') })));
 }
@@ -718,8 +750,10 @@ function renderProfileForks(card, d, kpi) {
 
 function renderProfileEvents(card, d) {
     const body = cardBody(card);
-    const items = (d?.entries || []).filter(e => e.type !== 'hardfork');
     if (!d) { body.appendChild(emptyNote('The timeline could not be read.')); return; }
+    // Newest first; undated last.
+    const items = [...new Map(d.entries.map(e => [e.id, e])).values()]
+        .sort((a, b) => (Date.parse(b.activationAt || '') || 0) - (Date.parse(a.activationAt || '') || 0));
     if (!items.length) { body.appendChild(emptyNote('No software updates or maintenance on record.')); return; }
     const rows = items.map(u => el('div', { class: 'pf-event-row' }, [
         el('span', { class: 'pf-fork-when mono', text: forkWhen(u) }),
