@@ -136,7 +136,7 @@ function parseBlockHeight(value) {
   return null;
 }
 
-async function checkRpcEndpoint(url) {
+async function checkRpcEndpoint(url, chainId = null) {
   const result = { url, ok: false, clientVersion: null, blockHeight: null, error: null };
 
   // Registry URLs are community-submitted input, not configuration, so a host check belongs
@@ -164,6 +164,23 @@ async function checkRpcEndpoint(url) {
   ]);
   if (version.status === 'fulfilled') result.clientVersion = version.value || null;
   if (block.status === 'fulfilled') result.blockHeight = parseBlockHeight(block.value);
+  // Which chain an endpoint that serves blocks actually serves. Registries list a successor's or
+  // a sibling's RPC under the wrong chain (Tempo's deprecated Andantino lists Moderato's, 0G's
+  // Galileo 16601 its successor's 16602), and blocks for another chain are not this chain's.
+  // Asked only of an endpoint that served a block; one that does not answer eth_chainId is
+  // judged on its blocks alone.
+  let servedChainId = null;
+  if (chainId != null && result.blockHeight !== null) {
+    try {
+      servedChainId = parseBlockHeight(await jsonRpcCall(url, 'eth_chainId', { timeoutMs: RPC_CHECK_TIMEOUT_MS }));
+    } catch { /* no answer: judged on its blocks */ }
+  }
+  if (servedChainId != null && servedChainId !== Number(chainId)) {
+    result.servedChainId = servedChainId;
+    result.error = `Serves chain ${servedChainId}, not ${chainId}`;
+    result.failure = 'wrong_chain';
+    return result;
+  }
   // Serving blocks is what makes an RPC work; some nodes disable web3_clientVersion and were
   // counted dead for it. The client version stays null then.
   result.ok = result.blockHeight !== null;
@@ -216,7 +233,7 @@ export async function processChainRpc(chainId) {
   const startedAt = Date.now();
   const deferred = new Set(urls.filter(u => isThrottled(u, startedAt)));
   rpcState.isMonitoring = true;
-  const probed = await Promise.all(urls.filter(u => !deferred.has(u)).map(checkRpcEndpoint));
+  const probed = await Promise.all(urls.filter(u => !deferred.has(u)).map(u => checkRpcEndpoint(u, chain.chainId)));
   rpcState.isMonitoring = false;
   noteProviderResponses(probed, Date.now());
   const previousByUrl = new Map((cachedData.rpcHealth?.[chainId] ?? []).map(r => [r.url, r]));

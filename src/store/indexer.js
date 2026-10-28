@@ -3,7 +3,8 @@ import { attachForums } from '../sources/forums.js';
 import { attachNetworkResearch } from '../sources/networkResearch.js';
 import { isKnownEolChain } from '../domain/eolChains.js';
 import { findIdentityConflicts, graphChainId } from '../domain/sourceIdentity.js';
-import { networkTypeClaims, resolveNetworkType } from '../domain/networkType.js';
+import { networkTypeClaims, resolveNetworkType, learnHintReliability, setNetworkTypeContext } from '../domain/networkType.js';
+import { learnNetworkWords, isTestNetworkWord } from '../domain/networkWords.js';
 
 /**
  * Build a mapping of network IDs to chain IDs from The Graph data
@@ -585,11 +586,25 @@ export function indexDefiLlamaSource(defillama, indexed) {
  * registries are in, so no single source's hint tags a chain the others call a mainnet.
  */
 function applyNetworkType(indexed, raw) {
-  Object.values(indexed.byChainId).forEach(chain => {
-    const id = chain.chainId;
-    const { isTestnet } = resolveNetworkType(networkTypeClaims({
-      chains: raw.chains.get(id), chainlist: raw.chainlist.get(id), theGraph: raw.theGraph.get(id)
-    }));
+  const chains = Object.values(indexed.byChainId);
+  const entriesOf = (id) => ({ chains: raw.chains.get(id), chainlist: raw.chainlist.get(id), theGraph: raw.theGraph.get(id) });
+  // Test-network words, learned from the sources' tags as they stand (networkWords.js), read in
+  // each chain's own hostnames.
+  learnNetworkWords(chains);
+  // First pass: each chain by its own claims, no hostnames and no parent — the parent's type
+  // the second pass reads a chain's relation by.
+  setNetworkTypeContext({});
+  const first = new Map(chains.map(chain => [chain.chainId, resolveNetworkType(networkTypeClaims(entriesOf(chain.chainId)))]));
+  const typeOf = (id) => {
+    const r = first.get(id);
+    return r?.decidedBy ? (r.isTestnet ? 'testnet' : 'mainnet') : null;
+  };
+  setNetworkTypeContext({ isTestWord: isTestNetworkWord, typeOf });
+  const claimsOf = new Map(chains.map(chain => [chain.chainId, networkTypeClaims(entriesOf(chain.chainId))]));
+  // How far each hint can be trusted, from where a source states the type outright.
+  learnHintReliability(claimsOf.values());
+  chains.forEach(chain => {
+    const { isTestnet } = resolveNetworkType(claimsOf.get(chain.chainId));
     const has = chain.tags.includes('Testnet');
     if (isTestnet && !has) chain.tags.unshift('Testnet');
     if (!isTestnet && has) chain.tags = chain.tags.filter(t => t !== 'Testnet');

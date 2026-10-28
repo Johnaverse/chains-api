@@ -242,6 +242,55 @@ describe('validation — L2BEAT cross-source rules', () => {
     });
   });
 
+  describe('rule 15 and severity', () => {
+    const chain = (chainId, name, symbol, coinType, slip44Symbol) => ({ chainId, name, tags: [], relations: [], nativeCurrency: { symbol }, slip44Info: { coinType, symbol: slip44Symbol } });
+
+    it('flags only a coin type of the chain\'s own, not one several chains share', () => {
+      seedCache({
+        chains: [
+          // Ethereum's 60, borrowed by EVM chains with their own currency: a convention.
+          chain(1, 'Ethereum', 'ETH', 60, 'ETH'), chain(8, 'c8ntinuum', 'CTM', 60, 'ETH'), chain(9, 'Other', 'OTH', 60, 'ETH'),
+          // A coin type only Viction uses, still registered under its old symbol: a real mismatch.
+          chain(88, 'Viction', 'VIC', 889, 'TOMO')
+        ]
+      });
+      expect(findErrorsForRule(validateChainData(), 15).map(e => e.chainId)).toEqual([88]);
+    });
+
+    it('counts errors and notices apart', () => {
+      seedCache({
+        chains: [chain(88, 'Viction', 'VIC', 889, 'TOMO')],
+        rpcHealth: {}
+      });
+      const report = validateChainData();
+      expect(report.bySeverity.error).toBe(report.allErrors.filter(e => e.severity === 'error').length);
+      expect(report.allErrors.every(e => e.severity === 'error' || e.severity === 'notice')).toBe(true);
+      expect(findErrorsForRule(report, 15)[0].severity).toBe('error');
+    });
+  });
+
+  describe('rule 21: rpc_serves_another_chain', () => {
+    it('reports an endpoint listed for a chain that serves another, and nothing else', () => {
+      seedCache({
+        chains: [
+          { chainId: 42429, name: 'Tempo Testnet Andantino (Deprecated)', tags: ['Testnet'], relations: [], status: 'deprecated' },
+          { chainId: 42431, name: 'Tempo Testnet Moderato', tags: ['Testnet'], relations: [] }
+        ],
+        rpcHealth: {
+          42429: [{ url: 'https://rpc.testnet.tempo.xyz', ok: false, failure: 'wrong_chain', servedChainId: 42431, blockHeight: 16 }],
+          42431: [{ url: 'https://rpc.testnet.tempo.xyz', ok: true, blockHeight: 16 }]
+        }
+      });
+      const report = validateChainData();
+      const errs = findErrorsForRule(report, 21);
+      expect(errs).toHaveLength(1);
+      expect(errs[0]).toMatchObject({ chainId: 42429, endpoints: [{ url: 'https://rpc.testnet.tempo.xyz', servedChainId: 42431, servedChainName: 'Tempo Testnet Moderato' }] });
+      // Not "a deprecated chain still serves blocks": its endpoint is another chain's.
+      expect(findErrorsForRule(report, 19)).toHaveLength(0);
+      expect(report.summary.rule21).toBe(1);
+    });
+  });
+
   describe('rule 12: rpc_block_height_drift', () => {
     it('flags when working RPCs disagree by more than 100 blocks', () => {
       seedCache({
@@ -568,8 +617,9 @@ describe('validation — L2BEAT cross-source rules', () => {
       expect(cachedData.indexed.byChainId[480].tags).not.toContain('Testnet');
       const [worldChain] = findErrorsForRule(report, 2).filter(e => e.chainId === 480);
       expect(worldChain).toMatchObject({ resolved: 'mainnet', decidedBy: { source: 'theGraph', field: 'networkType' }, contested: false });
+      // chainlist copies chains.json's slip44: one claim, not two.
       expect(worldChain.claims.filter(c => c.value === 'testnet').map(c => `${c.source}.${c.field}`).sort())
-        .toEqual(['chainlist.slip44', 'chains.slip44']);
+        .toEqual(['chains.slip44']);
       expect(report.summary).toHaveProperty('rule20', 1);
     });
   });
