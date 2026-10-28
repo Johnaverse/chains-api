@@ -2072,6 +2072,7 @@ a.tlx-row-title:hover { color: var(--accent-hover); }
 .pf-hw-caveat { font-size: var(--fs-200); overflow-wrap: anywhere; }
 .pf-hw-caveat .pf-hw-label { font-size: var(--fs-100); }
 
-/* A section the profile jumps to ("All hardforks →") stops below the sticky app bar instead of
-   under it. --appbar-h is the bar's measured height (initAppbarHeight). */
-.pf-card { scroll-margin-top: calc(var(--appbar-h, 64px) + var(--sp-3)); }
+/* Anything scrolled into view — a profile section a warning links to, the provider list a
+   board row jumps to — stops below the sticky app bar instead of under it. The document is the
+   scroller; --appbar-h is the bar's measured height (initAppbarHeight). */
+html { scroll-padding-top: calc(var(--appbar-h, 64px) + var(--sp-3)); }

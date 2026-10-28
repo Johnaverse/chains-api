@@ -184,7 +184,8 @@ async function renderChainProfile(chainId, { keepScroll = false } = {}) {
     stopProfileHead();
     profile.graphResize?.disconnect();
     clear(root);
-    if (!keepScroll) byId('view-chain')?.scrollTo(0, 0);
+    // The document scrolls, not the view: a profile opened from the foot of another starts at its top.
+    if (!keepScroll) window.scrollTo(0, 0);
 
     const known = state.byId.get(chainId);
     const hero = el('div', { class: 'pf-hero' });
