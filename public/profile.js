@@ -24,6 +24,12 @@ const profile = {
     head: { timer: null },
     // The chain the page was last built for; null while a deep link waits for the bulk data.
     renderedChain: null,
+    // The bulk data it was built from (bulkKey), and whether every bulk source has failed.
+    renderedBulk: null,
+    bulkFailed: false,
+    // What a newer bulk load refreshes in place (refreshProfileBulk).
+    bulk: null,
+    redrawGraph: null,
     pageTitle: null
 };
 const PROFILE_CACHE_MS = 60000;
@@ -62,14 +68,19 @@ function openChainProfile(chainId, opts = {}) {
     const same = activeView === 'chain' && profileChainId === chainId;
     // Already showing this chain (history, or applyBulk re-applying the URL): keep the page as
     // it is — expanded sections, an open drawer — unless it was built before the bulk data.
-    if (same && opts.fromUrl && profile.renderedChain === chainId) return;
+    if (same && opts.fromUrl && profile.renderedChain === chainId) {
+        // A newer bulk load (the network answer after the cached one): refresh what it feeds —
+        // value secured, scaling figures, the graph's types and sizes — and keep the rest.
+        if (profile.renderedBulk !== bulkKey()) refreshProfileBulk();
+        return;
+    }
     if (openChainId != null) closeDrawer({ fromUrl: true });
     profileChainId = chainId;
     switchView('chain', { fromUrl: true });
     if (!opts.fromUrl) updateUrl({ push: true });
     // A deep link opens before the bulk data (names, types, relations, L2BEAT) has loaded. Build
     // once it has — applyBulk re-applies the URL — or once it has failed (renderPendingProfile).
-    if (!state.chains.length) {
+    if (!state.chains.length && !profile.bulkFailed) {
         profile.renderedChain = null;
         const root = byId('chainProfile');
         if (root && !root.querySelector('.pf-loading')) {
@@ -80,9 +91,32 @@ function openChainProfile(chainId, opts = {}) {
     }
     renderChainProfile(chainId, { keepScroll: same });
 }
-// The bulk load failed: build the profile from the per-chain endpoints alone.
+// The bulk load failed: build profiles from the per-chain endpoints alone, this one and the next
+// ones opened, until a bulk load succeeds.
 function renderPendingProfile() {
+    profile.bulkFailed = true;
     if (activeView === 'chain' && profileChainId != null && profile.renderedChain == null) renderChainProfile(profileChainId);
+}
+function bulkKey() { return `${state.lastUpdated ?? ''}|${state.l2beatMeta?.fetchedAt ?? ''}|${state.chains.length}`; }
+function refreshProfileBulk() {
+    const b = profile.bulk;
+    if (!b || profileChainId !== b.chainId) return;
+    profile.renderedBulk = bulkKey();
+    const l2b = state.l2beat.get(b.chainId);
+    if (l2b?.tvs != null) b.kpi.value = l2bKpi(l2b); else delete b.kpi.value;
+    profileFetch(`/chains/${b.chainId}`).catch(() => ({})).then(d => {
+        if (profileChainId !== b.chainId) return;
+        const c = { ...(state.byId.get(b.chainId) || { chainId: b.chainId }), ...(d || {}) };
+        renderProfileHero(b.hero, c);
+        b.activityCard.querySelector('.pf-body')?.remove();
+        b.activityCard.classList.add('hidden');
+        renderProfileActivity(b.activityCard, c, l2b, b.kpi);
+        b.drawKpis();
+    });
+    profile.redrawGraph?.();
+}
+function l2bKpi(l2b) {
+    return { label: 'Value secured', value: fmtUsd(l2b.tvs), sub: [l2b.stage, 'L2BEAT'].filter(Boolean).join(' · '), hint: 'Total value secured, from L2BEAT' };
 }
 
 function stopProfileHead() { stopHeadPoller(profile.head); }
@@ -140,6 +174,9 @@ async function renderChainProfile(chainId, { keepScroll = false } = {}) {
     // A different chain starts with every relation shown, whatever the last one filtered.
     if (profile.renderedChain !== chainId) { profile.hiddenRoles.clear(); profile.depth = 2; }
     profile.renderedChain = chainId;
+    profile.renderedBulk = bulkKey();
+    profile.redrawGraph = null;
+    if (state.chains.length) profile.bulkFailed = false;
     // The profile's own answers count only while the profile shows this chain, not when the
     // same chain is open in the drawer.
     const live = () => token === profile.renderToken && activeView === 'chain' && profileChainId === chainId;
@@ -199,7 +236,8 @@ async function renderChainProfile(chainId, { keepScroll = false } = {}) {
     drawProfileAlerts();
     renderProfileIncidents(incidentCard, chainId, kpi);
     const l2b = state.l2beat.get(chainId);
-    if (l2b?.tvs != null) kpi.value = { label: 'Value secured', value: fmtUsd(l2b.tvs), sub: [l2b.stage, 'L2BEAT'].filter(Boolean).join(' · '), hint: 'Total value secured, from L2BEAT' };
+    if (l2b?.tvs != null) kpi.value = l2bKpi(l2b);
+    profile.bulk = { chainId, kpi, drawKpis: () => drawKpis(), activityCard, hero };
     drawKpis();
 
     const detail = profileFetch(`/chains/${chainId}`).catch(err => (err.status === 404 ? null : {}));
@@ -395,15 +433,26 @@ function drawProfileAlerts() {
     const f = a.nextFork;
     if (f) {
         const ms = Date.parse(f.activationAt || '');
-        const when = Number.isFinite(ms) ? `${countdownText(ms - Date.now())} · ${forkWhen(f)}` : forkWhen(f);
+        // A countdown only to a stated time: a date-only activation is that day, not its midnight.
+        const dayOnly = f.activationPrecision === 'day' || (f.activationAt && isDateOnlyActivation(f.activationAt));
+        const when = Number.isFinite(ms) && !dayOnly ? `${countdownText(ms - Date.now())} · ${forkWhen(f)}` : forkWhen(f);
         const link = (f.events || []).find(e => e.url)?.url;
-        const software = [...new Set((f.events || []).filter(e => e.release).map(e => `${e.release.repo?.split('/').pop()} ${e.release.version}`))].slice(0, 3);
+        // The newest release per repository that names this fork. Reported, not a recommendation:
+        // a later release may supersede it.
+        const newest = new Map();
+        for (const e of (f.events || []).filter(e => e.release?.repo)) {
+            const prev = newest.get(e.release.repo);
+            if (!prev || (Date.parse(e.publishedAt || '') || 0) > (Date.parse(prev.publishedAt || '') || 0)) newest.set(e.release.repo, e);
+        }
+        const software = [...newest.values()]
+            .sort((a, b) => (Date.parse(b.publishedAt || '') || 0) - (Date.parse(a.publishedAt || '') || 0))
+            .slice(0, 3).map(e => `${e.release.repo.split('/').pop()} ${e.release.version}`);
         a.node.appendChild(el('div', { class: 'pf-alert is-warn' }, [
             el('span', { class: 'pf-alert-kind', text: 'Next hardfork' }),
             el('span', { class: 'pf-alert-text' }, [
                 link ? extLink(link, f.name || 'Unnamed fork') : el('strong', { text: f.name || 'Unnamed fork' }),
                 el('span', { text: ` — ${when}` }),
-                software.length ? el('span', { class: 'dim', text: ` · upgrade to ${software.join(', ')}` }) : null
+                software.length ? el('span', { class: 'dim', text: ` · named in ${software.join(', ')}` }) : null
             ]),
             el('a', { class: 'pf-alert-more', href: '#', text: 'All hardforks →', onclick: jump(a.forkCard) })
         ]));
@@ -511,6 +560,7 @@ function renderRelationGraph(card, chainId, g) {
     body.append(controls, stage);
 
     const draw = () => drawRelationGraph(stage, chainId, direct, second);
+    profile.redrawGraph = draw;
     for (const role of ROLE_ORDER) {
         const n = [...direct.values()].filter(x => x.role === role).length;
         if (!n) continue;
@@ -827,9 +877,11 @@ function renderProfileForks(card, d, kpi) {
     const ms = f => Date.parse(f.activationAt || '') || 0;
     const rank = { upcoming: 0, unscheduled: 1, past: 2, cancelled: 3 };
     forks.sort((a, b) => (rank[a.phase] ?? 4) - (rank[b.phase] ?? 4) || (a.phase === 'upcoming' ? ms(a) - ms(b) : ms(b) - ms(a)));
-    const upcoming = forks.filter(f => f.phase === 'upcoming').length;
-    kpi.forks = { label: 'Hardforks', value: fmtNum(forks.length), sub: upcoming ? `${upcoming} upcoming` : 'none upcoming', tone: upcoming ? 'warn' : null };
-    setCardMeta(card, `${forks.length} known`);
+    // The response's own totals: the list is capped, the counts are not.
+    const total = d.totalMatched ?? forks.length;
+    const upcoming = d.byPhase?.upcoming ?? forks.filter(f => f.phase === 'upcoming').length;
+    kpi.forks = { label: 'Hardforks', value: fmtNum(total), sub: upcoming ? `${upcoming} upcoming` : 'none upcoming', tone: upcoming ? 'warn' : null };
+    setCardMeta(card, d.truncated ? `${fmtNum(total)} known · showing ${fmtNum(forks.length)}` : `${fmtNum(total)} known`);
     const rows = forks.map(f => {
         const ev = evidenceOf(f);
         const link = (f.events || []).find(e => e.url)?.url;
