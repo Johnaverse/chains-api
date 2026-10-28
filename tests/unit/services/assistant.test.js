@@ -109,11 +109,19 @@ describe('third-party text in tool results (OWASP LLM01/LLM06)', () => {
 
   it('checks every destination a run could become: whole in prose, cut at each | in a table', () => {
     const trusted = new Set(['https://docs.example']);
-    // Prose (no table rule): the dashboard links the whole run, to evil.example.
-    expect(limitLinks('| https://docs.example|@evil.example/claim', trusted)).toBe('| evil.example (link not from a source)');
+    // Prose (no table rule): the dashboard would link the whole run, to evil.example. Broken before
+    // the pipe, it links only the trusted URL; the rest is text with no scheme to link.
+    expect(limitLinks('| https://docs.example|@evil.example/claim', trusted)).toBe('| https://docs.example |@evil.example/claim');
     // In a table cell it would link https://docs.example only — but the run is checked both ways.
     expect(limitLinks('| a | https://docs.example | b |', trusted)).toBe('| a | https://docs.example | b |');
-    expect(limitLinks('| https://evil.example/x|https://docs.example |', trusted)).toBe('| evil.example (link not from a source) |');
+    expect(limitLinks('| https://evil.example/x|https://docs.example |', trusted)).toBe('| evil.example (link not from a source) |https://docs.example |');
+  });
+
+  it('keeps a compact table row\'s cells and its trusted citation', () => {
+    const trusted = new Set(['https://forum.example/t/1']);
+    // The prose run is broken before the pipe; the table still splits and trims the same cells.
+    expect(limitLinks('|https://forum.example/t/1|healthy|', trusted)).toBe('|https://forum.example/t/1 |healthy|');
+    expect(limitLinks('|https://evil.example/x|healthy|', trusted)).toBe('|evil.example (link not from a source) |healthy|');
   });
 
   it('trusts citation and endpoint fields as link fields', () => {

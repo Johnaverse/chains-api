@@ -76,18 +76,30 @@ function trimForCheck(token) {
 export const linksIn = (text) => (String(text).match(LINK_RUNS) ?? []).map((raw) => trimForCheck(trimUrl(raw)));
 
 export function limitLinks(text, trusted) {
-  return String(text).replace(LINK_RUNS, (raw) => {
-    const url = trimUrl(raw);
-    const tail = raw.slice(url.length);
-    const candidates = [trimForCheck(url)];
-    for (let i = raw.indexOf('|'); i !== -1; i = raw.indexOf('|', i + 1)) candidates.push(trimForCheck(raw.slice(0, i)));
-    const destinations = candidates.filter((c) => /^https?:\/\/./.test(c));
-    if (destinations.every((c) => trusted.has(c))) return raw;
-    // A code or bold span's closing mark stays right after the host, so the span still closes.
-    const checked = trimForCheck(url);
-    const marks = url.slice(checked.length);
-    let host = null;
-    try { host = new URL(checked).host; } catch { /* not a URL */ }
-    return `${host ?? 'a link'}${marks} (link not from a source)${tail}`;
-  });
+  return String(text).replace(LINK_RUNS, (raw) => limitRun(raw, trusted));
+}
+
+// The first unescaped `|` in a run: where a table cell ends (`\|` stays in the cell).
+function firstPipe(raw) {
+  for (let i = raw.indexOf('|'); i !== -1; i = raw.indexOf('|', i + 1)) if (raw[i - 1] !== '\\') return i;
+  return -1;
+}
+
+function limitRun(raw, trusted) {
+  const url = trimUrl(raw);
+  const tail = raw.slice(url.length);
+  const candidates = [trimForCheck(url)];
+  for (let i = raw.indexOf('|'); i !== -1; i = raw.indexOf('|', i + 1)) candidates.push(trimForCheck(raw.slice(0, i)));
+  if (candidates.filter((c) => /^https?:\/\/./.test(c)).every((c) => trusted.has(c))) return raw;
+  // A run with a cell boundary (`|https://x/1|healthy|`): keep the cells. The part before the pipe
+  // is judged alone, a space before the pipe ends the prose run there (a table trims cells, so it
+  // renders the same), and the rest is checked as text of its own.
+  const pipe = firstPipe(raw);
+  if (pipe > 0) return `${limitRun(raw.slice(0, pipe), trusted)} ${limitLinks(raw.slice(pipe), trusted)}`;
+  // A code or bold span's closing mark stays right after the host, so the span still closes.
+  const checked = trimForCheck(url);
+  const marks = url.slice(checked.length);
+  let host = null;
+  try { host = new URL(checked).host; } catch { /* not a URL */ }
+  return `${host ?? 'a link'}${marks} (link not from a source)${tail}`;
 }
