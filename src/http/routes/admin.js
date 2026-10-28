@@ -13,6 +13,7 @@ import { getNetworkResearchInfo } from '../../sources/networkResearch.js';
 import { loadData } from '../../services/loader.js';
 import { startRpcHealthCheck, getRpcMonitoringStatus } from '../../services/rpcHealth.js';
 import { validateChainData } from '../../services/validation.js';
+import { validationReport, findingsForChain } from '../../services/validationReport.js';
 import { runIncidentSentinel, inspectCachedIncidents } from '../../services/incidentSentinel.js';
 import { tokenMatches } from '../../util/token.js';
 import { getL2BeatRefreshStatus } from '../../services/l2beatRefresher.js';
@@ -226,12 +227,23 @@ export async function adminRoutes(fastify) {
     }
   });
 
-  fastify.get('/validate', async (_request, reply) => {
-    const validationResults = validateChainData();
+  fastify.get('/validate', {
+    schema: {
+      querystring: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          chainId: { type: 'integer', description: 'Only the findings about this chain (a chain profile reads these, not the whole report)' }
+        }
+      }
+    }
+  }, async (request, reply) => {
+    const validationResults = validationReport(validateChainData);
     if (validationResults.error) {
       return sendError(reply, 503, validationResults.error);
     }
-    return validationResults;
+    const { chainId } = request.query;
+    return chainId == null ? validationResults : findingsForChain(validationResults, chainId);
   });
 
   // Separate from /validate rather than folded into it: that one is synchronous over the

@@ -17,6 +17,7 @@ import {
   getRpcMonitoringStatus,
 } from './dataService.js';
 import { getL2BeatRefreshStatus } from './src/services/l2beatRefresher.js';
+import { validationReport, findingsForChain } from './src/services/validationReport.js';
 import { getL2Metrics, getL2MetricsForChain, getDaLayers, getEthSupply, ATTRIBUTION as GROWTHEPIE_ATTRIBUTION } from './src/sources/growthepie.js';
 import { ensureChainRpcResults } from './src/services/chainRefresher.js';
 import { getClientsByChain } from './clientsView.js';
@@ -191,7 +192,9 @@ export function getToolDefinitions() {
       description: 'Validate chain data for potential quality issues across 21 cross-source validation rules — each finding has a severity: error (a source should fix it) or notice (worth knowing, not wrong) — (relation conflicts, mainnet-vs-testnet claims that disagree — each with the source and field that said it —, one chain ID naming different networks in different sources, slip44/name/status mismatches, L2BEAT consistency, RPC drift, deprecated-parent propagation, networks deprecated here but not upstream, live chains with no answering RPC, deprecated chains whose RPC still answers, RPC endpoints listed for a chain that serve another, and more)',
       inputSchema: {
         type: 'object',
-        properties: {},
+        properties: {
+          chainId: { type: 'integer', description: 'Only the findings about this chain' },
+        },
       },
     },
     {
@@ -1112,12 +1115,13 @@ function handleGetKeywords() {
   });
 }
 
-function handleValidateChains() {
-  const validationResults = validateChainData();
+function handleValidateChains(args = {}) {
+  if (args.chainId != null && !isValidChainId(args.chainId)) return errorResponse('chainId must be a chain ID');
+  const validationResults = validationReport(validateChainData);
   if (validationResults.error) {
     return errorResponse(validationResults.error);
   }
-  return textResponse(validationResults);
+  return textResponse(args.chainId != null ? findingsForChain(validationResults, args.chainId) : validationResults);
 }
 
 function handleGetStats() {

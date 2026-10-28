@@ -30,6 +30,8 @@
     <!-- 3d-force-graph (1.2 MB) is injected lazily on first visit to the
          Relationships tab — see ensureGraphLib() in app.js. -->
     <script src="app.js" defer></script>
+    <!-- The chain profile page (<base>chains/<id>); built from app.js helpers, so loaded after it. -->
+    <script src="profile.js" defer></script>
 </head>
 
 <body>
@@ -563,6 +565,11 @@
     </section>
 
     <!-- ═══ View: Client releases ══════════════════════════════════════ -->
+    <!-- A network's profile page: reached at <base>chains/<id>, not from a tab. -->
+    <section id="view-chain" class="view scroll-view" role="region" aria-label="Network profile" tabindex="0">
+        <div class="view-inner" id="chainProfile"></div>
+    </section>
+
     <section id="view-releases" class="view scroll-view" role="tabpanel" aria-label="Client releases" tabindex="0">
         <div class="view-inner">
             <div class="view-head">

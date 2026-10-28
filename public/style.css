@@ -1951,3 +1951,103 @@ a.tlx-row-title:hover { color: var(--accent-hover); }
 .lineage-via.lineage-fork { color: var(--ink-2); background: none; border: 1px solid var(--rule); }
 .lineage-down-title { margin-top: var(--sp-4); }
 .lineage-down .r-item .affected-chains { margin-top: var(--sp-1); }
+
+/* ═══ Chain profile (<base>chains/<id>) ═════════════════════════════════ */
+.pf-crumbs { font-size: var(--fs-200); margin-bottom: var(--sp-3); }
+.pf-crumbs a { color: var(--ink-3); text-decoration: none; }
+.pf-crumbs a:hover { color: var(--ink-1); text-decoration: underline; }
+.pf-hero { display: flex; flex-direction: column; gap: var(--sp-2); margin-bottom: var(--sp-4); }
+.pf-title { font-size: var(--fs-700); font-weight: 600; letter-spacing: -.02em; line-height: var(--lh-tight); overflow-wrap: anywhere; }
+.pf-facts { font-size: var(--fs-200); color: var(--ink-3); overflow-wrap: anywhere; }
+.pf-links { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); font-size: var(--fs-200); }
+.pf-kpis { margin-bottom: var(--sp-4); }
+.pf-grid { display: grid; gap: var(--sp-4); grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.pf-grid > .card { margin-top: 0; min-width: 0; }
+.pf-wide { grid-column: 1 / -1; }
+@media (max-width: 860px) { .pf-grid { grid-template-columns: minmax(0, 1fr); } }
+.pf-body { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.pf-empty { font-size: var(--fs-200); }
+.pf-list { display: flex; flex-direction: column; }
+.pf-chips { display: flex; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); }
+.pf-rel-item { white-space: nowrap; }
+.d-profile-link { display: inline-block; margin-top: var(--sp-2); font-size: var(--fs-200); font-weight: 600; }
+
+/* Relationship graph: drawn in real pixels, so it scrolls sideways only if the card is
+   narrower than the 300px floor. Edges are recessive; a hovered node lights its own. */
+.pf-graph-controls { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); justify-content: space-between; }
+.pf-graph { width: 100%; overflow-x: auto; }
+.pf-graph-svg { display: block; margin: 0 auto; }
+.pf-g-edge { stroke: var(--rule-strong, var(--rule)); stroke-width: 1; transition: stroke-opacity var(--dur-fast) var(--ease); }
+.pf-g-edge-testnet, .pf-g-edge-mainnet { stroke-dasharray: 3 3; }
+.pf-graph-svg.is-focusing .pf-g-edge { stroke-opacity: .25; }
+.pf-graph-svg.is-focusing .pf-g-edge.is-on { stroke-opacity: 1; stroke: var(--ink-2); stroke-width: 1.5; }
+.pf-g-hit { fill: transparent; }
+.pf-g-node { cursor: pointer; }
+.pf-g-node.is-center { cursor: default; }
+.pf-g-dot { stroke: var(--surface-1); stroke-width: 2; }
+.pf-g-node:hover .pf-g-dot, .pf-g-node:focus-visible .pf-g-dot { stroke: var(--ink-1); }
+.pf-g-node:focus { outline: none; }
+.pf-g-label { font-size: 11px; fill: var(--ink-2); paint-order: stroke; stroke: var(--surface-1); stroke-width: 3px; stroke-linejoin: round; }
+.pf-g-label.is-center { font-size: 13px; font-weight: 600; fill: var(--ink-1); }
+.pf-role-key { width: 14px; height: 0; border-top: 1.5px solid var(--ink-3); flex-shrink: 0; }
+.pf-role-testnet, .pf-role-mainnet { border-top-style: dashed; }
+.pf-rel-list { margin-top: var(--sp-2); border-top: 1px solid var(--rule); padding-top: var(--sp-2); }
+
+/* RPC rows: status, URL, state, then what the probe saw. The URL wraps rather than
+   pushing the row wider than a phone. */
+.pf-rpc-row {
+    display: grid; grid-template-columns: 10px minmax(0, 2.2fr) 84px minmax(0, 2fr);
+    gap: var(--sp-2); align-items: center; padding: 5px 0; border-bottom: 1px solid var(--rule);
+    font-size: var(--fs-200);
+}
+.pf-rpc-url { overflow-wrap: anywhere; }
+.pf-rpc-meta { overflow-wrap: anywhere; }
+.dot-idle { background: transparent; border: 1px solid var(--ink-3); }
+@media (max-width: 760px) {
+    .pf-rpc-row { grid-template-columns: 10px minmax(0, 1fr) auto; }
+    .pf-rpc-meta { grid-column: 2 / -1; }
+}
+
+.pf-fork-row, .pf-event-row {
+    display: grid; grid-template-columns: 172px minmax(0, 1fr) auto; gap: var(--sp-3);
+    align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--rule); font-size: var(--fs-200);
+}
+.pf-event-row { grid-template-columns: 172px minmax(0, 1fr); }
+.pf-fork-row.pending .pf-fork-when { color: var(--warn-text); font-weight: 600; }
+.pf-fork-name { font-weight: 600; overflow-wrap: anywhere; }
+@media (max-width: 460px) {
+    .pf-fork-row, .pf-event-row { grid-template-columns: minmax(0, 1fr) auto; }
+    .pf-fork-row .pf-fork-when, .pf-event-row .pf-fork-when { grid-column: 1 / -1; }
+}
+
+.pf-finding { display: flex; gap: var(--sp-2); align-items: baseline; padding: 5px 0; border-bottom: 1px solid var(--rule); font-size: var(--fs-200); }
+.pf-finding .pill { flex-shrink: 0; }
+
+.pf-raw { border-bottom: 1px solid var(--rule); }
+.pf-raw summary { cursor: pointer; padding: 6px 0; font-size: var(--fs-200); }
+.pf-json {
+    max-height: 420px; overflow: auto; margin: 0 0 var(--sp-2); padding: var(--sp-3);
+    background: var(--surface-2, var(--surface-3)); border-radius: var(--r-sm);
+    font-size: var(--fs-100); line-height: 1.45; white-space: pre;
+}
+.pf-g-more { fill: var(--ink-3); font-style: italic; }
+.pf-rel-sub > summary { cursor: pointer; list-style: none; }
+.pf-rel-sub > summary::-webkit-details-marker { display: none; }
+.pf-rel-sub[open] { flex-basis: 100%; white-space: normal; }
+.pf-rel-sub[open] > .pf-chips { margin: var(--sp-1) 0 var(--sp-2) var(--sp-3); padding-left: var(--sp-2); border-left: 1px solid var(--rule); }
+
+/* Profile warnings: an open incident on this chain or its RPC providers, and the next
+   hardfork. A tinted row with a coloured edge — the label says what it is, never colour alone. */
+.pf-alerts { display: flex; flex-direction: column; gap: var(--sp-2); margin-bottom: var(--sp-4); }
+.pf-alerts:empty { display: none; }
+.pf-alert {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-3);
+    padding: var(--sp-2) var(--sp-4); border-radius: var(--r-md); border: 1px solid var(--rule);
+    border-left-width: 3px; font-size: var(--fs-300);
+}
+.pf-alert.is-warn { border-left-color: var(--warn); background: color-mix(in srgb, var(--warn) 9%, var(--surface-1)); }
+.pf-alert.is-critical { border-left-color: var(--critical); background: color-mix(in srgb, var(--critical) 9%, var(--surface-1)); }
+.pf-alert-kind { font-size: var(--fs-100); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--warn-text); white-space: nowrap; }
+.pf-alert.is-critical .pf-alert-kind { color: var(--critical-text); }
+.pf-alert-text { flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; }
+.pf-alert-more { font-size: var(--fs-200); white-space: nowrap; }

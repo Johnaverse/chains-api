@@ -12,6 +12,7 @@ import ajvErrors from 'ajv-errors';
 import pkg from '../../package.json' with { type: 'json' };
 import { initializeDataOnStartup } from '../services/loader.js';
 import { startRpcHealthCheck } from '../services/rpcHealth.js';
+import { appShell } from './appShell.js';
 import { startL2BeatRefresh } from '../services/l2beatRefresher.js';
 import { startGrowthepieRefresh } from '../sources/growthepie.js';
 import { startSourceRefresher } from '../services/sourceRefresher.js';
@@ -276,6 +277,14 @@ export async function buildApp(options = {}) {
     prefix: '/ui/',
     decorateReply: false
   });
+
+  // A chain's profile page: the same app, at a path of its own (public/profile.js).
+  const profilePage = appShell(join(__dir, '..', '..', 'public', 'index.html'), '/ui/');
+  // With or without a trailing slash, as the page itself accepts both.
+  for (const path of ['/ui/chains/:id', '/ui/chains/:id/']) {
+    fastify.get(path, { schema: { params: { type: 'object', properties: { id: { type: 'string', pattern: '^\\d+$' } } } } },
+      async (_request, reply) => reply.type('text/html; charset=utf-8').send(await profilePage()));
+  }
 
   await fastify.register(rateLimit, {
     max: RATE_LIMIT_MAX,
