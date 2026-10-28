@@ -93,3 +93,17 @@ describe('hwProfile', () => {
     expect(labels).toEqual(['CPU', 'GPU', 'OS']);
   });
 });
+
+describe('hwSizing', () => {
+  const ctx = vm.createContext({ state: { byId: new Map(), l2beat: new Map() } });
+  vm.runInContext(`${code}; this.api = { hwSizing };`, ctx);
+  const { hwSizing } = ctx.api;
+
+  it('says only what the sizing field establishes', () => {
+    expect(hwSizing('not_established')).toBe('no separate sizing published');
+    expect(hwSizing('not_established_separately')).toBe('no separate sizing published');
+    expect(hwSizing('included_in_whole_host_profile')).toBe("included in this profile's figures");
+    expect(hwSizing('covered_by_existing_profiles')).toBe('sized by another profile on this page');
+    expect(hwSizing(undefined)).toBeNull();
+  });
+});

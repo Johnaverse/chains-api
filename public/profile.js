@@ -1047,10 +1047,13 @@ function hwProfile(p, shared) {
 
 // Services a profile also needs that its own figures do not cover (Etherlink's operator-run
 // Tezos L1 node): when, where it may run, and whether its sizing is published or included.
+// Says only what the research established: unpublished separate sizing is not a claim that the
+// service falls outside this profile, and "covered by" points at the other profiles listed here.
 function hwSizing(v) {
     const t = String(v || '');
-    if (t.startsWith('not_established')) return 'sizing not published, not in the figures above';
-    if (t.startsWith('included') || t.startsWith('covered')) return 'included in the figures above';
+    if (t.startsWith('not_established')) return 'no separate sizing published';
+    if (t.startsWith('included')) return "included in this profile's figures";
+    if (t.startsWith('covered')) return 'sized by another profile on this page';
     return t ? words(t) : null;
 }
 function hwHosting(d) {
