@@ -1870,7 +1870,7 @@ describe('validateChainData', () => {
       decidedBy: { source: 'theGraph', field: 'relations' },
       contested: false
     });
-    expect(conflict.claims).toContainEqual({ source: 'chainlist', field: 'isTestnet', value: 'mainnet', said: false });
+    expect(conflict.claims).toContainEqual(expect.objectContaining({ source: 'chainlist', field: 'isTestnet', value: 'mainnet', said: false }));
     expect(conflict.message).toContain('chainlist isTestnet');
   });
 

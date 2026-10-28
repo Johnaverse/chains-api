@@ -91,6 +91,63 @@ describe('chainRefresher', () => {
       expect(cachedData.rpcHealth?.[999]).toBeUndefined();
     });
 
+    it('does not count an endpoint that serves another chain as this chain\'s', async () => {
+      // Tempo's deprecated Andantino (42429) lists Moderato's RPC, which answers as 42431.
+      seedCacheWith([seedChain(42429, ['https://rpc-moderato.example', 'https://rpc-silent-id.example'])]);
+      jsonRpcCall.mockImplementation(async (url, method) => {
+        if (method === 'web3_clientVersion') return 'tempo/v1';
+        if (method === 'eth_blockNumber') return '0x10';
+        if (url === 'https://rpc-silent-id.example') throw new Error('method not found');
+        return '0xa5bf'; // 42431
+      });
+      await processChainRpc(42429);
+      const [moderato, silent] = cachedData.rpcHealth[42429];
+      expect(moderato).toMatchObject({ ok: false, failure: 'wrong_chain', servedChainId: 42431 });
+      // One that will not say which chain it serves is judged on its blocks.
+      expect(silent).toMatchObject({ ok: true, blockHeight: 16 });
+    });
+
+    it('backs a provider off when it rate-limits the chain-id question, keeping the block verdict', async () => {
+      seedCacheWith([seedChain(1, ['https://a.limited.example']), seedChain(10, ['https://b.limited.example'])]);
+      jsonRpcCall.mockImplementation(async (_url, method) => {
+        if (method === 'eth_chainId') throw Object.assign(new Error('HTTP 429'), { kind: 'rate_limited', status: 429 });
+        return method === 'web3_clientVersion' ? 'Geth/v1' : '0x10';
+      });
+      await processChainRpc(1);
+      expect(cachedData.rpcHealth[1][0]).toMatchObject({ ok: true, blockHeight: 16 });
+      jsonRpcCall.mockClear();
+      await processChainRpc(10);
+      // Same provider (limited.example): deferred, not probed.
+      expect(jsonRpcCall).not.toHaveBeenCalled();
+    });
+
+    it('keeps a provider backed off when one endpoint of the batch was limited and another was fine', async () => {
+      seedCacheWith([seedChain(1, ['https://a.mixed.example', 'https://b.mixed.example']), seedChain(10, ['https://c.mixed.example'])]);
+      jsonRpcCall.mockImplementation(async (url, method) => {
+        if (method === 'eth_chainId') {
+          if (url === 'https://a.mixed.example') throw Object.assign(new Error('HTTP 429'), { kind: 'rate_limited', status: 429 });
+          return '0x1';
+        }
+        return method === 'web3_clientVersion' ? 'Geth/v1' : '0x10';
+      });
+      await processChainRpc(1);
+      // Nor is the provider asked for eth_config by the fork-schedule read.
+      expect(refreshNodeForkSchedule).toHaveBeenLastCalledWith(1, []);
+      jsonRpcCall.mockClear();
+      await processChainRpc(10);
+      expect(jsonRpcCall).not.toHaveBeenCalled();
+    });
+
+    it('takes no identity from a malformed chain id', async () => {
+      seedCacheWith([seedChain(1, ['https://rpc-a.example', 'https://rpc-b.example'])]);
+      jsonRpcCall.mockImplementation(async (url, method) => {
+        if (method === 'eth_chainId') return url === 'https://rpc-a.example' ? '' : '0x1garbage';
+        return method === 'web3_clientVersion' ? 'Geth/v1' : '0x10';
+      });
+      await processChainRpc(1);
+      expect(cachedData.rpcHealth[1].map(r => [r.ok, r.failure ?? null])).toEqual([[true, null], [true, null]]);
+    });
+
     it('never probes an RPC URL that is not publicly routable', async () => {
       // Registry URLs are community-submitted, and this sweep runs unattended. A crafted entry
       // pointing at a cluster address would otherwise have the refresher reach inside the
@@ -109,8 +166,9 @@ describe('chainRefresher', () => {
 
       expect(cachedData.rpcHealth[1]).toHaveLength(1);
       expect(cachedData.rpcHealth[1][0].url).toBe('https://rpc-public.example');
-      // Two calls: clientVersion + blockNumber, for the one endpoint that survived.
-      expect(jsonRpcCall).toHaveBeenCalledTimes(2);
+      // Three calls — clientVersion, blockNumber, and the chain id it serves — for the one
+      // endpoint that survived.
+      expect(jsonRpcCall).toHaveBeenCalledTimes(3);
       for (const [url] of jsonRpcCall.mock.calls) expect(url).toBe('https://rpc-public.example');
     });
 
@@ -132,7 +190,7 @@ describe('chainRefresher', () => {
       const unauthorized = Object.assign(new Error('HTTP 401'), { status: 401 });
       jsonRpcCall.mockImplementation(async (url, method) => {
         if (url === 'https://rpc-keyed.example') throw unauthorized;
-        return method === 'web3_clientVersion' ? 'Geth/v1.0' : '0x10';
+        return method === 'eth_chainId' ? '0x1' : method === 'web3_clientVersion' ? 'Geth/v1.0' : '0x10';
       });
 
       await processChainRpc(1);
@@ -158,7 +216,7 @@ describe('chainRefresher', () => {
       cachedData.rpcHealth = { 2: [{ url: 'https://rpc-keyed.example', ok: false }] };
       jsonRpcCall.mockImplementation(async (url, method) => {
         if (url === 'https://rpc-keyed.example') throw Object.assign(new Error('HTTP 401'), { status: 401 });
-        return method === 'web3_clientVersion' ? 'Geth/v1.0' : '0x10';
+        return method === 'eth_chainId' ? '0x1' : method === 'web3_clientVersion' ? 'Geth/v1.0' : '0x10';
       });
 
       await processChainRpc(1);
@@ -350,9 +408,9 @@ describe('chainRefresher', () => {
 
       // Chain 10's endpoint on the same provider is not probed; the other provider is.
       jsonRpcCall.mockReset();
-      jsonRpcCall.mockResolvedValue('0x20');
+      jsonRpcCall.mockImplementation(async (_url, method) => (method === 'eth_chainId' ? '0xa' : '0x20'));
       await processChainRpc(10);
-      expect(jsonRpcCall.mock.calls.map(([url]) => url)).toEqual(['https://rpc.other.example', 'https://rpc.other.example']);
+      expect(jsonRpcCall.mock.calls.map(([url]) => url)).toEqual(['https://rpc.other.example', 'https://rpc.other.example', 'https://rpc.other.example']);
       expect(cachedData.rpcHealth[10]).toEqual([
         { url: 'https://c10.rpc.provider.example', ok: true, blockHeight: 5 },
         expect.objectContaining({ url: 'https://rpc.other.example', ok: true })
@@ -477,7 +535,7 @@ describe('chainRefresher', () => {
         seedChain(3, ['https://rpc-c.example'])
       ]);
       fetchL2Beat.mockResolvedValue({ source: 'live', fetchedAt: '2026-05-05T00:00:00.000Z', projects: [] });
-      jsonRpcCall.mockImplementation(async (_url, method) => (method === 'web3_clientVersion' ? 'Geth/v1' : '0x10'));
+      jsonRpcCall.mockImplementation(async (_url, method) => (method === 'eth_chainId' ? '0x1' : method === 'web3_clientVersion' ? 'Geth/v1' : '0x10'));
 
       await tickOnce(); // l2beat_batch
       await tickOnce(); // chain_rpc 1
@@ -509,7 +567,7 @@ describe('chainRefresher', () => {
       seedCacheWith([seedChain(1, ['http://rpc.one'])]);
       // healthy endpoint: clientVersion + block height
       jsonRpcCall.mockImplementation((_url, method) =>
-        Promise.resolve(method === 'web3_clientVersion' ? 'geth/v1' : '0x10'));
+        Promise.resolve(method === 'eth_chainId' ? '0x1' : method === 'web3_clientVersion' ? 'geth/v1' : '0x10'));
 
       await processChainRpc(1); // no prior state -> changed -> persist
 
@@ -525,7 +583,7 @@ describe('chainRefresher', () => {
       cachedData.rpcHealth = { 1: [{ url: 'http://rpc.one', ok: true, blockHeight: 16 }] };
       persistChainRpcHealth.mockClear();
       jsonRpcCall.mockImplementation((_url, method) =>
-        Promise.resolve(method === 'web3_clientVersion' ? 'geth/v1' : '0x20')); // new block
+        Promise.resolve(method === 'eth_chainId' ? '0x1' : method === 'web3_clientVersion' ? 'geth/v1' : '0x20')); // new block
 
       await processChainRpc(1);
 

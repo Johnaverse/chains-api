@@ -27,7 +27,8 @@ export function rpcStateChanged(prev, next) {
   if (prev.length !== next.length) return true;
   // `failure` and `unansweredSince` count too: how and since when an endpoint is down is what
   // validation reads (rule 18). unansweredSince only changes when an endpoint goes silent or answers again.
-  const state = (r) => `${r.ok === true}|${r.failure ?? ''}|${r.unansweredSince ?? ''}`;
+  // servedChainId too: an endpoint moving from one wrong chain to another changes rule 21.
+  const state = (r) => `${r.ok === true}|${r.failure ?? ''}|${r.unansweredSince ?? ''}|${r.servedChainId ?? ''}`;
   const prevByUrl = new Map(prev.map(r => [r.url, state(r)]));
   for (const r of next) {
     if (!prevByUrl.has(r.url)) return true;
