@@ -101,14 +101,21 @@ function isThrottled(url, now) {
 }
 
 function noteProviderResponses(results, now) {
+  // Per provider for the whole batch: any refusal of our volume outranks a success beside it, or
+  // a provider that limited this batch would be probed again at once.
+  const verdict = new Map(); // provider -> 'limited' | 'ok'
   for (const r of results) {
     const provider = providerOf(r.url);
     if (!provider) continue;
-    if (r.failure === 'rate_limited' || r.throttled) {
+    if (r.failure === 'rate_limited' || r.throttled) verdict.set(provider, 'limited');
+    else if (r.ok && !verdict.has(provider)) verdict.set(provider, 'ok');
+  }
+  for (const [provider, v] of verdict) {
+    if (v === 'limited') {
       const prev = throttledProviders.get(provider);
       const backoffMs = prev ? Math.min(prev.backoffMs * 2, THROTTLE_BACKOFF_MAX_MS) : THROTTLE_BACKOFF_MS;
       throttledProviders.set(provider, { until: now + backoffMs, backoffMs });
-    } else if (r.ok) {
+    } else {
       throttledProviders.delete(provider);
     }
   }
@@ -134,6 +141,14 @@ function parseBlockHeight(value) {
     return Number.isNaN(parsed) ? null : parsed;
   }
   return null;
+}
+
+// An eth_chainId answer, only when it is wholly a quantity ("0x61", or digits): a malformed one
+// ("", "0x1garbage") is no evidence of which chain an endpoint serves.
+function parseChainId(value) {
+  const text = typeof value === 'number' ? String(value) : typeof value === 'string' ? value.trim() : '';
+  const n = /^0x[0-9a-f]+$/i.test(text) ? Number.parseInt(text, 16) : /^\d+$/.test(text) ? Number(text) : NaN;
+  return Number.isSafeInteger(n) && n >= 0 ? n : null;
 }
 
 async function checkRpcEndpoint(url, chainId = null) {
@@ -172,7 +187,7 @@ async function checkRpcEndpoint(url, chainId = null) {
   let servedChainId = null;
   if (chainId != null && result.blockHeight !== null) {
     try {
-      servedChainId = parseBlockHeight(await jsonRpcCall(url, 'eth_chainId', { timeoutMs: RPC_CHECK_TIMEOUT_MS }));
+      servedChainId = parseChainId(await jsonRpcCall(url, 'eth_chainId', { timeoutMs: RPC_CHECK_TIMEOUT_MS }));
     } catch (err) {
       // No answer: judged on its blocks. A refusal of our volume still backs the provider off
       // (noteProviderResponses), though the endpoint served its block.

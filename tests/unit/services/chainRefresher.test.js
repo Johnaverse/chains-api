@@ -121,6 +121,31 @@ describe('chainRefresher', () => {
       expect(jsonRpcCall).not.toHaveBeenCalled();
     });
 
+    it('keeps a provider backed off when one endpoint of the batch was limited and another was fine', async () => {
+      seedCacheWith([seedChain(1, ['https://a.mixed.example', 'https://b.mixed.example']), seedChain(10, ['https://c.mixed.example'])]);
+      jsonRpcCall.mockImplementation(async (url, method) => {
+        if (method === 'eth_chainId') {
+          if (url === 'https://a.mixed.example') throw Object.assign(new Error('HTTP 429'), { kind: 'rate_limited', status: 429 });
+          return '0x1';
+        }
+        return method === 'web3_clientVersion' ? 'Geth/v1' : '0x10';
+      });
+      await processChainRpc(1);
+      jsonRpcCall.mockClear();
+      await processChainRpc(10);
+      expect(jsonRpcCall).not.toHaveBeenCalled();
+    });
+
+    it('takes no identity from a malformed chain id', async () => {
+      seedCacheWith([seedChain(1, ['https://rpc-a.example', 'https://rpc-b.example'])]);
+      jsonRpcCall.mockImplementation(async (url, method) => {
+        if (method === 'eth_chainId') return url === 'https://rpc-a.example' ? '' : '0x1garbage';
+        return method === 'web3_clientVersion' ? 'Geth/v1' : '0x10';
+      });
+      await processChainRpc(1);
+      expect(cachedData.rpcHealth[1].map(r => [r.ok, r.failure ?? null])).toEqual([[true, null], [true, null]]);
+    });
+
     it('never probes an RPC URL that is not publicly routable', async () => {
       // Registry URLs are community-submitted, and this sweep runs unattended. A crafted entry
       // pointing at a cluster address would otherwise have the refresher reach inside the

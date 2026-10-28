@@ -227,9 +227,16 @@ export async function initializeDataOnStartup(options = {}) {
       attachForums(cachedData.indexed);
       // And the Testnet tags, with the classification context validation reads them by
       // (learned words, parent types, hint reliability): process state a snapshot does not carry.
-      // Only with the raw registries in the snapshot: without them every claim is missing.
-      if (Array.isArray(cachedData.chains) && cachedData.chains.length && Array.isArray(cachedData.chainlist)) {
-        applyNetworkType(cachedData.indexed, rawEntriesByChainId({ chains: cachedData.chains, chainlist: cachedData.chainlist, theGraph: cachedData.theGraph }));
+      // With whichever raw registries the snapshot holds (a missing one reads as empty), and the
+      // same identity exclusions indexData applied. With none at all, its tags stand.
+      const hasRaw = (Array.isArray(cachedData.chains) && cachedData.chains.length > 0)
+        || (Array.isArray(cachedData.chainlist) && cachedData.chainlist.length > 0)
+        || (Array.isArray(cachedData.theGraph?.networks) && cachedData.theGraph.networks.length > 0);
+      if (hasRaw) {
+        applyNetworkType(cachedData.indexed, rawEntriesByChainId(
+          { chains: cachedData.chains, chainlist: cachedData.chainlist, theGraph: cachedData.theGraph },
+          cachedData.indexed.identityConflicts
+        ));
       }
       cachedData.indexed.all = Object.values(cachedData.indexed.byChainId);
       await overlayDiskRpcHealth();
