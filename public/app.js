@@ -5123,7 +5123,11 @@ function appendInlineMd(target, text) {
         } else {
             // A sentence ending in a URL ("see https://docs.x.org/node.") would otherwise link
             // the full stop too and 404; trailing punctuation goes back to the text.
-            const url = m[3].replace(/[.,;:!?'"]+$/, '');
+            // A loop, not /[…]+$/ (quadratic on a long run of punctuation); the server cuts the
+            // same way when it decides which links an answer may keep (src/services/toolLinks.js).
+            let end = m[3].length;
+            while (end > 0 && '.,;:!?\'"'.includes(m[3][end - 1])) end--;
+            const url = m[3].slice(0, end);
             const tail = m[3].slice(url.length);
             // Same protocol rule as every other link on the page; a non-http(s) match stays text.
             const href = safeUrl(url);

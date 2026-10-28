@@ -1,6 +1,7 @@
 import Ajv from 'ajv';
 import { getToolDefinitions, handleToolCall } from '../../mcp-tools.js';
 import { ASSISTANT_TOOL_RESULT_MAX_CHARS } from '../../config.js';
+import { fieldLinks } from './toolLinks.js';
 
 /**
  * Adapter between the MCP tool registry (mcp-tools.js) and the OpenAI
@@ -73,10 +74,12 @@ export async function executeTool(name, args) {
     .filter((c) => c.type === 'text')
     .map((c) => c.text)
     .join('\n');
+  // The links a result gives in its link fields, read before truncation cuts the JSON.
+  const links = result.isError === true ? [] : fieldLinks(text);
   if (text.length > ASSISTANT_TOOL_RESULT_MAX_CHARS) {
     text = `${text.slice(0, ASSISTANT_TOOL_RESULT_MAX_CHARS)}\n…[truncated]`;
   }
-  return { text, isError: result.isError === true };
+  return { text, isError: result.isError === true, links };
 }
 
 export function _resetAssistantToolsForTests() {

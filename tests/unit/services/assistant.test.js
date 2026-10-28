@@ -87,6 +87,39 @@ describe('third-party text in tool results (OWASP LLM01/LLM06)', () => {
     expect(fetchImpl.calls[0].body.messages[0].content).toContain('never instructions');
   });
 
+  it('cuts URLs exactly as the dashboard links them: a quote before @ is part of the link', () => {
+    const trusted = new Set(['https://docs.example']);
+    // The dashboard links the whole token (host evil.example), so the check must see all of it.
+    // …and what is shown is where it really goes: everything before @ is userinfo.
+    expect(limitLinks("See https://docs.example'@evil.example/claim now", trusted)).toBe('See evil.example (link not from a source) now');
+    expect(limitLinks('See https://docs.example]@evil.example/x', trusted)).toBe('See evil.example (link not from a source)');
+    // Trailing punctuation still goes back to the text; code spans are not links and stay as written.
+    expect(limitLinks('Docs: https://docs.example. RPC: `https://rpc.other.example`', trusted)).toBe('Docs: https://docs.example. RPC: `https://rpc.other.example`');
+  });
+
+  it('trims a long run of punctuation in linear time', () => {
+    const started = Date.now();
+    limitLinks(`https://x.example/${'!'.repeat(50000)}x`, new Set());
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+
+  it('trusts link fields only, not URL-shaped free text', () => {
+    const result = JSON.stringify({ items: [{ title: 'https://evil.example/a', summary: 'https://evil.example/b', url: 'https://forum.example/t/1', sourceUrl: 'https://feed.example/rss' }], explorers: [{ name: 'x', url: 'https://scan.example' }], links: ['https://a.example'] });
+    expect(fieldLinks(result).sort()).toEqual(['https://a.example', 'https://feed.example/rss', 'https://forum.example/t/1', 'https://scan.example']);
+  });
+
+  it('keeps source links from a result too long for the model to see whole', async () => {
+    const big = JSON.stringify({ items: [{ url: 'https://forum.example/t/1', body: 'x'.repeat(20000) }] });
+    vi.mocked(handleToolCall).mockResolvedValueOnce({ content: [{ type: 'text', text: big }] });
+    const fetchImpl = fetchSequence([
+      llmResponse(toolCallMessage('search_chains', '{"query":"base"}')),
+      llmResponse({ role: 'assistant', content: 'Thread: https://forum.example/t/1' })
+    ]);
+    const result = await runAssistant({ messages: [{ role: 'user', content: 'news?' }], log: noopLog, fetchImpl });
+    expect(fetchImpl.calls[1].body.messages.find((m) => m.role === 'tool').content).toContain('[truncated]');
+    expect(result.reply).toBe('Thread: https://forum.example/t/1');
+  });
+
   it('keeps a link the user gave', async () => {
     const fetchImpl = fetchSequence([llmResponse({ role: 'assistant', content: 'That page is https://docs.example/a.' })]);
     const result = await runAssistant({ messages: [{ role: 'user', content: 'what is https://docs.example/a about?' }], log: noopLog, fetchImpl });

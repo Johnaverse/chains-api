@@ -11,3 +11,19 @@ describe('clientKey', () => {
     expect(clientKey({}, undefined)).toBe('unknown');
   });
 });
+
+describe('RATE_LIMIT_CLIENT_IP_HEADER', () => {
+  it('set empty turns the header off rather than falling back to the default', async () => {
+    const before = process.env.RATE_LIMIT_CLIENT_IP_HEADER;
+    process.env.RATE_LIMIT_CLIENT_IP_HEADER = '';
+    try {
+      const { vi } = await import('vitest');
+      vi.resetModules();
+      const { clientKey: fresh } = await import('../../../src/http/clientKey.js');
+      expect(fresh({ 'cf-connecting-ip': '203.0.113.7' }, '10.42.0.9')).toBe('10.42.0.9');
+    } finally {
+      if (before === undefined) delete process.env.RATE_LIMIT_CLIENT_IP_HEADER;
+      else process.env.RATE_LIMIT_CLIENT_IP_HEADER = before;
+    }
+  });
+});
