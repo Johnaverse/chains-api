@@ -24,6 +24,12 @@ const profile = {
     head: { timer: null },
     // The chain the page was last built for; null while a deep link waits for the bulk data.
     renderedChain: null,
+    // The bulk data it was built from (bulkKey), and whether every bulk source has failed.
+    renderedBulk: null,
+    bulkFailed: false,
+    // What a newer bulk load refreshes in place (refreshProfileBulk).
+    bulk: null,
+    redrawGraph: null,
     pageTitle: null
 };
 const PROFILE_CACHE_MS = 60000;
@@ -62,14 +68,19 @@ function openChainProfile(chainId, opts = {}) {
     const same = activeView === 'chain' && profileChainId === chainId;
     // Already showing this chain (history, or applyBulk re-applying the URL): keep the page as
     // it is — expanded sections, an open drawer — unless it was built before the bulk data.
-    if (same && opts.fromUrl && profile.renderedChain === chainId) return;
+    if (same && opts.fromUrl && profile.renderedChain === chainId) {
+        // A newer bulk load (the network answer after the cached one): refresh what it feeds —
+        // value secured, scaling figures, the graph's types and sizes — and keep the rest.
+        if (profile.renderedBulk !== bulkKey()) refreshProfileBulk();
+        return;
+    }
     if (openChainId != null) closeDrawer({ fromUrl: true });
     profileChainId = chainId;
     switchView('chain', { fromUrl: true });
     if (!opts.fromUrl) updateUrl({ push: true });
     // A deep link opens before the bulk data (names, types, relations, L2BEAT) has loaded. Build
     // once it has — applyBulk re-applies the URL — or once it has failed (renderPendingProfile).
-    if (!state.chains.length) {
+    if (!state.chains.length && !profile.bulkFailed) {
         profile.renderedChain = null;
         const root = byId('chainProfile');
         if (root && !root.querySelector('.pf-loading')) {
@@ -80,9 +91,33 @@ function openChainProfile(chainId, opts = {}) {
     }
     renderChainProfile(chainId, { keepScroll: same });
 }
-// The bulk load failed: build the profile from the per-chain endpoints alone.
+// The bulk load failed: build profiles from the per-chain endpoints alone, this one and the next
+// ones opened, until a bulk load succeeds.
 function renderPendingProfile() {
+    profile.bulkFailed = true;
     if (activeView === 'chain' && profileChainId != null && profile.renderedChain == null) renderChainProfile(profileChainId);
+}
+function bulkKey() { return `${state.lastUpdated ?? ''}|${state.l2beatMeta?.fetchedAt ?? ''}|${state.chains.length}`; }
+function refreshProfileBulk() {
+    const b = profile.bulk;
+    if (!b || profileChainId !== b.chainId) return;
+    profile.renderedBulk = bulkKey();
+    // The detail fetched for the previous generation must not stand in for this one.
+    profile.cache.delete(`/chains/${b.chainId}`);
+    const l2b = state.l2beat.get(b.chainId);
+    if (l2b?.tvs != null) b.kpi.value = l2bKpi(l2b); else delete b.kpi.value;
+    profileFetch(`/chains/${b.chainId}`).catch(() => ({})).then(d => {
+        // Still this render, still on screen: a reader who left, or a re-render, drops it.
+        if (activeView !== 'chain' || profile.bulk !== b) return;
+        const c = { ...(state.byId.get(b.chainId) || { chainId: b.chainId }), ...(d || {}) };
+        renderProfileHero(b.hero, c);
+        renderProfileActivity(b.activityCard, c, l2b, b.kpi);
+        b.drawKpis();
+    });
+    profile.redrawGraph?.();
+}
+function l2bKpi(l2b) {
+    return { label: 'Value secured', value: fmtUsd(l2b.tvs), sub: [l2b.stage, 'L2BEAT'].filter(Boolean).join(' · '), hint: 'Total value secured, from L2BEAT' };
 }
 
 function stopProfileHead() { stopHeadPoller(profile.head); }
@@ -140,6 +175,9 @@ async function renderChainProfile(chainId, { keepScroll = false } = {}) {
     // A different chain starts with every relation shown, whatever the last one filtered.
     if (profile.renderedChain !== chainId) { profile.hiddenRoles.clear(); profile.depth = 2; }
     profile.renderedChain = chainId;
+    profile.renderedBulk = bulkKey();
+    profile.redrawGraph = null;
+    if (state.chains.length) profile.bulkFailed = false;
     // The profile's own answers count only while the profile shows this chain, not when the
     // same chain is open in the drawer.
     const live = () => token === profile.renderToken && activeView === 'chain' && profileChainId === chainId;
@@ -175,13 +213,14 @@ async function renderChainProfile(chainId, { keepScroll = false } = {}) {
     const forumCard = profileCard('Recent forum posts');
     const activityCard = profileCard('Scaling & activity', { wide: true });
     const researchCard = profileCard('Research', { wide: true });
+    const hardwareCard = profileCard('Node hardware', { wide: true });
     const qualityCard = profileCard('Data quality', { wide: true });
     const rawCard = profileCard('All data', { wide: true, meta: 'raw API records' });
     root.appendChild(el('div', { class: 'pf-grid' }, [
         graphCard, identityCard, incidentCard, rpcCard, liveClientCard, softwareCard,
-        forkCard, eventCard, forumCard, activityCard, researchCard, qualityCard, rawCard
+        forkCard, eventCard, forumCard, activityCard, researchCard, hardwareCard, qualityCard, rawCard
     ]));
-    for (const card of [softwareCard, forumCard, activityCard, researchCard]) card.classList.add('hidden');
+    for (const card of [softwareCard, forumCard, activityCard, researchCard, hardwareCard]) card.classList.add('hidden');
 
     // Headline figures, filled as their sources answer.
     const kpi = {};
@@ -199,23 +238,37 @@ async function renderChainProfile(chainId, { keepScroll = false } = {}) {
     drawProfileAlerts();
     renderProfileIncidents(incidentCard, chainId, kpi);
     const l2b = state.l2beat.get(chainId);
-    if (l2b?.tvs != null) kpi.value = { label: 'Value secured', value: fmtUsd(l2b.tvs), sub: [l2b.stage, 'L2BEAT'].filter(Boolean).join(' · '), hint: 'Total value secured, from L2BEAT' };
+    if (l2b?.tvs != null) kpi.value = l2bKpi(l2b);
+    profile.bulk = { chainId, kpi, drawKpis: () => drawKpis(), activityCard, hero };
     drawKpis();
 
     const detail = profileFetch(`/chains/${chainId}`).catch(err => (err.status === 404 ? null : {}));
     const settled = (path) => profileFetch(path).then(v => ({ ok: true, v }), err => ({ ok: false, err }));
 
+    const generation = profile.renderedBulk;
     detail.then(d => {
         if (!live()) return;
         if (d === null && !known) { renderProfileMissing(root, chainId); return; }
         const c = { ...(known || { chainId }), ...(d || {}) };
-        renderProfileHero(hero, c);
         renderProfileIdentity(identityCard, c);
-        renderProfileActivity(activityCard, c, l2b, kpi);
+        // The header and scaling figures belong to a bulk generation: once a newer one has
+        // refreshed them (refreshProfileBulk), this older answer leaves them alone.
+        if (profile.renderedBulk === generation) {
+            renderProfileHero(hero, c);
+            renderProfileActivity(activityCard, c, state.l2beat.get(chainId), kpi);
+        }
         drawKpis();
         // renderResearch shows the card only when there is something it renders (a block holding
         // only node-hardware sizing stays hidden).
-        if (c.research) renderResearch(c.research, researchCard);
+        if (c.research) {
+            renderResearch(c.research, researchCard);
+            const r = c.research;
+            // The same order renderResearch's footer uses: a forum- or channel-only block has its
+            // own check date, and updatedAt is the dataset's, not this network's.
+            const when = r.checkedAt || r.forumsCheckedAt || r.channelsCheckedAt || r.updatedAt;
+            setCardMeta(researchCard, [r.coverage && `${r.coverage} coverage`, r.auditStatus && `audit ${r.auditStatus}`, when && `checked ${relTime(when)}`].filter(Boolean).join(' · '));
+        }
+        renderProfileHardware(hardwareCard, c.research?.hardware);
     });
 
     settled(`/relations/${chainId}/graph?depth=2`).then(r => {
@@ -395,15 +448,26 @@ function drawProfileAlerts() {
     const f = a.nextFork;
     if (f) {
         const ms = Date.parse(f.activationAt || '');
-        const when = Number.isFinite(ms) ? `${countdownText(ms - Date.now())} · ${forkWhen(f)}` : forkWhen(f);
+        // A countdown only to a stated time: a date-only activation is that day, not its midnight.
+        const dayOnly = f.activationPrecision === 'day' || (f.activationAt && isDateOnlyActivation(f.activationAt));
+        const when = Number.isFinite(ms) && !dayOnly ? `${countdownText(ms - Date.now())} · ${forkWhen(f)}` : forkWhen(f);
         const link = (f.events || []).find(e => e.url)?.url;
-        const software = [...new Set((f.events || []).filter(e => e.release).map(e => `${e.release.repo?.split('/').pop()} ${e.release.version}`))].slice(0, 3);
+        // The newest release per repository that names this fork. Reported, not a recommendation:
+        // a later release may supersede it.
+        const newest = new Map();
+        for (const e of (f.events || []).filter(e => e.release?.repo)) {
+            const prev = newest.get(e.release.repo);
+            if (!prev || (Date.parse(e.publishedAt || '') || 0) > (Date.parse(prev.publishedAt || '') || 0)) newest.set(e.release.repo, e);
+        }
+        const software = [...newest.values()]
+            .sort((a, b) => (Date.parse(b.publishedAt || '') || 0) - (Date.parse(a.publishedAt || '') || 0))
+            .slice(0, 3).map(e => `${e.release.repo.split('/').pop()} ${e.release.version}`);
         a.node.appendChild(el('div', { class: 'pf-alert is-warn' }, [
             el('span', { class: 'pf-alert-kind', text: 'Next hardfork' }),
             el('span', { class: 'pf-alert-text' }, [
                 link ? extLink(link, f.name || 'Unnamed fork') : el('strong', { text: f.name || 'Unnamed fork' }),
                 el('span', { text: ` — ${when}` }),
-                software.length ? el('span', { class: 'dim', text: ` · upgrade to ${software.join(', ')}` }) : null
+                software.length ? el('span', { class: 'dim', text: ` · named in ${software.join(', ')}` }) : null
             ]),
             el('a', { class: 'pf-alert-more', href: '#', text: 'All hardforks →', onclick: jump(a.forkCard) })
         ]));
@@ -511,6 +575,7 @@ function renderRelationGraph(card, chainId, g) {
     body.append(controls, stage);
 
     const draw = () => drawRelationGraph(stage, chainId, direct, second);
+    profile.redrawGraph = draw;
     for (const role of ROLE_ORDER) {
         const n = [...direct.values()].filter(x => x.role === role).length;
         if (!n) continue;
@@ -827,9 +892,11 @@ function renderProfileForks(card, d, kpi) {
     const ms = f => Date.parse(f.activationAt || '') || 0;
     const rank = { upcoming: 0, unscheduled: 1, past: 2, cancelled: 3 };
     forks.sort((a, b) => (rank[a.phase] ?? 4) - (rank[b.phase] ?? 4) || (a.phase === 'upcoming' ? ms(a) - ms(b) : ms(b) - ms(a)));
-    const upcoming = forks.filter(f => f.phase === 'upcoming').length;
-    kpi.forks = { label: 'Hardforks', value: fmtNum(forks.length), sub: upcoming ? `${upcoming} upcoming` : 'none upcoming', tone: upcoming ? 'warn' : null };
-    setCardMeta(card, `${forks.length} known`);
+    // The response's own totals: the list is capped, the counts are not.
+    const total = d.totalMatched ?? forks.length;
+    const upcoming = d.byPhase?.upcoming ?? forks.filter(f => f.phase === 'upcoming').length;
+    kpi.forks = { label: 'Hardforks', value: fmtNum(total), sub: upcoming ? `${upcoming} upcoming` : 'none upcoming', tone: upcoming ? 'warn' : null };
+    setCardMeta(card, d.truncated ? `${fmtNum(total)} known · showing ${fmtNum(forks.length)}` : `${fmtNum(total)} known`);
     const rows = forks.map(f => {
         const ev = evidenceOf(f);
         const link = (f.events || []).find(e => e.url)?.url;
@@ -864,6 +931,11 @@ function renderProfileEvents(card, d) {
 
 // ── scaling & activity ───────────────────────────────────────────────────
 function renderProfileActivity(card, c, l2b, kpi) {
+    // Replaces what an earlier render put here.
+    card.querySelector('.pf-body')?.remove();
+    card.classList.add('hidden');
+    delete kpi.users;
+    delete kpi.txcost;
     const m = c.l2Metrics;
     if (!l2b && !m) return;
     const body = cardBody(card);
@@ -890,6 +962,154 @@ function renderProfileActivity(card, c, l2b, kpi) {
         }
         if (m.url) body.appendChild(detailRow('Source', extLink(m.url, 'growthepie')));
     }
+    card.classList.remove('hidden');
+}
+
+// ── node hardware ─────────────────────────────────────────────────────────
+// research.hardware: the sizing a network's own documentation publishes, per node role and
+// level, each requirement with its qualifier and source. Shown as the documents state it; units
+// are not converted.
+const HW_STATUS_TEXT = {
+    documented: 'Documented by the project',
+    partial: 'Partly documented',
+    not_found: 'No published hardware requirements found',
+    inaccessible: 'Requirements page could not be read'
+};
+// Display order and names for the components most profiles use. Any other component the data
+// carries (gpu, os, …) is shown too, after these, under its own name.
+const HW_COMPONENT_LABEL = { cpu: 'CPU', gpu: 'GPU', memory: 'Memory', storage: 'Storage', network: 'Network', operating_system: 'OS', os: 'OS' };
+const HW_COMPONENT_ORDER = ['cpu', 'gpu', 'memory', 'storage', 'network', 'operating_system', 'os'];
+const HW_SCOPE_TEXT = { exact_network: 'this network', project_family: 'project-wide', historical_network: 'historical network', uncertain: 'scope uncertain' };
+const HW_QUALIFIER = { at_least: '≥ ', at_most: '≤ ', approximately: '~ ', minimum: '≥ ' };
+const words = v => String(v ?? '').replace(/_/g, ' ');
+// Metrics whose text value says what it is ("NVMe SSD", "Ubuntu 22.04", "AMD EPYC").
+const HW_SELF_NAMED = new Set(['storage_type', 'os_version', 'version', 'model']);
+
+function hwValue(r) {
+    // A yes/no requirement ("public_ip": true) is the requirement's name, or its absence; with the
+    // generic metric it is the component itself ("GPU: not required").
+    if (typeof r.value === 'boolean') {
+        if (r.metric === 'other') return r.value ? 'required' : 'not required';
+        return r.value ? words(r.metric) : `no ${words(r.metric)}`;
+    }
+    const unit = r.unit ? ` ${r.unit}` : '';
+    const v = r.qualifier === 'range' && (r.min != null || r.max != null)
+        ? `${r.min ?? '?'}–${r.max ?? '?'}${unit}`
+        : `${HW_QUALIFIER[r.qualifier] ?? ''}${typeof r.value === 'number' ? r.value.toLocaleString() : (r.value ?? '?')}${r.value != null ? unit : ''}`;
+    // The metric is named unless it is what the component means by default.
+    const plain = { cpu: ['cores'], memory: ['capacity'], storage: ['capacity'], network: ['bandwidth'], operating_system: ['os_version'] };
+    // …or when the unit already says it ("8 threads", "50,000 IOPS"), or the value names itself
+    // (a drive type, an OS, a model). Other text values keep it: "growth ~100 GB / 6 months".
+    const said = r.unit && String(r.unit).toLowerCase().includes(String(r.metric).toLowerCase());
+    const selfNamed = typeof r.value === 'string' && HW_SELF_NAMED.has(r.metric);
+    const metric = plain[r.component]?.includes(r.metric) || r.metric === 'other' || said || selfNamed ? '' : `${words(r.metric)} `;
+    return `${metric}${v}${r.qualifier === 'suggested' ? ' (suggested)' : ''}`;
+}
+
+function hwTitle(p) { return [words(p.role), words(p.level)].filter(x => x && x !== 'unspecified').join(' · ') || 'node'; }
+// Profiles sharing a role and level (Ethereum's attester and local-builder validators) are told
+// apart by their own id.
+function hwProfile(p, shared) {
+    const title = shared ? `${hwTitle(p)} · ${words(String(p.id || '').replace(/-(minimum|recommended|example)$/, '')).replace(/-/g, ' ')}` : hwTitle(p);
+    const head = el('div', { class: 'pf-hw-head' }, [
+        el('span', { class: 'pf-hw-title', text: title }),
+        p.client ? el('span', { class: 'pf-hw-client', text: [p.client, p.clientVersion].filter(Boolean).join(' ') }) : null,
+        el('span', { class: 'pill-meta', title: 'What the requirement applies to', text: HW_SCOPE_TEXT[p.scope] || words(p.scope) }),
+        p.deployment && p.deployment !== 'unknown' ? el('span', { class: 'pill-meta', text: words(p.deployment) }) : null,
+        el('span', {
+            class: `pill-meta pf-hw-verify pf-hw-${p.verification}`,
+            title: p.verificationNotes || null,
+            text: p.verification === 'confirmed' ? 'verified' : words(p.verification)
+        })
+    ]);
+    const rows = [];
+    const present = [...new Set((p.requirements || []).map(r => r.component || 'other'))];
+    const rank = c => (HW_COMPONENT_ORDER.includes(c) ? HW_COMPONENT_ORDER.indexOf(c) : c === 'other' ? 1e9 : 1e6);
+    for (const key of present.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))) {
+        const reqs = (p.requirements || []).filter(r => (r.component || 'other') === key);
+        const label = HW_COMPONENT_LABEL[key] || words(key).replace(/^./, ch => ch.toUpperCase());
+        rows.push(el('div', { class: 'pf-hw-row' }, [
+            el('span', { class: 'pf-hw-label', text: label }),
+            el('span', { class: 'pf-hw-values' }, reqs.flatMap((r, i) => [
+                i ? ' · ' : null,
+                el('span', { title: [r.notes, r.source && `Source: ${r.source}`].filter(Boolean).join('\n') || null, text: hwValue(r) + (r.notes && r.notes.length <= 24 ? ` (${r.notes})` : '') })
+            ]))
+        ]));
+    }
+    return el('div', { class: 'pf-hw-profile' }, [
+        head,
+        ...rows,
+        p.notes ? longNote(p.notes) : null,
+        p.dependencies?.length ? hwDependencies(p.dependencies) : null,
+        p.evidence?.length ? el('div', { class: 'pf-hw-note' }, p.evidence.slice(0, 3).flatMap((u, i) => [i ? ' · ' : null, extLink(u, safeHost(u) || 'source')])) : null
+    ]);
+}
+
+// Services a profile also needs that its own figures do not cover (Etherlink's operator-run
+// Tezos L1 node): when, where it may run, and whether its sizing is published or included.
+// Says only what the research established: unpublished separate sizing is not a claim that the
+// service falls outside this profile, and "covered by" points at the other profiles listed here.
+function hwSizing(v) {
+    const t = String(v || '');
+    if (t.startsWith('not_established')) return 'no separate sizing published';
+    if (t.startsWith('included')) return "included in this profile's figures";
+    if (t.startsWith('covered')) return 'sized by another profile on this page';
+    return t ? words(t) : null;
+}
+function hwHosting(d) {
+    if (typeof d.hosting === 'string') return /\s/.test(d.hosting) ? d.hosting : words(d.hosting);
+    if (d.selfHosted === true) return 'self-hosted';
+    if (d.selfHosted === false) return 'may be a remote service';
+    return null;
+}
+function hwDependencies(deps) {
+    return el('div', { class: 'pf-hw-deps' }, [
+        el('div', { class: 'pf-hw-label', text: 'Also needs' }),
+        ...deps.map(d => el('div', { class: 'pf-hw-dep' }, [
+            el('span', { class: 'pf-hw-dep-name', text: d.component || 'Another service' }),
+            d.clientOptions?.length ? el('span', { text: ` (one of ${d.clientOptions.join(', ')})` }) : null,
+            el('div', { class: 'dim', text: [d.requiredWhen && `when: ${d.requiredWhen}`, hwHosting(d), hwSizing(d.sizing)].filter(Boolean).join(' · ') }),
+            d.notes ? longNote(d.notes) : null,
+            d.sources?.length ? el('div', { class: 'pf-hw-note' }, d.sources.slice(0, 3).flatMap((u, i) => [i ? ' · ' : null, extLink(u, safeHost(u) || 'source')])) : null
+        ]))
+    ]);
+}
+
+// Research notes run to a paragraph or more: the first lines, the rest behind a toggle.
+const NOTE_SHOWN_CHARS = 220;
+function longNote(text) {
+    if (text.length <= NOTE_SHOWN_CHARS) return el('p', { class: 'dim pf-hw-note', text });
+    const cut = text.lastIndexOf(' ', NOTE_SHOWN_CHARS);
+    const rest = el('span', { class: 'hidden', text: text.slice(cut) });
+    const more = el('button', { class: 'pf-note-more', type: 'button', 'aria-expanded': 'false', text: 'Show more' });
+    const dots = el('span', { text: '… ' });
+    more.addEventListener('click', () => {
+        const open = rest.classList.toggle('hidden') === false;
+        dots.textContent = open ? ' ' : '… ';
+        more.textContent = open ? 'Show less' : 'Show more';
+        more.setAttribute('aria-expanded', String(open));
+    });
+    return el('p', { class: 'dim pf-hw-note' }, [text.slice(0, cut), rest, dots, more]);
+}
+
+function renderProfileHardware(card, hw) {
+    card.querySelector('.pf-body')?.remove();
+    if (!hw) { card.classList.add('hidden'); return; }
+    const body = cardBody(card);
+    const profiles = hw.profiles || [];
+    setCardMeta(card, [HW_STATUS_TEXT[hw.status] || words(hw.status), hw.checkedAt && `checked ${relTime(hw.checkedAt)}`].filter(Boolean).join(' · '));
+    if (profiles.length) {
+        const count = new Map();
+        for (const p of profiles) count.set(hwTitle(p), (count.get(hwTitle(p)) || 0) + 1);
+        body.appendChild(el('div', { class: 'pf-hw-grid' }, profiles.map(p => hwProfile(p, count.get(hwTitle(p)) > 1))));
+    } else {
+        body.appendChild(emptyNote(`${HW_STATUS_TEXT[hw.status] || 'No hardware requirements on record'} for this network.`));
+    }
+    if (hw.notes) body.appendChild(longNote(hw.notes));
+    if (hw.sources?.length) {
+        body.appendChild(detailRow('Sources', hw.sources.map(src => extLink(src.url, src.title || safeHost(src.url)))));
+    }
+    body.appendChild(el('div', { class: 'r-foot dim', text: 'As the project documents it, per node role; units as published. Project-wide figures may cover several networks of the family.' }));
     card.classList.remove('hidden');
 }
 
