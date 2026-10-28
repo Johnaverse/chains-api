@@ -14,6 +14,8 @@ import { createRequire } from 'node:module';
 import { initializeDataOnStartup, getCachedData, startRpcHealthCheck } from './dataService.js';
 import { getToolDefinitions, handleToolCall } from './mcp-tools.js';
 import { logger } from './src/util/logger.js';
+import { clientKey } from './src/http/clientKey.js';
+import { RATE_LIMIT_WINDOW_MS, MCP_RATE_LIMIT_MAX, MCP_MAX_SESSIONS, MCP_SESSION_IDLE_MS } from './config.js';
 
 const require = createRequire(import.meta.url);
 const { version } = require('./package.json');
@@ -56,7 +58,7 @@ const createServer = () => {
  * source. When this module runs as the combined server's MCP listener, the
  * REST process has already loaded data into the shared in-memory store.
  */
-export function createMcpHttpApp() {
+export function createMcpHttpApp({ now = Date.now } = {}) {
   const app = express();
 
   // Avoid implicit framework/version disclosure
@@ -67,6 +69,47 @@ export function createMcpHttpApp() {
 
   // Map to store transports by session ID
   const transports = {};
+  // When each session was last used. Sessions used to live until the client closed them, so
+  // clients that never did grew the map without bound.
+  const lastSeen = new Map();
+  const sessionCount = () => Object.keys(transports).length;
+
+  // Per-client request budget for /mcp, keyed like the REST limits (clientKey.js). A tool call
+  // can make chains-api reach out — an on-demand RPC probe (get_rpc_monitor_by_id, with its
+  // eth_config read), block explorers (check_chain_halt) — so an unthrottled client could
+  // drive thousands of outbound requests.
+  const budgets = new Map(); // key -> { count, resetAt }
+  const limitMcp = (req, res, next) => {
+    const key = clientKey(req.headers, req.socket?.remoteAddress);
+    const t = now();
+    let b = budgets.get(key);
+    if (!b || t >= b.resetAt) {
+      b = { count: 0, resetAt: t + RATE_LIMIT_WINDOW_MS };
+      budgets.set(key, b);
+    }
+    b.count += 1;
+    if (b.count <= MCP_RATE_LIMIT_MAX) return next();
+    res.set('Retry-After', String(Math.max(1, Math.ceil((b.resetAt - t) / 1000))));
+    res.status(429).json({ jsonrpc: '2.0', error: { code: -32000, message: 'Too many requests' }, id: null });
+  };
+
+  /** Close sessions unused for MCP_SESSION_IDLE_MS, and forget spent rate budgets. */
+  const sweep = async () => {
+    const t = now();
+    for (const [sessionId, seen] of lastSeen) {
+      if (t - seen < MCP_SESSION_IDLE_MS) continue;
+      const transport = transports[sessionId];
+      lastSeen.delete(sessionId);
+      delete transports[sessionId];
+      if (transport) {
+        logger.info({ sessionId }, 'Closing idle MCP session');
+        await transport.close().catch(() => {});
+      }
+    }
+    for (const [key, b] of budgets) if (t >= b.resetAt) budgets.delete(key);
+  };
+  const sweeper = setInterval(() => { sweep().catch(() => {}); }, Math.min(MCP_SESSION_IDLE_MS, 60000));
+  sweeper.unref?.();
 
   // MCP POST endpoint
   const mcpPostHandler = async (req, res) => {
@@ -82,13 +125,20 @@ export function createMcpHttpApp() {
       if (sessionId && transports[sessionId]) {
         // Reuse existing transport
         transport = transports[sessionId];
+        lastSeen.set(sessionId, now());
       } else if (!sessionId && isInitializeRequest(req.body)) {
+        if (sessionCount() >= MCP_MAX_SESSIONS) await sweep();
+        if (sessionCount() >= MCP_MAX_SESSIONS) {
+          res.status(503).json({ jsonrpc: '2.0', error: { code: -32000, message: 'Too many open sessions; try again later' }, id: null });
+          return;
+        }
         // New initialization request
         transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (sessionId) => {
             logger.info({ sessionId }, 'MCP session initialized');
             transports[sessionId] = transport;
+            lastSeen.set(sessionId, now());
           },
         });
 
@@ -99,6 +149,7 @@ export function createMcpHttpApp() {
             logger.info({ sessionId: sid }, 'MCP transport closed');
             delete transports[sid];
           }
+          if (sid) lastSeen.delete(sid);
         };
 
         // Connect the transport to the MCP server
@@ -159,8 +210,8 @@ export function createMcpHttpApp() {
   };
 
   // Set up routes
-  app.post('/mcp', mcpPostHandler);
-  app.delete('/mcp', mcpDeleteHandler);
+  app.post('/mcp', limitMcp, mcpPostHandler);
+  app.delete('/mcp', limitMcp, mcpDeleteHandler);
 
   // Health check endpoint
   app.get('/health', (req, res) => {
@@ -192,6 +243,8 @@ export function createMcpHttpApp() {
 
   // Expose the transport registry so callers can close sessions on shutdown.
   app.locals.transports = transports;
+  app.locals.sweepIdleSessions = sweep;
+  app.locals.stopSweeper = () => clearInterval(sweeper);
   return app;
 }
 

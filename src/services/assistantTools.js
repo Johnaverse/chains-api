@@ -18,9 +18,15 @@ const ajv = new Ajv({ coerceTypes: true, removeAdditional: 'all', useDefaults: t
 let openAiTools = null;
 const validators = new Map();
 
+// The assistant gets only tools DECLARED read-only (`annotations.readOnlyHint`). The registry is
+// shared with the MCP servers, so without this a tool added there later — one that writes,
+// reloads or sends — would become callable by the model without anyone deciding it should be
+// (OWASP LLM06, excessive agency). Undeclared means excluded.
+const assistantToolDefinitions = () => getToolDefinitions().filter((t) => t.annotations?.readOnlyHint === true);
+
 export function getOpenAiTools() {
   if (!openAiTools) {
-    openAiTools = getToolDefinitions().map((t) => ({
+    openAiTools = assistantToolDefinitions().map((t) => ({
       type: 'function',
       function: { name: t.name, description: t.description, parameters: t.inputSchema }
     }));
@@ -30,7 +36,7 @@ export function getOpenAiTools() {
 
 function getValidator(name) {
   if (!validators.has(name)) {
-    const def = getToolDefinitions().find((t) => t.name === name);
+    const def = assistantToolDefinitions().find((t) => t.name === name);
     validators.set(name, def ? ajv.compile(def.inputSchema) : null);
   }
   return validators.get(name);

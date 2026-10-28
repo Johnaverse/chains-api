@@ -41,6 +41,14 @@ export const MAX_PARAM_LENGTH = parseIntEnv('MAX_PARAM_LENGTH', 200);
 // Rate limiting
 export const RATE_LIMIT_MAX = parseIntEnv('RATE_LIMIT_MAX', 100);
 export const RATE_LIMIT_WINDOW_MS = parseIntEnv('RATE_LIMIT_WINDOW_MS', 60000); // 1 minute
+// The header carrying the visitor's address behind Cloudflare and the gateway; rate limits key on
+// it (src/http/clientKey.js). Empty: key on the TCP peer.
+export const RATE_LIMIT_CLIENT_IP_HEADER = parseStringEnv('RATE_LIMIT_CLIENT_IP_HEADER', 'cf-connecting-ip').toLowerCase();
+// The MCP HTTP endpoint: requests per client per RATE_LIMIT_WINDOW_MS, open sessions, and how long
+// an unused session is kept.
+export const MCP_RATE_LIMIT_MAX = parseIntEnv('MCP_RATE_LIMIT_MAX', 120);
+export const MCP_MAX_SESSIONS = parseIntEnv('MCP_MAX_SESSIONS', 200);
+export const MCP_SESSION_IDLE_MS = parseIntEnv('MCP_SESSION_IDLE_MS', 30 * 60 * 1000);
 export const RELOAD_RATE_LIMIT_MAX = parseIntEnv('RELOAD_RATE_LIMIT_MAX', 5);
 export const FEEDBACK_RATE_LIMIT_MAX = parseIntEnv('FEEDBACK_RATE_LIMIT_MAX', 5);
 export const SEARCH_RATE_LIMIT_MAX = parseIntEnv('SEARCH_RATE_LIMIT_MAX', 30);
