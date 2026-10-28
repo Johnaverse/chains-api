@@ -69,4 +69,20 @@ describe('node fork schedule (eth_config)', () => {
     expect(mentions[1]).toMatchObject({ feed: 'node', chains: [{ chainId: 97 }], id: 'node:97:0xe660a57e:1793241000', enrichment: { class: 'planned_hard_fork', fork: { name: null } } });
     expect(mentions[1].title).toContain('BNB Smart Chain Testnet');
   });
+
+  it('leaves out a fork parked far ahead: a placeholder, not a schedule', async () => {
+    // LUKSO's nodes report next at 2050-01-01.
+    jsonRpcCall.mockResolvedValueOnce({ ...chapel, next: { ...chapel.next, activationTime: 2524608000 }, last: { ...chapel.last, activationTime: 2524608000 } });
+    await refreshNodeForkSchedule(97, ['https://b'], { now: NOW });
+    expect(nodeForkMentions({ now: NOW }).map((m) => m.enrichment.fork.activationAt)).toEqual(['2026-07-21T02:30:00.000Z']);
+    // Nor through the client code's schedule for the current fork: the placeholder is left out,
+    // a height-only entry kept.
+    const sourceOf = () => ({ name: 'Pasteur', repo: 'o/r', askedAt: NOW, forks: [
+      { name: 'Pasteur', activationTime: 1784601000, activationBlock: null },
+      { name: 'Parked', activationTime: 2524608000, activationBlock: null },
+      { name: 'Lorentz', activationTime: null, activationBlock: 48000000 }
+    ] });
+    const source = nodeForkMentions({ now: NOW, sourceOf }).filter((m) => m.feed === 'source');
+    expect(source.map((m) => m.enrichment.fork.name)).toEqual(['Pasteur', 'Lorentz']);
+  });
 });

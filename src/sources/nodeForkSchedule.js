@@ -1,5 +1,5 @@
 import { jsonRpcCall } from '../../rpcUtil.js';
-import { NODE_FORK_SCHEDULE_REFRESH_MS, NODE_FORK_SCHEDULE_RETRY_MS, NODE_FORK_SCHEDULE_MAX_URLS, RPC_CHECK_TIMEOUT_MS } from '../../config.js';
+import { NODE_FORK_SCHEDULE_REFRESH_MS, NODE_FORK_SCHEDULE_RETRY_MS, NODE_FORK_SCHEDULE_MAX_URLS, NODE_FORK_SCHEDULE_MAX_AHEAD_MS, RPC_CHECK_TIMEOUT_MS } from '../../config.js';
 
 /**
  * Each chain's fork schedule as its own nodes are configured with it: `eth_config` (EIP-7910),
@@ -106,6 +106,8 @@ export function nodeForkMentions({ now = Date.now(), nameOf = () => null, source
     const sources = [];
     for (const [which, fork] of [['current', s.current], ['next', s.next], ['last', s.last]]) {
       if (!fork || fork.activationTime === 0 || seen.has(fork.activationTime)) continue;
+      // Parked far ahead (2030-01-01, 2050-01-01): a fork the client has not scheduled.
+      if (fork.activationTime * 1000 - now > NODE_FORK_SCHEDULE_MAX_AHEAD_MS) continue;
       seen.add(fork.activationTime);
       const at = new Date(fork.activationTime * 1000).toISOString();
       const done = fork.activationTime * 1000 <= now;
@@ -162,6 +164,9 @@ function sourceMentions(chainId, sources, { now, chain }) {
       const key = `${f.name.toLowerCase()}|${f.activationTime ?? ''}|${f.activationBlock ?? ''}`;
       if (seen.has(key)) continue;
       seen.add(key);
+      // A placeholder in the code (a fork parked at 2050-01-01) is no more a schedule than in
+      // the node's answer; a height-only entry is kept for the explorer to date.
+      if (f.activationTime && f.activationTime * 1000 - now > NODE_FORK_SCHEDULE_MAX_AHEAD_MS) continue;
       const at = f.activationTime ? new Date(f.activationTime * 1000).toISOString() : null;
       // A height-only fork's state is unknown here: whether the chain reached the height is the
       // explorer's to say (resolveForkActivation), never assumed done.
@@ -205,7 +210,7 @@ export function nodeForkPairs() {
   for (const [chainId, s] of schedules) {
     if (s.unsupported) continue;
     for (const fork of [s.current, s.next, s.last]) {
-      if (fork?.activationTime > 0) pairs.push({ chainId, time: fork.activationTime });
+      if (fork?.activationTime > 0 && fork.activationTime * 1000 - Date.now() <= NODE_FORK_SCHEDULE_MAX_AHEAD_MS) pairs.push({ chainId, time: fork.activationTime });
     }
   }
   return pairs;

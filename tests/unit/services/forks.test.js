@@ -41,7 +41,7 @@ describe('getForks', () => {
   it('serves the nodes\' fork schedules when every feed is down', async () => {
     getForkMentions.mockRejectedValue(new Error('Fork feeds unavailable: status: down'));
     await expect(getForks()).rejects.toThrow('Fork feeds unavailable');
-    _setNodeForkScheduleForTests(97, { checkedAt: Date.parse('2026-08-15T00:00:00Z'), url: 'https://rpc', current: { activationTime: 1784601000, forkId: '0x5203e674' }, next: { activationTime: 4102444800, forkId: '0xe660a57e' }, last: null, nextSince: Date.parse('2026-08-15T00:00:00Z') });
+    _setNodeForkScheduleForTests(97, { checkedAt: Date.parse('2026-08-15T00:00:00Z'), url: 'https://rpc', current: { activationTime: 1784601000, forkId: '0x5203e674' }, next: { activationTime: Math.floor(Date.now() / 1000) + 30 * 86400, forkId: '0xe660a57e' }, last: null, nextSince: Date.parse('2026-08-15T00:00:00Z') });
     try {
       const out = await getForks();
       expect(out.forks.map(f => f.chains)).toEqual([[97], [97]]);
