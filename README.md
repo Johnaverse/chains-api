@@ -342,6 +342,7 @@ Each tool returns JSON data that can be used by AI assistants to answer question
 ### Data Cache
 - `DATA_CACHE_ENABLED`: Enable disk-backed startup cache (default: `true`)
 - `DATA_CACHE_FILE`: Snapshot file path used for stale-first startup (default: `.cache/chains-api-data.json`)
+- `DASHBOARD_ORIGINS`: comma-separated origins the dashboard runs on besides `/ui` (default `https://www.johnaverse.cc`); their requests are audited as client kind `dashboard`.
 - `CHAINS_API_DB_HOST`, `CHAINS_API_DB_PORT` (3306), `CHAINS_API_DB_NAME` (`chains_api`), `CHAINS_API_DB_USER`, `CHAINS_API_DB_PASSWORD`: MariaDB for RPC health, used when host, user and password are set. One row per chain in `rpc_health` (created at startup): its endpoint statuses, written when a chain's up/down state changes, and the time of every check. Every replica reads and writes the same rows, so a new pod serves the last known health at once and sweeps the chains that waited longest first. Without a database, or while it is unreachable, health is kept in per-chain files beside `DATA_CACHE_FILE`.
 
 ### Assistant (Optional)
@@ -922,6 +923,18 @@ RPC health records each failed endpoint's `failure` kind. A provider that refuse
   "fix": { "source": "ethereum-lists/chains", "file": "_data/chains/eip155-5.json", "set": { "status": "deprecated" } }
 }
 ```
+
+## Usage audit
+
+Every REST and MCP request except `/health`, `/ready` and `/metrics` writes one log line (`"msg":"api access"` or `"mcp access"`, field `audit`), replacing fastify's per-request pair:
+
+- `method`, `route` (the template, e.g. `/chains/:id`; `unmatched` for unknown paths, `/ui/*` for the dashboard's files), `path`, `status`, `ms`, `chainId` when the request names one;
+- the client: `ip` (Cloudflare's `CF-Connecting-IP`, else the first `X-Forwarded-For` hop), `country` (`CF-IPCountry`), `kind`, `ua`, `referer` (host), `origin`;
+- MCP lines add `rpc` (the JSON-RPC methods) and `tools` (for `tools/call`) and `session`.
+
+`kind` is judged from what the client sends: `dashboard` (from `/ui` on this host or a `DASHBOARD_ORIGINS` origin), `browser` (another page: Fetch Metadata headers), `bot` (a declared crawler), else `script` (curl, SDKs, servers).
+
+Metrics (`/metrics`): `chains_api_http_requests_total{route,method,status,kind}`, `chains_api_http_request_duration_seconds{route,method}` (histogram), `chains_api_mcp_rpc_total{rpc,status}`, `chains_api_mcp_tool_calls_total{tool,status}`, alongside the assistant's `chains_api_assistant_tool_calls_total`. Labels never carry an IP or a raw path.
 
 ## Data Structure
 

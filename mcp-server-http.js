@@ -14,6 +14,8 @@ import { createRequire } from 'node:module';
 import { initializeDataOnStartup, getCachedData, startRpcHealthCheck } from './dataService.js';
 import { getToolDefinitions, handleToolCall } from './mcp-tools.js';
 import { logger } from './src/util/logger.js';
+import { mcpAccessLog } from './src/http/accessLog.js';
+import { DASHBOARD_ORIGINS } from './config.js';
 
 const require = createRequire(import.meta.url);
 const { version } = require('./package.json');
@@ -64,6 +66,9 @@ export function createMcpHttpApp() {
 
   // Parse JSON bodies
   app.use(express.json({ limit: '4mb' }));
+
+  // Usage audit: one line per MCP request with its JSON-RPC method and tool (src/http/accessLog.js).
+  app.use(mcpAccessLog({ dashboardOrigins: DASHBOARD_ORIGINS }));
 
   // Map to store transports by session ID
   const transports = {};

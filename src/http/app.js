@@ -13,6 +13,7 @@ import pkg from '../../package.json' with { type: 'json' };
 import { initializeDataOnStartup } from '../services/loader.js';
 import { startRpcHealthCheck } from '../services/rpcHealth.js';
 import { appShell } from './appShell.js';
+import { registerAccessLog } from './accessLog.js';
 import { startL2BeatRefresh } from '../services/l2beatRefresher.js';
 import { startGrowthepieRefresh } from '../sources/growthepie.js';
 import { startSourceRefresher } from '../services/sourceRefresher.js';
@@ -20,6 +21,7 @@ import {
   BODY_LIMIT,
   MAX_PARAM_LENGTH,
   RATE_LIMIT_MAX,
+  DASHBOARD_ORIGINS,
   RATE_LIMIT_WINDOW_MS,
   CORS_ORIGIN
 } from '../../config.js';
@@ -173,6 +175,9 @@ export async function buildApp(options = {}) {
 
   const fastify = Fastify({
     logger,
+    // One audit line per request instead (accessLog.js): fastify's pair split each request over
+    // two lines, the second without its path, and logged every kubelet probe.
+    disableRequestLogging: true,
     bodyLimit,
     maxParamLength,
     schemaErrorFormatter: formatSchemaValidationError,
@@ -222,6 +227,9 @@ export async function buildApp(options = {}) {
     },
     transform: openapiTransform
   });
+
+  // Usage audit (one line per request, request metrics); before any route so all are covered.
+  registerAccessLog(fastify, { dashboardOrigins: DASHBOARD_ORIGINS });
 
   await fastify.register(cors, {
     origin: resolveCorsOrigin(CORS_ORIGIN),
