@@ -929,10 +929,10 @@ RPC health records each failed endpoint's `failure` kind. A provider that refuse
 Every REST and MCP request except `/health`, `/ready` and `/metrics` writes one log line (`"msg":"api access"` or `"mcp access"`, field `audit`), replacing fastify's per-request pair:
 
 - `method`, `route` (the template, e.g. `/chains/:id`; `unmatched` for unknown paths, `/ui/*` for the dashboard's files), `path`, `status`, `ms`, `chainId` when the request names one;
-- the client: `ip` (Cloudflare's `CF-Connecting-IP`, else the first `X-Forwarded-For` hop), `country` (`CF-IPCountry`), `kind`, `ua`, `referer` (host), `origin`;
+- the client: `ip` (Cloudflare's `CF-Connecting-IP`, else the first `X-Forwarded-For` hop), `country` (`CF-IPCountry`), `kind`, `ua`, `referer` (host), `origin`, `site`;
 - MCP lines add `rpc` (the JSON-RPC methods) and `tools` (for `tools/call`) and `session`.
 
-`kind` is judged from what the client sends: `dashboard` (from `/ui` on this host or a `DASHBOARD_ORIGINS` origin), `browser` (another page: Fetch Metadata headers), `bot` (a declared crawler), else `script` (curl, SDKs, servers).
+`kind` is judged from what the client sends: `internal` (another service in the cluster: no Cloudflare or proxy headers, a private address), `dashboard` (from `/ui` on this host or a `DASHBOARD_ORIGINS` origin), `browser` (another page: a browser user agent with Fetch Metadata headers), `bot` (a declared crawler), else `script` (curl, SDKs, servers). `site` is the host of the referrer, or of the `Origin` when there is no referrer.
 
 Metrics (`/metrics`): `chains_api_http_requests_total{route,method,status,kind}`, `chains_api_http_request_duration_seconds{route,method}` (histogram), `chains_api_mcp_rpc_total{rpc,status}`, `chains_api_mcp_tool_calls_total{tool,status}`, alongside the assistant's `chains_api_assistant_tool_calls_total`. Labels never carry an IP or a raw path.
 

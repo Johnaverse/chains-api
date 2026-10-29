@@ -98,7 +98,7 @@ const METRIC_HELP = {
   chains_api_assistant_tool_calls_total: 'Number of assistant tool executions by tool and outcome',
   chains_api_assistant_llm_calls_total: 'Number of LLM round-trips made by the assistant by outcome',
   chains_api_assistant_reply_sanitized_total: 'Number of assistant replies altered by the sanitizer, by kind (leak, whole_repeat)',
-  chains_api_http_requests_total: 'API requests by route template, method, status class and client kind (dashboard, browser, bot, script)',
+  chains_api_http_requests_total: 'API requests by route template, method, status class and client kind (internal, dashboard, browser, bot, script)',
   chains_api_http_request_duration_seconds: 'API request duration in seconds by route template and method',
   chains_api_mcp_rpc_total: 'MCP JSON-RPC requests by method and HTTP status class',
   chains_api_mcp_tool_calls_total: 'MCP tool calls by tool and HTTP status class'
