@@ -27,14 +27,23 @@ export function clientIp(headers = {}, fallback = null) {
   return first || fallback || null;
 }
 
+// A cluster or LAN address: a request that reached the pod without Cloudflare or the ingress.
+function isPrivateAddress(ip) {
+  const a = String(ip ?? '').replace(/^::ffff:/, '');
+  return /^(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|fc|fd|::1$)/i.test(a);
+}
+
 /**
  * What kind of client asked, from what it sends rather than from a list of products:
+ *   internal  — another service in the cluster (no Cloudflare or proxy headers, a private
+ *               address): the sibling feeds and probes;
  *   dashboard — our own dashboard (a page under /ui on this host, or the CORS origin it runs on);
- *   browser   — another page in a browser (it sends Fetch Metadata, sec-fetch-*);
+ *   browser   — another page in a browser (a browser user agent with Fetch Metadata, sec-fetch-*;
+ *               Node's fetch sends Fetch Metadata too, without one);
  *   bot       — a self-declared crawler or bot;
- *   script    — anything else: curl, SDKs, servers, other services.
+ *   script    — anything else: curl, SDKs, servers.
  */
-export function clientKind(headers = {}, { dashboardOrigins = [] } = {}) {
+export function clientKind(headers = {}, { dashboardOrigins = [], peer = null } = {}) {
   const ua = String(headers['user-agent'] ?? '');
   const origin = String(headers.origin ?? '');
   const referer = String(headers.referer ?? '');
@@ -42,8 +51,9 @@ export function clientKind(headers = {}, { dashboardOrigins = [] } = {}) {
   const fromDashboard = dashboardOrigins.some(o => o && (origin === o || referer.startsWith(`${o}/`)))
     || (host && referer.includes(`://${host}/ui`));
   if (fromDashboard) return 'dashboard';
+  if (!headers['cf-connecting-ip'] && !headers['x-forwarded-for'] && isPrivateAddress(peer)) return 'internal';
   if (/\b(bot|crawler|spider)\b|bot\//i.test(ua)) return 'bot';
-  if (headers['sec-fetch-mode'] || headers['sec-fetch-site']) return 'browser';
+  if (/^Mozilla\//.test(ua) && (headers['sec-fetch-mode'] || headers['sec-fetch-site'])) return 'browser';
   return 'script';
 }
 
@@ -57,13 +67,17 @@ function statusClass(status) {
 
 /** The audit fields shared by REST and MCP lines. */
 export function auditFields(headers, { ip = null, dashboardOrigins = [] } = {}) {
+  const referer = headers.referer ? hostOf(headers.referer) : null;
   return {
     ip: clientIp(headers, ip),
     country: headers['cf-ipcountry'] ?? null,
-    kind: clientKind(headers, { dashboardOrigins }),
+    kind: clientKind(headers, { dashboardOrigins, peer: ip }),
     ua: headers['user-agent'] ? String(headers['user-agent']).slice(0, UA_MAX) : null,
-    referer: headers.referer ? hostOf(headers.referer) : null,
-    origin: headers.origin ?? null
+    referer,
+    origin: headers.origin ?? null,
+    // The site a browser request came from: the referrer's host, or the Origin's when the
+    // page sends no referrer (the dashboard's cross-origin calls carry only Origin).
+    site: referer ?? (headers.origin ? hostOf(headers.origin) : null)
   };
 }
 

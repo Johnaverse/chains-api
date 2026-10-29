@@ -26,6 +26,15 @@ describe('clientKind', () => {
     expect(clientKind({ 'user-agent': 'Mozilla/5.0 (compatible; Googlebot/2.1)' })).toBe('bot');
     expect(clientKind({ 'user-agent': 'curl/8.5.0' })).toBe('script');
   });
+
+  it('reads another service in the cluster as internal, and Node fetch as no browser', () => {
+    // A sibling feed: Node's fetch sends Fetch Metadata, straight to the pod.
+    const nodeFetch = { 'user-agent': 'node', 'sec-fetch-mode': 'cors' };
+    expect(clientKind(nodeFetch, { peer: '10.42.1.46' })).toBe('internal');
+    expect(clientKind(nodeFetch, { peer: '::ffff:10.42.1.46' })).toBe('internal');
+    // The same through Cloudflare is an outside script, not a browser.
+    expect(clientKind({ ...nodeFetch, 'cf-connecting-ip': '203.0.113.7' }, { peer: '10.42.0.5' })).toBe('script');
+  });
 });
 
 describe('REST audit', () => {
@@ -47,6 +56,9 @@ describe('REST audit', () => {
     expect(fields).toMatchObject({ audit: 'api', method: 'GET', route: '/chains/:id', path: '/chains/1', status: 200, chainId: '1', ip: '203.0.113.7', country: 'CA', kind: 'script', ua: 'curl/8.5.0' });
     expect(metricsText()).toContain('chains_api_http_requests_total{kind="script",method="GET",route="/chains/:id",status="2xx"} 1');
     expect(metricsText()).toContain('chains_api_http_request_duration_seconds_count{method="GET",route="/chains/:id"} 1');
+    await fastify.inject({ url: '/chains/2', headers: { 'cf-connecting-ip': '203.0.113.7', origin: 'https://www.johnaverse.cc', 'sec-fetch-mode': 'cors', 'user-agent': 'Mozilla/5.0' } });
+    const dash = info.mock.calls.filter(c => c[1] === 'api access').map(c => c[0]).find(f => f.path === '/chains/2');
+    expect(dash).toMatchObject({ kind: 'dashboard', referer: null, site: 'www.johnaverse.cc' });
     await fastify.close();
   });
 
