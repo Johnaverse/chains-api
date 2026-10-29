@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import {
-  forkKey, forkScopes, normalizeForkName, resolveForkActivation, forkPhase,
+  inferPastForks, forkKey, forkScopes, normalizeForkName, resolveForkActivation, forkPhase,
   bestActivation, bestState, buildForks, FORK_PHASE, forkIdentity, scopeName, sourceRank,
   registryScopes, scopeLookups, forkKind, plausibleFork, observedAtOf, forksOf, isDateOnly, FORK_KIND
 } from '../../../src/domain/forks.js';
@@ -877,5 +877,35 @@ describe('a node fork schedule (eth_config) on its chain', () => {
     expect(await buildForks([release, node('n1', 56, '2026-10-29T02:30:00Z')], opts)).toHaveLength(2);
     const other = { ...release, id: 'rel2', title: 't-rel2', enrichment: { fork: fork({ name: 'Other', network: 'BSC Chapel Testnet', activationAt: '2026-10-29T03:30:00Z', state: 'scheduled' }) } };
     expect(await buildForks([release, other, node('n1', 97, '2026-10-29T03:00:00Z')], opts)).toHaveLength(3);
+  });
+});
+
+describe('inferPastForks', () => {
+  const now = Date.parse('2026-10-29T00:00:00Z');
+  const ev = (publishedAt) => ({ feed: 'release', publishedAt });
+  // Ethereum: Fulu went live on 2025-12-03; Fusaka and Pectra are only ever "scheduled" with no
+  // date, last mentioned before that. Glamsterdam is still being mentioned in 2026.
+  const fulu = { key: 'fulu', name: 'Fulu', chains: [1], phase: 'past', state: 'scheduled', activationAt: '2025-12-03T21:49:11.000Z', events: [ev('2025-11-10T00:00:00Z')] };
+  const fusaka = { key: 'fusaka', name: 'Fusaka', chains: [1], phase: 'unscheduled', state: 'scheduled', activationAt: null, events: [ev('2025-11-03T00:00:00Z'), ev('2025-11-17T00:00:00Z')] };
+  const pectra = { key: 'pectra', name: 'Pectra', chains: [1], phase: 'unscheduled', state: 'scheduled', activationAt: null, events: [ev('2025-09-11T00:00:00Z')] };
+  const glamsterdam = { key: 'glam', name: 'Glamsterdam', chains: [1], phase: 'unscheduled', state: 'scheduled', activationAt: null, events: [ev('2025-06-01T00:00:00Z'), ev('2026-10-20T00:00:00Z')] };
+
+  it('reads an undated fork as past once a later fork on its chain has gone live', () => {
+    const out = inferPastForks([fulu, fusaka, pectra, glamsterdam], now);
+    const byKey = Object.fromEntries(out.map(f => [f.key, f]));
+    expect(byKey.fusaka).toMatchObject({ phase: 'past', activationAt: null, pastInferred: { after: 'Fulu', afterKey: 'fulu', at: '2025-12-03T21:49:11.000Z' } });
+    expect(byKey.pectra.phase).toBe('past');
+    // Still mentioned after Fulu went live: not done.
+    expect(byKey.glam).toMatchObject({ phase: 'unscheduled' });
+    expect(byKey.glam.pastInferred).toBeUndefined();
+  });
+
+  it('needs a shared chain, and leaves called-off and dated forks alone', () => {
+    const other = { ...fusaka, key: 'x', chains: [10] };
+    const cancelled = { ...fusaka, key: 'c', state: 'cancelled', phase: 'cancelled' };
+    const out = inferPastForks([fulu, other, cancelled], now);
+    expect(out[1].phase).toBe('unscheduled');
+    expect(out[2].phase).toBe('cancelled');
+    expect(out[0]).toBe(fulu);
   });
 });

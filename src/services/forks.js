@@ -1,6 +1,6 @@
 import { getForkMentions } from '../sources/forkFeeds.js';
 import { getExplorerTip } from '../sources/blockscout.js';
-import { buildForks, forkPhase, sortForks, FORK_PHASE, FORK_KIND, registryScopes, scopeLookups, normalizeForkName, nameWordsOf } from '../domain/forks.js';
+import { buildForks, forkPhase, inferPastForks, sortForks, FORK_PHASE, FORK_KIND, registryScopes, scopeLookups, normalizeForkName, nameWordsOf } from '../domain/forks.js';
 import { getAllChains } from '../store/queries.js';
 import { getRepositoryChains } from '../sources/networkResearch.js';
 import { logger } from '../util/logger.js';
@@ -354,10 +354,11 @@ export async function getAllForks() {
   // The node schedules read so far: a chain the refresher has not reached, or whose RPCs all
   // refuse eth_config, has none.
   const feeds = { ...feedStatus, node: { ok: true, count: schedules.filter((s) => !s.unsupported).length, unsupported: schedules.filter((s) => s.unsupported).length } };
-  const forks = sortForks((await builtForks(mentions, fetchedAt)).map((f) => ({
+  // Phases against the clock, then the undated forks a later activation shows to be past.
+  const forks = sortForks(inferPastForks((await builtForks(mentions, fetchedAt)).map((f) => ({
     ...f,
     phase: forkPhase({ activationAt: f.activationAt, state: f.state, activationPrecision: f.activationPrecision }, now)
-  })));
+  })), now));
   return { forks, fetchedAt, feeds };
 }
 

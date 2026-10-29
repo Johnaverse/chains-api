@@ -1996,7 +1996,7 @@ a.tlx-row-title:hover { color: var(--accent-hover); }
 /* RPC rows: status, URL, state, then what the probe saw. The URL wraps rather than
    pushing the row wider than a phone. */
 .pf-rpc-row {
-    display: grid; grid-template-columns: 10px minmax(0, 2.2fr) 84px minmax(0, 2fr);
+    display: grid; grid-template-columns: 10px minmax(0, 2.2fr) 84px 150px minmax(0, 1.6fr);
     gap: var(--sp-2); align-items: center; padding: 5px 0; border-bottom: 1px solid var(--rule);
     font-size: var(--fs-200);
 }
@@ -2005,8 +2005,15 @@ a.tlx-row-title:hover { color: var(--accent-hover); }
 .dot-idle { background: transparent; border: 1px solid var(--ink-3); }
 @media (max-width: 760px) {
     .pf-rpc-row { grid-template-columns: 10px minmax(0, 1fr) auto; }
-    .pf-rpc-meta { grid-column: 2 / -1; }
+    .pf-rpc-you, .pf-rpc-meta { grid-column: 2 / -1; }
 }
+/* Latency from the reader's browser: the number carries the meaning, the colour only tints it. */
+.pf-rpc-you { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pf-rpc-you[title] { cursor: help; }
+.pf-rpc-you.is-fast { color: var(--good-text); }
+.pf-rpc-you.is-slow { color: var(--warn-text); }
+.pf-rpc-you.is-bad { color: var(--critical-text); }
+.pf-rpc-legend { font-size: var(--fs-100); }
 
 .pf-fork-row, .pf-event-row {
     display: grid; grid-template-columns: 172px minmax(0, 1fr) auto; gap: var(--sp-3);

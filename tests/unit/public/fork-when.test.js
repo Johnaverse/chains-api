@@ -31,3 +31,20 @@ describe('an undated fork', () => {
     expect(evidenceOf(dated).label).toBe('stated');
   });
 });
+
+describe('an undated past fork', () => {
+  it('reads past, never TBA, with its height when stated', () => {
+    expect(undatedWhenText({ activationAt: null, phase: 'past', activationBlock: null })).toBe('past');
+    expect(undatedWhenText({ activationAt: null, phase: 'past', activationBlock: 5000 })).toBe(`past · block ${(5000).toLocaleString()}`);
+    expect(evidenceOf({ activationAt: null, phase: 'past' }).label).toBe('past');
+  });
+
+  it('says why when the past is inferred from a later fork going live', () => {
+    const fusaka = { activationAt: null, phase: 'past', pastInferred: { after: 'Fulu', at: '2025-12-03T21:49:11.000Z' } };
+    const ev = evidenceOf(fusaka);
+    expect(ev.label).toBe('past (inferred)');
+    expect(ev.title).toContain('Fulu went live');
+    expect(undatedWhenText(fusaka)).toBe('past');
+  });
+});
+

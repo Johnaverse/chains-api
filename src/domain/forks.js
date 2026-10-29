@@ -389,6 +389,41 @@ export function forkPhase({ activationAt, state, activationPrecision = null }, n
 }
 
 /**
+ * Undated forks that have, by the evidence, already happened.
+ *
+ * A fork on one network activates in order: a later fork going live means every fork before it
+ * did. An undated fork no source has mentioned since another fork on one of its chains went
+ * live (by a stated or observed time, now past) is therefore past too. That rule makes Fusaka
+ * and Pectra on Ethereum past once Fulu has activated, though no source ever dated them here.
+ *
+ * Inferred, never stated: the fork keeps no date, and `pastInferred` names the fork that went
+ * live and when, so a reader can see why. One still being prepared keeps appearing in new client
+ * releases (Glamsterdam during 2026), which is what keeps it from being read as done. Only an
+ * unscheduled, uncalled-off fork is considered; everything else is returned unchanged.
+ */
+export function inferPastForks(forks, now = Date.now()) {
+  const live = forks.filter(f => f.phase === FORK_PHASE.PAST && Date.parse(f.activationAt ?? '') <= now);
+  const lastMention = f => Math.max(-Infinity, ...(f.events ?? [])
+    .map(e => Date.parse(e.publishedAt ?? ''))
+    .filter(Number.isFinite));
+  return forks.map(f => {
+    if (f.phase !== FORK_PHASE.UNSCHEDULED || f.state === 'cancelled' || !(f.chains ?? []).length) return f;
+    const last = lastMention(f);
+    if (!Number.isFinite(last)) return f;
+    const chains = new Set(f.chains);
+    const after = live
+      .filter(y => y !== f && (y.chains ?? []).some(c => chains.has(c)) && Date.parse(y.activationAt) > last)
+      .sort((a, b) => Date.parse(a.activationAt) - Date.parse(b.activationAt))[0];
+    if (!after) return f;
+    return {
+      ...f,
+      phase: FORK_PHASE.PAST,
+      pastInferred: { after: after.name ?? null, afterKey: after.key, at: after.activationAt }
+    };
+  });
+}
+
+/**
  * Pick the best activation across every event that mentions one fork.
  *
  * Strength first: a provider posts "coming soon" before the exact time, and a later vaguer note

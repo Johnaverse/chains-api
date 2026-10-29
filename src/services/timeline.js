@@ -198,6 +198,8 @@ function forkEntry(fork) {
     activationPrecision: fork.activationPrecision ?? null,
     activationBlock: fork.activationBlock ?? null,
     phase: fork.phase ?? null,
+    // Past by inference (inferPastForks): the later fork that went live, and when.
+    ...(fork.pastInferred ? { pastInferred: fork.pastInferred } : {}),
     state: fork.state ?? null,
     completed: fork.state === 'completed',
     urgency: 'standard',
