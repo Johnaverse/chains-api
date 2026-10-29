@@ -150,6 +150,10 @@ export const CHAINS_API_DB_PASSWORD = parseStringEnv('CHAINS_API_DB_PASSWORD', '
 
 // CORS
 export const CORS_ORIGIN = parseStringEnv('CORS_ORIGIN', '*');
+// Where the dashboard runs besides /ui on this host, comma-separated: requests from it are
+// audited as client kind "dashboard" (src/http/accessLog.js).
+export const DASHBOARD_ORIGINS = parseStringEnv('DASHBOARD_ORIGINS', 'https://www.johnaverse.cc')
+  .split(',').map(o => o.trim().replace(/\/+$/, '')).filter(Boolean);
 
 // Proxy (optional)
 export const PROXY_URL = parseStringEnv('PROXY_URL', '');
