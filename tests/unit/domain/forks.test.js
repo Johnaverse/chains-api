@@ -885,10 +885,11 @@ describe('inferPastForks', () => {
   const ev = (publishedAt) => ({ feed: 'release', publishedAt });
   // Ethereum: Fulu went live on 2025-12-03; Fusaka and Pectra are only ever "scheduled" with no
   // date, last mentioned before that. Glamsterdam is still being mentioned in 2026.
-  const fulu = { key: 'fulu', name: 'Fulu', chains: [1], phase: 'past', state: 'scheduled', activationAt: '2025-12-03T21:49:11.000Z', events: [ev('2025-11-10T00:00:00Z')] };
-  const fusaka = { key: 'fusaka', name: 'Fusaka', chains: [1], phase: 'unscheduled', state: 'scheduled', activationAt: null, events: [ev('2025-11-03T00:00:00Z'), ev('2025-11-17T00:00:00Z')] };
-  const pectra = { key: 'pectra', name: 'Pectra', chains: [1], phase: 'unscheduled', state: 'scheduled', activationAt: null, events: [ev('2025-09-11T00:00:00Z')] };
-  const glamsterdam = { key: 'glam', name: 'Glamsterdam', chains: [1], phase: 'unscheduled', state: 'scheduled', activationAt: null, events: [ev('2025-06-01T00:00:00Z'), ev('2026-10-20T00:00:00Z')] };
+  const base = { kind: 'fork', network: 'ethereum', chains: [1], state: 'scheduled' };
+  const fulu = { ...base, key: 'fulu', name: 'Fulu', phase: 'past', activationAt: '2025-12-03T21:49:11.000Z', activationEvidence: 'stated', events: [ev('2025-11-10T00:00:00Z')] };
+  const fusaka = { ...base, key: 'fusaka', name: 'Fusaka', phase: 'unscheduled', activationAt: null, events: [ev('2025-11-03T00:00:00Z'), ev('2025-11-17T00:00:00Z')] };
+  const pectra = { ...base, key: 'pectra', name: 'Pectra', phase: 'unscheduled', activationAt: null, events: [ev('2025-09-11T00:00:00Z')] };
+  const glamsterdam = { ...base, key: 'glam', name: 'Glamsterdam', phase: 'unscheduled', activationAt: null, events: [ev('2025-06-01T00:00:00Z'), ev('2026-10-20T00:00:00Z')] };
 
   it('reads an undated fork as past once a later fork on its chain has gone live', () => {
     const out = inferPastForks([fulu, fusaka, pectra, glamsterdam], now);
@@ -898,6 +899,25 @@ describe('inferPastForks', () => {
     // Still mentioned after Fulu went live: not done.
     expect(byKey.glam).toMatchObject({ phase: 'unscheduled' });
     expect(byKey.glam.pastInferred).toBeUndefined();
+  });
+
+  it('never reads the next fork as past because the current one went live first', () => {
+    // BSC: Lorentz was announced first and goes live; Maxwell, announced after it, is next.
+    const bsc = { kind: 'fork', network: 'bnb smart chain', chains: [56], state: 'scheduled' };
+    const lorentz = { ...bsc, key: 'lorentz', name: 'Lorentz', phase: 'past', activationAt: '2025-04-29T05:05:00.000Z', activationEvidence: 'stated', events: [ev('2025-03-20T00:00:00Z')] };
+    const maxwell = { ...bsc, key: 'maxwell', name: 'Maxwell', phase: 'unscheduled', activationAt: null, events: [ev('2025-04-01T00:00:00Z')] };
+    expect(inferPastForks([lorentz, maxwell], now)[1].phase).toBe('unscheduled');
+  });
+
+  it('counts only a consensus fork on the same network, with a stated or observed time', () => {
+    const upgrade = { ...fulu, key: 'u', kind: 'upgrade' };
+    const testnet = { ...fulu, key: 't', network: 'hoodi' };
+    const estimated = { ...fulu, key: 'e', activationEvidence: 'estimated' };
+    for (const y of [upgrade, testnet, estimated]) expect(inferPastForks([y, fusaka], now)[1].phase).toBe('unscheduled');
+  });
+
+  it('leaves a fork with a stated height to the chain tip', () => {
+    expect(inferPastForks([fulu, { ...fusaka, activationBlock: 50000000 }], now)[1].phase).toBe('unscheduled');
   });
 
   it('needs a shared chain, and leaves called-off and dated forks alone', () => {

@@ -81,7 +81,9 @@ function iso(t) {
 
 function phaseOf(entry, now) {
   const at = ms(entry.activationAt);
-  if (at == null) return entry.completed ? 'past' : 'unscheduled';
+  // Undated: past when a source reported it done, or when a later fork has gone live since it
+  // was last mentioned (pastInferred, services/forks.js).
+  if (at == null) return entry.completed || entry.pastInferred ? 'past' : 'unscheduled';
   return at > now ? 'upcoming' : 'past';
 }
 
@@ -416,6 +418,25 @@ function mergeEntry(into, from) {
   for (const p of from.providerUpdates) addProviderUpdate(into, p);
   for (const n of from.news) addNews(into, n);
   into.url ??= from.url;
+  // An inference from either side holds for the merged entry only while nothing in it mentions
+  // the fork after the later fork went live.
+  const inferred = into.pastInferred ?? from.pastInferred;
+  if (!into.activationAt && inferred) {
+    if (latestMention(into) > (ms(inferred.at) ?? -Infinity)) {
+      delete into.pastInferred;
+      if (!into.completed && into.phase === 'past') into.phase = 'unscheduled';
+    } else {
+      into.pastInferred = inferred;
+      into.phase = 'past';
+    }
+  }
+}
+
+function latestMention(entry) {
+  const times = [...entry.releases, ...entry.providerUpdates, ...entry.news]
+    .map(x => ms(x.publishedAt))
+    .filter(t => t != null);
+  return times.length ? Math.max(...times) : -Infinity;
 }
 
 // Providers' network names carry their title decorations: "Urgent Ethereum Mainnet",

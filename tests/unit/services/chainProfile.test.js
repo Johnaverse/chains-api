@@ -33,7 +33,7 @@ beforeEach(() => {
   m.getNetworkClients.mockResolvedValue({ clients: [] });
   m.getStatusPageByChainId.mockReturnValue(null);
   m.getForks.mockResolvedValue({ forks: [{ name: 'Fulu' }] });
-  m.getTimeline.mockImplementation(async ({ type }) => ({ entries: [{ id: type, type }] }));
+  m.getTimeline.mockResolvedValue({ entries: [{ id: 'f', type: 'hardfork' }, { id: 'u', type: 'software_update' }, { id: 'm', type: 'maintenance' }] });
   m.validateChainData.mockReturnValue({ allErrors: [{ rule: 1, chainId: 1 }, { rule: 1, chainId: 2 }], errorsByRule: {} });
   m.getRpcMonitoringStatus.mockReturnValue({ isMonitoring: true });
 });
@@ -47,20 +47,38 @@ describe('getChainProfile', () => {
       endpoints: { rpc: ['https://rpc.one'] },
       rpcMonitor: { totalEndpoints: 1, workingEndpoints: 1, clients: [{ name: 'reth' }] },
       forks: { forks: [{ name: 'Fulu' }] },
-      events: { entries: [{ type: 'software_update' }, { type: 'maintenance' }] },
+
       validation: { chainId: 1, totalErrors: 1 }
     });
     expect(p.unavailable).toBeUndefined();
-    // Hardforks are their own part: events asks for the other two types.
-    expect(m.getTimeline.mock.calls.map(c => c[0].type)).toEqual(['software_update', 'maintenance']);
+    // One timeline read; hardforks are their own part.
+    expect(m.getTimeline).toHaveBeenCalledTimes(1);
+    expect(p.events.entries.map(e => e.type)).toEqual(['software_update', 'maintenance']);
+    // The profile shows what is known: it never waits on an on-demand probe.
+    expect(m.ensureChainRpcResults).not.toHaveBeenCalled();
   });
 
   it('reports a failing source as unavailable instead of failing the profile', async () => {
     m.getForks.mockRejectedValue(new Error('feeds down'));
+    m.traverseRelations.mockImplementation(() => { throw new Error('bad relation'); });
+    m.validateChainData.mockReturnValue({ error: 'Data not loaded' });
     const p = await getChainProfile(1);
     expect(p.forks).toBeNull();
-    expect(p.unavailable).toEqual({ forks: 'feeds down' });
+    expect(p.relations).toBeNull();
+    expect(p.validation).toBeNull();
+    expect(p.unavailable).toEqual({ forks: 'feeds down', relations: 'bad relation', validation: 'Data not loaded' });
     expect(p.chain.name).toBe('Ethereum Mainnet');
+  });
+
+  it('does not wait on a slow source', async () => {
+    vi.useFakeTimers();
+    try {
+      m.getNetworkClients.mockReturnValue(new Promise(() => {}));
+      const pending = getChainProfile(1);
+      await vi.advanceTimersByTimeAsync(8000);
+      const p = await pending;
+      expect(p.unavailable).toEqual({ networkClients: 'timed out' });
+    } finally { vi.useRealTimers(); }
   });
 
   it('answers null for a chain no registry lists, and reuses a fresh profile', async () => {

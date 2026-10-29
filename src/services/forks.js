@@ -355,12 +355,21 @@ export async function getAllForks() {
   // refuse eth_config, has none.
   const feeds = { ...feedStatus, node: { ok: true, count: schedules.filter((s) => !s.unsupported).length, unsupported: schedules.filter((s) => s.unsupported).length } };
   // Phases against the clock, then the undated forks a later activation shows to be past.
-  const forks = sortForks(inferPastForks((await builtForks(mentions, fetchedAt)).map((f) => ({
-    ...f,
-    phase: forkPhase({ activationAt: f.activationAt, state: f.state, activationPrecision: f.activationPrecision }, now)
-  })), now));
-  return { forks, fetchedAt, feeds };
+  // Kept for PHASE_MEMO_MS per build: one profile asks /forks and /timeline, and each used to
+  // rerun this pass over every fork.
+  const built = await builtForks(mentions, fetchedAt);
+  if (phased.built !== built || now - phased.at > PHASE_MEMO_MS) {
+    phased.forks = sortForks(inferPastForks(built.map((f) => ({
+      ...f,
+      phase: forkPhase({ activationAt: f.activationAt, state: f.state, activationPrecision: f.activationPrecision }, now)
+    })), now));
+    phased.built = built;
+    phased.at = now;
+  }
+  return { forks: phased.forks, fetchedAt, feeds };
 }
+const PHASE_MEMO_MS = 10000;
+const phased = { built: null, at: 0, forks: null };
 
 function includesUpgrades(include) {
   const list = Array.isArray(include) ? include : String(include ?? '').split(',');

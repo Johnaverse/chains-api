@@ -561,3 +561,28 @@ describe('getTimeline', () => {
     expect(out).toMatchObject({ count: 1, totalMatched: 3, truncated: true });
   });
 });
+
+describe('an undated fork inferred past', () => {
+  const now = Date.parse('2026-10-29T00:00:00Z');
+  const inferred = { after: 'Fulu', afterKey: 'name:fulu@ethereum', at: '2025-12-03T21:49:11.000Z' };
+
+  it('stays past on the timeline, whatever type the entry takes', () => {
+    // A versioned name makes the entry a software update, whose phase the timeline recomputes.
+    const f = fork({ name: 'v1.20.0', network: 'ethereum', chains: [1], kind: 'upgrade', activationAt: null, activationEvidence: null, activationPrecision: null, phase: 'past', pastInferred: inferred });
+    const [entry] = buildTimeline({ forks: [f], now });
+    expect(entry).toMatchObject({ phase: 'past', pastInferred: inferred });
+  });
+
+  it('carries the inference through a merge, and drops it when the other entry mentions it later', () => {
+    const base = { name: 'Fusaka', network: 'ethereum', chains: [1], activationAt: null, activationEvidence: null, activationPrecision: null };
+    const past = fork({ ...base, key: 'a', phase: 'past', pastInferred: inferred, events: [releaseEvent({ publishedAt: '2025-11-17T00:00:00Z', activationAt: null })] });
+    const quiet = fork({ ...base, key: 'b', phase: 'unscheduled', events: [releaseEvent({ url: 'https://x/1', publishedAt: '2025-11-03T00:00:00Z', activationAt: null })] });
+    const merged = buildTimeline({ forks: [quiet, past], now }).filter(e => e.name === 'Fusaka');
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({ phase: 'past', pastInferred: inferred });
+    const later = fork({ ...base, key: 'c', phase: 'unscheduled', events: [releaseEvent({ url: 'https://x/2', title: 'v1.9.0', publishedAt: '2026-02-01T00:00:00Z', activationAt: null, release: { repo: 'bnb-chain/bsc', version: 'v1.9.0', mandatory: true } })] });
+    const [still] = buildTimeline({ forks: [past, later], now }).filter(e => e.name === 'Fusaka');
+    expect(still.phase).toBe('unscheduled');
+    expect(still.pastInferred).toBeUndefined();
+  });
+});

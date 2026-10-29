@@ -870,7 +870,7 @@ function renderProfileRpc(card, chainId, mon, eps, kpi) {
             el('span', { class: 'pf-rpc-url code', title: u, text: u }),
             el('span', { class: 'pf-rpc-state', text: status }),
             you,
-            el('span', { class: 'pf-rpc-meta dim', text: [r?.blockNumber != null ? `#${r.blockNumber.toLocaleString()}` : null, clientNameVersion(r?.clientVersion)].filter(Boolean).join(' · ') })
+            el('span', { class: 'pf-rpc-meta dim', text: [r?.blockNumber != null ? `#${r.blockNumber.toLocaleString()}` : null, clientNameVersion(r?.clientVersion), r?.status !== 'working' ? r?.error : null].filter(Boolean).join(' · ') })
         ]);
         row._probe = { url: u, you, result: null, order: order(u) };
         return row;
@@ -884,7 +884,7 @@ function renderProfileRpc(card, chainId, mon, eps, kpi) {
     if (rows.length) {
         const list = moreList(rows, { shown: 10 });
         body.appendChild(list);
-        browserProbeRows(rows, { container: list });
+        browserProbeRows(rows);
     }
     if (failed.length) {
         body.appendChild(el('p', { class: 'dim pf-empty', text: `${failed.length} endpoint${failed.length === 1 ? '' : 's'} failed the monitor's last check and ${failed.length === 1 ? 'is' : 'are'} not listed.` }));
@@ -992,7 +992,7 @@ function showProbe(p) {
 }
 
 // Rows are tested as they come into view; `again` re-tests the ones already tested.
-function browserProbeRows(rows, { container = null, again = false } = {}) {
+function browserProbeRows(rows, { again = false } = {}) {
     if (again) {
         for (const row of rows) if (row._probe.result && !row._probe.result.skip) { row._probe.result = null; enqueueProbe(row); }
         return;
@@ -1034,23 +1034,38 @@ function pumpProbes() {
                 row._probe.result = result;
                 showProbe(row._probe);
                 pumpProbes();
-                if (!profile.probeActive && !profile.probeQueue.length) sortProbedRows();
+                if (!profile.probeActive && !profile.probeQueue.length && !probeMoreIfFewWork()) sortProbedRows();
             });
     }
 }
 
-// Once a round of tests is done: within each list, what works from here first, fastest first;
-// then the rest in their server order.
+// When the rows on screen yield fewer than this many that work from here, the ones behind
+// "Show more" are tested too, a batch at a time, so a working endpoint is not left hidden.
+const BROWSER_PROBE_WANT = 3;
+const BROWSER_PROBE_BATCH = 10;
+function probeMoreIfFewWork() {
+    const rows = profile.probeRows || [];
+    if (rows.filter(r => r._probe.result?.ok).length >= BROWSER_PROBE_WANT) return false;
+    const next = rows.filter(r => !r._probe.result && !browserProbeSkip(r._probe.url)).slice(0, BROWSER_PROBE_BATCH);
+    for (const row of next) { profile.rpcObserver?.unobserve(row); enqueueProbe(row); }
+    return next.length > 0;
+}
+
+// Once a round of tests is done: what works from here first, fastest first, then the rest in
+// their server order — across the shown rows and those behind "Show more", which keep their
+// counts, so the fastest endpoints are the ones on screen.
 function sortProbedRows() {
-    const rank = row => {
-        const r = row._probe.result;
-        return r?.ok ? r.ms : Infinity;
-    };
-    const parents = new Set((profile.probeRows || []).map(r => r.parentElement).filter(Boolean));
-    for (const parent of parents) {
-        const kids = [...parent.children].filter(c => c._probe);
-        kids.sort((a, b) => rank(a) - rank(b) || a._probe.order - b._probe.order).forEach(c => parent.appendChild(c));
-    }
+    const rows = profile.probeRows || [];
+    const parents = [...new Set(rows.map(r => r.parentElement).filter(Boolean))];
+    if (!parents.length) return;
+    const sizes = parents.map(p => [...p.children].filter(c => c._probe).length);
+    const rank = row => (row._probe.result?.ok ? row._probe.result.ms : Infinity);
+    const sorted = [...rows].sort((a, b) => rank(a) - rank(b) || a._probe.order - b._probe.order);
+    let i = 0;
+    parents.forEach((parent, n) => {
+        for (const row of sorted.slice(i, i + sizes[n])) parent.appendChild(row);
+        i += sizes[n];
+    });
 }
 
 function stopBrowserProbes() {

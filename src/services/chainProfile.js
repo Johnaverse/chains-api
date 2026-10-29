@@ -22,11 +22,15 @@ const PROFILE_TTL_MS = 30000;
 const PROFILE_CACHE_MAX = 500;
 const cache = new Map();
 
-/** The /rpc-monitor/:id view of one chain, or null when it has no probe results. */
-export async function chainRpcMonitor(chainId) {
+/**
+ * The /rpc-monitor/:id view of one chain, or null when it has no probe results. `probe` lets a
+ * chain the sweep has not reached be probed on demand (the endpoint does; the profile does not
+ * wait on that and shows what is known).
+ */
+export async function chainRpcMonitor(chainId, { probe = true } = {}) {
   let results = getRpcMonitoringResults();
   let chainResults = results.results.filter(r => r.chainId === chainId);
-  if (chainResults.length === 0 && await ensureChainRpcResults(chainId)) {
+  if (chainResults.length === 0 && probe && await ensureChainRpcResults(chainId)) {
     results = getRpcMonitoringResults();
     chainResults = results.results.filter(r => r.chainId === chainId);
   }
@@ -44,39 +48,58 @@ export async function chainRpcMonitor(chainId) {
   };
 }
 
+// A source slower than this is reported unavailable rather than holding up the whole page.
+const PART_TIMEOUT_MS = 8000;
+// Enough for a chain's whole timeline; hardforks are dropped from it (they are in `forks`).
+const EVENTS_LIMIT = 500;
+
 async function assemble(chainId) {
   const chain = getChainDetail(chainId);
   if (!chain) return null;
   const unavailable = {};
+  // Every part guarded: a throw or a slow source makes that part null and names it here.
   const part = async (name, read) => {
-    try { return (await read()) ?? null; } catch (err) { unavailable[name] = err?.message || 'failed'; return null; }
+    let timer;
+    try {
+      const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('timed out')), PART_TIMEOUT_MS); });
+      return (await Promise.race([Promise.resolve().then(read), timeout])) ?? null;
+    } catch (err) {
+      unavailable[name] = err?.message || 'failed';
+      return null;
+    } finally { clearTimeout(timer); }
   };
-  const [price, rpcMonitor, networkClients, forks, updates, maintenance] = await Promise.all([
+  const [price, rpcMonitor, networkClients, forks, timeline, relations, endpoints, clients, statusPage, rpcMonitorStatus, validation] = await Promise.all([
     part('price', () => getPriceForChain(chainId)),
-    part('rpcMonitor', () => chainRpcMonitor(chainId)),
+    part('rpcMonitor', () => chainRpcMonitor(chainId, { probe: false })),
     part('networkClients', () => getNetworkClients(chainId)),
     part('forks', () => getForks({ chainId, limit: 200 })),
-    part('updates', () => getTimeline({ chainId, type: 'software_update', limit: 100 })),
-    part('maintenance', () => getTimeline({ chainId, type: 'maintenance', limit: 100 }))
+    part('events', () => getTimeline({ chainId, limit: EVENTS_LIMIT })),
+    part('relations', () => traverseRelations(chainId, 2)),
+    part('endpoints', () => getEndpointsById(chainId)),
+    part('clients', () => getClientsByChain(chainId)),
+    part('statusPage', () => getStatusPageByChainId(chainId)),
+    part('rpcMonitorStatus', () => getRpcMonitoringStatus()),
+    part('validation', () => {
+      const report = validationReport(validateChainData);
+      if (report?.error) throw new Error(report.error);
+      return findingsForChain(report, chainId);
+    })
   ]);
-  const report = validationReport(validateChainData);
   return {
     chainId,
     generatedAt: new Date().toISOString(),
     chain: { ...chain, price },
-    relations: traverseRelations(chainId, 2),
-    endpoints: getEndpointsById(chainId),
+    relations,
+    endpoints,
     rpcMonitor,
-    rpcMonitorStatus: getRpcMonitoringStatus(),
-    clients: getClientsByChain(chainId) ?? null,
+    rpcMonitorStatus,
+    clients,
     networkClients,
     forks,
-    // Software updates and maintenance, each with its own limit: hardforks are in `forks`.
-    events: (updates || maintenance)
-      ? { entries: [...(updates?.entries ?? []), ...(maintenance?.entries ?? [])] }
-      : null,
-    statusPage: getStatusPageByChainId(chainId) ?? null,
-    validation: report?.error ? null : findingsForChain(report, chainId),
+    // Software updates and maintenance; hardforks are in `forks`.
+    events: timeline ? { entries: (timeline.entries ?? []).filter(e => e.type !== 'hardfork') } : null,
+    statusPage,
+    validation,
     ...(Object.keys(unavailable).length ? { unavailable } : {})
   };
 }
