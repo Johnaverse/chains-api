@@ -124,6 +124,7 @@ function stopProfileHead() { stopHeadPoller(profile.head); }
 
 function leaveChainProfile() {
     stopProfileHead();
+    stopBrowserProbes();
     Viz.hideTip();
     profile.graphResize?.disconnect();
     profile.graphResize = null;
@@ -182,6 +183,7 @@ async function renderChainProfile(chainId, { keepScroll = false } = {}) {
     // same chain is open in the drawer.
     const live = () => token === profile.renderToken && activeView === 'chain' && profileChainId === chainId;
     stopProfileHead();
+    stopBrowserProbes();
     profile.graphResize?.disconnect();
     clear(root);
     // The document scrolls, not the view: a profile opened from the foot of another starts at its top.
@@ -243,8 +245,17 @@ async function renderChainProfile(chainId, { keepScroll = false } = {}) {
     profile.bulk = { chainId, kpi, drawKpis: () => drawKpis(), activityCard, hero };
     drawKpis();
 
-    const detail = profileFetch(`/chains/${chainId}`).catch(err => (err.status === 404 ? null : {}));
-    const settled = (path) => profileFetch(path).then(v => ({ ok: true, v }), err => ({ ok: false, err }));
+    // One request for the whole page (GET /chains/:id/profile). An API without that route answers
+    // 404, and each part is then read from its own endpoint as before.
+    const whole = profileFetch(`/chains/${chainId}/profile`).catch(() => null);
+    const part = (path, pick) => whole.then(p => {
+        if (!p) return profileFetch(path);
+        const v = pick(p);
+        if (v == null) throw Object.assign(new Error(p.unavailable ? 'unavailable' : 'none'), { status: 404 });
+        return v;
+    });
+    const detail = part(`/chains/${chainId}`, p => p.chain).catch(err => (err.status === 404 ? null : {}));
+    const settled = (path, pick) => part(path, pick).then(v => ({ ok: true, v }), err => ({ ok: false, err }));
 
     const generation = profile.renderedBulk;
     detail.then(d => {
@@ -272,7 +283,7 @@ async function renderChainProfile(chainId, { keepScroll = false } = {}) {
         renderProfileHardware(hardwareCard, c.research?.hardware);
     });
 
-    settled(`/relations/${chainId}/graph?depth=2`).then(r => {
+    settled(`/relations/${chainId}/graph?depth=2`, p => p.relations).then(r => {
         if (!live()) return;
         if (!r.ok) { cardBody(graphCard).appendChild(emptyNote('Relationships could not be loaded.')); return; }
         renderRelationGraph(graphCard, chainId, r.v);
@@ -287,19 +298,19 @@ async function renderChainProfile(chainId, { keepScroll = false } = {}) {
         }
     });
 
-    Promise.all([settled(`/rpc-monitor/${chainId}`), settled(`/endpoints/${chainId}`)]).then(([mon, eps]) => {
+    Promise.all([settled(`/rpc-monitor/${chainId}`, p => p.rpcMonitor), settled(`/endpoints/${chainId}`, p => p.endpoints)]).then(([mon, eps]) => {
         if (!live()) return;
         renderProfileRpc(rpcCard, chainId, mon.ok ? mon.v : null, eps.ok ? eps.v : null, kpi);
         renderProfileLiveClients(liveClientCard, mon.ok ? mon.v : null);
         drawKpis();
     });
-    settled(`/clients/${chainId}`).then(r => {
+    settled(`/clients/${chainId}`, p => p.clients).then(r => {
         if (!live() || !r.ok) return;
         const n = (r.v.clients || []).length;
         if (n) { kpi.clients = { label: 'Node clients seen', value: fmtNum(n), sub: `${fmtNum(r.v.totalNodes || 0)} probed node${r.v.totalNodes === 1 ? '' : 's'}` }; drawKpis(); }
     });
-    loadNetworkClients(chainId, softwareCard);
-    settled(`/forks?chainId=${chainId}&limit=200`).then(r => {
+    loadNetworkClients(chainId, softwareCard, whole.then(p => (p ? p.networkClients : undefined)));
+    settled(`/forks?chainId=${chainId}&limit=200`, p => p.forks).then(r => {
         if (!live()) return;
         renderProfileForks(forkCard, r.ok ? r.v : null, kpi);
         drawKpis();
@@ -309,14 +320,15 @@ async function renderChainProfile(chainId, { keepScroll = false } = {}) {
     });
     // One request per type: /timeline applies its limit before any filtering here, so hardforks
     // must not use up the rows this card shows.
-    Promise.all(['software_update', 'maintenance'].map(type => settled(`/timeline?chainId=${chainId}&type=${type}&limit=100`))).then(rs => {
+    whole.then(p => (p ? [{ ok: Boolean(p.events), v: p.events }]
+        : Promise.all(['software_update', 'maintenance'].map(type => settled(`/timeline?chainId=${chainId}&type=${type}&limit=100`))))).then(rs => {
         if (!live()) return;
         const ok = rs.filter(r => r.ok);
         renderProfileEvents(eventCard, ok.length ? { entries: ok.flatMap(r => r.v.entries || []) } : null);
     });
     const forumBox = cardBody(forumCard);
     loadForumNews(chainId, forumBox, forumCard);
-    settled(`/validate?chainId=${chainId}`).then(r => {
+    settled(`/validate?chainId=${chainId}`, p => p.validation).then(r => {
         if (!live()) return;
         renderProfileQuality(qualityCard, chainId, r.ok ? r.v : null);
     });
@@ -839,25 +851,229 @@ function renderProfileRpc(card, chainId, mon, eps, kpi) {
     if (browserUrls.length) startHeadPoller(profile.head, browserUrls, head); else head.textContent = '—';
 
     if (!urls.length) body.appendChild(emptyNote('No RPC endpoints in any registry.'));
+    // An endpoint the monitor last found failing is not offered: the list is what a reader can
+    // use. Its count stays, so "none shown" is never mistaken for "none listed".
+    const failed = urls.filter(u => probed.get(u)?.status === 'failed');
+    const offered = urls.filter(u => probed.get(u)?.status !== 'failed');
     const order = u => {
         const r = probed.get(u);
-        return r ? ({ working: 0, failed: 1 }[r.status] ?? 2) : u.includes('${') ? 4 : 3;
+        return r ? ({ working: 0 }[r.status] ?? 1) : u.includes('${') ? 3 : 2;
     };
-    const rows = urls.sort((a, b) => order(a) - order(b)).map(u => {
+    const rows = offered.sort((a, b) => order(a) - order(b)).map(u => {
         const r = probed.get(u);
         const keyed = u.includes('${');
         const status = r ? (r.status === 'rate_limited' ? 'rate-limited' : r.status) : keyed ? 'needs key' : 'listed';
-        const dot = r?.status === 'working' ? 'dot-ok' : r?.status === 'failed' ? 'dot-bad' : 'dot-idle';
-        return el('div', { class: 'pf-rpc-row' }, [
+        const dot = r?.status === 'working' ? 'dot-ok' : 'dot-idle';
+        const you = el('span', { class: 'pf-rpc-you dim', text: '' });
+        const row = el('div', { class: 'pf-rpc-row' }, [
             el('span', { class: `dot ${dot}` }),
             el('span', { class: 'pf-rpc-url code', title: u, text: u }),
             el('span', { class: 'pf-rpc-state', text: status }),
-            el('span', { class: 'pf-rpc-meta dim', text: [r?.blockNumber != null ? `#${r.blockNumber.toLocaleString()}` : null, clientNameVersion(r?.clientVersion), r?.error].filter(Boolean).join(' · ') })
+            you,
+            el('span', { class: 'pf-rpc-meta dim', text: [r?.blockNumber != null ? `#${r.blockNumber.toLocaleString()}` : null, clientNameVersion(r?.clientVersion), r?.status !== 'working' ? r?.error : null].filter(Boolean).join(' · ') })
         ]);
+        row._probe = { url: u, you, result: null, order: order(u) };
+        return row;
     });
-    if (rows.length) body.appendChild(moreList(rows, { shown: 10 }));
+    if (rows.length) {
+        body.appendChild(el('div', { class: 'pf-rpc-legend dim' }, [
+            el('span', { text: 'From you: eth_blockNumber round trip from your browser (best of two), tested as each row comes into view. ' }),
+            el('button', { class: 'pf-note-more', type: 'button', text: 'Test again', onclick: () => browserProbeRows(rows, { again: true }) })
+        ]));
+    }
+    if (rows.length) {
+        const list = moreList(rows, { shown: 10 });
+        body.appendChild(list);
+        browserProbeRows(rows);
+    }
+    if (failed.length) {
+        body.appendChild(el('p', { class: 'dim pf-empty', text: `${failed.length} endpoint${failed.length === 1 ? '' : 's'} failed the monitor's last check and ${failed.length === 1 ? 'is' : 'are'} not listed.` }));
+    }
     const extra = [['Firehose', eps?.firehose], ['Substreams', eps?.substreams]].filter(([, l]) => l?.length);
     for (const [label, list] of extra) body.appendChild(detailRow(label, el('span', { class: 'code', text: list.join(', ') })));
+}
+
+// ── RPC latency from the reader's browser ──────────────────────────────────
+// Whether an endpoint works for THIS reader, and how fast: the server's probe says nothing
+// about a reader's network, CORS, or distance. Each row is tested once it is on screen (hidden
+// "Show more" rows wait until shown), four at a time, each request bounded.
+const BROWSER_PROBE_CONCURRENCY = 4;
+const BROWSER_PROBE_TIMEOUT_MS = 5000;
+
+// A reader's own network is never probed from this page: localhost, private and link-local
+// addresses, and .local names.
+function isPrivateHost(host) {
+    const h = String(host || '').toLowerCase().replace(/^\[|\]$/g, '');
+    if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || h === '::1') return true;
+    if (/^(fc|fd)[0-9a-f]{2}:/.test(h) || h.startsWith('fe80:')) return true;
+    const m = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(h);
+    if (!m) return false;
+    const [a, b] = [Number(m[1]), Number(m[2])];
+    return a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31) || (a === 100 && b >= 64 && b <= 127);
+}
+
+// Why an endpoint is not tested from here, or null when it can be.
+function browserProbeSkip(url) {
+    if (url.includes('${')) return 'needs an API key';
+    let u;
+    try { u = new URL(url); } catch { return 'not a URL'; }
+    if (!['https:', 'http:', 'wss:', 'ws:'].includes(u.protocol)) return 'not testable here';
+    if (isPrivateHost(u.hostname)) return 'private address, not tested';
+    if (location.protocol === 'https:' && (u.protocol === 'http:' || u.protocol === 'ws:')) return 'not secure, blocked on this page';
+    return null;
+}
+
+async function httpRoundTrip(url) {
+    const t0 = performance.now();
+    const res = await fetch(url, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }),
+        signal: AbortSignal.timeout(BROWSER_PROBE_TIMEOUT_MS)
+    });
+    const ms = performance.now() - t0;
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const d = await res.json();
+    if (typeof d?.result !== 'string') throw new Error(d?.error?.message || 'no block number');
+    return { ms, block: parseInt(d.result, 16) };
+}
+
+// One socket, two requests: the round trips are timed, not the connect.
+function wsRoundTrips(url) {
+    return new Promise((resolve, reject) => {
+        let ws;
+        const times = [];
+        let block = null;
+        let sentAt = 0;
+        const done = (err) => {
+            clearTimeout(timer);
+            try { ws?.close(); } catch { /* closing anyway */ }
+            if (err) reject(err); else resolve({ ms: Math.min(...times), block });
+        };
+        const timer = setTimeout(() => done(new Error('timed out')), BROWSER_PROBE_TIMEOUT_MS);
+        const send = (id) => { sentAt = performance.now(); ws.send(JSON.stringify({ jsonrpc: '2.0', id, method: 'eth_blockNumber', params: [] })); };
+        try { ws = new WebSocket(url); } catch (err) { done(err); return; }
+        ws.onopen = () => send(1);
+        ws.onerror = () => done(new Error('connection failed'));
+        ws.onmessage = (e) => {
+            let d;
+            try { d = JSON.parse(e.data); } catch { return; }
+            if (typeof d?.result !== 'string') { done(new Error(d?.error?.message || 'no block number')); return; }
+            times.push(performance.now() - sentAt);
+            block = parseInt(d.result, 16);
+            if (times.length < 2) send(2); else done();
+        };
+    });
+}
+
+// Best of two round trips: the first over HTTP also pays for the connection and TLS.
+async function browserProbe(url) {
+    if (url.startsWith('ws')) return wsRoundTrips(url);
+    const first = await httpRoundTrip(url);
+    try {
+        const second = await httpRoundTrip(url);
+        return second.ms < first.ms ? second : first;
+    } catch { return first; }
+}
+
+function showProbe(p) {
+    const r = p.result;
+    p.you.className = 'pf-rpc-you';
+    if (r.skip) { p.you.classList.add('dim'); p.you.textContent = r.skip; p.you.title = ''; return; }
+    if (r.pending) { p.you.classList.add('dim'); p.you.textContent = 'testing…'; return; }
+    if (r.ok) {
+        p.you.classList.add(r.ms < 300 ? 'is-fast' : r.ms < 1000 ? 'is-ok' : 'is-slow');
+        p.you.textContent = `${Math.round(r.ms)} ms from you`;
+        p.you.title = `eth_blockNumber answered from your browser in ${Math.round(r.ms)} ms (best of two)${Number.isFinite(r.block) ? `, block #${r.block.toLocaleString()}` : ''}.`;
+    } else {
+        p.you.classList.add('is-bad');
+        p.you.textContent = 'not from your browser';
+        p.you.title = `${r.error || 'No answer'}. The endpoint may block browser requests (CORS) or be unreachable from your network.`;
+    }
+}
+
+// Rows are tested as they come into view; `again` re-tests the ones already tested.
+function browserProbeRows(rows, { again = false } = {}) {
+    if (again) {
+        for (const row of rows) if (row._probe.result && !row._probe.result.skip) { row._probe.result = null; enqueueProbe(row); }
+        return;
+    }
+    profile.rpcObserver?.disconnect();
+    profile.probeQueue = [];
+    profile.probeActive = 0;
+    profile.probeRows = rows;
+    profile.probeToken = (profile.probeToken || 0) + 1;
+    const observer = new IntersectionObserver(entries => {
+        for (const e of entries) if (e.isIntersecting) { observer.unobserve(e.target); enqueueProbe(e.target); }
+    }, { rootMargin: '200px' });
+    profile.rpcObserver = observer;
+    for (const row of rows) observer.observe(row);
+}
+
+function enqueueProbe(row) {
+    const p = row._probe;
+    // Tested already (a "Test again" clears the result first).
+    if (p.result) return;
+    const skip = browserProbeSkip(p.url);
+    if (skip) { p.result = { skip }; showProbe(p); return; }
+    p.result = { pending: true };
+    showProbe(p);
+    profile.probeQueue.push(row);
+    pumpProbes();
+}
+
+function pumpProbes() {
+    const token = profile.probeToken;
+    while (profile.probeActive < BROWSER_PROBE_CONCURRENCY && profile.probeQueue.length) {
+        const row = profile.probeQueue.shift();
+        profile.probeActive++;
+        browserProbe(row._probe.url)
+            .then(r => ({ ok: true, ms: r.ms, block: r.block }), err => ({ ok: false, error: err?.name === 'TimeoutError' ? 'No answer within 5 s' : (err?.message || 'failed') }))
+            .then(result => {
+                if (token !== profile.probeToken) return;
+                profile.probeActive--;
+                row._probe.result = result;
+                showProbe(row._probe);
+                pumpProbes();
+                if (!profile.probeActive && !profile.probeQueue.length && !probeMoreIfFewWork()) sortProbedRows();
+            });
+    }
+}
+
+// When the rows on screen yield fewer than this many that work from here, the ones behind
+// "Show more" are tested too, a batch at a time, so a working endpoint is not left hidden.
+const BROWSER_PROBE_WANT = 3;
+const BROWSER_PROBE_BATCH = 10;
+function probeMoreIfFewWork() {
+    const rows = profile.probeRows || [];
+    if (rows.filter(r => r._probe.result?.ok).length >= BROWSER_PROBE_WANT) return false;
+    const next = rows.filter(r => !r._probe.result && !browserProbeSkip(r._probe.url)).slice(0, BROWSER_PROBE_BATCH);
+    for (const row of next) { profile.rpcObserver?.unobserve(row); enqueueProbe(row); }
+    return next.length > 0;
+}
+
+// Once a round of tests is done: what works from here first, fastest first, then the rest in
+// their server order — across the shown rows and those behind "Show more", which keep their
+// counts, so the fastest endpoints are the ones on screen.
+function sortProbedRows() {
+    const rows = profile.probeRows || [];
+    const parents = [...new Set(rows.map(r => r.parentElement).filter(Boolean))];
+    if (!parents.length) return;
+    const sizes = parents.map(p => [...p.children].filter(c => c._probe).length);
+    const rank = row => (row._probe.result?.ok ? row._probe.result.ms : Infinity);
+    const sorted = [...rows].sort((a, b) => rank(a) - rank(b) || a._probe.order - b._probe.order);
+    let i = 0;
+    parents.forEach((parent, n) => {
+        for (const row of sorted.slice(i, i + sizes[n])) parent.appendChild(row);
+        i += sizes[n];
+    });
+}
+
+function stopBrowserProbes() {
+    profile.rpcObserver?.disconnect();
+    profile.rpcObserver = null;
+    profile.probeQueue = [];
+    profile.probeActive = 0;
+    profile.probeToken = (profile.probeToken || 0) + 1;
 }
 
 function renderProfileLiveClients(card, mon) {
@@ -1177,6 +1393,7 @@ function renderProfileQuality(card, chainId, d) {
 function renderProfileRaw(card, chainId) {
     const body = cardBody(card);
     const records = [
+        ['Whole profile', `/chains/${chainId}/profile`],
         ['Chain record', `/chains/${chainId}`],
         ['Relations', `/relations/${chainId}`],
         ['RPC endpoints', `/endpoints/${chainId}`],

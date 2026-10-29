@@ -6469,14 +6469,19 @@ function clientLineageSection(c, networks) {
     return sec;
 }
 
-async function loadNetworkClients(chainId, sec) {
+// `prefetched` (the chain profile's one request) resolves to the same answer, or to undefined
+// when it has none and this endpoint is asked as before.
+async function loadNetworkClients(chainId, sec, prefetched = null) {
     if (releases.configured === false) return;
-    let d;
-    try {
-        d = await api(`/client-releases/networks/${chainId}`, { timeoutMs: 15000 });
-    } catch (err) {
-        if (isFeedAbsent(err)) setClientFeedConfigured(false);
-        return;   // section stays hidden
+    let d = prefetched ? await prefetched.catch(() => undefined) : undefined;
+    if (d === null) return;   // the profile asked and the feed had nothing: section stays hidden
+    if (d === undefined) {
+        try {
+            d = await api(`/client-releases/networks/${chainId}`, { timeoutMs: 15000 });
+        } catch (err) {
+            if (isFeedAbsent(err)) setClientFeedConfigured(false);
+            return;   // section stays hidden
+        }
     }
     if (!chainOnScreen(chainId)) return;
     const clients = (Array.isArray(d.clients) ? d.clients : []).filter(c => c && (c.repo || c.names?.length));
@@ -6551,6 +6556,8 @@ const TL_EVIDENCE = {
     stated: { label: 'stated', cls: 'ev-exact', title: 'A source stated the activation time — the network, a client release or a provider.' },
     observed: { label: 'observed', cls: 'ev-approx', title: 'Derived from a block height the chain has already reached.' },
     block: { label: 'block height', cls: 'ev-approx', title: 'Activates at a stated block height. No date or time is stated, and none is estimated from the chain\'s block rate.' },
+    past: { label: 'past', cls: 'ev-approx', title: 'Reported as activated; no source gave the date.' },
+    pastInferred: { label: 'past (inferred)', cls: 'ev-approx', title: 'No source gave the date or reported it done: a later fork on this network has gone live since anything last mentioned it.' },
     estimated: { label: 'estimated', cls: 'ev-approx', title: 'A block height still ahead, times the average block rate — approximate.' },
     released: { label: 'release date', cls: 'ev-exact', title: 'No rollout window was posted; this is when the client released it.' }
 };
@@ -6563,14 +6570,31 @@ const TL_TYPES = [
 ];
 const TL_TYPE_LABEL = { hardfork: 'hardfork', software_update: 'software update', maintenance: 'maintenance' };
 function evidenceOf(u) {
-    return TL_EVIDENCE[u.activationEvidence] ?? (activationBlockOf(u) != null ? TL_EVIDENCE.block : TL_EVIDENCE.announced);
+    if (TL_EVIDENCE[u.activationEvidence]) return TL_EVIDENCE[u.activationEvidence];
+    if (isUndatedPast(u)) {
+        if (!u.pastInferred) return TL_EVIDENCE.past;
+        const after = u.pastInferred.after || 'A later fork';
+        const when = Date.parse(u.pastInferred.at || '');
+        return {
+            ...TL_EVIDENCE.pastInferred,
+            title: `No source gave the date or reported it done. ${after} went live on this network`
+                + `${Number.isFinite(when) ? ` on ${new Date(when).toLocaleDateString(undefined, { dateStyle: 'medium' })}` : ''}`
+                + ', and nothing has mentioned this fork since.'
+        };
+    }
+    return activationBlockOf(u) != null ? TL_EVIDENCE.block : TL_EVIDENCE.announced;
 }
+// Past with no date: reported done, or inferred from a later fork going live (pastInferred).
+function isUndatedPast(u) { return timelineActivationMs(u) == null && u.phase === 'past'; }
 // An undated fork's stated height. Only a fork with no date, no time and no height is TBA.
 function activationBlockOf(u) {
     return timelineActivationMs(u) == null && Number.isFinite(u.activationBlock) ? u.activationBlock : null;
 }
+// A past fork with no date is past, never TBA; then a stated height; only a fork with neither
+// is TBA.
 function undatedWhenText(u) {
     const block = activationBlockOf(u);
+    if (isUndatedPast(u)) return block != null ? `past · block ${block.toLocaleString()}` : 'past';
     return block != null ? `block ${block.toLocaleString()}` : 'date TBA';
 }
 function isDated(u) { return timelineActivationMs(u) != null; }
@@ -7085,9 +7109,9 @@ function renderTimelineRows(items, now) {
         const tb = timelineActivationMs(b) ?? 0;
         const aP = timelinePending(a, now), bP = timelinePending(b, now);
         if (aP !== bP) return aP ? -1 : 1;
-        // Undated: a stated height ahead of TBA, so each keeps one day separator.
-        const aB = activationBlockOf(a) != null, bB = activationBlockOf(b) != null;
-        if (ta === tb && aB !== bB) return aB ? -1 : 1;
+        // Undated: a stated height, then past, then TBA, so each keeps one day separator.
+        const undatedRank = u => (activationBlockOf(u) != null && !isUndatedPast(u) ? 0 : isUndatedPast(u) ? 1 : 2);
+        if (ta === tb && undatedRank(a) !== undatedRank(b)) return undatedRank(a) - undatedRank(b);
         return aP ? ta - tb : tb - ta;
     });
 
@@ -7099,7 +7123,8 @@ function renderTimelineRows(items, now) {
             // once for what is still to come and once for what already ran.
             // Qualify the pending one or the two runs read as a rendering bug.
             const actMs = timelineActivationMs(u);
-            const day = activationBlockOf(u) != null ? 'At a block height · no date' : timelineDayBucket(actMs, now);
+            const day = isUndatedPast(u) ? 'Past · date not recorded'
+                : activationBlockOf(u) != null ? 'At a block height · no date' : timelineDayBucket(actMs, now);
             const bucket = timelinePending(u, now) ? `${day} · scheduled` : day;
             if (bucket !== lastBucket) {
                 lastBucket = bucket;
@@ -7274,7 +7299,7 @@ function timelineRow(u, now) {
     const when = u.phase === 'cancelled'
         ? el('span', { class: 'tlx-when past', text: 'called off' })
         : actMs == null
-        ? el('span', { class: activationBlockOf(u) != null ? 'tlx-when tlx-when-block mono' : 'tlx-when tlx-when-tba', title: ev.title, text: undatedWhenText(u) })
+        ? el('span', { class: isUndatedPast(u) ? 'tlx-when past' : activationBlockOf(u) != null ? 'tlx-when tlx-when-block mono' : 'tlx-when tlx-when-tba', title: ev.title, text: undatedWhenText(u) })
         : pending
             ? el('span', { class: 'tlx-when mono tl-countdown', 'data-at': String(actMs), text: countdownText(actMs - now) })
             : el('span', {

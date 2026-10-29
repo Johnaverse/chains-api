@@ -12,6 +12,7 @@ const ENDPOINTS = {
   '/ready': 'Readiness probe (503 until the first data load completes)',
   '/chains': 'Get all chains (optional ?tag=Testnet|L2|Beacon)',
   '/chains/:id': 'Get chain by ID',
+  '/chains/:id/profile': 'Everything a chain profile page shows, in one response (chain, relations, RPC, clients, forks, events, status page, validation)',
   '/search?q={query}': 'Search chains by name or ID',
   '/relations': 'Get all chain relations data',
   '/relations/:id': 'Get relations for a specific chain by ID',

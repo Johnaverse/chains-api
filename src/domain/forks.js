@@ -389,6 +389,54 @@ export function forkPhase({ activationAt, state, activationPrecision = null }, n
 }
 
 /**
+ * Undated forks that have, by the evidence, already happened.
+ *
+ * Forks on one network activate in order: one announced after another and already live means
+ * the earlier one went first. An undated fork is past when a fork on the same network
+ *   - is a consensus fork (not a software update or a provider's window) whose time was stated
+ *     or observed, and is now behind us;
+ *   - was first announced after this fork was — announced before it, it may simply come first
+ *     (BSC's Lorentz before Maxwell);
+ *   - went live after anything last mentioned this fork — one still being prepared keeps
+ *     appearing in new client releases (Glamsterdam during 2026).
+ * That makes Fusaka and Pectra on Ethereum past once Fulu has gone live, though no source ever
+ * dated them here.
+ *
+ * A fork with a stated height is left alone: whether the chain has reached it needs its tip.
+ * Inferred, never stated: the fork keeps no date, and `pastInferred` names the fork that went
+ * live and when. Every other fork is returned unchanged.
+ */
+const PROVEN_EVIDENCE = new Set(['stated', 'observed']);
+export function inferPastForks(forks, now = Date.now()) {
+  const mentions = f => (f.events ?? []).map(e => Date.parse(e.publishedAt ?? '')).filter(Number.isFinite);
+  const first = f => Math.min(Infinity, ...mentions(f));
+  const last = f => Math.max(-Infinity, ...mentions(f));
+  const networksOf = f => new Set([f.network, ...(f.networks ?? [])].filter(Boolean));
+  const live = forks
+    .filter(f => f.phase === FORK_PHASE.PAST && f.kind !== FORK_KIND.UPGRADE
+      && PROVEN_EVIDENCE.has(f.activationEvidence) && Date.parse(f.activationAt ?? '') <= now)
+    .map(f => ({ f, at: Date.parse(f.activationAt), first: first(f), networks: networksOf(f), chains: new Set(f.chains ?? []) }));
+  return forks.map(f => {
+    if (f.phase !== FORK_PHASE.UNSCHEDULED || f.state === 'cancelled' || f.kind === FORK_KIND.UPGRADE) return f;
+    if (f.activationBlock != null || !(f.chains ?? []).length) return f;
+    const lastSeen = last(f);
+    const firstSeen = first(f);
+    if (!Number.isFinite(lastSeen)) return f;
+    const nets = networksOf(f);
+    const after = live
+      .filter(y => y.f !== f && y.at > lastSeen && y.first > firstSeen
+        && f.chains.some(c => y.chains.has(c)) && [...nets].some(n => y.networks.has(n)))
+      .sort((a, b) => a.at - b.at)[0];
+    if (!after) return f;
+    return {
+      ...f,
+      phase: FORK_PHASE.PAST,
+      pastInferred: { after: after.f.name ?? null, afterKey: after.f.key, at: after.f.activationAt }
+    };
+  });
+}
+
+/**
  * Pick the best activation across every event that mentions one fork.
  *
  * Strength first: a provider posts "coming soon" before the exact time, and a later vaguer note
