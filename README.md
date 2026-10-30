@@ -934,6 +934,8 @@ Every REST and MCP request except `/health`, `/ready` and `/metrics` writes one 
 
 `kind` is judged from what the client sends: `internal` (another service in the cluster: no Cloudflare or proxy headers, a private address), `dashboard` (from `/ui` on this host or a `DASHBOARD_ORIGINS` origin), `browser` (another page: a browser user agent with Fetch Metadata headers), `bot` (a declared crawler), else `script` (curl, SDKs, servers). `site` is the host of the referrer, or of the `Origin` when there is no referrer.
 
+Each assistant chat turn writes one more line when it settles, `"msg":"chat access"` (`audit: "chat"`): the question (the last user message, up to 500 characters), `turns`, the dashboard `view` and `chainId` it was asked from, `outcome` (`ok`, `degraded`, `off_topic`, `error`), the `tools` the answer used, `viaFallback`, `ms` and the same client fields. The answer is not logged here; the LLM proxy keeps the exchange (the terms' Privacy section says for how long).
+
 Metrics (`/metrics`): `chains_api_http_requests_total{route,method,status,kind}`, `chains_api_http_request_duration_seconds{route,method}` (histogram), `chains_api_mcp_rpc_total{rpc,status}`, `chains_api_mcp_tool_calls_total{tool,status}`, alongside the assistant's `chains_api_assistant_tool_calls_total`. Labels never carry an IP or a raw path.
 
 ## Data Structure
