@@ -333,6 +333,10 @@ Each tool returns JSON data that can be used by AI assistants to answer question
 - `RATE_LIMIT_WINDOW_MS`: Rate limit window in milliseconds (default: 60000 = 1 minute)
 - `RELOAD_RATE_LIMIT_MAX`: Maximum `/reload` requests per window (default: 5)
 - `SEARCH_RATE_LIMIT_MAX`: Maximum `/search` requests per window (default: 30)
+- `RATE_LIMIT_CLIENT_IP_HEADER`: Header carrying the visitor's address behind the proxy (default: `cf-connecting-ip`). Every public request reaches the pod through Cloudflare and Envoy, so the TCP peer is the gateway; limits key on this header when it holds a valid IP, else on the peer — per visitor, not one bucket for everyone. Empty disables it.
+- `MCP_RATE_LIMIT_MAX`: Maximum `/mcp` requests per window per visitor (default: 120)
+- `MCP_MAX_SESSIONS`: Most open MCP sessions; idle ones are freed before a new one is refused with 503 (default: 200)
+- `MCP_SESSION_IDLE_MS`: An MCP session unused this long is closed (default: 1800000)
 
 ### RPC Health Check
 - `RPC_CHECK_TIMEOUT_MS`: Timeout per RPC health check call in milliseconds (default: 8000)
@@ -359,7 +363,9 @@ ASSISTANT_LLM_URL=http://localhost:11434 npm start
 - `ASSISTANT_MAX_TOOL_ITERATIONS`: Hard cap on LLM round-trips per request (default: 6)
 - `ASSISTANT_TIMEOUT_MS`: Overall per-request deadline (default: 60000)
 - `ASSISTANT_MAX_TOKENS`: `max_tokens` per LLM call (default: 1024)
-- `ASSISTANT_RATE_LIMIT_MAX`: Maximum `/assistant/chat` requests per window per IP (default: 10)
+- `ASSISTANT_RATE_LIMIT_MAX`: Maximum `/assistant/chat` requests per window per visitor (default: 10)
+
+The assistant's agency is kept to reading (OWASP LLM06): it gets only the tools the registry declares read-only (`annotations.readOnlyHint`, required on every tool by a test), so a tool added later that writes, reloads or sends is not offered to the model unless someone declares otherwise. Tool results carry third-party text (status pages, forums, news, release notes): each is marked as data for the model, the system prompt tells it to follow no instructions inside, and the answer keeps only links a result gives as a URL field (or the user wrote) — any other link becomes its host, "(link not from a source)", so a planted post cannot hand readers a clickable phishing link.
 - `ASSISTANT_TOPIC_GUARD`: Pre-classify each question with a cheap extra LLM call and refuse off-topic ones before the tool loop runs; fails open if the classifier misbehaves (default: `true`)
 - `ASSISTANT_FALLBACK_LLM_URL` / `ASSISTANT_FALLBACK_MODEL` / `ASSISTANT_FALLBACK_LLM_API_KEY`: Optional backup provider — see below.
 
@@ -923,6 +929,30 @@ RPC health records each failed endpoint's `failure` kind. A provider that refuse
   "fix": { "source": "ethereum-lists/chains", "file": "_data/chains/eip155-5.json", "set": { "status": "deprecated" } }
 }
 ```
+
+## MCP access: licence keys and OAuth
+
+With `PUBLIC_ORIGIN` set (e.g. `https://chains-api.johnaverse.cc`), the MCP endpoint `/mcp` needs authorization; without it, MCP stays anonymous. The REST API and the dashboard stay public under the [terms](https://chains-api.johnaverse.cc/terms).
+
+**Licence keys** (`cak_…`), one per licensee, are kept as SHA-256 hashes in the `chains_api` database:
+
+```
+kubectl -n chains-api exec deploy/chains-api -- node src/cli/licenceKeys.js create "Acme Corp"   # prints the key once
+kubectl -n chains-api exec deploy/chains-api -- node src/cli/licenceKeys.js list
+kubectl -n chains-api exec deploy/chains-api -- node src/cli/licenceKeys.js revoke <id>          # disconnects that licensee's connectors
+```
+
+A client that can send a header uses the key directly: `Authorization: Bearer cak_…` (Claude Code: `claude mcp add --transport http chains https://chains-api.johnaverse.cc/mcp --header "Authorization: Bearer cak_…"`).
+
+**OAuth 2.1** for connectors that only speak OAuth (ChatGPT, claude.ai, Claude Desktop): add `https://chains-api.johnaverse.cc/mcp` as a remote MCP server; the connector gets a `401` pointing at the protected-resource metadata, discovers the authorization server, registers itself, and opens the consent page, where the licensee pastes their key. The connector then gets its own tokens; the key is never shared with it.
+
+- Endpoints: `/.well-known/oauth-protected-resource[/mcp]` (RFC 9728), `/.well-known/oauth-authorization-server` (RFC 8414), `/oauth/register` (RFC 7591), `/oauth/authorize`, `/oauth/token`, `/oauth/revoke` (RFC 7009).
+- PKCE with S256 only; `state` and `iss` in the response; one resource (`/mcp`, scope `mcp`; `offline_access` accepted and implied). Public and confidential clients (`client_secret_post` / `_basic`); redirect URIs HTTPS, or HTTP on loopback; at most 200 clients, a registration unused for an hour is removed.
+- Access tokens last 1 hour, refresh tokens 30 days and rotate on every refresh; codes last 2 minutes and are single use (a failed exchange spends the code). Only hashes are stored.
+- A grant records the licence key that approved it: revoking the key ends its grants at once.
+- The consent page is served with a strict CSP, `frame-ancestors 'none'` and `X-Frame-Options: DENY`; its form accepts only this origin. `/mcp` refuses requests whose `Origin` is another site.
+- Rate limits: registration 20, authorization 60, token 300 per minute per visitor. On `/mcp`, every request spends its address's budget (`MCP_RATE_LIMIT_MAX`), and an authorized one also its licensee's.
+- The MCP audit line names the `licensee` and how it authorized (`oauth` or `key`).
 
 ## Usage audit
 

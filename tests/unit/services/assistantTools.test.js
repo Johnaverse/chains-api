@@ -10,7 +10,34 @@ import {
 
 vi.mock('../../../mcp-tools.js', async (importOriginal) => {
   const original = await importOriginal();
-  return { ...original, handleToolCall: vi.fn(original.handleToolCall) };
+  return { ...original, handleToolCall: vi.fn(original.handleToolCall), getToolDefinitions: vi.fn(original.getToolDefinitions) };
+});
+
+describe('read-only tools only (OWASP LLM06)', () => {
+  beforeEach(() => _resetAssistantToolsForTests());
+
+  it('every registry tool declares whether it is read-only', () => {
+    // A new tool must decide: the assistant takes only those declared read-only.
+    for (const tool of getToolDefinitions()) expect(typeof tool.annotations?.readOnlyHint, tool.name).toBe('boolean');
+  });
+
+  it('never offers or runs a tool not declared read-only', async () => {
+    const real = vi.mocked(getToolDefinitions).getMockImplementation();
+    const writes = { name: 'reload_data', description: 'Reloads every source', inputSchema: { type: 'object', properties: {} } };
+    const declaredWrite = { ...writes, name: 'purge_cache', annotations: { readOnlyHint: false } };
+    vi.mocked(getToolDefinitions).mockImplementation(() => [...real(), writes, declaredWrite]);
+    try {
+      const names = getOpenAiTools().map((t) => t.function.name);
+      expect(names).not.toContain('reload_data');
+      expect(names).not.toContain('purge_cache');
+      expect(names).toContain('get_chains');
+      expect(await executeTool('reload_data', {})).toEqual({ text: 'ERROR: Unknown tool: reload_data', isError: true });
+      expect(handleToolCall).not.toHaveBeenCalledWith('reload_data', expect.anything());
+    } finally {
+      vi.mocked(getToolDefinitions).mockImplementation(real);
+      _resetAssistantToolsForTests();
+    }
+  });
 });
 
 describe('getOpenAiTools', () => {
