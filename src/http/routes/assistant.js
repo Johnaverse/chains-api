@@ -9,10 +9,12 @@ import {
   ASSISTANT_JOB_TTL_MS,
   ASSISTANT_MAX_CONCURRENT_JOBS,
   ASSISTANT_TIMEOUT_MS,
-  RATE_LIMIT_WINDOW_MS
+  RATE_LIMIT_WINDOW_MS,
+  DASHBOARD_ORIGINS
 } from '../../../config.js';
 import { runAssistant, checkLlmReachable, AssistantUnavailableError } from '../../services/assistant.js';
 import { sendError } from '../util/sendError.js';
+import { auditFields } from '../accessLog.js';
 
 // Async job handling. A reverse proxy in front of the API (ingress /
 // Cloudflare) times out long requests, and a local LLM tool loop can easily
@@ -29,8 +31,39 @@ function runningJobCount() {
 
 const MAX_JOB_STEPS = 40;
 
-function startAssistantJob({ messages, context, log }) {
+// The question as logged: the last user message, cut to this many characters.
+const CHAT_AUDIT_QUESTION_MAX = 500;
+
+/**
+ * One "chat access" line per chat turn, when its job settles: the question, the tools the
+ * answer used, the outcome and time, and who asked (the same visitor fields as every audit line,
+ * accessLog.js). The answer is not logged: the LLM proxy keeps the exchange (see the terms).
+ */
+export function auditChat({ job, messages, context, visitor, startedAt, log }) {
+  const last = messages[messages.length - 1]?.content;
+  const question = typeof last === 'string' ? last.replace(/\s+/g, ' ').trim() : '';
+  const result = job.result;
+  const outcome = job.status === 'error' ? 'error'
+    : result?.offTopic ? 'off_topic' : result?.degraded ? 'degraded' : 'ok';
+  log.info({
+    audit: 'chat',
+    job: job.id,
+    question: question.length > CHAT_AUDIT_QUESTION_MAX ? `${question.slice(0, CHAT_AUDIT_QUESTION_MAX)}…` : question,
+    turns: messages.length,
+    view: context?.view ?? null,
+    chainId: context?.chainId ?? null,
+    outcome,
+    tools: (result?.toolCalls ?? []).map(c => c.name),
+    ...(result?.viaFallback ? { viaFallback: true } : {}),
+    ...(job.error ? { error: job.error } : {}),
+    ms: Date.now() - startedAt,
+    ...visitor
+  }, 'chat access');
+}
+
+function startAssistantJob({ messages, context, log, visitor = {} }) {
   const job = { id: randomUUID(), status: 'running', result: null, error: null, steps: [] };
+  const startedAt = Date.now();
   jobs.set(job.id, job);
   const jobId = job.id;
   // Harness progress labels ("using search_chains", "thinking…") accumulate
@@ -57,6 +90,7 @@ function startAssistantJob({ messages, context, log }) {
       }
     })
     .finally(() => {
+      auditChat({ job, messages, context, visitor, startedAt, log });
       // Finished jobs linger for the poll TTL, then vanish. Capture only the
       // id — closing over `job` would pin every response body for the TTL.
       setTimeout(() => jobs.delete(jobId), ASSISTANT_JOB_TTL_MS).unref?.();
@@ -202,7 +236,10 @@ export async function assistantRoutes(fastify) {
     if (runningJobCount() >= ASSISTANT_MAX_CONCURRENT_JOBS) {
       return sendError(reply, 503, 'Assistant busy — try again shortly');
     }
-    const job = startAssistantJob({ messages, context, log: request.log });
+    const job = startAssistantJob({
+      messages, context, log: request.log,
+      visitor: auditFields(request.headers, { ip: request.ip, dashboardOrigins: DASHBOARD_ORIGINS })
+    });
     await waitForJob(job, ASSISTANT_SYNC_WAIT_MS);
     if (job.status === 'done') {
       jobs.delete(job.id);
