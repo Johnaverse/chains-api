@@ -3,6 +3,7 @@ import { fileURLToPath as toFilePath } from 'node:url';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
+import { clientKey } from './clientKey.js';
 import helmet from '@fastify/helmet';
 import fastifyStatic from '@fastify/static';
 import compress from '@fastify/compress';
@@ -308,6 +309,8 @@ export async function buildApp(options = {}) {
   await fastify.register(rateLimit, {
     max: RATE_LIMIT_MAX,
     timeWindow: RATE_LIMIT_WINDOW_MS,
+    // Per visitor, not per gateway pod (clientKey.js).
+    keyGenerator: (request) => clientKey(request.headers, request.ip),
     // Probe endpoints must never be rate-limited. A 429 on /ready reads to kubelet as
     // "not ready", which removes the pod from the Service — so an exhausted bucket would
     // turn a traffic spike into a self-inflicted outage. /health has the same problem via

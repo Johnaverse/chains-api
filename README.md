@@ -333,6 +333,10 @@ Each tool returns JSON data that can be used by AI assistants to answer question
 - `RATE_LIMIT_WINDOW_MS`: Rate limit window in milliseconds (default: 60000 = 1 minute)
 - `RELOAD_RATE_LIMIT_MAX`: Maximum `/reload` requests per window (default: 5)
 - `SEARCH_RATE_LIMIT_MAX`: Maximum `/search` requests per window (default: 30)
+- `RATE_LIMIT_CLIENT_IP_HEADER`: Header carrying the visitor's address behind the proxy (default: `cf-connecting-ip`). Every public request reaches the pod through Cloudflare and Envoy, so the TCP peer is the gateway; limits key on this header when it holds a valid IP, else on the peer — per visitor, not one bucket for everyone. Empty disables it.
+- `MCP_RATE_LIMIT_MAX`: Maximum `/mcp` requests per window per visitor (default: 120)
+- `MCP_MAX_SESSIONS`: Most open MCP sessions; idle ones are freed before a new one is refused with 503 (default: 200)
+- `MCP_SESSION_IDLE_MS`: An MCP session unused this long is closed (default: 1800000)
 
 ### RPC Health Check
 - `RPC_CHECK_TIMEOUT_MS`: Timeout per RPC health check call in milliseconds (default: 8000)
@@ -359,7 +363,9 @@ ASSISTANT_LLM_URL=http://localhost:11434 npm start
 - `ASSISTANT_MAX_TOOL_ITERATIONS`: Hard cap on LLM round-trips per request (default: 6)
 - `ASSISTANT_TIMEOUT_MS`: Overall per-request deadline (default: 60000)
 - `ASSISTANT_MAX_TOKENS`: `max_tokens` per LLM call (default: 1024)
-- `ASSISTANT_RATE_LIMIT_MAX`: Maximum `/assistant/chat` requests per window per IP (default: 10)
+- `ASSISTANT_RATE_LIMIT_MAX`: Maximum `/assistant/chat` requests per window per visitor (default: 10)
+
+The assistant's agency is kept to reading (OWASP LLM06): it gets only the tools the registry declares read-only (`annotations.readOnlyHint`, required on every tool by a test), so a tool added later that writes, reloads or sends is not offered to the model unless someone declares otherwise. Tool results carry third-party text (status pages, forums, news, release notes): each is marked as data for the model, the system prompt tells it to follow no instructions inside, and the answer keeps only links a result gives as a URL field (or the user wrote) — any other link becomes its host, "(link not from a source)", so a planted post cannot hand readers a clickable phishing link.
 - `ASSISTANT_TOPIC_GUARD`: Pre-classify each question with a cheap extra LLM call and refuse off-topic ones before the tool loop runs; fails open if the classifier misbehaves (default: `true`)
 - `ASSISTANT_FALLBACK_LLM_URL` / `ASSISTANT_FALLBACK_MODEL` / `ASSISTANT_FALLBACK_LLM_API_KEY`: Optional backup provider — see below.
 
