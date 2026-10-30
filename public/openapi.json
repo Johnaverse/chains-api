@@ -3,7 +3,7 @@
   "info": {
     "title": "Chains API",
     "description": "Aggregated blockchain chain data from five external sources (TheGraph, Chainlist, Chain ID Network, SLIP-0044, L2BEAT): chain metadata, relations, RPC endpoints and health, L2 scaling, and operator status.",
-    "version": "1.7.89"
+    "version": "1.7.101"
   },
   "components": {
     "schemas": {}
@@ -73,6 +73,17 @@
       "get": {
         "tags": [
           "Validation"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer"
+            },
+            "in": "query",
+            "name": "chainId",
+            "required": false,
+            "description": "Only the findings about this chain (a chain profile reads these, not the whole report)"
+          }
         ],
         "responses": {
           "200": {
@@ -1354,6 +1365,31 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/chains/{id}/profile": {
+      "get": {
+        "tags": [
+          "Chains"
+        ],
+        "description": "Everything a chain profile page shows, in one response: the chain record with price, its relation graph (depth 2), RPC endpoints and their probe results, node clients, client software, hardforks, software updates and maintenance, its status page and its validation findings. A part whose source fails is null and named in `unavailable`. Cached for 30 seconds per chain.",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "pattern": "^-?\\d+$",
+              "errorMessage": "Invalid chain ID"
+            },
+            "in": "path",
+            "name": "id",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Default Response"
           }
         }
       }

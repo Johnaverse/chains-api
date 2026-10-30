@@ -273,3 +273,39 @@ describe('assistant routes', () => {
     });
   });
 });
+
+describe('chat audit', () => {
+  it('logs the question, tools, outcome and visitor of a chat turn, never the answer', async () => {
+    const { auditChat } = await import('../../../src/http/routes/assistant.js');
+    const lines = [];
+    const log = { info: (fields, msg) => lines.push({ fields, msg }) };
+    const messages = [
+      { role: 'user', content: 'hi' },
+      { role: 'assistant', content: 'hello' },
+      { role: 'user', content: '  Is   Base mainnet healthy?\n' }
+    ];
+    const job = { id: 'j1', status: 'done', error: null, result: { reply: 'Yes, all good.', toolCalls: [{ name: 'get_rpc_monitor_by_id', args: {} }], degraded: false } };
+    auditChat({ job, messages, context: { view: 'chain', chainId: 8453 }, visitor: { ip: '203.0.113.7', country: 'CA', kind: 'dashboard' }, startedAt: Date.now() - 1200, log });
+    expect(lines).toHaveLength(1);
+    expect(lines[0].msg).toBe('chat access');
+    expect(lines[0].fields).toMatchObject({
+      audit: 'chat', job: 'j1', question: 'Is Base mainnet healthy?', turns: 3, view: 'chain', chainId: 8453,
+      outcome: 'ok', tools: ['get_rpc_monitor_by_id'], ip: '203.0.113.7', country: 'CA', kind: 'dashboard'
+    });
+    expect(lines[0].fields.ms).toBeGreaterThanOrEqual(1200);
+    expect(JSON.stringify(lines[0].fields)).not.toContain('all good');
+  });
+
+  it('records off-topic, degraded and failed turns, and cuts a long question', async () => {
+    const { auditChat } = await import('../../../src/http/routes/assistant.js');
+    const lines = [];
+    const log = { info: (fields) => lines.push(fields) };
+    const long = [{ role: 'user', content: 'x'.repeat(800) }];
+    auditChat({ job: { id: 'a', status: 'done', result: { offTopic: true, toolCalls: [] } }, messages: long, startedAt: Date.now(), log });
+    auditChat({ job: { id: 'b', status: 'done', result: { degraded: true, toolCalls: [] } }, messages: long, startedAt: Date.now(), log });
+    auditChat({ job: { id: 'c', status: 'error', error: 'Assistant LLM unreachable', result: null }, messages: long, startedAt: Date.now(), log });
+    expect(lines.map(l => l.outcome)).toEqual(['off_topic', 'degraded', 'error']);
+    expect(lines[2].error).toBe('Assistant LLM unreachable');
+    expect(lines[0].question).toHaveLength(501);
+  });
+});

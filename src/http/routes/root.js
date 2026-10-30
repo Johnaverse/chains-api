@@ -4,14 +4,18 @@ import {
   DATA_SOURCE_CHAINLIST,
   DATA_SOURCE_CHAINS,
   DATA_SOURCE_SLIP44,
-  DATA_SOURCE_L2BEAT_API
+  DATA_SOURCE_L2BEAT_API,
+  TERMS_URL,
+  LICENSING_CONTACT
 } from '../../../config.js';
 
 const ENDPOINTS = {
+  '/terms': 'Terms of use: free for personal, academic and non-profit/open-source use; commercial use requires a licence',
   '/health': 'Health check and data status (liveness; always 200 while the process is up)',
   '/ready': 'Readiness probe (503 until the first data load completes)',
   '/chains': 'Get all chains (optional ?tag=Testnet|L2|Beacon)',
   '/chains/:id': 'Get chain by ID',
+  '/chains/:id/profile': 'Everything a chain profile page shows, in one response (chain, relations, RPC, clients, forks, events, status page, validation)',
   '/search?q={query}': 'Search chains by name or ID',
   '/relations': 'Get all chain relations data',
   '/relations/:id': 'Get relations for a specific chain by ID',
@@ -52,6 +56,9 @@ export async function rootRoute(fastify) {
     name: 'Chains API',
     version: pkg.version,
     description: 'API query service for blockchain chain data from multiple sources',
+    // Free for personal, academic and non-profit/open-source use; commercial use needs a licence.
+    terms: TERMS_URL,
+    commercialLicensing: LICENSING_CONTACT,
     endpoints: ENDPOINTS,
     dataSources: [
       DATA_SOURCE_THE_GRAPH,

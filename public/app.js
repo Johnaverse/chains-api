@@ -497,6 +497,8 @@ async function loadBulk() {
 
 // Accepts both /summary ({chains, l2beat}) and /export ({data:{indexed:{all}}}).
 let statusPagesLoaded = false;
+// True once /status-pages has answered (or failed): until then "no status page" is unknown.
+let statusPagesReady = false;
 function applyBulk(payload) {
     const data = payload.data ?? payload;
     state.chains = data.chains ?? data.indexed?.all ?? [];
@@ -534,6 +536,7 @@ function applyBulk(payload) {
 
 function showLoadError() {
     byId('loadErrorBanner')?.classList.remove('hidden');
+    if (typeof renderPendingProfile === 'function') renderPendingProfile();
     const o = byId('loadingOverlay');
     if (o) {
         o.querySelector('.spinner')?.classList.add('hidden');
@@ -592,7 +595,8 @@ function initAppbarHeight() {
 }
 
 // ─────────────────────────────── tabs / routing ──────────────────────────
-const VIEWS = ['overview', 'networks', 'graph', 'incidents', 'providers', 'timeline', 'news', 'forum', 'releases'];
+// 'chain' is a network's profile page (profile.js), reached by its own path rather than a tab.
+const VIEWS = ['overview', 'networks', 'graph', 'incidents', 'providers', 'timeline', 'news', 'forum', 'releases', 'chain'];
 // The five feed views share one top-level "Activity" tab; the strip built by
 // initSubTabs() inside each of their sections picks between them. URLs are
 // untouched — ?view=news still deep-links, it just lights up Activity + News.
@@ -604,6 +608,31 @@ let searchQuery = '';
 let openChainId = null;
 // The client whose detail the drawer shows (registry id, e.g. github:bnb-chain/bsc), when it shows one.
 let openClientId = null;
+// The chain whose profile page is open, at <base>chains/<id>.
+let profileChainId = null;
+// Where the app lives: /chains-api/ on Pages, /ui/ on the API. A profile URL is a path under it,
+// and the copy of the page served there carries a <base> pointing back here.
+const APP_BASE = new URL('./', document.baseURI).pathname;
+// Relative URLs (the lazily loaded graph library, the summary.json fallback) must keep resolving
+// at the app root after history moves the address to <base>chains/<id>; without a <base> they
+// would follow the address. The profile copy of the page carries one already.
+if (!document.querySelector('base')) {
+    const base = document.createElement('base');
+    base.href = APP_BASE;
+    document.head.prepend(base);
+}
+function profilePathId(pathname = location.pathname) {
+    if (!pathname.startsWith(`${APP_BASE}chains/`)) return null;
+    const m = /^(\d+)\/?$/.exec(pathname.slice(APP_BASE.length + 'chains/'.length));
+    return m ? Number(m[1]) : null;
+}
+function profileHref(chainId) { return `${APP_BASE}chains/${chainId}`; }
+// Whether a chain's detail is on screen — in the drawer or on its profile page. The loaders the
+// two share check it after their fetch so a slow answer for a chain no longer shown is dropped;
+// the drawer-only ones (RPC, block head, live clients) check the drawer alone.
+function chainOnScreen(chainId) {
+    return openChainId === chainId || (activeView === 'chain' && profileChainId === chainId);
+}
 
 function initTabs() {
     const tabs = [...document.querySelectorAll('#tabs .tab')];
@@ -652,7 +681,8 @@ function initSubTabs() {
 }
 
 function switchView(view, opts = {}) {
-    if (!VIEWS.includes(view)) view = DEFAULT_VIEW;
+    if (!VIEWS.includes(view) || (view === 'chain' && profileChainId == null)) view = DEFAULT_VIEW;
+    if (activeView === 'chain' && view !== 'chain' && typeof leaveChainProfile === 'function') leaveChainProfile();
     activeView = view;
     // The Activity tab remembers the feed the reader was on: its dataset.view
     // is updated to the current feed, which also makes the generic
@@ -731,10 +761,12 @@ function applySearch() {
 function updateUrl({ push = false } = {}) {
     const u = new URL(location.href);
     const set = (k, v) => { if (v == null || v === '') u.searchParams.delete(k); else u.searchParams.set(k, v); };
-    set('view', activeView === DEFAULT_VIEW ? null : activeView);
+    const onProfile = activeView === 'chain' && profileChainId != null;
+    u.pathname = onProfile ? profileHref(profileChainId) : APP_BASE;
+    set('view', activeView === DEFAULT_VIEW || onProfile ? null : activeView);
     set('q', searchQuery || null);
-    set('chain', openChainId);
-    set('client', openClientId);
+    set('chain', onProfile ? null : openChainId);
+    set('client', onProfile ? null : openClientId);
     history[push ? 'pushState' : 'replaceState'](null, '', u);
 }
 
@@ -744,6 +776,13 @@ function applyUrlState() {
     searchQuery = q.trim().toLowerCase();
     const input = byId('searchInput');
     if (input && input.value !== q) input.value = q;
+    const profileId = profilePathId();
+    if (profileId != null && typeof openChainProfile === 'function') {
+        closeDrawer({ fromUrl: true });
+        openChainProfile(profileId, { fromUrl: true });
+        return;
+    }
+    profileChainId = null;
     switchView(params.get('view') || DEFAULT_VIEW, { fromUrl: true });
 
     const chain = params.get('chain');
@@ -858,6 +897,10 @@ async function loadStatusPages() {
             }
         }
     } catch { /* the drawer simply omits the status-page link */ }
+    finally {
+        statusPagesReady = true;
+        if (typeof refreshProfileIncidents === 'function') refreshProfileIncidents();
+    }
 }
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -1234,6 +1277,7 @@ function repaintIncidentSurfaces() {
     if (activeView === 'networks') {
         try { renderChainsTable(); } catch (err) { console.error('table render failed', err); }
     }
+    if (activeView === 'chain' && typeof refreshProfileIncidents === 'function') refreshProfileIncidents();
     // Node colours depend on which chains have an open incident.
     if (graphEmphasizeIncidents && myGraph) applyGraphFilter();
 }
@@ -4023,7 +4067,9 @@ function openChainDetail(chainId, opts = {}) {
     body.appendChild(el('div', { class: 'd-header' }, [
         el('div', {}, [
             el('h2', { id: 'drawerTitle', text: c.name || `Chain ${c.chainId}` }),
-            badges
+            badges,
+            // profile.js may be missing (a cached page from before it): the drawer works without.
+            typeof profileLink === 'function' ? profileLink(chainId, 'Full profile →', 'd-profile-link') : null
         ])
     ]));
 
@@ -4488,7 +4534,7 @@ async function loadForumNews(chainId, box, section) {
         if (!res.ok) return;
         let posts = (await res.json()).news || [];
         posts = [...new Map(posts.map(p => [forumThreadKey(p.url), p])).values()].slice(0, 4);
-        if (openChainId !== chainId || !posts.length) return;
+        if (!chainOnScreen(chainId) || !posts.length) return;
         clear(box);
         for (const p of posts) {
             box.appendChild(el('div', { class: 'forum-post' }, [
@@ -4517,7 +4563,7 @@ async function loadChainHardforks(chainId, section) {
         const ev = evidenceOf(f);
         const when = Number.isFinite(at)
             ? new Date(at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
-            : 'date TBA';
+            : undatedWhenText(f);
         const counts = [
             f.counts?.releases ? `${f.counts.releases} release${f.counts.releases === 1 ? '' : 's'}` : null,
             f.counts?.providerUpdates ? `${f.counts.providerUpdates} provider${f.counts.providerUpdates === 1 ? '' : 's'}` : null,
@@ -4648,17 +4694,23 @@ async function loadLiveClients(chainId, box) {
 }
 
 // ─── client-side block-head polling ──────────────────────────────────────
-let blockHeadTimer = null;
-let blockHeadToken = 0;
-function stopBlockHead() {
-    if (blockHeadTimer) { clearInterval(blockHeadTimer); blockHeadTimer = null; }
+// One poller per surface (the drawer's here, the profile's in profile.js), so closing one never
+// freezes the other. Each sweep tries the endpoints in turn with a short timeout, and a sweep
+// still running when the next tick comes is not doubled.
+const BLOCK_HEAD_TRIES = 8;
+const BLOCK_HEAD_TIMEOUT_MS = 4000;
+const drawerHead = { timer: null };
+function stopHeadPoller(slot) {
+    if (slot.timer) { clearInterval(slot.timer); slot.timer = null; }
 }
+function stopBlockHead() { stopHeadPoller(drawerHead); }
 async function rpcBlockNumber(url) {
     try {
         const res = await fetch(url, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] })
+            body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }),
+            signal: AbortSignal.timeout(BLOCK_HEAD_TIMEOUT_MS)
         });
         if (!res.ok) return null;
         const d = await res.json();
@@ -4666,26 +4718,33 @@ async function rpcBlockNumber(url) {
         return Number.isFinite(n) ? n : null;
     } catch { return null; }
 }
-function startBlockHead(urls, cell) {
-    stopBlockHead();
-    const token = ++blockHeadToken;
+function startHeadPoller(slot, urls, cell) {
+    stopHeadPoller(slot);
+    const tries = urls.slice(0, BLOCK_HEAD_TRIES);
     let liveUrl = null;
+    let busy = false;
+    let timer = null;
     const poll = async () => {
-        for (const u of (liveUrl ? [liveUrl, ...urls] : urls)) {
-            const n = await rpcBlockNumber(u);
-            if (token !== blockHeadToken) return;
-            if (n != null) {
-                liveUrl = u;
-                cell.textContent = `#${n.toLocaleString()}`;
-                cell.title = `Polled directly from your browser via ${safeHost(u) || u}`;
-                return;
+        if (busy) return;
+        busy = true;
+        try {
+            for (const u of (liveUrl ? [liveUrl, ...tries.filter(x => x !== liveUrl)] : tries)) {
+                const n = await rpcBlockNumber(u);
+                if (timer !== slot.timer) return;
+                if (n != null) {
+                    liveUrl = u;
+                    cell.textContent = `#${n.toLocaleString()}`;
+                    cell.title = `Polled directly from your browser via ${safeHost(u) || u}`;
+                    return;
+                }
             }
-        }
-        if (token === blockHeadToken && !liveUrl) cell.textContent = 'unreachable from this browser';
+            if (timer === slot.timer && !liveUrl) cell.textContent = 'unreachable from this browser';
+        } finally { busy = false; }
     };
+    timer = slot.timer = setInterval(poll, 5000);
     poll();
-    blockHeadTimer = setInterval(poll, 5000);
 }
+function startBlockHead(urls, cell) { startHeadPoller(drawerHead, urls, cell); }
 
 // ═════════════════════════════════════════════════════════════════════════
 // Assistant
@@ -4771,7 +4830,8 @@ async function sendAssistantMessage(text) {
     setAssistantBusy(true);
     const thinking = appendChatThinking();
     try {
-        const context = { view: activeView, ...(openChainId != null ? { chainId: openChainId } : {}) };
+        const shownChain = openChainId ?? (activeView === 'chain' ? profileChainId : null);
+        const context = { view: activeView, ...(shownChain != null ? { chainId: shownChain } : {}) };
         let res = await apiPost('/assistant/chat', { messages: assistant.messages, context });
         // Slow runs return 202 + a job id; poll so a reverse-proxy timeout can
         // never kill a long-held request.
@@ -6413,16 +6473,21 @@ function clientLineageSection(c, networks) {
     return sec;
 }
 
-async function loadNetworkClients(chainId, sec) {
+// `prefetched` (the chain profile's one request) resolves to the same answer, or to undefined
+// when it has none and this endpoint is asked as before.
+async function loadNetworkClients(chainId, sec, prefetched = null) {
     if (releases.configured === false) return;
-    let d;
-    try {
-        d = await api(`/client-releases/networks/${chainId}`, { timeoutMs: 15000 });
-    } catch (err) {
-        if (isFeedAbsent(err)) setClientFeedConfigured(false);
-        return;   // section stays hidden
+    let d = prefetched ? await prefetched.catch(() => undefined) : undefined;
+    if (d === null) return;   // the profile asked and the feed had nothing: section stays hidden
+    if (d === undefined) {
+        try {
+            d = await api(`/client-releases/networks/${chainId}`, { timeoutMs: 15000 });
+        } catch (err) {
+            if (isFeedAbsent(err)) setClientFeedConfigured(false);
+            return;   // section stays hidden
+        }
     }
-    if (openChainId !== chainId) return;
+    if (!chainOnScreen(chainId)) return;
     const clients = (Array.isArray(d.clients) ? d.clients : []).filter(c => c && (c.repo || c.names?.length));
     if (!clients.length) return;
     while (sec.children.length > 1) sec.removeChild(sec.lastChild);
@@ -6494,6 +6559,9 @@ const TL_EVIDENCE = {
     // Fork activations (see /forks).
     stated: { label: 'stated', cls: 'ev-exact', title: 'A source stated the activation time — the network, a client release or a provider.' },
     observed: { label: 'observed', cls: 'ev-approx', title: 'Derived from a block height the chain has already reached.' },
+    block: { label: 'block height', cls: 'ev-approx', title: 'Activates at a stated block height. No date or time is stated, and none is estimated from the chain\'s block rate.' },
+    past: { label: 'past', cls: 'ev-approx', title: 'Reported as activated; no source gave the date.' },
+    pastInferred: { label: 'past (inferred)', cls: 'ev-approx', title: 'No source gave the date or reported it done: a later fork on this network has gone live since anything last mentioned it.' },
     estimated: { label: 'estimated', cls: 'ev-approx', title: 'A block height still ahead, times the average block rate — approximate.' },
     released: { label: 'release date', cls: 'ev-exact', title: 'No rollout window was posted; this is when the client released it.' }
 };
@@ -6505,13 +6573,40 @@ const TL_TYPES = [
     ['maintenance', 'Maintenance']
 ];
 const TL_TYPE_LABEL = { hardfork: 'hardfork', software_update: 'software update', maintenance: 'maintenance' };
-function evidenceOf(u) { return TL_EVIDENCE[u.activationEvidence] ?? TL_EVIDENCE.announced; }
+function evidenceOf(u) {
+    if (TL_EVIDENCE[u.activationEvidence]) return TL_EVIDENCE[u.activationEvidence];
+    if (isUndatedPast(u)) {
+        if (!u.pastInferred) return TL_EVIDENCE.past;
+        const after = u.pastInferred.after || 'A later fork';
+        const when = Date.parse(u.pastInferred.at || '');
+        return {
+            ...TL_EVIDENCE.pastInferred,
+            title: `No source gave the date or reported it done. ${after} went live on this network`
+                + `${Number.isFinite(when) ? ` on ${new Date(when).toLocaleDateString(undefined, { dateStyle: 'medium' })}` : ''}`
+                + ', and nothing has mentioned this fork since.'
+        };
+    }
+    return activationBlockOf(u) != null ? TL_EVIDENCE.block : TL_EVIDENCE.announced;
+}
+// Past with no date: reported done, or inferred from a later fork going live (pastInferred).
+function isUndatedPast(u) { return timelineActivationMs(u) == null && u.phase === 'past'; }
+// An undated fork's stated height. Only a fork with no date, no time and no height is TBA.
+function activationBlockOf(u) {
+    return timelineActivationMs(u) == null && Number.isFinite(u.activationBlock) ? u.activationBlock : null;
+}
+// A past fork with no date is past, never TBA; then a stated height; only a fork with neither
+// is TBA.
+function undatedWhenText(u) {
+    const block = activationBlockOf(u);
+    if (isUndatedPast(u)) return block != null ? `past · block ${block.toLocaleString()}` : 'past';
+    return block != null ? `block ${block.toLocaleString()}` : 'date TBA';
+}
 function isDated(u) { return timelineActivationMs(u) != null; }
 
 const TL_STREAMS = [
     ['all', 'All events'],
     ['upcoming', 'Upcoming'],
-    ['undated', 'Date TBA'],
+    ['undated', 'No date'],
     ['active', 'In progress'],
     ['fallout', 'With fallout'],
     ['done', 'Completed']
@@ -7018,6 +7113,9 @@ function renderTimelineRows(items, now) {
         const tb = timelineActivationMs(b) ?? 0;
         const aP = timelinePending(a, now), bP = timelinePending(b, now);
         if (aP !== bP) return aP ? -1 : 1;
+        // Undated: a stated height, then past, then TBA, so each keeps one day separator.
+        const undatedRank = u => (activationBlockOf(u) != null && !isUndatedPast(u) ? 0 : isUndatedPast(u) ? 1 : 2);
+        if (ta === tb && undatedRank(a) !== undatedRank(b)) return undatedRank(a) - undatedRank(b);
         return aP ? ta - tb : tb - ta;
     });
 
@@ -7029,7 +7127,8 @@ function renderTimelineRows(items, now) {
             // once for what is still to come and once for what already ran.
             // Qualify the pending one or the two runs read as a rendering bug.
             const actMs = timelineActivationMs(u);
-            const day = timelineDayBucket(actMs, now);
+            const day = isUndatedPast(u) ? 'Past · date not recorded'
+                : activationBlockOf(u) != null ? 'At a block height · no date' : timelineDayBucket(actMs, now);
             const bucket = timelinePending(u, now) ? `${day} · scheduled` : day;
             if (bucket !== lastBucket) {
                 lastBucket = bucket;
@@ -7204,7 +7303,7 @@ function timelineRow(u, now) {
     const when = u.phase === 'cancelled'
         ? el('span', { class: 'tlx-when past', text: 'called off' })
         : actMs == null
-        ? el('span', { class: 'tlx-when tlx-when-tba', title: ev.title, text: 'date TBA' })
+        ? el('span', { class: isUndatedPast(u) ? 'tlx-when past' : activationBlockOf(u) != null ? 'tlx-when tlx-when-block mono' : 'tlx-when tlx-when-tba', title: ev.title, text: undatedWhenText(u) })
         : pending
             ? el('span', { class: 'tlx-when mono tl-countdown', 'data-at': String(actMs), text: countdownText(actMs - now) })
             : el('span', {

@@ -17,6 +17,7 @@ import { buildApp } from './src/http/app.js';
 import { startMcpHttpServer } from './mcp-server-http.js';
 import { PORT, HOST } from './config.js';
 import { logger } from './src/util/logger.js';
+import { closeRpcHealthDb } from './src/store/rpcHealthDb.js';
 
 const start = async () => {
   // buildApp() loads data and starts the refreshers (RPC health, L2BEAT,
@@ -44,6 +45,7 @@ const start = async () => {
     } catch (error) {
       logger.error({ err: error.message || error }, 'Error closing REST server');
     }
+    await closeRpcHealthDb();
     process.exit(0);
   };
 

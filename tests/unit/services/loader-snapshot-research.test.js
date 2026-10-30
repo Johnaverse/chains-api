@@ -9,7 +9,7 @@ vi.mock('../../../src/store/snapshot.js', () => ({
   writeSnapshotToDiskAtomic: vi.fn(),
   DATA_CACHE_PATH: '/tmp/snapshot.json'
 }));
-vi.mock('../../../src/store/rpcHealthStore.js', () => ({ loadAllRpcHealthFromDisk: vi.fn(async () => ({ byChainId: {}, lastCheckedAt: null })) }));
+vi.mock('../../../src/store/rpcHealthStore.js', () => ({ loadAllRpcHealth: vi.fn(async () => ({ byChainId: {}, checkedAtByChainId: {}, lastCheckedAt: null })) }));
 vi.mock('../../../src/transport/fetch.js', () => ({ fetchData: vi.fn(async () => { throw new Error('registry down'); }) }));
 vi.mock('../../../src/sources/l2beat.js', () => ({ fetchL2Beat: vi.fn(async () => null) }));
 vi.mock('../../../src/sources/defillama.js', () => ({ fetchDefiLlama: vi.fn(async () => null) }));

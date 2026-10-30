@@ -11,6 +11,10 @@ import v8 from 'node:v8';
  */
 
 const counters = new Map();
+// name -> Map(labelKey -> { labels, buckets: number[], sum, count })
+const histograms = new Map();
+// Seconds. Covers a cached answer (milliseconds) to a slow profile assembly (8 s bound).
+const HISTOGRAM_BUCKETS = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10];
 
 /**
  * Escape a string for use as a Prometheus label value. Per the exposition
@@ -38,6 +42,36 @@ export function incCounter(name, labels = {}, value = 1) {
   counters.set(key, (counters.get(key) || 0) + value);
 }
 
+/** Record one observation (seconds) in a histogram with the shared buckets. */
+export function observeHistogram(name, labels = {}, value) {
+  if (!Number.isFinite(value)) return;
+  if (!histograms.has(name)) histograms.set(name, new Map());
+  const series = histograms.get(name);
+  const key = counterKey('', labels);
+  let h = series.get(key);
+  if (!h) {
+    h = { labels, buckets: HISTOGRAM_BUCKETS.map(() => 0), sum: 0, count: 0 };
+    series.set(key, h);
+  }
+  HISTOGRAM_BUCKETS.forEach((le, i) => { if (value <= le) h.buckets[i] += 1; });
+  h.sum += value;
+  h.count += 1;
+}
+
+function formatHistograms(lines) {
+  for (const [name, series] of histograms.entries()) {
+    lines.push(`# HELP ${name} ${METRIC_HELP[name] || ''}`);
+    lines.push(`# TYPE ${name} histogram`);
+    for (const h of series.values()) {
+      const withLe = (le) => counterKey(`${name}_bucket`, { ...h.labels, le });
+      HISTOGRAM_BUCKETS.forEach((le, i) => lines.push(`${withLe(String(le))} ${h.buckets[i]}`));
+      lines.push(`${withLe('+Inf')} ${h.count}`);
+      lines.push(`${counterKey(`${name}_sum`, h.labels)} ${h.sum}`);
+      lines.push(`${counterKey(`${name}_count`, h.labels)} ${h.count}`);
+    }
+  }
+}
+
 function formatCounters(lines) {
   // Group by metric name for proper HELP/TYPE headers.
   const byName = new Map();
@@ -63,7 +97,11 @@ const METRIC_HELP = {
   chains_api_assistant_requests_total: 'Number of assistant chat requests by outcome (ok, degraded)',
   chains_api_assistant_tool_calls_total: 'Number of assistant tool executions by tool and outcome',
   chains_api_assistant_llm_calls_total: 'Number of LLM round-trips made by the assistant by outcome',
-  chains_api_assistant_reply_sanitized_total: 'Number of assistant replies altered by the sanitizer, by kind (leak, whole_repeat)'
+  chains_api_assistant_reply_sanitized_total: 'Number of assistant replies altered by the sanitizer, by kind (leak, whole_repeat)',
+  chains_api_http_requests_total: 'API requests by route template, method, status class and client kind (internal, dashboard, browser, bot, script)',
+  chains_api_http_request_duration_seconds: 'API request duration in seconds by route template and method',
+  chains_api_mcp_rpc_total: 'MCP JSON-RPC requests by method and HTTP status class',
+  chains_api_mcp_tool_calls_total: 'MCP tool calls by tool and HTTP status class'
 };
 
 /**
@@ -74,6 +112,7 @@ export function renderMetrics({ cache, rpcStatus, l2beatStatus, validationSummar
   const lines = [];
 
   formatCounters(lines);
+  formatHistograms(lines);
 
   // Process memory: growth toward the heap limit shows here before the process dies of it
   // (2026-10-24: "JavaScript heap out of memory" after 18.5 h, with nothing on /metrics to see).
@@ -157,4 +196,5 @@ export function renderMetrics({ cache, rpcStatus, l2beatStatus, validationSummar
 // Test-only helper.
 export function _resetMetricsForTests() {
   counters.clear();
+  histograms.clear();
 }

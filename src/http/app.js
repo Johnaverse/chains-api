@@ -13,6 +13,8 @@ import ajvErrors from 'ajv-errors';
 import pkg from '../../package.json' with { type: 'json' };
 import { initializeDataOnStartup } from '../services/loader.js';
 import { startRpcHealthCheck } from '../services/rpcHealth.js';
+import { appShell } from './appShell.js';
+import { registerAccessLog } from './accessLog.js';
 import { startL2BeatRefresh } from '../services/l2beatRefresher.js';
 import { startGrowthepieRefresh } from '../sources/growthepie.js';
 import { startSourceRefresher } from '../services/sourceRefresher.js';
@@ -20,6 +22,8 @@ import {
   BODY_LIMIT,
   MAX_PARAM_LENGTH,
   RATE_LIMIT_MAX,
+  DASHBOARD_ORIGINS,
+  TERMS_URL,
   RATE_LIMIT_WINDOW_MS,
   CORS_ORIGIN
 } from '../../config.js';
@@ -56,6 +60,7 @@ import { metricsRoute } from './routes/metrics.js';
 import { refresherRoute } from './routes/refresher.js';
 import { summaryRoute } from './routes/summary.js';
 import { rootRoute } from './routes/root.js';
+import { termsRoutes } from './routes/terms.js';
 import { assistantRoutes } from './routes/assistant.js';
 import { prefetchAllPrices, startPriceRefresh } from '../../priceService.js';
 import { logger } from '../util/logger.js';
@@ -173,6 +178,9 @@ export async function buildApp(options = {}) {
 
   const fastify = Fastify({
     logger,
+    // One audit line per request instead (accessLog.js): fastify's pair split each request over
+    // two lines, the second without its path, and logged every kubelet probe.
+    disableRequestLogging: true,
     bodyLimit,
     maxParamLength,
     schemaErrorFormatter: formatSchemaValidationError,
@@ -223,6 +231,9 @@ export async function buildApp(options = {}) {
     transform: openapiTransform
   });
 
+  // Usage audit (one line per request, request metrics); before any route so all are covered.
+  registerAccessLog(fastify, { dashboardOrigins: DASHBOARD_ORIGINS });
+
   await fastify.register(cors, {
     origin: resolveCorsOrigin(CORS_ORIGIN),
     credentials: false
@@ -255,6 +266,15 @@ export async function buildApp(options = {}) {
     }
   });
 
+  // The terms on every response, for clients that never read a page: the licence link
+  // (RFC 8288) and the EU text-and-data-mining reservation (TDMRep).
+  fastify.addHook('onSend', async (_request, reply, payload) => {
+    reply.header('link', `<${TERMS_URL}>; rel="license"`);
+    reply.header('tdm-reservation', '1');
+    reply.header('tdm-policy', TERMS_URL);
+    return payload;
+  });
+
   // Swagger UI ships an inline bootstrap script/style that the API's strict CSP
   // would block. Relax CSP for the docs surface only — everything else (the API
   // and the /ui dashboard) keeps the hardened policy.
@@ -277,6 +297,14 @@ export async function buildApp(options = {}) {
     prefix: '/ui/',
     decorateReply: false
   });
+
+  // A chain's profile page: the same app, at a path of its own (public/profile.js).
+  const profilePage = appShell(join(__dir, '..', '..', 'public', 'index.html'), '/ui/');
+  // With or without a trailing slash, as the page itself accepts both.
+  for (const path of ['/ui/chains/:id', '/ui/chains/:id/']) {
+    fastify.get(path, { schema: { params: { type: 'object', properties: { id: { type: 'string', pattern: '^\\d+$' } } } } },
+      async (_request, reply) => reply.type('text/html; charset=utf-8').send(await profilePage()));
+  }
 
   await fastify.register(rateLimit, {
     max: RATE_LIMIT_MAX,
@@ -339,6 +367,7 @@ export async function buildApp(options = {}) {
   await fastify.register(refresherRoute);
   await fastify.register(summaryRoute);
   await fastify.register(assistantRoutes);
+  await fastify.register(termsRoutes);
   await fastify.register(rootRoute);
 
   // Interactive docs at /docs and the raw machine-readable spec at /openapi.json.

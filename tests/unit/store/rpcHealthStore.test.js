@@ -12,7 +12,9 @@ vi.mock('node:fs/promises', () => fsMock);
 
 vi.mock('../../../config.js', () => ({
   DATA_CACHE_ENABLED: true,
-  DATA_CACHE_FILE: '.cache/test-data.json'
+  DATA_CACHE_FILE: '.cache/test-data.json',
+  // No database: RPC health stays in the file store.
+  CHAINS_API_DB_HOST: '', CHAINS_API_DB_PORT: 3306, CHAINS_API_DB_NAME: 'chains_api', CHAINS_API_DB_USER: '', CHAINS_API_DB_PASSWORD: '',
 }));
 
 import {
@@ -24,6 +26,12 @@ import {
 beforeEach(() => vi.clearAllMocks());
 
 describe('rpcStateChanged', () => {
+  it('counts a change in which other chain an endpoint serves', () => {
+    const prev = [{ url: 'a', ok: false, failure: 'wrong_chain', servedChainId: 42431 }];
+    expect(rpcStateChanged(prev, [{ url: 'a', ok: false, failure: 'wrong_chain', servedChainId: 42431 }])).toBe(false);
+    expect(rpcStateChanged(prev, [{ url: 'a', ok: false, failure: 'wrong_chain', servedChainId: 4217 }])).toBe(true);
+  });
+
   it('is true when there is no prior state', () => {
     expect(rpcStateChanged(undefined, [{ url: 'a', ok: true }])).toBe(true);
   });
@@ -67,7 +75,7 @@ describe('persistChainRpcHealth', () => {
 describe('loadAllRpcHealthFromDisk', () => {
   it('returns empty when the directory does not exist', async () => {
     fsMock.readdir.mockRejectedValueOnce(Object.assign(new Error('nope'), { code: 'ENOENT' }));
-    expect(await loadAllRpcHealthFromDisk()).toEqual({ byChainId: {}, lastCheckedAt: null });
+    expect(await loadAllRpcHealthFromDisk()).toEqual({ byChainId: {}, checkedAtByChainId: {}, lastCheckedAt: null });
   });
 
   it('loads per-chain files and tracks the newest checkedAt', async () => {

@@ -148,8 +148,26 @@ export const L2BEAT_REFRESH_INTERVAL_MS = parseIntEnv('L2BEAT_REFRESH_INTERVAL_M
 export const DATA_CACHE_ENABLED = parseBooleanEnv('DATA_CACHE_ENABLED', true);
 export const DATA_CACHE_FILE = parseStringEnv('DATA_CACHE_FILE', '.cache/chains-api-data.json');
 
+// MariaDB for state that must outlive a pod: RPC health per chain (src/store/rpcHealthDb.js).
+// Used when host, user and password are all set; otherwise that state stays in files beside
+// DATA_CACHE_FILE, which last only as long as the container's disk.
+export const CHAINS_API_DB_HOST = parseStringEnv('CHAINS_API_DB_HOST', '');
+export const CHAINS_API_DB_PORT = parseIntEnv('CHAINS_API_DB_PORT', 3306);
+export const CHAINS_API_DB_NAME = parseStringEnv('CHAINS_API_DB_NAME', 'chains_api');
+export const CHAINS_API_DB_USER = parseStringEnv('CHAINS_API_DB_USER', '');
+export const CHAINS_API_DB_PASSWORD = parseStringEnv('CHAINS_API_DB_PASSWORD', '');
+
 // CORS
 export const CORS_ORIGIN = parseStringEnv('CORS_ORIGIN', '*');
+// Terms of use for the hosted service, and where a commercial licence is asked for. Sent as a
+// `Link: <TERMS_URL>; rel="license"` header on every response, in robots.txt and in tdmrep.json.
+export const TERMS_URL = parseStringEnv('TERMS_URL', 'https://chains-api.johnaverse.cc/terms');
+export const LICENSING_CONTACT = parseStringEnv('LICENSING_CONTACT', 'licensing@johnaverse.cc');
+
+// Where the dashboard runs besides /ui on this host, comma-separated: requests from it are
+// audited as client kind "dashboard" (src/http/accessLog.js).
+export const DASHBOARD_ORIGINS = parseStringEnv('DASHBOARD_ORIGINS', 'https://www.johnaverse.cc')
+  .split(',').map(o => o.trim().replace(/\/+$/, '')).filter(Boolean);
 
 // Proxy (optional)
 export const PROXY_URL = parseStringEnv('PROXY_URL', '');

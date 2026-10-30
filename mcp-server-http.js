@@ -15,7 +15,8 @@ import { initializeDataOnStartup, getCachedData, startRpcHealthCheck } from './d
 import { getToolDefinitions, handleToolCall } from './mcp-tools.js';
 import { logger } from './src/util/logger.js';
 import { clientKey } from './src/http/clientKey.js';
-import { RATE_LIMIT_WINDOW_MS, MCP_RATE_LIMIT_MAX, MCP_MAX_SESSIONS, MCP_SESSION_IDLE_MS } from './config.js';
+import { mcpAccessLog } from './src/http/accessLog.js';
+import { RATE_LIMIT_WINDOW_MS, MCP_RATE_LIMIT_MAX, MCP_MAX_SESSIONS, MCP_SESSION_IDLE_MS, DASHBOARD_ORIGINS, TERMS_URL, LICENSING_CONTACT } from './config.js';
 
 const require = createRequire(import.meta.url);
 const { version } = require('./package.json');
@@ -35,6 +36,8 @@ const createServer = () => {
       capabilities: {
         tools: {},
       },
+      // Shown to MCP clients on connect: the same terms as the REST API.
+      instructions: `Data from chains-api, under its terms of use (${TERMS_URL}): free for personal and hobby use, academic research and teaching, and non-profit or open-source projects that earn nothing from it. Any commercial or for-profit use, including use that earns revenue, requires a licence: ${LICENSING_CONTACT}.`,
     }
   );
 
@@ -66,6 +69,9 @@ export function createMcpHttpApp({ now = Date.now } = {}) {
 
   // Parse JSON bodies
   app.use(express.json({ limit: '4mb' }));
+
+  // Usage audit: one line per MCP request with its JSON-RPC method and tool (src/http/accessLog.js).
+  app.use(mcpAccessLog({ dashboardOrigins: DASHBOARD_ORIGINS }));
 
   // Map to store transports by session ID
   const transports = {};

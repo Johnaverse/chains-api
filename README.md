@@ -346,6 +346,8 @@ Each tool returns JSON data that can be used by AI assistants to answer question
 ### Data Cache
 - `DATA_CACHE_ENABLED`: Enable disk-backed startup cache (default: `true`)
 - `DATA_CACHE_FILE`: Snapshot file path used for stale-first startup (default: `.cache/chains-api-data.json`)
+- `DASHBOARD_ORIGINS`: comma-separated origins the dashboard runs on besides `/ui` (default `https://www.johnaverse.cc`); their requests are audited as client kind `dashboard`.
+- `CHAINS_API_DB_HOST`, `CHAINS_API_DB_PORT` (3306), `CHAINS_API_DB_NAME` (`chains_api`), `CHAINS_API_DB_USER`, `CHAINS_API_DB_PASSWORD`: MariaDB for RPC health, used when host, user and password are set. One row per chain in `rpc_health` (created at startup): its endpoint statuses, written when a chain's up/down state changes, and the time of every check. Every replica reads and writes the same rows, so a new pod serves the last known health at once and sweeps the chains that waited longest first. Without a database, or while it is unreachable, health is kept in per-chain files beside `DATA_CACHE_FILE`.
 
 ### Assistant (Optional)
 An LLM chat assistant over the whole registry plus live incidents, exposed at `POST /assistant/chat` and consumed by the dashboard's floating **chat overlay** (corner button, available on every view). It runs a tool-use loop against any OpenAI-compatible server (Ollama, vLLM, LM Studio) and stays disabled until configured:
@@ -848,6 +850,10 @@ The latest release of one client repository, answering the questions an operator
 
 Errors: **400** for a repo that is not `owner/repo` or a GitHub/GitLab URL; **404** when the feed records no release for the repository (or component); 502/503 as above.
 
+**`GET /chains/:id/profile`** answers everything a profile page shows in one request (cached 30 s per chain): the chain record with price, the relation graph, endpoints with probe results, node clients, client software, hardforks, software updates and maintenance, the status page and validation findings; a part whose source fails is null and named in `unavailable`. On the profile, endpoints the monitor last found failing are not listed (their count is), and every other endpoint is tested from the reader's browser as it comes into view: the `eth_blockNumber` round trip (best of two), or why it does not work from there. An undated fork that a later fork on its chain has outrun (nothing mentioned it after that one went live) is past, marked `pastInferred` with the fork and time that show it, and shows as *past (inferred)*, never *date TBA*.
+
+**Chain profile pages:** every network has a page at `<dashboard>/chains/<id>` (e.g. `https://www.johnaverse.cc/chains-api/chains/1`, or `/ui/chains/1` on the API), opened from the chain drawer's *Full profile* link or any related-chain link. It gathers `/chains/:id`, `/relations/:id/graph` (an interactive relationship graph, direct and second hop, with the same relations listed by source), `/endpoints/:id` joined to `/rpc-monitor/:id`, `/clients/:id`, `/client-releases/networks/:id`, `/forks` and `/timeline` for the chain, open incidents, L2BEAT and growthepie figures, research (with its coverage, audit status and check date), node hardware requirements per role and level from `research.hardware` (as the project documents them, with qualifier, verification and sources), `/validate?chainId=` findings and the raw records. Warnings above the figures name open incidents and the next hardfork. GitHub Pages has no rewrites, so the deploy writes `404.html` as the app with a `<base>` at the site root; the API serves `/ui/chains/:id` the same way (`src/http/appShell.js`).
+
 **Dashboard:** Activity → **Releases** lists `/client-releases?limit=200` (the *Forks only* toggle re-reads with `fork=true`) with chain and client filters; each card shows the repo linked to its release, version/tag, `pre-release` / `mandatory` badges, published time, the AI summary, a fork line (name, network, activation — a time only when one was stated, plus block/epoch/slot/timestamp — and state) and its chains (labelled *Repository networks* when the notes named none). The chain drawer gains a **Clients** section from `/client-releases/networks/:chainId`, where *Supports N networks* expands the client's other networks (each opens that chain). Both stay hidden when the API answers 503.
 
 ### `POST /reload`
@@ -865,20 +871,26 @@ Reload data from all sources.
 ### `GET /validate`
 Validate chain data for potential human errors across all three data sources.
 
+`?chainId=<id>` returns only that chain's findings (`chainId`, `totalErrors`, `errorsByRule` with the rules that have any, `allErrors`) — what a chain's profile page reads.
+
 This endpoint analyzes the chain data and identifies potential inconsistencies or errors based on the following rules:
 
 1. **Rule 1 - Relation Conflicts**: Assumes graph relations are always true and finds conflicts with the chain's tags
-2. **Rule 2 - Mainnet or Testnet, Sources Disagree**: every source's claim — The Graph `networkType` / `testnetOf`, a `parent.type: "testnet"` (stated), the name's "Testnet"/"Mainnet" (name), `slip44: 1` and chainlist `isTestnet` (hints) — with `source`, `field`, `value` and what it `said`. The Testnet tag follows the strongest claim (`resolved`, `decidedBy`); `contested: true` means claims of equal strength disagree and the tag is only a default (32 on 2026-10-27, e.g. Morph, Superseed: slip44=1 vs chainlist `isTestnet: false`). World Chain, Plume and ~25 other mainnets with slip44=1 are no longer tagged Testnet.
+2. **Rule 2 - Mainnet or Testnet, Sources Disagree**: every source's claim — The Graph `networkType` / `testnetOf`, a `parent.type: "testnet"` (stated), the name's "Testnet"/"Mainnet" (name), and the hints: `slip44: 1` (chains.json's; chainlist copies it, so it counts once), chainlist `isTestnet`, the parent's type for a chain the sources file under another (an L2 of Ethereum mainnet is a mainnet), and a learned test-network word — or "mainnet" — in the chain's own RPC, explorer and faucet hostnames (`testnet-rpc.atleta.network`, `mainnet.superseed.xyz`) — with `source`, `field`, `value`, what it `said`, and for a hint its learned `accuracy`. The strongest claim decides; disagreeing hints vote, each weighted by how often it agrees with a stated type on the chains that have one (learned per value at every index; 2026-10-28: chainlist `isTestnet: false` 74/78, slip44=1 27/29, a test word in the hosts 47/49), starting from the base rate of test networks among those chains. `contested: true` marks claims of equal strength that disagree — a review list, not a finding.
 3. **Rule 3 - Name/Tag Mismatch**: Chain full names containing "Testnet" or "Devnet" but not tagged as Testnet
 4. **Rule 4 - Named After a Test Network**: Chains whose name contains another testnet's own registry id or alias ("Base Sepolia" → Ethereum Sepolia's `sepolia`) but are not tagged L2 and have no relations. Which words name a test network is read from the registry, not a list.
 5. **Rule 5 - Status Conflicts**: Deprecated status conflicts across different sources
 6. **Rule 6 - Deprecated Here, Not Upstream**: Chains chains-api treats as deprecated (its end-of-life seed, or a deprecated parent) that no upstream source marks deprecated. Each carries `statusReason` and a `fix` naming the ethereum-lists/chains file to update (`_data/chains/eip155-<id>.json`, `status: "deprecated"`). Live on 2026-10-19: 18 chains, Goerli, Ropsten, Rinkeby, Mumbai and their L2s among them.
 7. Rules 7–17: L2BEAT classification, RPC block-height drift, name / currency / SLIP-44 disagreements, RPC URLs in one source only, active children of deprecated parents.
 18. **Rule 18 - No RPC Answers, Not Deprecated**: every listed endpoint has failed with nothing answering (`unreachable`, `timeout`, `tls_error`) for at least `RPC_DEAD_AFTER_MS` (3 days; each endpoint's `unansweredSince` runs across consecutive silent checks and restarts on any answer) and no source calls the network dead — dead and unmarked upstream, or its endpoints moved. An endpoint that answered at all (rate limit, HTTP error, a refused method, a client version without a block) does not count as gone, nor does a reset connection or an unrecognised error, which may be on our side.
-19. **Rule 19 - Deprecated But an RPC Answers**: a deprecated chain with an endpoint still serving blocks.
+19. **Rule 19 - Deprecated But an RPC Answers**: a deprecated chain with an endpoint still serving blocks for that chain.
+21. **Rule 21 - An RPC Serves Another Chain**: an endpoint listed for this chain answers `eth_chainId` with another (Tempo's deprecated Andantino listing Moderato's RPC; 0G Galileo 16601 its successor 16602's). The registry entry is wrong, not the endpoint; it is not counted as this chain's (failure `wrong_chain`, with `servedChainId`), so it never reads as rule 19 or 12.
+
+Each finding has a `severity`: `error` — data a source should fix — or `notice` — worth knowing, not wrong: an L2BEAT risk signal (11), two spellings of one name (13), an endpoint only one source lists (16). `bySeverity` counts both. Rule 15 (SLIP-44 symbol) flags only a coin type of the chain's own: one several chains use with different currencies (Ethereum's 60 borrowed by EVM chains) is a convention, learned from the registry at each run.
+
 20. **Rule 20 - One Chain ID, Different Networks**: the sources describe different networks under one ID (names with no word in common AND different native symbols). The record is built only from the sources that agree — the larger group, else chains.json, then The Graph, then chainlist — and the others are left out of it entirely (no name, RPCs, type or tags), listed with `kept`, `excluded` and each source's `identities` (`name`, `symbol`). 12 on 2026-10-27: 999 is HyperEVM in chainlist and The Graph but Wanchain Testnet in chains.json; 222 is Permission in chains.json but OPN Chain in chainlist.
 
-RPC health records each failed endpoint's `failure` kind. A provider that refuses our volume (HTTP 429, EIP-1474 `-32005`, or an error worded as a limit or "try again") is `rate_limited`: its endpoints are reported with status `rate_limited` — neither working nor failed, and left out of `healthPercent` — and that provider (registrable domain, so thirdweb's per-chain hosts count as one) is not probed again for 10 minutes, doubling to an hour while it keeps refusing, with each endpoint keeping its last result meanwhile. Failure kinds: `unreachable` / `timeout` / `tls_error` / `connection_error` / `rate_limited` / `http_error` / `rpc_error` / `invalid_response` / `answered_no_block` / `unknown` / `private_address`. `private_address` means the endpoint's hostname resolves to a non-public address, so it is never probed: registry URLs are community-submitted, and the same check guards the chain-halt probe and the Blockscout explorer reader. An endpoint serving blocks counts as working even when it disables `web3_clientVersion`.
+RPC health records each failed endpoint's `failure` kind. A provider that refuses our volume (HTTP 429, EIP-1474 `-32005`, or an error worded as a limit or "try again") is `rate_limited`: its endpoints are reported with status `rate_limited` — neither working nor failed, and left out of `healthPercent` — and that provider (registrable domain, so thirdweb's per-chain hosts count as one) is not probed again for 10 minutes, doubling to an hour while it keeps refusing, with each endpoint keeping its last result meanwhile. Failure kinds: `unreachable` / `timeout` / `tls_error` / `connection_error` / `rate_limited` / `http_error` / `rpc_error` / `invalid_response` / `answered_no_block` / `wrong_chain` / `unknown` / `private_address`. An endpoint that serves blocks is asked `eth_chainId`; one answering for another chain is `wrong_chain` (with `servedChainId`) and not working; one that does not answer it is judged on its blocks. `private_address` means the endpoint's hostname resolves to a non-public address, so it is never probed: registry URLs are community-submitted, and the same check guards the chain-halt probe and the Blockscout explorer reader. An endpoint serving blocks counts as working even when it disables `web3_clientVersion`.
 
 **Response:**
 ```json
@@ -917,6 +929,20 @@ RPC health records each failed endpoint's `failure` kind. A provider that refuse
   "fix": { "source": "ethereum-lists/chains", "file": "_data/chains/eip155-5.json", "set": { "status": "deprecated" } }
 }
 ```
+
+## Usage audit
+
+Every REST and MCP request except `/health`, `/ready` and `/metrics` writes one log line (`"msg":"api access"` or `"mcp access"`, field `audit`), replacing fastify's per-request pair:
+
+- `method`, `route` (the template, e.g. `/chains/:id`; `unmatched` for unknown paths, `/ui/*` for the dashboard's files), `path`, `status`, `ms`, `chainId` when the request names one;
+- the client: `ip` (Cloudflare's `CF-Connecting-IP`, else the first `X-Forwarded-For` hop), `country` (`CF-IPCountry`), `kind`, `ua`, `referer` (host), `origin`, `site`;
+- MCP lines add `rpc` (the JSON-RPC methods) and `tools` (for `tools/call`) and `session`.
+
+`kind` is judged from what the client sends: `internal` (another service in the cluster: no Cloudflare or proxy headers, a private address), `dashboard` (from `/ui` on this host or a `DASHBOARD_ORIGINS` origin), `browser` (another page: a browser user agent with Fetch Metadata headers), `bot` (a declared crawler), else `script` (curl, SDKs, servers). `site` is the host of the referrer, or of the `Origin` when there is no referrer.
+
+Each assistant chat turn writes one more line when it settles, `"msg":"chat access"` (`audit: "chat"`): the question (the last user message, up to 500 characters), `turns`, the dashboard `view` and `chainId` it was asked from, `outcome` (`ok`, `degraded`, `off_topic`, `error`), the `tools` the answer used, `viaFallback`, `ms` and the same client fields. The answer is not logged here; the LLM proxy keeps the exchange (the terms' Privacy section says for how long).
+
+Metrics (`/metrics`): `chains_api_http_requests_total{route,method,status,kind}`, `chains_api_http_request_duration_seconds{route,method}` (histogram), `chains_api_mcp_rpc_total{rpc,status}`, `chains_api_mcp_tool_calls_total{tool,status}`, alongside the assistant's `chains_api_assistant_tool_calls_total`. Labels never carry an IP or a raw path.
 
 ## Data Structure
 
@@ -1038,5 +1064,6 @@ If you have questions or encounter issues, please [open an issue](https://github
 
 ## License
 
-MIT
+**Code:** [PolyForm Noncommercial License 1.0.0](LICENSE) from version 1.7.99: free for noncommercial purposes — personal use, research, and noncommercial organisations. Commercial use, including running your own copy commercially, requires a separate licence: licensing@johnaverse.cc. Releases up to and including 1.7.98 were published under the MIT licence and remain so.
 
+**Hosted service and data:** the API at `chains-api.johnaverse.cc`, its MCP server, the dashboard and the data they serve are covered by the [Terms of Use](https://chains-api.johnaverse.cc/terms) — free for personal and hobby use, academic research and teaching, and non-profit or open-source projects that earn nothing from it; any commercial or for-profit use requires a licence. Third-party data keeps its sources' own licences (growthepie must be credited wherever its data is shown). `/robots.txt` allows search indexing and reserves AI training and AI input (`Content-Signal`), `/.well-known/tdmrep.json` reserves text and data mining (EU Directive 2019/790, Art. 4), and every response carries `Link: <terms>; rel="license"`. `TERMS_URL` and `LICENSING_CONTACT` configure both.

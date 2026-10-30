@@ -3,6 +3,7 @@ import { getPricesForChains, getPriceForChain } from '../../../priceService.js';
 import { MAX_SEARCH_QUERY_LENGTH, RATE_LIMIT_WINDOW_MS, SEARCH_RATE_LIMIT_MAX } from '../../../config.js';
 import { parseIntParam } from '../util/parseIntParam.js';
 import { sendError } from '../util/sendError.js';
+import { getChainProfile } from '../../services/chainProfile.js';
 import { chainDetailSchema, chainErrorSchema } from '../schemas/chainDetail.js';
 
 const VALID_TAGS = ['Testnet', 'L2', 'Beacon', 'ZK', 'Validium', 'Optimium'];
@@ -61,6 +62,28 @@ export async function chainsRoutes(fastify) {
     if (!chain) return sendError(reply, 404, 'Chain not found');
     const price = await getPriceForChain(chainId);
     return { ...chain, price };
+  });
+
+  fastify.get('/chains/:id/profile', {
+    schema: {
+      description: 'Everything a chain profile page shows, in one response: the chain record with price, its relation graph (depth 2), RPC endpoints and their probe results, node clients, client software, hardforks, software updates and maintenance, its status page and its validation findings. A part whose source fails is null and named in `unavailable`. Cached for 30 seconds per chain.',
+      params: {
+        type: 'object',
+        properties: {
+          id: {
+            type: 'string',
+            pattern: '^-?\\d+$',
+            errorMessage: 'Invalid chain ID'
+          }
+        },
+        required: ['id']
+      }
+    }
+  }, async (request, reply) => {
+    const profile = await getChainProfile(parseIntParam(request.params.id));
+    if (!profile) return sendError(reply, 404, 'Chain not found');
+    reply.header('cache-control', 'public, max-age=30');
+    return profile;
   });
 
   fastify.get('/search', {

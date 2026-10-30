@@ -8,7 +8,7 @@ import { fetchData } from '../transport/fetch.js';
 import { parseSLIP44 } from '../sources/slip44.js';
 import { fetchL2Beat } from '../sources/l2beat.js';
 import { fetchDefiLlama } from '../sources/defillama.js';
-import { indexData } from '../store/indexer.js';
+import { indexData, applyNetworkType, rawEntriesByChainId } from '../store/indexer.js';
 import { cachedData, applyDataToCache } from '../store/cache.js';
 import { attachNetworkResearch } from '../sources/networkResearch.js';
 import { attachForums } from '../sources/forums.js';
@@ -17,7 +17,7 @@ import {
   writeSnapshotToDiskAtomic,
   DATA_CACHE_PATH
 } from '../store/snapshot.js';
-import { loadAllRpcHealthFromDisk } from '../store/rpcHealthStore.js';
+import { loadAllRpcHealth } from '../store/rpcHealthStore.js';
 import { loadPrivateRpcsFromDisk, stripPrivateRpcs } from '../store/privateRpcStore.js';
 import { logger } from '../util/logger.js';
 
@@ -189,9 +189,11 @@ export async function refreshAllSources() {
  * snapshot.
  */
 async function overlayDiskRpcHealth() {
-  const { byChainId, lastCheckedAt } = await loadAllRpcHealthFromDisk();
+  const { byChainId, checkedAtByChainId, lastCheckedAt } = await loadAllRpcHealth();
   if (Object.keys(byChainId).length === 0) return;
   cachedData.rpcHealth = byChainId;
+  // When each chain was last checked: the refresher re-checks the longest-waiting first.
+  cachedData.rpcCheckedAt = { ...(checkedAtByChainId || {}) };
   stripPrivateRpcs(null, cachedData.rpcHealth);
   if (lastCheckedAt) cachedData.lastRpcCheck = lastCheckedAt;
   logger.info({ chains: Object.keys(byChainId).length }, 'Loaded cached RPC-health state');
@@ -225,6 +227,19 @@ export async function initializeDataOnStartup(options = {}) {
       attachNetworkResearch(cachedData.indexed);
       // Same for the forum registry: the snapshot carries the old build's forumUrl values.
       attachForums(cachedData.indexed);
+      // And the Testnet tags, with the classification context validation reads them by
+      // (learned words, parent types, hint reliability): process state a snapshot does not carry.
+      // With whichever raw registries the snapshot holds (a missing one reads as empty), and the
+      // same identity exclusions indexData applied. With none at all, its tags stand.
+      const hasRaw = (Array.isArray(cachedData.chains) && cachedData.chains.length > 0)
+        || (Array.isArray(cachedData.chainlist) && cachedData.chainlist.length > 0)
+        || (Array.isArray(cachedData.theGraph?.networks) && cachedData.theGraph.networks.length > 0);
+      if (hasRaw) {
+        applyNetworkType(cachedData.indexed, rawEntriesByChainId(
+          { chains: cachedData.chains, chainlist: cachedData.chainlist, theGraph: cachedData.theGraph },
+          cachedData.indexed.identityConflicts
+        ));
+      }
       cachedData.indexed.all = Object.values(cachedData.indexed.byChainId);
       await overlayDiskRpcHealth();
       startupInitialized = true;

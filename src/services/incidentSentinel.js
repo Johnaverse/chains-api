@@ -5,7 +5,7 @@ import { PLANNED_WORK_CLASSES } from '../domain/plannedWork.js';
 /**
  * Incident-feed sentinel: contradictions in what the feed and its LLM enrichment assert.
  *
- * `validation.js` already does this for the chain registry — 20 rules that fire when two
+ * `validation.js` already does this for the chain registry — 21 rules that fire when two
  * sources disagree about one chain. The incident + enrichment path never got an equivalent,
  * and the cost has been concrete: a status vocabulary nobody was counting (a literal
  * `unknown` on a large share of events) was rediscovered only after a consumer shipped a

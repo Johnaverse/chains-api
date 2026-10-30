@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import { createRequire } from 'node:module';
 import { buildApp } from '../../index.js';
+import { clearValidationReport } from '../../src/services/validationReport.js';
 import * as dataService from '../../dataService.js';
 import * as fsPromises from 'node:fs/promises';
 
@@ -1049,6 +1050,9 @@ describe('API Endpoints', () => {
   });
 
   describe('GET /validate', () => {
+    // The report is cached per data load; each test sets its own.
+    beforeEach(() => clearValidationReport());
+
     it('should return validation results for chain data', async () => {
       const response = await app.inject({
         method: 'GET',
@@ -1063,6 +1067,28 @@ describe('API Endpoints', () => {
       expect(data).toHaveProperty('allErrors');
       expect(typeof data.totalErrors).toBe('number');
       expect(Array.isArray(data.allErrors)).toBe(true);
+    });
+
+    it('returns one chain\'s findings with ?chainId', async () => {
+      mocks.validateChainData.mockReturnValueOnce({
+        totalErrors: 3,
+        errorsByRule: {
+          rule1_relation_conflicts: [{ rule: 1, chainId: 1, message: 'a' }, { rule: 1, chainId: 10, message: 'b' }],
+          rule21_rpc_serves_other_chain: [{ rule: 21, chainId: 10, message: 'c' }]
+        },
+        summary: {},
+        allErrors: [{ rule: 1, chainId: 1, message: 'a' }, { rule: 1, chainId: 10, message: 'b' }, { rule: 21, chainId: 10, message: 'c' }]
+      });
+      const response = await app.inject({ method: 'GET', url: '/validate?chainId=1' });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({
+        chainId: 1,
+        totalErrors: 1,
+        bySeverity: { error: 1, notice: 0 },
+        errorsByRule: { rule1_relation_conflicts: [{ rule: 1, chainId: 1, message: 'a' }] },
+        allErrors: [{ rule: 1, chainId: 1, message: 'a' }]
+      });
+      expect((await app.inject({ method: 'GET', url: '/validate?chainId=x' })).statusCode).toBe(400);
     });
 
     it('should have proper error structure with all rule categories', async () => {

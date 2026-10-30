@@ -101,14 +101,21 @@ function isThrottled(url, now) {
 }
 
 function noteProviderResponses(results, now) {
+  // Per provider for the whole batch: any refusal of our volume outranks a success beside it, or
+  // a provider that limited this batch would be probed again at once.
+  const verdict = new Map(); // provider -> 'limited' | 'ok'
   for (const r of results) {
     const provider = providerOf(r.url);
     if (!provider) continue;
-    if (r.failure === 'rate_limited') {
+    if (r.failure === 'rate_limited' || r.throttled) verdict.set(provider, 'limited');
+    else if (r.ok && !verdict.has(provider)) verdict.set(provider, 'ok');
+  }
+  for (const [provider, v] of verdict) {
+    if (v === 'limited') {
       const prev = throttledProviders.get(provider);
       const backoffMs = prev ? Math.min(prev.backoffMs * 2, THROTTLE_BACKOFF_MAX_MS) : THROTTLE_BACKOFF_MS;
       throttledProviders.set(provider, { until: now + backoffMs, backoffMs });
-    } else if (r.ok) {
+    } else {
       throttledProviders.delete(provider);
     }
   }
@@ -136,7 +143,15 @@ function parseBlockHeight(value) {
   return null;
 }
 
-async function checkRpcEndpoint(url) {
+// An eth_chainId answer, only when it is wholly a quantity ("0x61", or digits): a malformed one
+// ("", "0x1garbage") is no evidence of which chain an endpoint serves.
+function parseChainId(value) {
+  const text = typeof value === 'number' ? String(value) : typeof value === 'string' ? value.trim() : '';
+  const n = /^0x[0-9a-f]+$/i.test(text) ? Number.parseInt(text, 16) : /^\d+$/.test(text) ? Number(text) : NaN;
+  return Number.isSafeInteger(n) && n >= 0 ? n : null;
+}
+
+async function checkRpcEndpoint(url, chainId = null) {
   const result = { url, ok: false, clientVersion: null, blockHeight: null, error: null };
 
   // Registry URLs are community-submitted input, not configuration, so a host check belongs
@@ -164,6 +179,27 @@ async function checkRpcEndpoint(url) {
   ]);
   if (version.status === 'fulfilled') result.clientVersion = version.value || null;
   if (block.status === 'fulfilled') result.blockHeight = parseBlockHeight(block.value);
+  // Which chain an endpoint that serves blocks actually serves. Registries list a successor's or
+  // a sibling's RPC under the wrong chain (Tempo's deprecated Andantino lists Moderato's, 0G's
+  // Galileo 16601 its successor's 16602), and blocks for another chain are not this chain's.
+  // Asked only of an endpoint that served a block; one that does not answer eth_chainId is
+  // judged on its blocks alone.
+  let servedChainId = null;
+  if (chainId != null && result.blockHeight !== null) {
+    try {
+      servedChainId = parseChainId(await jsonRpcCall(url, 'eth_chainId', { timeoutMs: RPC_CHECK_TIMEOUT_MS }));
+    } catch (err) {
+      // No answer: judged on its blocks. A refusal of our volume still backs the provider off
+      // (noteProviderResponses), though the endpoint served its block.
+      if (err?.kind === 'rate_limited') result.throttled = true;
+    }
+  }
+  if (servedChainId != null && servedChainId !== Number(chainId)) {
+    result.servedChainId = servedChainId;
+    result.error = `Serves chain ${servedChainId}, not ${chainId}`;
+    result.failure = 'wrong_chain';
+    return result;
+  }
   // Serving blocks is what makes an RPC work; some nodes disable web3_clientVersion and were
   // counted dead for it. The client version stays null then.
   result.ok = result.blockHeight !== null;
@@ -216,7 +252,7 @@ export async function processChainRpc(chainId) {
   const startedAt = Date.now();
   const deferred = new Set(urls.filter(u => isThrottled(u, startedAt)));
   rpcState.isMonitoring = true;
-  const probed = await Promise.all(urls.filter(u => !deferred.has(u)).map(checkRpcEndpoint));
+  const probed = await Promise.all(urls.filter(u => !deferred.has(u)).map(u => checkRpcEndpoint(u, chain.chainId)));
   rpcState.isMonitoring = false;
   noteProviderResponses(probed, Date.now());
   const previousByUrl = new Map((cachedData.rpcHealth?.[chainId] ?? []).map(r => [r.url, r]));
@@ -260,22 +296,26 @@ export async function processChainRpc(chainId) {
   }
   cachedData.rpcHealth[chainId] = publicResults;
   chain.lastTested = now;
+  if (!cachedData.rpcCheckedAt) cachedData.rpcCheckedAt = {};
+  cachedData.rpcCheckedAt[chainId] = now;
   // The chain's fork schedule as its nodes hold it, from an endpoint that served blocks in this
   // pass (eth_config, nodeForkSchedule.js) — not one deferred by a provider's rate-limit backoff,
   // which keeps its earlier result above. Paced by its own interval; fire-and-forget.
-  refreshNodeForkSchedule(Number(chainId), probed.filter(r => r.ok && !r.authRequired).map(r => r.url)).catch(() => {});
+  // Nor one whose provider this batch just backed off (a throttled eth_chainId, a sibling's 429).
+  refreshNodeForkSchedule(Number(chainId), probed.filter(r => r.ok && !r.authRequired && !isThrottled(r.url, Date.now())).map(r => r.url)).catch(() => {});
   // Freshness signal for /clients and /rpc-monitor. Stamped per chain as
   // results are written — not at sweep end — because a full sweep can abort
   // mid-pass on a data-version change (so onSweepEnd may never run), which
   // would otherwise leave lastRpcCheck (and /clients lastUpdated) null.
   cachedData.lastRpcCheck = chain.lastTested;
 
-  // Live, incremental persistence: write only this chain's state, and only
-  // when an endpoint's up/down status actually changed (not on every block
-  // advance). Fire-and-forget; the store logs its own failures.
-  if (rpcStateChanged(previous, publicResults)) {
-    persistChainRpcHealth(chainId, publicResults).catch(() => {});
-  }
+  // Live, incremental persistence of this chain alone: its statuses when an endpoint's up/down
+  // state changed (not on every block advance), and in the database also the time of every
+  // check, which orders the next pod's first sweep. Fire-and-forget; the store logs failures.
+  persistChainRpcHealth(chainId, publicResults, {
+    changed: rpcStateChanged(previous, publicResults),
+    checkedAt: Date.parse(now)
+  }).catch(() => {});
 
   incCounter('chains_api_rpc_check_total', { outcome: 'completed' }, probed.length);
 }
@@ -359,10 +399,20 @@ export async function processL2BeatBatch() {
 
 // ───────────────────────── scheduler ─────────────────────────
 
-function buildSweepQueue() {
+// Longest-waiting first: chains never checked, then the oldest checks, the rest in registry
+// order. A restart resumes where checking left off (rpcCheckedAt is restored from the store)
+// instead of starting again at the registry's first chain.
+export function buildSweepQueue() {
   const chains = cachedData.indexed?.all || [];
+  const checkedAt = cachedData.rpcCheckedAt || {};
+  const at = c => {
+    const t = Date.parse(checkedAt[c.chainId] || '');
+    return Number.isFinite(t) ? t : -Infinity;
+  };
+  const ordered = chains.map((c, i) => ({ c, i, t: at(c) }))
+    .sort((a, b) => a.t - b.t || a.i - b.i);
   const jobs = [{ type: 'l2beat_batch' }];
-  for (const c of chains) {
+  for (const { c } of ordered) {
     jobs.push({ type: 'chain_rpc', chainId: c.chainId });
   }
   return jobs;
