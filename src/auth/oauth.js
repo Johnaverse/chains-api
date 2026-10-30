@@ -233,11 +233,12 @@ ${error ? `<p class="error">${escapeHtml(error)}</p>` : ''}<form method="post" a
     let id = params.client_id;
     let given = params.client_secret;
     if (typeof authorization === 'string' && authorization.startsWith('Basic ')) {
-      let user, password;
-      try { [user, password] = Buffer.from(authorization.slice(6), 'base64').toString('utf8').split(':').map(decodeURIComponent); } catch { throw new OAuthError(401, 'invalid_client', 'Malformed Basic credentials'); }
-      if (id && id !== user) throw new OAuthError(401, 'invalid_client', 'Conflicting client_id');
-      id = user;
-      given = password;
+      // RFC 6749 §2.3.1: the client id and the client secret this server issued (cas_…).
+      let basicId, basicSecret;
+      try { [basicId, basicSecret] = Buffer.from(authorization.slice(6), 'base64').toString('utf8').split(':').map(decodeURIComponent); } catch { throw new OAuthError(401, 'invalid_client', 'Malformed Basic credentials'); }
+      if (id && id !== basicId) throw new OAuthError(401, 'invalid_client', 'Conflicting client_id');
+      id = basicId;
+      given = basicSecret;
     }
     const found = id ? await store.client(id) : null;
     if (!found || (found.secretHash ? !given || !sameHash(sha256(given), found.secretHash) : given !== undefined)) {

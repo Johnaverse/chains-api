@@ -9,6 +9,10 @@ import { authStore } from './store.js';
  */
 export const KEY_PATTERN = /^cak_[A-Za-z0-9_-]{43}$/;
 
+// The fingerprint stored for every secret this service issues — licence keys, OAuth codes,
+// tokens and client secrets. Each is 256 bits from the CSPRNG (secret() below), never a
+// person's password, so a fast hash is the right one: there is nothing to brute-force, and a
+// deliberately slow password hash would only make each check an amplifier for floods.
 export const sha256 = value => createHash('sha256').update(value).digest('hex');
 export const secret = (prefix = '') => prefix + randomBytes(32).toString('base64url');
 export const nowSeconds = () => Math.floor(Date.now() / 1000);
