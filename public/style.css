@@ -2083,3 +2083,19 @@ a.tlx-row-title:hover { color: var(--accent-hover); }
    board row jumps to — stops below the sticky app bar instead of under it. The document is the
    scroller; --appbar-h is the bar's measured height (initAppbarHeight). */
 html { scroll-padding-top: calc(var(--appbar-h, 64px) + var(--sp-3)); }
+
+/* ═══ Footer and terms page ═══════════════════════════════════════════ */
+.site-footer {
+    max-width: var(--maxw); margin: 0 auto; padding: var(--sp-4) var(--sp-5) var(--sp-7);
+    font-size: var(--fs-100); color: var(--ink-3); border-top: 1px solid var(--rule);
+}
+.site-footer a { color: var(--ink-2); }
+body.graph-active .site-footer { display: none; }
+.terms-page { background: var(--page); color: var(--ink-1); }
+.terms { max-width: 760px; line-height: var(--lh-snug, 1.55); }
+.terms h1 { font-size: var(--fs-700); font-weight: 600; letter-spacing: -.02em; margin: var(--sp-2) 0 var(--sp-1); }
+.terms h2 { font-size: var(--fs-400); font-weight: 600; margin: var(--sp-6) 0 var(--sp-2); }
+.terms p, .terms li { font-size: var(--fs-300); }
+.terms p + p, .terms ul + p { margin-top: var(--sp-2); }
+.terms ul { padding-left: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-1); margin: var(--sp-2) 0; }
+.terms code { font-family: var(--font-mono); font-size: .92em; }

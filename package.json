@@ -1,6 +1,6 @@
 {
   "name": "chains-api",
-  "version": "1.7.98",
+  "version": "1.7.99",
   "description": "API query service for blockchain chain data from multiple sources",
   "main": "index.js",
   "type": "module",
@@ -26,7 +26,7 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "bugs": {
     "url": "https://github.com/Johnaverse/chains-api/issues"
   },

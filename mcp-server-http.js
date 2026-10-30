@@ -15,7 +15,7 @@ import { initializeDataOnStartup, getCachedData, startRpcHealthCheck } from './d
 import { getToolDefinitions, handleToolCall } from './mcp-tools.js';
 import { logger } from './src/util/logger.js';
 import { mcpAccessLog } from './src/http/accessLog.js';
-import { DASHBOARD_ORIGINS } from './config.js';
+import { DASHBOARD_ORIGINS, TERMS_URL, LICENSING_CONTACT } from './config.js';
 
 const require = createRequire(import.meta.url);
 const { version } = require('./package.json');
@@ -35,6 +35,8 @@ const createServer = () => {
       capabilities: {
         tools: {},
       },
+      // Shown to MCP clients on connect: the same terms as the REST API.
+      instructions: `Data from chains-api, under its terms of use (${TERMS_URL}): free for personal and hobby use, academic research and teaching, and non-profit or open-source projects that earn nothing from it. Any commercial or for-profit use, including use that earns revenue, requires a licence: ${LICENSING_CONTACT}.`,
     }
   );
 

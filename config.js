@@ -150,6 +150,11 @@ export const CHAINS_API_DB_PASSWORD = parseStringEnv('CHAINS_API_DB_PASSWORD', '
 
 // CORS
 export const CORS_ORIGIN = parseStringEnv('CORS_ORIGIN', '*');
+// Terms of use for the hosted service, and where a commercial licence is asked for. Sent as a
+// `Link: <TERMS_URL>; rel="license"` header on every response, in robots.txt and in tdmrep.json.
+export const TERMS_URL = parseStringEnv('TERMS_URL', 'https://chains-api.johnaverse.cc/terms');
+export const LICENSING_CONTACT = parseStringEnv('LICENSING_CONTACT', 'licensing@johnaverse.cc');
+
 // Where the dashboard runs besides /ui on this host, comma-separated: requests from it are
 // audited as client kind "dashboard" (src/http/accessLog.js).
 export const DASHBOARD_ORIGINS = parseStringEnv('DASHBOARD_ORIGINS', 'https://www.johnaverse.cc')
