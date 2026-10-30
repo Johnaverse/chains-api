@@ -1056,5 +1056,6 @@ If you have questions or encounter issues, please [open an issue](https://github
 
 ## License
 
-MIT
+**Code:** [PolyForm Noncommercial License 1.0.0](LICENSE) from version 1.7.99: free for noncommercial purposes — personal use, research, and noncommercial organisations. Commercial use, including running your own copy commercially, requires a separate licence: licensing@johnaverse.cc. Releases up to and including 1.7.98 were published under the MIT licence and remain so.
 
+**Hosted service and data:** the API at `chains-api.johnaverse.cc`, its MCP server, the dashboard and the data they serve are covered by the [Terms of Use](https://chains-api.johnaverse.cc/terms) — free for personal and hobby use, academic research and teaching, and non-profit or open-source projects that earn nothing from it; any commercial or for-profit use requires a licence. Third-party data keeps its sources' own licences (growthepie must be credited wherever its data is shown). `/robots.txt` allows search indexing and reserves AI training and AI input (`Content-Signal`), `/.well-known/tdmrep.json` reserves text and data mining (EU Directive 2019/790, Art. 4), and every response carries `Link: <terms>; rel="license"`. `TERMS_URL` and `LICENSING_CONTACT` configure both.
