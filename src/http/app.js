@@ -24,6 +24,7 @@ import {
   RATE_LIMIT_MAX,
   DASHBOARD_ORIGINS,
   TERMS_URL,
+  PUBLIC_ORIGIN,
   RATE_LIMIT_WINDOW_MS,
   CORS_ORIGIN
 } from '../../config.js';
@@ -61,6 +62,7 @@ import { refresherRoute } from './routes/refresher.js';
 import { summaryRoute } from './routes/summary.js';
 import { rootRoute } from './routes/root.js';
 import { termsRoutes } from './routes/terms.js';
+import { registerOAuth } from '../auth/oauth.js';
 import { assistantRoutes } from './routes/assistant.js';
 import { prefetchAllPrices, startPriceRefresh } from '../../priceService.js';
 import { logger } from '../util/logger.js';
@@ -368,6 +370,8 @@ export async function buildApp(options = {}) {
   await fastify.register(summaryRoute);
   await fastify.register(assistantRoutes);
   await fastify.register(termsRoutes);
+  // OAuth 2.1 for the MCP endpoint (src/auth/oauth.js), when the public origin is configured.
+  if (PUBLIC_ORIGIN) registerOAuth(fastify, { origin: PUBLIC_ORIGIN });
   await fastify.register(rootRoute);
 
   // Interactive docs at /docs and the raw machine-readable spec at /openapi.json.

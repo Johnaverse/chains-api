@@ -930,6 +930,30 @@ RPC health records each failed endpoint's `failure` kind. A provider that refuse
 }
 ```
 
+## MCP access: licence keys and OAuth
+
+With `PUBLIC_ORIGIN` set (e.g. `https://chains-api.johnaverse.cc`), the MCP endpoint `/mcp` needs authorization; without it, MCP stays anonymous. The REST API and the dashboard stay public under the [terms](https://chains-api.johnaverse.cc/terms).
+
+**Licence keys** (`cak_…`), one per licensee, are kept as SHA-256 hashes in the `chains_api` database:
+
+```
+kubectl -n chains-api exec deploy/chains-api -- node src/cli/licenceKeys.js create "Acme Corp"   # prints the key once
+kubectl -n chains-api exec deploy/chains-api -- node src/cli/licenceKeys.js list
+kubectl -n chains-api exec deploy/chains-api -- node src/cli/licenceKeys.js revoke <id>          # disconnects that licensee's connectors
+```
+
+A client that can send a header uses the key directly: `Authorization: Bearer cak_…` (Claude Code: `claude mcp add --transport http chains https://chains-api.johnaverse.cc/mcp --header "Authorization: Bearer cak_…"`).
+
+**OAuth 2.1** for connectors that only speak OAuth (ChatGPT, claude.ai, Claude Desktop): add `https://chains-api.johnaverse.cc/mcp` as a remote MCP server; the connector gets a `401` pointing at the protected-resource metadata, discovers the authorization server, registers itself, and opens the consent page, where the licensee pastes their key. The connector then gets its own tokens; the key is never shared with it.
+
+- Endpoints: `/.well-known/oauth-protected-resource[/mcp]` (RFC 9728), `/.well-known/oauth-authorization-server` (RFC 8414), `/oauth/register` (RFC 7591), `/oauth/authorize`, `/oauth/token`, `/oauth/revoke` (RFC 7009).
+- PKCE with S256 only; `state` and `iss` in the response; one resource (`/mcp`, scope `mcp`; `offline_access` accepted and implied). Public and confidential clients (`client_secret_post` / `_basic`); redirect URIs HTTPS, or HTTP on loopback; at most 200 clients, a registration unused for an hour is removed.
+- Access tokens last 1 hour, refresh tokens 30 days and rotate on every refresh; codes last 2 minutes and are single use (a failed exchange spends the code). Only hashes are stored.
+- A grant records the licence key that approved it: revoking the key ends its grants at once.
+- The consent page is served with a strict CSP, `frame-ancestors 'none'` and `X-Frame-Options: DENY`; its form accepts only this origin. `/mcp` refuses requests whose `Origin` is another site.
+- Rate limits: registration 20, authorization 60, token 300 per minute per visitor. On `/mcp`, every request spends its address's budget (`MCP_RATE_LIMIT_MAX`), and an authorized one also its licensee's.
+- The MCP audit line names the `licensee` and how it authorized (`oauth` or `key`).
+
 ## Usage audit
 
 Every REST and MCP request except `/health`, `/ready` and `/metrics` writes one log line (`"msg":"api access"` or `"mcp access"`, field `audit`), replacing fastify's per-request pair:

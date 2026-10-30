@@ -16,7 +16,8 @@ import { getToolDefinitions, handleToolCall } from './mcp-tools.js';
 import { logger } from './src/util/logger.js';
 import { clientKey } from './src/http/clientKey.js';
 import { mcpAccessLog } from './src/http/accessLog.js';
-import { RATE_LIMIT_WINDOW_MS, MCP_RATE_LIMIT_MAX, MCP_MAX_SESSIONS, MCP_SESSION_IDLE_MS, DASHBOARD_ORIGINS, TERMS_URL, LICENSING_CONTACT } from './config.js';
+import { mcpBearer, resourceMetadataUrl } from './src/auth/oauth.js';
+import { RATE_LIMIT_WINDOW_MS, MCP_RATE_LIMIT_MAX, MCP_MAX_SESSIONS, MCP_SESSION_IDLE_MS, DASHBOARD_ORIGINS, TERMS_URL, LICENSING_CONTACT, PUBLIC_ORIGIN } from './config.js';
 
 const require = createRequire(import.meta.url);
 const { version } = require('./package.json');
@@ -61,7 +62,7 @@ const createServer = () => {
  * source. When this module runs as the combined server's MCP listener, the
  * REST process has already loaded data into the shared in-memory store.
  */
-export function createMcpHttpApp({ now = Date.now } = {}) {
+export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN, authStore: store = undefined } = {}) {
   const app = express();
 
   // Avoid implicit framework/version disclosure
@@ -85,8 +86,7 @@ export function createMcpHttpApp({ now = Date.now } = {}) {
   // eth_config read), block explorers (check_chain_halt) — so an unthrottled client could
   // drive thousands of outbound requests.
   const budgets = new Map(); // key -> { count, resetAt }
-  const limitMcp = (req, res, next) => {
-    const key = clientKey(req.headers, req.socket?.remoteAddress);
+  const spend = (key, res, next) => {
     const t = now();
     let b = budgets.get(key);
     if (!b || t >= b.resetAt) {
@@ -98,6 +98,10 @@ export function createMcpHttpApp({ now = Date.now } = {}) {
     res.set('Retry-After', String(Math.max(1, Math.ceil((b.resetAt - t) / 1000))));
     res.status(429).json({ jsonrpc: '2.0', error: { code: -32000, message: 'Too many requests' }, id: null });
   };
+  // Every request spends the visitor address's budget (this also bounds failed authorizations);
+  // an authorized one also spends its licensee's, wherever its requests come from.
+  const limitMcp = (req, res, next) => spend(clientKey(req.headers, req.socket?.remoteAddress), res, next);
+  const limitLicensee = (req, res, next) => (req.licensee ? spend(`licensee:${req.licensee.keyId}`, res, next) : next());
 
   /** Close sessions unused for MCP_SESSION_IDLE_MS, and forget spent rate budgets. */
   const sweep = async () => {
@@ -215,9 +219,39 @@ export function createMcpHttpApp({ now = Date.now } = {}) {
     }
   };
 
-  // Set up routes
-  app.post('/mcp', limitMcp, mcpPostHandler);
-  app.delete('/mcp', limitMcp, mcpDeleteHandler);
+  // With PUBLIC_ORIGIN set, /mcp needs a licence key or an OAuth access token (src/auth/oauth.js).
+  // A missing or invalid one gets 401 with the protected-resource metadata URL (RFC 9728), which
+  // is how an MCP client discovers the OAuth flow. A browser page from another site is refused
+  // (Origin), against DNS rebinding.
+  const requireLicence = async (req, res, next) => {
+    if (!publicOrigin) return next();
+    const sentOrigin = req.headers.origin;
+    if (sentOrigin !== undefined && sentOrigin !== publicOrigin) {
+      return res.status(403).json({ jsonrpc: '2.0', error: { code: -32000, message: 'Origin not allowed' }, id: null });
+    }
+    const challenge = (error) => res
+      .set('WWW-Authenticate', `Bearer resource_metadata="${resourceMetadataUrl(publicOrigin)}"${error ? `, error="${error}"` : ''}`)
+      .status(401)
+      .json({ jsonrpc: '2.0', error: { code: -32001, message: `Authorization required: connect with OAuth, or send a licence key as a Bearer token. Terms: ${TERMS_URL}` }, id: null });
+    const header = req.headers.authorization;
+    if (!header) return challenge(null);
+    try {
+      const who = await mcpBearer(header, publicOrigin, store);
+      if (!who) return challenge('invalid_token');
+      req.licensee = who;
+      return next();
+    } catch (err) {
+      logger.warn({ err: err.message }, 'MCP authorization check failed');
+      return res.status(503).json({ jsonrpc: '2.0', error: { code: -32000, message: 'Authorization is temporarily unavailable' }, id: null });
+    }
+  };
+
+  // Set up routes: the per-address budget first (it also bounds failed authorizations), then the
+  // licensee's own once known.
+  app.post('/mcp', limitMcp, requireLicence, limitLicensee, mcpPostHandler);
+  app.delete('/mcp', limitMcp, requireLicence, limitLicensee, mcpDeleteHandler);
+  // This server streams no server-initiated messages on GET (the spec's answer is 405).
+  app.get('/mcp', (_req, res) => res.set('Allow', 'POST, DELETE').status(405).end());
 
   // Health check endpoint
   app.get('/health', (req, res) => {

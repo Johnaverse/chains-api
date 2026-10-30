@@ -136,6 +136,8 @@ export function mcpAccessLog({ dashboardOrigins = [] } = {}) {
         rpc: rpc.length ? rpc : null,
         ...(tools.length ? { tools } : {}),
         session: req.headers['mcp-session-id'] ?? null,
+        // Who, once authorized (mcp-server-http.js): the licensee and how (oauth or key).
+        ...(req.licensee ? { licensee: req.licensee.licensee, auth: req.licensee.via } : {}),
         ...fields
       }, 'mcp access');
       const status = statusClass(res.statusCode);

@@ -159,6 +159,23 @@ export const CHAINS_API_DB_PASSWORD = parseStringEnv('CHAINS_API_DB_PASSWORD', '
 
 // CORS
 export const CORS_ORIGIN = parseStringEnv('CORS_ORIGIN', '*');
+// The service's public origin (https://host, no path). When set, the MCP endpoint requires a
+// licence key or an OAuth token, and the service is its own OAuth 2.1 authorization server
+// (src/auth/oauth.js). Empty: MCP stays anonymous, as before.
+function parseOriginEnv(name) {
+  const raw = (process.env[name] ?? '').trim();
+  if (!raw) return '';
+  let url;
+  try { url = new URL(raw); } catch { url = null; }
+  const local = url && url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+  if (!url || (url.protocol !== 'https:' && !local) || url.pathname !== '/' || url.search || url.hash || url.username) {
+    console.error(`Invalid value for ${name}: "${raw}" (expected https://host with no path). OAuth stays off.`);
+    process.exit(1);
+  }
+  return url.origin;
+}
+export const PUBLIC_ORIGIN = parseOriginEnv('PUBLIC_ORIGIN');
+
 // Terms of use for the hosted service, and where a commercial licence is asked for. Sent as a
 // `Link: <TERMS_URL>; rel="license"` header on every response, in robots.txt and in tdmrep.json.
 export const TERMS_URL = parseStringEnv('TERMS_URL', 'https://chains-api.johnaverse.cc/terms');
