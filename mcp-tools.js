@@ -49,6 +49,7 @@ export function getToolDefinitions() {
   return [
     {
       name: 'get_chains',
+      annotations: { readOnlyHint: true },
       description:
         'List blockchain chains, optionally filtered by tag (Testnet/L2/Beacon) and/or lifecycle status. Returns a CAPPED sample (default 50, max 200) — `totalMatched` is the full number of chains matching the filter, `count` is how many are in this response, and `truncated` is true when there are more. When `truncated` is true, tell the user you are showing the first `count` of `totalMatched` (a display limit) and offer to narrow by tag/status or search by name — do NOT present the sample as the complete list. For an exact total or category breakdown use get_stats; to find a specific chain use search_chains. Never treat a tag/category count as the overall registry total. Each chain carries a `price` object for its NATIVE currency, or null when the asset is unmapped (only ~29 of ~3000 chains are): `{usd, vol24h, marketCap, asOf, stale}`. `vol24h` is the ASSET’s 24-hour trading volume in USD — market activity, NOT chain throughput or transaction count — so chains sharing an asset legitimately report the SAME volume (Optimism, Base and Arbitrum all report ETH’s), and you must name the asset when you quote it rather than implying it is that chain’s own activity. `asOf` is when CoinGecko last moved the number and `stale` is true when that is over a day old — some assets are still quoted months after their market ended. When `stale` is true, `vol24h` and `marketCap` are null (a closed window is not a weaker answer, it is a different one) and `usd` is the LAST KNOWN price: quote it as of `asOf`, never as current. A null field means unknown, never zero.',
       inputSchema: {
@@ -77,6 +78,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_chain_by_id',
+      annotations: { readOnlyHint: true },
       description: 'Get detailed information about a specific blockchain chain by its chain ID. Includes a `price` object for the chain’s NATIVE currency (null when unmapped): `{usd, vol24h, marketCap, asOf, stale}`. `vol24h` is that ASSET’s 24-hour trading volume in USD — market activity, NOT chain throughput — so an L2 settling in ETH reports ETH’s volume, not its own; name the asset when quoting it. When `stale` is true the quote stopped moving at `asOf` (over a day ago): `vol24h` and `marketCap` are null and `usd` is the last known price, to be quoted as of `asOf` rather than as current. A null field is unknown, never zero. When researched, a `research` object lists the chain’s node/client `repositories` (each with a `kind` such as execution, consensus, rollup or node), whitepaper/document `papers` and short sourced `features`; every item carries a `status` (checked = fully verified, partial = evidence has gaps) and its `evidence` URLs — say when an item is only partially verified, and treat features as the project’s own claims, not tested facts. `research.forums` lists discussion boards the forum research tied to the chain, each with `relationship` (official / community_run / uncertain), `scope` (exact_network, project_family = the project’s shared board, ecosystem_shared, historical_network, uncertain = the board’s relationship to this chain could not be established) and `access` (read / inaccessible / archived when checked) — name the scope and say when a board was unreachable or archived; the chain’s `forumUrl` is the separately curated registry entry. `research.channels` lists public community / developer / support routes a primary project source links (`platform` discord / telegram / x / email / slack / gitter / matrix / wechat / contact_form / other), at most 12 (each platform gets a slot before any repeats), most specific first, with `channelsTotal` the full count and `channelsByPlatform` the full count per platform — a platform absent from `channelsByPlatform` has none listed, while one counted there but missing from `channels` was cut by the cap, so never say a chain has no Discord/Telegram/etc. unless `channelsByPlatform` lacks it: `relationship` official_operated / officially_endorsed (linked by the project, not necessarily run by it) / community_run / uncertain; `scope` as for forums; `access` = what the research could read without joining (public_preview_read, invite_unverified = invite link not validated, inaccessible, login_required, not_checked). When supplied, `availability` retains the dated observed state, activity and check time; read `channelsAvailabilityNote`. Closure can be retained alongside a later failed check; `historicalStatus` alone never establishes current closure. Cached observations do not establish current activity. Nobody joined or contacted these, so never promise a channel is active or that the team answers there, and name the scope when a route is project-wide or shared. Node hardware / setup requirements are NOT in this response: when `hasNodeRequirements` is true, call get_node_requirements for them.',
       inputSchema: {
         type: 'object',
@@ -91,6 +93,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_node_requirements',
+      annotations: { readOnlyHint: true },
       description:
         'Documented hardware and system requirements for running a node on a chain (CPU, memory, storage, bandwidth, OS, GPU), from the audited node hardware research. Use it for "what do I need to run a node / validator / RPC / archive node on X", "minimum vs recommended specs", "how much disk". Resolve the chain ID first (search_chains) if the user named the network. Returns one profile per node `role` × requirement `level` (minimum / recommended / example / unspecified) × `client`, most specific first. `client` is the software the figures were published for; when it is null the profile is generic for the chain — say "generic" rather than naming a client. Each requirement is a string in the publisher’s ORIGINAL unit ("memory capacity: 16 GB", "cpu cores: at least 4 cores"): quote units exactly as given, NEVER convert GB/GiB, Mbps/MB/s, cores/vCPU/threads, and never add up or average profiles. ALWAYS read and relay two caveats. (1) `identityStatus` is how firmly the research tied the documentation to THIS chain: confirmed = established; qualified = the project is right but the exact deployment or version has limits; unresolved = the documentation could not be matched to this chain — present unresolved figures as "documentation found for the project, not confirmed to apply to chain N". (2) each profile’s `scope`: exact_network = documented for this chain; project_family = the project’s generic sizing applied to this chain, NOT verified for it; historical_network = a past deployment, read the notes before use; uncertain = applicability could not be established, do not present it as verified sizing. Also mention `deployment` historical/deprecated and `verification` qualified. A profile with `prerequisiteFor` is a sourced prerequisite for another role, returned by that role filter while keeping its original `role`; it is not dedicated sizing for the requested role. Read the relationship’s condition, sizing, notes and sources; do not count the profile twice. A component that is absent was not documented — never say zero or unnecessary. These are published requirements, not benchmarks, and storage grows over time. `totalProfiles` is everything the research kept for the chain, `totalMatched` what survived your role/level filter (including explicitly sourced prerequisites for the requested role), `count` what fits in this response; `truncated` true means more matched profiles exist — narrow with `role` or `level` to see them. When `totalProfiles` is 0 the research found no publishable requirements for this chain, which is not proof none exist — say that and point to the project’s own node documentation; when `totalMatched` is 0 but `totalProfiles` is not, the chain has requirements for OTHER roles or tiers — say which roles exist (`availableRoles`) rather than that none are documented. Also returns `software` (or null): `repositories` = the node/client source repositories the research tied to the chain (`kind` execution / consensus / rollup / node / packaging / sdk / contracts, `status` checked or partial), and `observedClients` = client software and versions actually seen on the chain’s live RPC endpoints (what operators run today — evidence, not a requirement, and only for chains with monitored endpoints). Combine them when asked how to set up a node: hardware from `profiles`, software from `software`, each profile’s `client` naming the software its figures were published for.',
       inputSchema: {
@@ -120,6 +123,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'search_chains',
+      annotations: { readOnlyHint: true },
       description: 'Search for blockchain chains by name or other attributes',
       inputSchema: {
         type: 'object',
@@ -134,6 +138,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_endpoints',
+      annotations: { readOnlyHint: true },
       description: 'Get RPC, firehose, and substreams endpoints for a specific chain or all chains',
       inputSchema: {
         type: 'object',
@@ -147,6 +152,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_relations',
+      annotations: { readOnlyHint: true },
       description: 'Get chain relationships (testnet/mainnet, L2/L1, etc.) for a specific chain or all chains',
       inputSchema: {
         type: 'object',
@@ -160,6 +166,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_slip44',
+      annotations: { readOnlyHint: true },
       description: 'Get SLIP-0044 coin type information by coin type ID or all coin types',
       inputSchema: {
         type: 'object',
@@ -173,6 +180,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_sources',
+      annotations: { readOnlyHint: true },
       description: 'Get the status of all data sources (theGraph, chainlist, chains, slip44)',
       inputSchema: {
         type: 'object',
@@ -181,6 +189,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_keywords',
+      annotations: { readOnlyHint: true },
       description: 'Get extracted keywords such as blockchain names, network names, software client names, tags, and relation kinds',
       inputSchema: {
         type: 'object',
@@ -189,6 +198,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'validate_chains',
+      annotations: { readOnlyHint: true },
       description: 'Validate chain data for potential quality issues across 21 cross-source validation rules — each finding has a severity: error (a source should fix it) or notice (worth knowing, not wrong) — (relation conflicts, mainnet-vs-testnet claims that disagree — each with the source and field that said it —, one chain ID naming different networks in different sources, slip44/name/status mismatches, L2BEAT consistency, RPC drift, deprecated-parent propagation, networks deprecated here but not upstream, live chains with no answering RPC, deprecated chains whose RPC still answers, RPC endpoints listed for a chain that serve another, and more)',
       inputSchema: {
         type: 'object',
@@ -199,6 +209,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_rpc_monitor',
+      annotations: { readOnlyHint: true },
       description: 'Get RPC monitor status and summary endpoint health counts across all chains (without per-chain endpoint listing)',
       inputSchema: {
         type: 'object',
@@ -207,6 +218,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_stats',
+      annotations: { readOnlyHint: true },
       description: 'Get aggregate statistics: total chains, mainnets, testnets, L2s, beacons, RPC health percentage, and a lifecycle breakdown — activeChains (non-deprecated), deprecatedChains, and byStatus (counts per active/incubating/deprecated). Use for "how many chains", "how many are active/deprecated".',
       inputSchema: {
         type: 'object',
@@ -215,6 +227,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'traverse_relations',
+      annotations: { readOnlyHint: true },
       description: 'BFS graph traversal of chain relations from a starting chain. Returns all reachable chains (nodes) and their relationship edges up to a given depth.',
       inputSchema: {
         type: 'object',
@@ -233,6 +246,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_rpc_monitor_by_id',
+      annotations: { readOnlyHint: true },
       description: 'Get RPC endpoint monitoring results for a specific chain by its chain ID. If the rolling monitor has not reached the chain yet (e.g. right after a deploy), its endpoints are checked live on demand, so a result is normally available.',
       inputSchema: {
         type: 'object',
@@ -247,6 +261,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'check_chain_halt',
+      annotations: { readOnlyHint: true },
       description:
         'Check whether a chain has STOPPED PRODUCING BLOCKS. Probes the chain\'s public RPC endpoints live for the latest block (height + block timestamp) and cross-checks a block explorer, then returns a verdict: "halted" (every responding source agrees on the same block and it is overdue), "delayed" (overdue but sources disagree), "endpoint_lagging" (chain is fine, a source is stuck on an old block — NOT a chain problem), "healthy", or "unknown" (fewer than two sources answered — this does NOT mean the chain is down). Use for "is X halted/stuck/stalled", "is X still producing blocks", "is X down". Distinct from get_rpc_monitor_by_id, which reports whether our probe could REACH an endpoint, and from get_live_incidents, which reports what the operator ANNOUNCED.',
       inputSchema: {
@@ -262,6 +277,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_l2_metrics',
+      annotations: { readOnlyHint: true },
       description: 'Ethereum L2 data from growthepie (about 26 chains: Base, Arbitrum, OP Mainnet, zkSync Era, Scroll, Linea, Unichain, Mantle, Celo, MegaETH, Robinhood Chain, Polygon PoS, Ethereum itself…). Use for activity, fees, revenue/profit, costs paid to Ethereum, TVL, stablecoins, blockspace use and DA questions ("which L2 has the most active addresses", "how much does Base pay for blobs", "is Arbitrum profitable"). Views: `chains` (default) ranks every covered chain by `metric` with its latest value and 7-day change; give `chainId` for one chain in full (profile, every metric with 7d/30d change, current median/swap/transfer fees, users, revenue/costs/profit per period, blockspace share by category, DA layers used; add `metric` + `days` for its daily history); `da` compares data-availability layers (Ethereum blobs, Celestia, EigenDA: fees, data posted, consumers); `eth_supply` gives ETH supply and issuance. Metric keys: daa (daily active addresses), aa_last7d, txcount, tvl, stables_mcap, fees_paid_usd (revenue = fees users paid), profit_usd, rent_paid_usd (paid to Ethereum L1), costs_total_usd, costs_l1_usd, costs_blobs_usd, txcosts_median_usd, gas_per_second, market_cap_usd, fdv_usd, app_fees_usd, blob_size_bytes. Values are daily; USD unless the key says otherwise. `change7d` compares two single days and swings on event days; for a trend use `avg7dChange` (7-day average vs the week before). Always credit growthepie (`attribution`) when you use these numbers. Only these chains are covered: an absent chain means growthepie does not track it, not zero activity.',
       inputSchema: {
         type: 'object',
@@ -276,6 +292,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_scaling_chains',
+      annotations: { readOnlyHint: true },
       description: 'List chains classified by L2BEAT as scaling solutions (Optimistic Rollup, ZK Rollup, Validium, Optimium). Returns each chain\'s L2BEAT view (stage, category, stack, DA layer, host chain, TVS) plus a refresher freshness block indicating whether the data is live or from the static fallback snapshot.',
       inputSchema: {
         type: 'object',
@@ -284,6 +301,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_l2beat_by_id',
+      annotations: { readOnlyHint: true },
       description: 'Get L2BEAT scaling data for a single chain by chain ID. Includes stage classification, category, stack, DA layer, host chain, TVS, activity, and per-chain freshness metadata.',
       inputSchema: {
         type: 'object',
@@ -298,6 +316,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_refresher_status',
+      annotations: { readOnlyHint: true },
       description: 'Get the unified rolling chain refresher\'s current state: tick interval, in-flight status, queue depth, sweep cursor, plus per-job-type status for L2BEAT batches and RPC sweeps. Useful for diagnosing data freshness or stuck refreshes.',
       inputSchema: {
         type: 'object',
@@ -306,6 +325,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_clients',
+      annotations: { readOnlyHint: true },
       description: 'Get execution client software (name, version, GitHub repo, language) running on a chain, aggregated from live RPC endpoints. Omit chainId to get a summary across all chains.',
       inputSchema: {
         type: 'object',
@@ -319,6 +339,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_status_pages',
+      annotations: { readOnlyHint: true },
       description: 'Get the curated registry of operator status/incident pages. Returns chain-keyed projects (each with the chainIds it covers) plus coin/symbol-keyed entries for networks not represented by a chainId (e.g. Solana, Sui).',
       inputSchema: {
         type: 'object',
@@ -327,6 +348,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_status_page_by_chain',
+      annotations: { readOnlyHint: true },
       description: 'Get the operator status/incident page covering a specific chain by its chain ID (e.g. 8453 for Base → base-l2.statuspage.io).',
       inputSchema: {
         type: 'object',
@@ -341,6 +363,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_status_page_by_symbol',
+      annotations: { readOnlyHint: true },
       description: 'Get the operator status/incident page for a coin/network keyed by symbol rather than chain ID (e.g. SOL for Solana). Case-insensitive.',
       inputSchema: {
         type: 'object',
@@ -355,6 +378,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_live_incidents',
+      annotations: { readOnlyHint: true },
       description:
         'Get LIVE incidents and scheduled maintenance from chain operator status pages and RPC provider status pages (Infura, QuickNode, dRPC, Pinax). Use for questions like "is X down", "any incidents today", "provider outages". Each item carries a lifecycle `status` and an `ongoing` flag: for "is X down right now" pass ongoing=true; for "scheduled/upcoming maintenance" pass status="maintenance_scheduled" (its publishedAt is when the maintenance starts). `chainLevel` is the important one for "is CHAIN X healthy": each entry is a chain that TWO OR MORE independent RPC providers are reporting at the same time, which is evidence about the chain rather than about one provider — lead with it and say how many providers agree. It is computed across all ongoing provider incidents, so it is present even when a chainId filter narrowed `incidents`. A provider incident usually does not declare a chain, so `chainId` also matches a chain read from the incident title; `chainEvidence` says which ("declared" or "title"), and an incident naming a non-EVM network with no chainId in the registry is never attributed at all. Near-real-time (cached ~60s).',
       inputSchema: {
@@ -395,6 +419,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_forum_news',
+      annotations: { readOnlyHint: true },
       description:
         'Get recent posts from official chain community/governance forums (Ethereum Magicians, Arbitrum DAO, …), keyed by chain ID. Use for questions about governance discussions, proposals, upgrades being debated, or community news. Near-real-time (cached ~60s).',
       inputSchema: {
@@ -417,6 +442,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_chain_upgrades',
+      annotations: { readOnlyHint: true },
       description:
         'Get the cross-feed upgrade timeline: scheduled/completed network upgrades and maintenance windows with the REQUIRED SOFTWARE ({client, version} operators must run), urgency (standard/urgent/mandatory), activation time WITH ITS EVIDENCE, incidents that followed on the same network within 24h (labelled suspectedCause: "upgrade" — temporal correlation, not asserted causation), and related forum discussion + news coverage. Use for "when is the next upgrade for X", "what version is required", "did the upgrade cause incidents". NOT for a fork schedule: this returns one entry per PROVIDER WINDOW, so a single fork appears here several times over. For forks themselves — one entry per fork per network, with every provider window attached — use get_forks. `network` accepts a name for chains with no EVM chain ID (e.g. "Solana", "Canton"). NEVER read `activationAt` without `activationEvidence`: `window`/`scheduled` mean a stated time you may count down to; `started`/`completed` are OBSERVED and approximate (`completed` is an upper bound on the run, not its start, so say "completed by"); `announced` means the provider announced the upgrade and never named a day — `activationAt` is null and you must say the date is not announced yet rather than implying one. Evidence strength wins over recency, so a later exact window overrides an earlier undated announcement. `windowMinutes`/`windowEndAt` exist only for `window` evidence. On followedByIncidents, `durationEvidence` is `observed` (resolvedAt is real), `ongoing` (still open), or `unpublished` (the page never said when it ended — do not state a duration). Returns a capped list with totalMatched/truncated — say when you are showing a subset.',
       inputSchema: {
@@ -439,6 +465,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_forks',
+      annotations: { readOnlyHint: true },
       description:
         'Get FORKS as entities: one entry per fork per network, grouped across ALL feeds — status pages (the network\'s and each provider\'s maintenance windows), governance/research forums, news (the project\'s own blog = primary, outlets = secondary), and client release notes (feed `release`: the client team\'s own release/changelog announcing the activation, primary evidence) where that feed is configured. A fork produces many events (each provider posts its own maintenance window), so get_chain_upgrades shows the same fork repeatedly — this collapses them. Use for "what forks are coming", "when does X fork", "is the fork still on". Only consensus forks / network upgrades are listed by default (`kind: "fork"`): ordinary software updates that merely carried a fork marker — client releases, RPC patches, provider infrastructure work — are `kind: "upgrade"` and appear only with include="upgrades"; `byKind` counts both. Each fork carries: `name` (codename such as "Protocol 28", or null when the text marked a fork without naming one), `network` (plus `networks` when one set of events covered several), `aliases` (other names the same activation goes by, e.g. Gloas / Amsterdam for Glamsterdam), `phase`, `activationAt` WITH `activationEvidence` and `activationPrecision` (`day` = only the date was given, not the time — say "on <date>", never a time of day), `activationBlock`, `state`, `sources` (which status pages, forums or outlets reported it — more than one means independent confirmation), `feeds` (status / forum / news / release) and `events`, each with its own claimed `activationAt`. The fork\'s activationAt is the strongest claim (the network or a primary source over secondary news), except that newer non-secondary sources moving the date by more than a day are treated as a reschedule. An RPC provider\'s maintenance window never sets a fork\'s time or state — it is the provider\'s own schedule, listed among `events` to say when that provider upgrades — and a fork only providers mention is not listed (their windows are software updates on get_timeline); when `feeds` is only ["news"], attribute it ("CoinDesk reports…") rather than stating it as the network\'s schedule. A top-level `feeds` says which feeds answered — if one is not ok, say forks from it may be missing or out of date (`stale: true` means its forks are from an earlier fetch). NEVER read activationAt without activationEvidence: `stated` is a time a source actually gave; `observed` is derived from a block height already reached; `estimated` is a height still ahead multiplied by the average block rate, so it is an order-of-magnitude answer and must be described as approximate, never as a schedule. `phase` is upcoming / past / cancelled / unscheduled — `unscheduled` means no source has named a date (or the only stated date was implausible and dropped — see the event `implausibleActivationAt`), so say the date is not announced rather than implying one; `completed` forks are `past` even with no date; an undated `past` fork carrying `pastInferred` (`{ after, at }`) was not dated or reported done by any source — the fork `after` went live on its network at `at` and nothing has mentioned this one since, so say it already happened (after `after`), by inference, never give it a date or call it confirmed; and `cancelled` only ever appears when a source said so (a quietly dropped fork stays upcoming until its date passes). Pass scheduledOnly=true for a calendar view. Returns a capped list with totalMatched/truncated plus byPhase counts over everything matched — quote byPhase for totals rather than counting the rows shown.',
       inputSchema: {
@@ -465,6 +492,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_timeline',
+      annotations: { readOnlyHint: true },
       description:
         'Get the EVENT TIMELINE: hardforks, software updates and maintenance as events, each with everything the feeds say about it grouped under it — `releases` (the client releases that ship it: repo, version, mandatory; `component` for a monorepo, whose components share versions — Lotus v1.38.0 and miner v1.38.0), `providerUpdates` (every RPC provider\'s rollout window for it, with status and activation evidence), `news` (articles and forum posts about it) and `followedByIncidents` (incidents on the same network within 24h after activation: suspected, never asserted causation). Use for a chain\'s HARDFORK HISTORY (chainId + type="hardfork": every fork the feeds know for that chain, newest first after any upcoming one), for "what happened around the X fork" (which clients shipped it, which providers rolled it out, what broke after), and for "what software updates are coming for X". `type`: `hardfork` = a consensus fork / network upgrade; `software_update` = a client version rolled out with no fork behind it (provider windows for one version are grouped across providers) — planned work, NEVER an incident, so do not report it as an outage; `maintenance` = a provider window naming no software. History reaches as far back as the feeds\' archives: client releases go back years, provider status posts only weeks — a fork with no `providerUpdates` before that window is not evidence that no provider rolled it out. `activationEvidence`: `stated`/`window`/`scheduled` = a time a source gave; `observed`/`started`/`completed` = seen happening (approximate); `estimated` = derived from a block height ahead (approximate); `released` = only the release date is known; null with `phase: "unscheduled"` = no date announced — say so rather than implying one. `pastInferred` (`{ after, at }`) on an undated fork with `phase: "past"` means no source dated it or reported it done: the fork `after` went live on its network at `at` and nothing has mentioned this one since — say it already happened (after `after`), by inference, never give it a date or call it confirmed. `layerName` is the name a client used when the feeds showed the same activation under a better-attested one (e.g. Gloas under Glamsterdam). A fork with `phase: "cancelled"` was called off: its `software` then lists, per client, the newest release that CALLS IT OFF — cancels it, or reschedules it without naming a new date ahead (each release\'s `forkState` is what it said: `scheduled`, `cancelled`, `rescheduled`, and `forkActivationAt` the date it stated) — `supersededSoftware` lists every other version — the ones that scheduled it, and older ones — and an EMPTY `software` means no release that disables it is known yet (never that the old versions are safe: say "no fixed release known yet"), and `upgradeBy` (present while the original activation is still ahead) is the deadline — a node still on a superseded version activates the fork on its own at that moment and leaves the network, so answer "upgrade to <software> before <upgradeBy>", never "nothing to do" — and it is NOT upcoming: never list a cancelled fork among coming forks (its `upgradeBy` is a deadline to act on, not an activation). `counts` gives the full size of each group; the lists are capped at 2 here. `sources` says which feeds answered — a missing release feed means most fork history is missing. Returns totalMatched/truncated with byType and byPhase over everything matched — quote those for totals.',
       inputSchema: {
@@ -488,6 +516,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_provider_stats',
+      annotations: { readOnlyHint: true },
       description:
         'Get per-RPC-provider quality indicators (Infura, QuickNode, Alchemy, dRPC, Chainstack, …): incidents30d, ongoingNow (open INCIDENTS only), ongoingMaintenance (planned windows in progress — never call these outages), maintenance30d, chainsAffected30d, oldestOngoingAt (start of the longest-running open incident), staleOngoing + staleIncidents (incidents the status page still marks open but has not updated for over 72h — likely left unresolved by the operator; NOT counted in ongoingNow and charged as downtime only until their last update, so say they are stale, not ongoing), resolutionHours (median/avg time-to-resolve, usually null), availability, endpointReachability, and chain coverage. For "which provider is most reliable/available" use `availability`: CHAIN-WEIGHTED over three windows (last24h/last7d/last30d), each {percent, chainHoursLost} where percent = 1 − chain-hours lost / (chainsSupported × window hours) — so 1 of 10 supported chains down for a full 24h window is 90%, not 0%. chainsSupported is ONLY what the provider lists on its own status page; when that coverage is unavailable the percents are null with a note. It is SELF-REPORTED: a provider that never posts incidents scores a perfect 100 (a silent status page looks perfect), so always say it is self-reported. Most status pages publish an incident only ONCE, at resolution, so its duration is unknown and it is EXCLUDED from the percent rather than charged as downtime — compare availability.measuredIncidents against unknownDurationIncidents before ranking providers on it, and when measuredIncidents is 0 say the percent means "nothing open right now", not "a clean month". Use disclosure.comparable to decide whether a provider belongs in a ranking at all; a "partial window" note means feed retention is younger than the window. `endpointReachability` ({working, total, percent, registryChains}) measures whether REGISTRY-LISTED endpoint URLs answer chains-api\'s probes — keyed/stale/geo-blocked registry URLs fail by design, so it is a registry data-quality signal; do NOT present it as provider uptime.',
       inputSchema: {
@@ -502,6 +531,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_web3_news',
+      annotations: { readOnlyHint: true },
       description:
         'Get recent blockchain/web3 ecosystem news from curated publishers (Ethereum Foundation blog, Vitalik\'s blog, Consensys, CoinDesk, Decrypt, The Block). Use for "what is new with X", upgrade/hard-fork announcements, research, funding and ecosystem developments. Distinct from the other feeds: get_live_incidents is outages/maintenance and get_forum_news is governance discussion — this is what the ecosystem publishes about itself. `weight` separates protocol/research sources ("primary") from news desks that also cover markets ("secondary"); prefer primary for protocol facts. Returns a capped list (default 15, max 50) with `totalMatched`; when it exceeds `count`, say you are showing the most recent subset. Near-real-time (cached ~60s).',
       inputSchema: {
@@ -529,6 +559,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_client_releases',
+      annotations: { readOnlyHint: true },
       description:
         'Get recent blockchain CLIENT software releases (geth, Nethermind, Lighthouse, op-node, …) read from their GitHub/GitLab releases and changelogs, newest first. Use for "latest version of X", "is this release mandatory", "which client release ships fork Y". `release.mandatory` = the notes say operators must upgrade; `enrichment.fork` = the hard fork the release announces (name, network, activationAt/activationBlock/activationEpoch, state). `chainsFrom` says where the chains come from: `fork` = the networks of the hard fork the release announces, `release` = named in the notes, `repository` = every network the repo serves, not ones the notes named. `review` = the notes carry fork or upgrade-obligation wording the model did not confirm (quotes included): report it as a POSSIBLE fork / mandatory upgrade to verify, never as \"no fork\". For fork dates across all sources prefer get_forks. Returns a capped list (default 15, max 50) with `totalMatched` (null = completeness unknown; `note` says why — tell the user it may be partial).',
       inputSchema: {
@@ -567,6 +598,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_latest_release',
+      annotations: { readOnlyHint: true },
       description:
         'The LATEST release of one client repository, answered field by field: `latest.version` and `latest.url` (the release link), `hardfork.included` (the release schedules a hard fork; `forks` lists each with network, chainId, state and activation, one per fork and network; `state` is what the notes said when released and can read `scheduled` long after the date — use `phase` (`upcoming`/`past`/`cancelled`/`unscheduled`) for where the fork stands now (`phaseFrom: "forks"` = the notes called it completed without a date and the fork list has it still ahead: trust the phase); `layerName` = the name the client used when the feeds showed the same activation under a better-attested one (e.g. Amsterdam under Glamsterdam)), `mandatory` (operators must upgrade), `security.update` (a security release: `source: advisory` = a published GitHub advisory names this version as patched, with severity; `source: notes` = the notes say so, `quote` is the line; `scope: dependency` = only a library/toolchain bump), and `flags.changed` (CLI flags or config keys added/removed/deprecated/renamed/default changed, each with its `quote`). Use for "what is the latest version of X", "is the latest X release mandatory / a security update / a hard fork", "does it change any flags". `null` = UNKNOWN (not classified yet, or no notes) — say it is unknown, never "no". `hardfork.review` = possible fork wording the model did not confirm: report it as a possible fork to verify. Stable releases unless includePrerelease; `newerPrerelease` names a newer prerelease. A monorepo returns `components` (newest release of each): ask which one, or pass `component`. For many releases or a date range use get_client_releases.',
       inputSchema: {
@@ -590,6 +622,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_client_activity',
+      annotations: { readOnlyHint: true },
       description:
         'How actively a node CLIENT is developed and how much of its open work is flagged as critical: default-branch commits and merged pull requests in the last 30/90 days, open issues and PRs, issues opened in 30 days, open issues labeled as bugs or as critical/security/priority (with the label names), published GitHub security advisories (count by severity, newest three), a development `level` (active / moderate / low / dormant / archived) and an `attention` level (high / elevated / normal) with its reasons. Use for "is X still maintained", "how active is X", "does X have critical open issues or recent security advisories". Label counts say what maintainers labeled, not a code audit — say so. Refreshed daily; `activity: null` means not collected yet. Also returns `lineage`: the upstream client this one customizes (e.g. a chain\'s geth fork → Geth) and the clients customizing it with their networks (`networks` is a sample of at most ten; `networkCount` is the full count); `via` is `github-fork`/`gitlab-fork` (recorded by the host), `known` (well-known parent) or `name` (inferred from names — call it a likely link, not a fact). Use for "which chains run a customized geth", "what is X based on". Give `repo` for one repository, or `client` (a name such as "lighthouse") for up to `limit` matching repositories.',
       inputSchema: {
@@ -612,6 +645,7 @@ export function getToolDefinitions() {
     },
     {
       name: 'get_network_clients',
+      annotations: { readOnlyHint: true },
       description:
         'List the node/client software repositories known to serve a chain (execution, consensus, node, sequencer, …), each with the kinds it plays on that chain, how many networks it serves (`networkCount`), its latest release and latest announced fork, and a compact `activity` (development level, attention level, commits/merged PRs in 30 days, open and critical-labeled issues, advisories in the last year; null until collected). Use for "which clients run X" and "what is the latest geth version for X"; for one client\'s full activity call get_client_activity. Different from get_clients, which reports what live RPC endpoints self-report.',
       inputSchema: {

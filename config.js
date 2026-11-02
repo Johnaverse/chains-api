@@ -41,6 +41,15 @@ export const MAX_PARAM_LENGTH = parseIntEnv('MAX_PARAM_LENGTH', 200);
 // Rate limiting
 export const RATE_LIMIT_MAX = parseIntEnv('RATE_LIMIT_MAX', 100);
 export const RATE_LIMIT_WINDOW_MS = parseIntEnv('RATE_LIMIT_WINDOW_MS', 60000); // 1 minute
+// The header carrying the visitor's address behind Cloudflare and the gateway; rate limits key on
+// it (src/http/clientKey.js). Empty: key on the TCP peer.
+// Read directly: parseStringEnv treats an empty value as unset, and empty here means "off".
+export const RATE_LIMIT_CLIENT_IP_HEADER = (process.env.RATE_LIMIT_CLIENT_IP_HEADER ?? 'cf-connecting-ip').trim().toLowerCase();
+// The MCP HTTP endpoint: requests per client per RATE_LIMIT_WINDOW_MS, open sessions, and how long
+// an unused session is kept.
+export const MCP_RATE_LIMIT_MAX = parseIntEnv('MCP_RATE_LIMIT_MAX', 120);
+export const MCP_MAX_SESSIONS = parseIntEnv('MCP_MAX_SESSIONS', 200);
+export const MCP_SESSION_IDLE_MS = parseIntEnv('MCP_SESSION_IDLE_MS', 30 * 60 * 1000);
 export const RELOAD_RATE_LIMIT_MAX = parseIntEnv('RELOAD_RATE_LIMIT_MAX', 5);
 export const FEEDBACK_RATE_LIMIT_MAX = parseIntEnv('FEEDBACK_RATE_LIMIT_MAX', 5);
 export const SEARCH_RATE_LIMIT_MAX = parseIntEnv('SEARCH_RATE_LIMIT_MAX', 30);
@@ -150,6 +159,23 @@ export const CHAINS_API_DB_PASSWORD = parseStringEnv('CHAINS_API_DB_PASSWORD', '
 
 // CORS
 export const CORS_ORIGIN = parseStringEnv('CORS_ORIGIN', '*');
+// The service's public origin (https://host, no path). When set, the MCP endpoint requires a
+// licence key or an OAuth token, and the service is its own OAuth 2.1 authorization server
+// (src/auth/oauth.js). Empty: MCP stays anonymous, as before.
+function parseOriginEnv(name) {
+  const raw = (process.env[name] ?? '').trim();
+  if (!raw) return '';
+  let url;
+  try { url = new URL(raw); } catch { url = null; }
+  const local = url && url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+  if (!url || (url.protocol !== 'https:' && !local) || url.pathname !== '/' || url.search || url.hash || url.username) {
+    console.error(`Invalid value for ${name}: "${raw}" (expected https://host with no path). OAuth stays off.`);
+    process.exit(1);
+  }
+  return url.origin;
+}
+export const PUBLIC_ORIGIN = parseOriginEnv('PUBLIC_ORIGIN');
+
 // Terms of use for the hosted service, and where a commercial licence is asked for. Sent as a
 // `Link: <TERMS_URL>; rel="license"` header on every response, in robots.txt and in tdmrep.json.
 export const TERMS_URL = parseStringEnv('TERMS_URL', 'https://chains-api.johnaverse.cc/terms');

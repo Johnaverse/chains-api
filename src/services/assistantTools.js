@@ -1,6 +1,7 @@
 import Ajv from 'ajv';
 import { getToolDefinitions, handleToolCall } from '../../mcp-tools.js';
 import { ASSISTANT_TOOL_RESULT_MAX_CHARS } from '../../config.js';
+import { fieldLinks } from './toolLinks.js';
 
 /**
  * Adapter between the MCP tool registry (mcp-tools.js) and the OpenAI
@@ -18,9 +19,15 @@ const ajv = new Ajv({ coerceTypes: true, removeAdditional: 'all', useDefaults: t
 let openAiTools = null;
 const validators = new Map();
 
+// The assistant gets only tools DECLARED read-only (`annotations.readOnlyHint`). The registry is
+// shared with the MCP servers, so without this a tool added there later — one that writes,
+// reloads or sends — would become callable by the model without anyone deciding it should be
+// (OWASP LLM06, excessive agency). Undeclared means excluded.
+const assistantToolDefinitions = () => getToolDefinitions().filter((t) => t.annotations?.readOnlyHint === true);
+
 export function getOpenAiTools() {
   if (!openAiTools) {
-    openAiTools = getToolDefinitions().map((t) => ({
+    openAiTools = assistantToolDefinitions().map((t) => ({
       type: 'function',
       function: { name: t.name, description: t.description, parameters: t.inputSchema }
     }));
@@ -30,7 +37,7 @@ export function getOpenAiTools() {
 
 function getValidator(name) {
   if (!validators.has(name)) {
-    const def = getToolDefinitions().find((t) => t.name === name);
+    const def = assistantToolDefinitions().find((t) => t.name === name);
     validators.set(name, def ? ajv.compile(def.inputSchema) : null);
   }
   return validators.get(name);
@@ -67,10 +74,12 @@ export async function executeTool(name, args) {
     .filter((c) => c.type === 'text')
     .map((c) => c.text)
     .join('\n');
+  // The links a result gives in its link fields, read before truncation cuts the JSON.
+  const links = result.isError === true ? [] : fieldLinks(text);
   if (text.length > ASSISTANT_TOOL_RESULT_MAX_CHARS) {
     text = `${text.slice(0, ASSISTANT_TOOL_RESULT_MAX_CHARS)}\n…[truncated]`;
   }
-  return { text, isError: result.isError === true };
+  return { text, isError: result.isError === true, links };
 }
 
 export function _resetAssistantToolsForTests() {

@@ -1,11 +1,4 @@
-import {
-  CHAINS_API_DB_HOST,
-  CHAINS_API_DB_PORT,
-  CHAINS_API_DB_NAME,
-  CHAINS_API_DB_USER,
-  CHAINS_API_DB_PASSWORD
-} from '../../config.js';
-import { logger } from '../util/logger.js';
+import { database, databaseConfigured, registerSchema, warnDatabase, closeDatabase, _setCreatePoolForTests as setPool } from './database.js';
 
 /**
  * RPC health in MariaDB: one row per chain, shared by every replica and kept across deploys.
@@ -23,64 +16,18 @@ const DDL = `CREATE TABLE IF NOT EXISTS rpc_health (
   INDEX idx_checked_at (checked_at)
 )`;
 
-let createPoolImpl = defaultCreatePool;
-let pool = null;
-let initPromise = null;
-let lastWarnAt = 0;
-let retryAt = 0;
-const WARN_EVERY_MS = 60000;
-// After a failed connect, the file store is used for this long before trying again — not on
-// every chain check (about one a second).
-const RETRY_AFTER_MS = 60000;
+registerSchema(DDL);
 
 export function rpcHealthDbConfigured() {
-  return Boolean(CHAINS_API_DB_HOST && CHAINS_API_DB_USER && CHAINS_API_DB_PASSWORD);
+  return databaseConfigured();
 }
 
-async function defaultCreatePool() {
-  const mod = await import('mariadb');
-  const mariadb = mod.default ?? mod;
-  return mariadb.createPool({
-    host: CHAINS_API_DB_HOST,
-    port: CHAINS_API_DB_PORT,
-    database: CHAINS_API_DB_NAME,
-    user: CHAINS_API_DB_USER,
-    password: CHAINS_API_DB_PASSWORD,
-    connectionLimit: 3,
-    acquireTimeout: 10000,
-    connectTimeout: 5000,
-    // BIGINT chain IDs and times come back as numbers, not BigInt.
-    bigIntAsNumber: true
-  });
-}
-
-/** The pool, with the table created; null when unconfigured or unreachable (warned once). */
+/** The shared pool (database.js); null when unconfigured or unreachable. */
 export async function rpcHealthDb() {
-  if (!rpcHealthDbConfigured()) return null;
-  if (!initPromise && Date.now() < retryAt) return null;
-  initPromise ??= (async () => {
-    try {
-      const p = await createPoolImpl();
-      await p.query(DDL);
-      pool = p;
-      logger.info({ host: CHAINS_API_DB_HOST, database: CHAINS_API_DB_NAME }, 'RPC health stored in MariaDB');
-      return p;
-    } catch (err) {
-      warn(err, 'RPC health database unavailable; using the file store');
-      // Retry later rather than never, and not on every call meanwhile.
-      retryAt = Date.now() + RETRY_AFTER_MS;
-      initPromise = null;
-      return null;
-    }
-  })();
-  return initPromise;
+  return database();
 }
 
-function warn(err, msg) {
-  if (Date.now() - lastWarnAt < WARN_EVERY_MS) return;
-  lastWarnAt = Date.now();
-  logger.warn({ err: err.message }, msg);
-}
+const warn = warnDatabase;
 
 /**
  * Record one chain's check. Full results when `changed`; otherwise only `checked_at`, falling
@@ -139,16 +86,9 @@ export async function loadAllRpcHealthDb() {
 }
 
 export async function closeRpcHealthDb() {
-  const p = pool;
-  pool = null;
-  initPromise = null;
-  if (p) await p.end().catch(() => {});
+  await closeDatabase();
 }
 
 export function _setCreatePoolForTests(fn) {
-  createPoolImpl = fn ?? defaultCreatePool;
-  pool = null;
-  initPromise = null;
-  lastWarnAt = 0;
-  retryAt = 0;
+  setPool(fn);
 }

@@ -3,6 +3,7 @@ import { fileURLToPath as toFilePath } from 'node:url';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
+import { clientKey } from './clientKey.js';
 import helmet from '@fastify/helmet';
 import fastifyStatic from '@fastify/static';
 import compress from '@fastify/compress';
@@ -23,6 +24,7 @@ import {
   RATE_LIMIT_MAX,
   DASHBOARD_ORIGINS,
   TERMS_URL,
+  PUBLIC_ORIGIN,
   RATE_LIMIT_WINDOW_MS,
   CORS_ORIGIN
 } from '../../config.js';
@@ -60,6 +62,7 @@ import { refresherRoute } from './routes/refresher.js';
 import { summaryRoute } from './routes/summary.js';
 import { rootRoute } from './routes/root.js';
 import { termsRoutes } from './routes/terms.js';
+import { registerOAuth } from '../auth/oauth.js';
 import { assistantRoutes } from './routes/assistant.js';
 import { prefetchAllPrices, startPriceRefresh } from '../../priceService.js';
 import { logger } from '../util/logger.js';
@@ -308,6 +311,8 @@ export async function buildApp(options = {}) {
   await fastify.register(rateLimit, {
     max: RATE_LIMIT_MAX,
     timeWindow: RATE_LIMIT_WINDOW_MS,
+    // Per visitor, not per gateway pod (clientKey.js).
+    keyGenerator: (request) => clientKey(request.headers, request.ip),
     // Probe endpoints must never be rate-limited. A 429 on /ready reads to kubelet as
     // "not ready", which removes the pod from the Service — so an exhausted bucket would
     // turn a traffic spike into a self-inflicted outage. /health has the same problem via
@@ -365,6 +370,8 @@ export async function buildApp(options = {}) {
   await fastify.register(summaryRoute);
   await fastify.register(assistantRoutes);
   await fastify.register(termsRoutes);
+  // OAuth 2.1 for the MCP endpoint (src/auth/oauth.js), when the public origin is configured.
+  if (PUBLIC_ORIGIN) registerOAuth(fastify, { origin: PUBLIC_ORIGIN });
   await fastify.register(rootRoute);
 
   // Interactive docs at /docs and the raw machine-readable spec at /openapi.json.
