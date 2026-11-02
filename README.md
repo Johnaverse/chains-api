@@ -954,6 +954,8 @@ A client that can send a header uses the key directly: `Authorization: Bearer ca
 - Rate limits: registration 20, authorization 60, token 300 per minute per visitor. On `/mcp`, every request spends its address's budget (`MCP_RATE_LIMIT_MAX`), and an authorized one also its licensee's.
 - The MCP audit line names the `licensee` and how it authorized (`oauth` or `key`).
 
+**Cloudflare MCP Portal:** add `https://chains-api.johnaverse.cc/mcp` as an MCP server with **OAuth → Automatic** (dynamic client registration; approve once on the consent page with a licence key), or through the API with `auth_type: "bearer"` and a licence key as `auth_credentials`. With **Require user auth** on, each portal user consents with their own key and is audited as that licensee; off, every call uses the admin's grant. All portal users arrive from the portal's egress address, so an authorized request does not spend the address's budget, only its licensee's.
+
 ## Usage audit
 
 Every REST and MCP request except `/health`, `/ready` and `/metrics` writes one log line (`"msg":"api access"` or `"mcp access"`, field `audit`), replacing fastify's per-request pair:

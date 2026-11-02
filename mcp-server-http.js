@@ -98,10 +98,18 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
     res.set('Retry-After', String(Math.max(1, Math.ceil((b.resetAt - t) / 1000))));
     res.status(429).json({ jsonrpc: '2.0', error: { code: -32000, message: 'Too many requests' }, id: null });
   };
-  // Every request spends the visitor address's budget (this also bounds failed authorizations);
-  // an authorized one also spends its licensee's, wherever its requests come from.
-  const limitMcp = (req, res, next) => spend(clientKey(req.headers, req.socket?.remoteAddress), res, next);
-  const limitLicensee = (req, res, next) => (req.licensee ? spend(`licensee:${req.licensee.keyId}`, res, next) : next());
+  // Every request first spends its address's budget, which bounds anonymous use and failed
+  // authorizations (each one a database lookup). An authorized request gets that back and spends
+  // its licensee's instead: many licensees can share one address — every user of a Cloudflare MCP
+  // Portal arrives from the portal's egress — and must not exhaust each other's budget there.
+  const addressKey = (req) => clientKey(req.headers, req.socket?.remoteAddress);
+  const limitMcp = (req, res, next) => spend(addressKey(req), res, next);
+  const limitLicensee = (req, res, next) => {
+    if (!req.licensee) return next();
+    const b = budgets.get(addressKey(req));
+    if (b && b.count > 0) b.count -= 1;
+    return spend(`licensee:${req.licensee.keyId}`, res, next);
+  };
 
   /** Close sessions unused for MCP_SESSION_IDLE_MS, and forget spent rate budgets. */
   const sweep = async () => {

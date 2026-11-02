@@ -5,7 +5,7 @@ import Fastify from 'fastify';
 vi.mock('../../../config.js', async (importOriginal) => ({
   ...(await importOriginal()),
   RATE_LIMIT_WINDOW_MS: 60000,
-  MCP_RATE_LIMIT_MAX: 1000,
+  MCP_RATE_LIMIT_MAX: 5,
   MCP_MAX_SESSIONS: 50,
   MCP_SESSION_IDLE_MS: 600000
 }));
@@ -142,6 +142,23 @@ describe('MCP authorization', () => {
     expect((await initialize({ authorization: `Bearer ${refreshed.json().access_token}` })).status).toBe(401);
     expect((await post('/oauth/token', { grant_type: 'refresh_token', client_id: a.client.client_id, refresh_token: refreshed.json().refresh_token })).json().error).toBe('invalid_grant');
     expect((await initialize({ authorization: `Bearer ${b.tokens.access_token}` })).status).toBe(200);
+  });
+
+  it('gives licensees sharing one address their own budgets (an MCP portal), anonymous ones share it', async () => {
+    const a = await createLicenceKey('Portal user A', store);
+    const b = await createLicenceKey('Portal user B', store);
+    const portal = { 'cf-connecting-ip': '198.51.100.50' };
+    // Five authorized requests each (the budget) from the same address: none is refused.
+    for (let i = 0; i < 5; i++) {
+      expect((await initialize({ ...portal, authorization: `Bearer ${a.key}` })).status).toBe(200);
+      expect((await initialize({ ...portal, authorization: `Bearer ${b.key}` })).status).toBe(200);
+    }
+    // A sixth from A is over A's own budget.
+    expect((await initialize({ ...portal, authorization: `Bearer ${a.key}` })).status).toBe(429);
+    // Failed attempts spend the address's budget: five, then refused before any lookup.
+    const other = { 'cf-connecting-ip': '203.0.113.99' };
+    for (let i = 0; i < 5; i++) expect((await initialize({ ...other, authorization: `Bearer cak_${'z'.repeat(43)}` })).status).toBe(401);
+    expect((await initialize({ ...other, authorization: `Bearer cak_${'z'.repeat(43)}` })).status).toBe(429);
   });
 
   it('accepts a licence key itself as a bearer token, until revoked', async () => {
