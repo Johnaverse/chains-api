@@ -6771,11 +6771,15 @@ function renderTimeline() {
     // ARE listed and counted, because "announced, day unknown" is information a reader needs
     // rather than a row to hide.
     const undated = timelineUndated(searched);
-    const tabbable = [...inRange, ...undated];
+    // The range bounds history and the chart's axis, never what is still to come: a mandatory
+    // hardfork announced five weeks ahead (BSC's Jenner) is listed whatever the range, and
+    // counted beside the chart, which does not stretch to reach it.
+    const later = searched.filter(u => { const t = timelineActivationMs(u); return t != null && t > hi && timelinePending(u, now); });
+    const tabbable = [...inRange, ...later, ...undated];
     const items = tabbable.filter(u => timelineInStream(u, timeline.stream, now));
 
     renderTimelineTabs(tabbable, now);
-    renderTimelineChart(inRange, items, [lo, hi], now, undated.length);
+    renderTimelineChart(inRange, items, [lo, hi], now, undated.length, later.length);
     renderTimelineRows(items, now);
 
     if (meta) meta.textContent = `${timeline.upgrades.length} tracked`;
@@ -6828,17 +6832,18 @@ const TL_CHART_W = 1000;   // viewBox units; the SVG scales to its container
 const TL_CHART_H = 150;
 const TL_BUCKETS = 96;
 
-function renderTimelineChart(inRange, selected, [lo, hi], now, undatedCount = 0) {
+function renderTimelineChart(inRange, selected, [lo, hi], now, undatedCount = 0, laterCount = 0) {
     const host = byId('timelineChart');
     if (!host) return;
     host.textContent = '';
     // Say what the chart cannot show. A silently short axis reads as "nothing else exists".
     const omitted = byId('timelineOmitted');
     if (omitted) {
-        omitted.textContent = undatedCount
-            ? `${undatedCount} window${undatedCount === 1 ? '' : 's'} not plotted — no date announced`
-            : '';
-        omitted.hidden = !undatedCount;
+        omitted.textContent = [
+            undatedCount ? `${undatedCount} window${undatedCount === 1 ? '' : 's'} not plotted — no date announced` : null,
+            laterCount ? `${laterCount} upcoming after ${new Date(hi).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} — listed below, past the chart's range` : null
+        ].filter(Boolean).join(' · ');
+        omitted.hidden = !undatedCount && !laterCount;
     }
     const span = Math.max(hi - lo, 1);
     const x = (t) => ((t - lo) / span) * TL_CHART_W;
