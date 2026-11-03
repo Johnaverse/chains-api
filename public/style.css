@@ -1684,7 +1684,8 @@ button, input, textarea, select { font: inherit; color: inherit; }
 
 .tlx-axis { position: relative; height: 24px; border-top: 1px solid var(--rule); }
 .tlx-tick { position: absolute; top: 5px; transform: translateX(-50%); font-size: var(--fs-100); color: var(--ink-3); white-space: nowrap; }
-.tlx-tick:first-child { transform: none; left: 6px !important; }
+/* The 0% tick only: :first-child pinned whichever tick came first when that one was skipped. */
+.tlx-tick-start { transform: none; left: 6px !important; }
 .tlx-tick-end { transform: translateX(-100%); margin-left: -4px; }
 .tlx-tick-now { color: var(--good-text); font-weight: 600; }
 
@@ -2099,3 +2100,10 @@ body.graph-active .site-footer { display: none; }
 .terms p + p, .terms ul + p { margin-top: var(--sp-2); }
 .terms ul { padding-left: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-1); margin: var(--sp-2) 0; }
 .terms code { font-family: var(--font-mono); font-size: .92em; }
+/* TBA: nothing dated to place on the axis — only the note beneath stays. */
+.tlx-chart-empty .tlx-pins, .tlx-chart-empty .tlx-chart, .tlx-chart-empty .tlx-heat,
+.tlx-chart-empty .tlx-axis, .tlx-chart-empty .tlx-crosshair { display: none; }
+/* The Hardforks filter has no time range: its range bar is hidden (display:flex would beat the
+   bare hidden attribute). */
+.tlx-range[hidden] { display: none; }
+

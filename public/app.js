@@ -6537,6 +6537,8 @@ const timeline = {
     // grouped releases, provider rollouts, news and fallout.
     upgrades: [], loaded: false, loading: false, error: null, ticker: null,
     stream: 'all', type: 'all', rangeDays: 7, sort: 'time',
+    // The Hardforks filter has its own three filters and no time range (TL_HF_STREAMS).
+    hfStream: 'upcoming',
     // Domain + bucketing of the chart as last drawn, read by the hover layer.
     hover: null
 };
@@ -6602,6 +6604,23 @@ function undatedWhenText(u) {
     return block != null ? `block ${block.toLocaleString()}` : 'date TBA';
 }
 function isDated(u) { return timelineActivationMs(u) != null; }
+
+// Hardforks only: what is still to come, what has happened, what has no date yet. No time
+// range — a mandatory fork five weeks out matters as much as tomorrow's. The chart spans the
+// filter's dated forks, reaching back at most TL_HF_CHART_HISTORY_MS on Past.
+const TL_HF_STREAMS = [
+    ['upcoming', 'Upcoming'],
+    ['past', 'Past'],
+    ['tba', 'TBA']
+];
+const TL_HF_CHART_HISTORY_MS = 90 * 864e5;
+function hardforkMode() { return timeline.type === 'hardfork'; }
+function hardforkStreamOf(u, now) {
+    if (u.phase === 'cancelled') return 'past';
+    // Undated: past when known to be done (reported, or a later fork has gone live), else TBA.
+    if (!isDated(u)) return u.phase === 'past' ? 'past' : 'tba';
+    return timelinePending(u, now) ? 'upcoming' : 'past';
+}
 
 const TL_STREAMS = [
     ['all', 'All events'],
@@ -6763,6 +6782,12 @@ function renderTimeline() {
     const now = Date.now();
     const typed = timeline.type === 'all' ? timeline.upgrades : timeline.upgrades.filter(u => u.type === timeline.type);
     const searched = searchQuery ? typed.filter(u => timelineMatchesSearch(u, searchQuery)) : typed;
+    byId('timelineRange')?.toggleAttribute('hidden', hardforkMode());
+    if (hardforkMode()) {
+        renderHardforkTimeline(searched, now);
+        finishTimelineRender(searched, now);
+        return;
+    }
     const [lo, hi] = timelineDomain(searched, now);
     // The chart shows everything the search matched inside the window; the tabs
     // then slice that set, so tab counts always describe what the chart draws.
@@ -6771,12 +6796,55 @@ function renderTimeline() {
     // ARE listed and counted, because "announced, day unknown" is information a reader needs
     // rather than a row to hide.
     const undated = timelineUndated(searched);
-    const tabbable = [...inRange, ...undated];
+    // The range bounds history and the chart's axis, never what is still to come: a mandatory
+    // hardfork announced five weeks ahead (BSC's Jenner) is listed whatever the range, and
+    // counted beside the chart, which does not stretch to reach it.
+    const later = searched.filter(u => { const t = timelineActivationMs(u); return t != null && t > hi && timelinePending(u, now); });
+    const tabbable = [...inRange, ...later, ...undated];
     const items = tabbable.filter(u => timelineInStream(u, timeline.stream, now));
 
     renderTimelineTabs(tabbable, now);
-    renderTimelineChart(inRange, items, [lo, hi], now, undated.length);
+    byId('timelineChartWrap')?.classList.remove('tlx-chart-empty');
+    renderTimelineChart(inRange, items, [lo, hi], now, undated.length, later.length);
     renderTimelineRows(items, now);
+    finishTimelineRender(searched, now);
+}
+
+// Hardforks: Upcoming / Past / TBA, no time range. The chart spans the filter's dated forks.
+function renderHardforkTimeline(searched, now) {
+    const items = searched.filter(u => hardforkStreamOf(u, now) === timeline.hfStream);
+    const dated = items.filter(isDated);
+    // History goes back years in the release archive: the chart reaches back at most
+    // TL_HF_CHART_HISTORY_MS, and counts what it leaves to the list.
+    const times = dated.map(timelineActivationMs).sort((a, b) => a - b);
+    const start = timeline.hfStream === 'past' ? now - TL_HF_CHART_HISTORY_MS : -Infinity;
+    const plotted = dated.filter(u => timelineActivationMs(u) >= start);
+    const ptimes = plotted.map(timelineActivationMs);
+    const lo0 = ptimes.length ? Math.min(...ptimes, now) : now - 864e5;
+    const hi0 = ptimes.length ? Math.max(...ptimes, now) : now + 864e5;
+    const pad = Math.max((hi0 - lo0) * 0.02, 36e5);
+
+    const bar = byId('timelineTabs');
+    if (bar) {
+        bar.textContent = '';
+        for (const [key, label] of TL_HF_STREAMS) {
+            const n = searched.filter(u => hardforkStreamOf(u, now) === key).length;
+            bar.appendChild(el('button', {
+                class: `tlx-tab${timeline.hfStream === key ? ' active' : ''}`,
+                onclick: () => { timeline.hfStream = key; renderTimeline(); }
+            }, [el('span', { class: 'tlx-tab-label', text: label }), el('span', { class: 'tlx-tab-count', text: String(n) })]));
+        }
+    }
+    // TBA: nothing dated to place on an axis, only the note saying so.
+    byId('timelineChartWrap')?.classList.toggle('tlx-chart-empty', plotted.length === 0);
+    const older = dated.length - plotted.length;
+    renderTimelineChart(plotted, items, [lo0 - pad, hi0 + pad], now, items.length - dated.length, 0,
+        older ? { count: older, from: times[0] } : null);
+    renderTimelineRows(items, now);
+}
+
+function finishTimelineRender(searched, now) {
+    const meta = byId('timelineMeta');
 
     if (meta) meta.textContent = `${timeline.upgrades.length} tracked`;
     // Only a DATED window can be counted down to. An undated announcement must never
@@ -6828,17 +6896,20 @@ const TL_CHART_W = 1000;   // viewBox units; the SVG scales to its container
 const TL_CHART_H = 150;
 const TL_BUCKETS = 96;
 
-function renderTimelineChart(inRange, selected, [lo, hi], now, undatedCount = 0) {
+function renderTimelineChart(inRange, selected, [lo, hi], now, undatedCount = 0, laterCount = 0, older = null) {
     const host = byId('timelineChart');
     if (!host) return;
     host.textContent = '';
     // Say what the chart cannot show. A silently short axis reads as "nothing else exists".
     const omitted = byId('timelineOmitted');
     if (omitted) {
-        omitted.textContent = undatedCount
-            ? `${undatedCount} window${undatedCount === 1 ? '' : 's'} not plotted — no date announced`
-            : '';
-        omitted.hidden = !undatedCount;
+        const pastFilter = hardforkMode() && timeline.hfStream === 'past';
+        omitted.textContent = [
+            undatedCount ? `${undatedCount} window${undatedCount === 1 ? '' : 's'} not plotted — ${pastFilter ? 'no date recorded' : 'no date announced'}` : null,
+            laterCount ? `${laterCount} upcoming after ${new Date(hi).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} — listed below, past the chart's range` : null,
+            older ? `${older.count} older, back to ${new Date(older.from).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}, not plotted — listed below` : null
+        ].filter(Boolean).join(' · ');
+        omitted.hidden = !omitted.textContent;
     }
     const span = Math.max(hi - lo, 1);
     const x = (t) => ((t - lo) / span) * TL_CHART_W;
@@ -6967,17 +7038,19 @@ function renderTimelineAxis(lo, hi, nowX) {
     host.textContent = '';
     const span = hi - lo;
     const withinDay = span <= 36 * 36e5;
+    // Past nine months a day-and-month label repeats across years ("Nov 12" twice): say the year.
     const fmt = (t) => new Date(t).toLocaleString(undefined,
-        withinDay ? { hour: '2-digit', minute: '2-digit' } : { month: 'short', day: 'numeric' });
+        withinDay ? { hour: '2-digit', minute: '2-digit' }
+            : span > 270 * 864e5 ? { month: 'short', year: 'numeric' } : { month: 'short', day: 'numeric' });
     // "now" always wins: a date tick sitting on top of it rendered as "Junow".
     const nowPct = (nowX / TL_CHART_W) * 100;
     for (let i = 0; i <= 6; i += 1) {
         const pct = (i / 6) * 100;
-        if (Math.abs(pct - nowPct) < 5) continue;
+        if (Math.abs(pct - nowPct) < 8) continue;
         host.appendChild(el('span', {
             // The last tick sits at 100% and its centring transform pushed half
             // the label outside the clipped container ("Aug 3" read as "Au").
-            class: `tlx-tick${i === 6 ? ' tlx-tick-end' : ''}`,
+            class: `tlx-tick${i === 0 ? ' tlx-tick-start' : ''}${i === 6 ? ' tlx-tick-end' : ''}`,
             style: { left: `${pct.toFixed(2)}%` }, text: fmt(lo + (span * i) / 6)
         }));
     }
@@ -7090,7 +7163,7 @@ function renderTimelineRows(items, now) {
     // Says what it is SCOPED to: the header pill counts everything tracked, this counts what
     // survived the range and the search, and two bare "N windows" a few pixels apart read as a
     // contradiction rather than as two different questions.
-    if (count) count.textContent = `${items.length} in range${searchQuery ? ` · “${searchQuery}”` : ''}`;
+    if (count) count.textContent = `${items.length} ${hardforkMode() ? 'shown' : 'in range'}${searchQuery ? ` · “${searchQuery}”` : ''}`;
 
     if (!items.length) {
         wrap.appendChild(el('div', { class: 'feed-empty', text: searchQuery ? 'Nothing matches.' : 'No events in this range.' }));

@@ -76,6 +76,10 @@ export const NODE_FORK_SCHEDULE_MAX_URLS = parseIntEnv('NODE_FORK_SCHEDULE_MAX_U
 // A node fork further ahead than this is a placeholder, not a schedule: clients park a fork they
 // have not scheduled at a far date (NetX at 2030-01-01, LUKSO at 2050-01-01).
 export const NODE_FORK_SCHEDULE_MAX_AHEAD_MS = parseIntEnv('NODE_FORK_SCHEDULE_MAX_AHEAD_MS', 365 * 24 * 60 * 60 * 1000);
+// The earliest a fork can really have activated: the EVM's own start, Ethereum's genesis block
+// (2015-07-30T15:26:13Z, unix seconds). A node reporting a fork active since 1970-01-04 has it
+// configured from genesis at a tiny timestamp; that is not a dated event.
+export const NODE_FORK_SCHEDULE_MIN_TIME = parseIntEnv('NODE_FORK_SCHEDULE_MIN_TIME', 1438269973);
 
 // Search
 export const MAX_SEARCH_QUERY_LENGTH = parseIntEnv('MAX_SEARCH_QUERY_LENGTH', 200);
