@@ -4,7 +4,7 @@ vi.mock('../../../rpcUtil.js', () => ({ jsonRpcCall: vi.fn() }));
 
 import { jsonRpcCall } from '../../../rpcUtil.js';
 import {
-  parseEthConfig, refreshNodeForkSchedule, nodeForkMentions, nodeForkScheduleVersion, _resetNodeForkSchedulesForTests
+  parseEthConfig, refreshNodeForkSchedule, nodeForkMentions, nodeForkScheduleVersion, nodeForkPairs, isScheduleTime, _resetNodeForkSchedulesForTests
 } from '../../../src/sources/nodeForkSchedule.js';
 
 // BSC Chapel's answer on 2026-10-27: Pasteur active, Jenner (0xe660a57e) scheduled.
@@ -84,5 +84,28 @@ describe('node fork schedule (eth_config)', () => {
     ] });
     const source = nodeForkMentions({ now: NOW, sourceOf }).filter((m) => m.feed === 'source');
     expect(source.map((m) => m.enrichment.fork.name)).toEqual(['Pasteur', 'Lorentz']);
+  });
+
+  it('leaves out a fork set from genesis at a tiny timestamp: not a dated event', async () => {
+    // Ozone Chain's nodes report the current fork active since 1970-01-04 (timestamp 305340).
+    jsonRpcCall.mockResolvedValueOnce({ ...chapel, current: { ...chapel.current, activationTime: 305340 } });
+    await refreshNodeForkSchedule(97, ['https://b'], { now: NOW });
+    expect(nodeForkMentions({ now: NOW }).map((m) => m.enrichment.fork.activationAt)).toEqual(['2026-10-29T02:30:00.000Z']);
+    expect(nodeForkPairs().map((p) => p.time)).not.toContain(305340);
+    // The same in the client code's schedule.
+    const sourceOf = () => ({ name: 'Jenner', repo: 'o/r', askedAt: NOW, forks: [
+      { name: 'FromGenesis', activationTime: 305340, activationBlock: null },
+      { name: 'Jenner', activationTime: 1793241000, activationBlock: null }
+    ] });
+    const source = nodeForkMentions({ now: NOW, sourceOf }).filter((m) => m.feed === 'source');
+    expect(source.map((m) => m.enrichment.fork.name)).toEqual(['Jenner']);
+  });
+
+  it('takes as a schedule only a time after the EVM began and within the horizon', () => {
+    expect(isScheduleTime(0, NOW)).toBe(false);
+    expect(isScheduleTime(305340, NOW)).toBe(false);
+    expect(isScheduleTime(1438269973, NOW)).toBe(true);
+    expect(isScheduleTime(1793241000, NOW)).toBe(true);
+    expect(isScheduleTime(2524608000, NOW)).toBe(false);
   });
 });
