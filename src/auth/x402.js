@@ -215,14 +215,14 @@ export function x402Paywall({
       outcome = settleOutcome(null, err, c.SettleError);
     }
     // A recovery cannot take a refusal at its word: the earlier attempt may have paid before the
-    // authorization expired or the payer's balance moved. Nor can anyone take "nonce spent". The
-    // chain says whether our transfer happened; until it can be ruled out, the payment stays unresolved.
+    // authorization expired or the payer's balance moved. Nor can anyone take "nonce spent". Only
+    // the chain may rule our transfer out — the nonce spent elsewhere, or the authorization unusable
+    // for good (x402Chain.js); until then the payment stays unresolved, and no new one is asked for.
     if (outcome.kind === 'nonce_used' || (c.recovering && outcome.kind !== 'settled')) {
-      const seen = await observe({ network: rec.network, asset: rec.asset, payer: rec.payer, nonce: rec.nonce, payTo: rec.payTo, amount: rec.amount, transaction: outcome.transaction ?? rec.transaction });
-      const expired = rec.validBefore && now() / 1000 > rec.validBefore;
+      const seen = await observe({ network: rec.network, asset: rec.asset, payer: rec.payer, nonce: rec.nonce, payTo: rec.payTo, amount: rec.amount, validBefore: rec.validBefore, transaction: outcome.transaction ?? rec.transaction });
       if (seen.state === 'paid') outcome = { kind: 'settled', transaction: seen.transaction };
       else if (seen.state === 'other') outcome = { kind: 'refused', reason: 'its nonce was spent on another transfer' };
-      else if (seen.state === 'unused' && (expired || outcome.kind === 'refused')) outcome = { kind: 'refused', reason: expired ? 'it expired unused' : outcome.reason };
+      else if (seen.state === 'expired_unused') outcome = { kind: 'refused', reason: 'it expired unused' };
       else outcome = { kind: 'unresolved', transaction: outcome.transaction ?? rec.transaction };
     }
     const at = now();

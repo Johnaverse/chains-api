@@ -83,7 +83,8 @@ function fakeServer({ valid = true, initFails = 0, settleAs = [], verifyFails = 
     })
   };
   // What the chain shows for an authorization: the facilitator's own record of spent nonces.
-  s.observe = vi.fn(async ({ nonce }) => (chain.has(nonce) ? { state: 'paid', transaction: chain.get(nonce) } : { state: 'unused' }));
+  // Unspent proves nothing by itself (a node may lag): that takes an expired, finalized view, which tests set.
+  s.observe = vi.fn(async ({ nonce }) => (chain.has(nonce) ? { state: 'paid', transaction: chain.get(nonce) } : { state: 'unknown' }));
   return s;
 }
 const paywallOf = (s, extra = {}) => x402Paywall({ ...CFG, resourceServer: s, ledger: memoryLedger(), observe: s.observe, ...extra });
@@ -302,14 +303,28 @@ describe('x402Paywall', () => {
       expect(spent.structuredContent.error).toBe('Settlement failed: its nonce was spent on another transfer');
       expect(asksForPayment(spent)).toBe(true);
 
-      let t = 0;
-      const expired = fakeServer({ settleAs: ['lostBefore', 'lostBefore'] });
-      const b = paywallOf(expired, { now: () => t });
+      const expired = fakeServer({ settleAs: ['lostBefore', 'refuse'] });
+      expired.observe.mockResolvedValue({ state: 'expired_unused' });
+      const b = paywallOf(expired);
       await b.call(TOOL, PAYMENT, () => ok);
-      t = (VALID_BEFORE + 1) * 1000;
       const late = await b.call(TOOL, PAYMENT, () => ok);
       expect(late.structuredContent.error).toBe('Settlement failed: it expired unused');
+      expect(expired.observe).toHaveBeenLastCalledWith(expect.objectContaining({ validBefore: VALID_BEFORE }));
       expect(expired.chain.size).toBe(0);
+    });
+
+    it('never asks a payer whose pending settlement went through to pay again, while the chain cannot prove otherwise', async () => {
+      // epistemedeus's case: settlement_pending with a hash, the retry refused after expiry, and an
+      // on-chain view that can neither confirm the transfer nor prove the authorization unused.
+      const s = fakeServer({ settleAs: ['pending', 'refuse'] });
+      const paywall = paywallOf(s);
+      const first = await paywall.call(TOOL, PAYMENT, () => ok);
+      expect(first._meta['x402/payment-response']).toMatchObject({ status: 'unresolved', transaction: '0xtx1' });
+      s.observe.mockResolvedValue({ state: 'unknown' });
+      const retry = await paywall.call(TOOL, PAYMENT, () => ok);
+      expect(asksForPayment(retry)).toBe(false);
+      expect(retry._meta['x402/payment-response']).toMatchObject({ status: 'unresolved', transaction: '0xtx1' });
+      expect(s.observe).toHaveBeenLastCalledWith(expect.objectContaining({ transaction: '0xtx1' }));
     });
 
     it('is recovered by another pod sharing the ledger', async () => {

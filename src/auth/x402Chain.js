@@ -3,20 +3,27 @@ import { cachedData } from '../store/cache.js';
 import { logger } from '../util/logger.js';
 
 /**
- * Whether an EIP-3009 authorization (an x402 `exact` EVM payment) was used on-chain, and whether
- * it paid us: read from the token contract through the chain's own healthy RPC endpoints, as
- * this registry measures them. Used when a settlement's outcome was lost, so that recovery sees
- * what the first attempt did instead of asking for another payment.
+ * What became of an EIP-3009 authorization (an x402 `exact` EVM payment) on-chain, read from the
+ * token contract through the chain's own healthy RPC endpoints, as this registry measures them.
+ * Used when a settlement's outcome was lost, so that recovery sees what the first attempt did
+ * instead of asking for another payment.
  *
  * Answers one of:
  *   { state: 'paid', transaction }  the authorization moved at least `amount` from payer to payTo
- *   { state: 'other' }              its nonce was spent on a transfer that did not pay us
- *   { state: 'unused' }             its nonce is still unspent
- *   { state: 'unknown' }            fewer than two endpoints agreed, or the use was not found
+ *   { state: 'other' }              its nonce was spent, in a finalized block, on a transfer that
+ *                                   did not pay us
+ *   { state: 'expired_unused' }     it can never be used: unspent at a finalized block whose time
+ *                                   is past its `validBefore`
+ *   { state: 'unknown' }            anything less certain
  *
- * The endpoints are public, so no single one is believed: a definitive answer needs two that
- * agree (for 'paid', on the same transaction). Anything less is 'unknown', which keeps the
- * payment unresolved rather than serving it, or refusing it, on one node's word.
+ * The endpoints are public and may lag, so the answers that would let a caller be asked to pay
+ * again need proof that no node can give alone:
+ *  - 'paid' and 'other' need two endpoints that agree on the same transaction;
+ *  - 'expired_unused' needs two endpoints that agree on the same finalized block (number and
+ *    hash), past the authorization's expiry, with the nonce unspent at that block — not "unspent
+ *    at latest", which a lagging node says of a transfer it has not seen yet;
+ *  - any sign that the authorization was used (a receipt, a spent nonce, a log) on any endpoint
+ *    rules both refusals out.
  */
 // Event and function signatures of EIP-3009 / ERC-20 (keccak-256 of the canonical signatures).
 const AUTHORIZATION_USED = '0x98de503528ee59b575ef0c0a2576a82497bfc029a5685b209e9ec333479b10a5'; // AuthorizationUsed(address,bytes32)
@@ -34,6 +41,7 @@ const RPC_TIMEOUT_MS = 8000;
 const word = (hex) => `0x${hex.toLowerCase().replace(/^0x/, '').padStart(64, '0')}`;
 const sameAddress = (topic, address) => BigInt(topic) === BigInt(address);
 const hexBlock = (n) => `0x${n.toString(16)}`;
+const num = (hex) => Number.parseInt(hex, 16);
 
 /** Healthy http(s) RPC endpoints of a chain, fastest first. */
 export function rpcUrlsFor(chainId) {
@@ -45,38 +53,74 @@ export function rpcUrlsFor(chainId) {
     .map(r => r.url);
 }
 
-/** One endpoint's answer. Throws when the endpoint cannot answer. */
-async function readAt(url, { asset, payer, nonce, payTo, amount, transaction }) {
+function reader(url, { asset, payer, nonce }) {
   const call = (method, params) => jsonRpcCall(url, method, { params, timeoutMs: RPC_TIMEOUT_MS });
-  const used = await call('eth_call', [{ to: asset, data: `${AUTHORIZATION_STATE}${word(payer).slice(2)}${word(nonce).slice(2)}` }, 'latest']);
-  if (BigInt(used) === 0n) return { state: 'unused' };
+  return {
+    call,
+    spentAt: async (block) => BigInt(await call('eth_call', [{ to: asset, data: `${AUTHORIZATION_STATE}${word(payer).slice(2)}${word(nonce).slice(2)}` }, block])) !== 0n,
+    usedIn: (log) => String(log.address).toLowerCase() === asset.toLowerCase()
+      && log.topics?.[0] === AUTHORIZATION_USED && sameAddress(log.topics[1], payer) && BigInt(log.topics[2]) === BigInt(nonce)
+  };
+}
 
-  const usedHere = (log) => String(log.address).toLowerCase() === asset.toLowerCase()
-    && log.topics?.[0] === AUTHORIZATION_USED && sameAddress(log.topics[1], payer) && BigInt(log.topics[2]) === BigInt(nonce);
+/**
+ * What one endpoint shows of the authorization's use: { use, finalized }. `use` is null (no sign
+ * of use), { spent: true } (spent, transaction not found), or { state: 'paid' | 'other',
+ * transaction, blockNumber }. `finalized` is its finalized head, or null. Throws when the endpoint
+ * cannot answer.
+ */
+async function useAt(url, p) {
+  const { call, spentAt, usedIn } = reader(url, p);
   const judge = (hash, receipt) => {
     // A missing receipt (a reorg, a lagging backend) says nothing about where the funds went.
-    if (!receipt) return { state: 'unknown' };
-    const paid = receipt?.status === '0x1' && (receipt.logs ?? []).some(l => String(l.address).toLowerCase() === asset.toLowerCase()
-      && l.topics?.[0] === TRANSFER && sameAddress(l.topics[1], payer) && sameAddress(l.topics[2], payTo)
-      && /^0x[0-9a-f]+$/i.test(l.data) && BigInt(l.data) >= BigInt(amount));
-    return paid ? { state: 'paid', transaction: hash } : { state: 'other' };
+    if (!receipt) return { spent: true };
+    const paid = receipt.status === '0x1' && (receipt.logs ?? []).some(l => String(l.address).toLowerCase() === p.asset.toLowerCase()
+      && l.topics?.[0] === TRANSFER && sameAddress(l.topics[1], p.payer) && sameAddress(l.topics[2], p.payTo)
+      && /^0x[0-9a-f]+$/i.test(l.data) && BigInt(l.data) >= BigInt(p.amount));
+    return { state: paid ? 'paid' : 'other', transaction: hash, blockNumber: num(receipt.blockNumber ?? '0x0') };
   };
+  const finalized = await call('eth_getBlockByNumber', ['finalized', false]).catch(() => null);
 
-  // The transaction is known (a pending settlement): its receipt answers directly.
-  if (transaction) {
-    const receipt = await call('eth_getTransactionReceipt', [transaction]);
-    if (receipt?.logs?.some(usedHere)) return judge(transaction, receipt);
+  // A known transaction (a pending settlement) is read before any state, so that a node which
+  // has its receipt is heard even when its state, or another node's, has not caught up.
+  if (p.transaction) {
+    const receipt = await call('eth_getTransactionReceipt', [p.transaction]);
+    if (receipt?.logs?.some(usedIn)) return { use: judge(p.transaction, receipt), finalized };
   }
-  const latest = Number.parseInt(await call('eth_blockNumber', []), 16);
+  if (!await spentAt('latest')) return { use: null, finalized };
+  const latest = num(await call('eth_blockNumber', []));
   for (let to = latest; to > latest - LOG_WINDOW_BLOCKS && to >= 0; to -= LOG_CHUNK_BLOCKS) {
     const from = Math.max(0, to - LOG_CHUNK_BLOCKS + 1);
-    const logs = await call('eth_getLogs', [{ address: asset, topics: [AUTHORIZATION_USED, word(payer), word(nonce)], fromBlock: hexBlock(from), toBlock: hexBlock(to) }]);
+    const logs = await call('eth_getLogs', [{ address: p.asset, topics: [AUTHORIZATION_USED, word(p.payer), word(p.nonce)], fromBlock: hexBlock(from), toBlock: hexBlock(to) }]);
     if (logs.length) {
       const hash = logs[0].transactionHash;
-      return judge(hash, await call('eth_getTransactionReceipt', [hash]));
+      return { use: judge(hash, await call('eth_getTransactionReceipt', [hash])), finalized };
     }
   }
-  return { state: 'unknown' }; // spent, but longer ago than the window
+  return { use: { spent: true }, finalized }; // spent, longer ago than the window
+}
+
+/**
+ * Whether two endpoints agree that the authorization is unspent at one finalized block past its
+ * expiry: the lowest finalized head among them, which each must show with the same hash.
+ */
+async function expiredUnused(urls, finalizedHeads, p) {
+  const heads = finalizedHeads.filter(Boolean).map(f => num(f.number));
+  if (heads.length < AGREEMENT || !p.validBefore) return false;
+  const at = hexBlock(Math.min(...heads));
+  const views = await Promise.all(urls.map(async (url) => {
+    try {
+      const { call, spentAt } = reader(url, p);
+      const block = await call('eth_getBlockByNumber', [at, false]);
+      if (!block?.hash || num(block.timestamp) <= p.validBefore) return null;
+      return (await spentAt(at)) ? null : block.hash;
+    } catch {
+      return null;
+    }
+  }));
+  const byHash = new Map();
+  for (const h of views.filter(Boolean)) byHash.set(h, (byHash.get(h) ?? 0) + 1);
+  return [...byHash.values()].some(n => n >= AGREEMENT);
 }
 
 /**
@@ -87,20 +131,35 @@ async function readAt(url, { asset, payer, nonce, payTo, amount, transaction }) 
  * @param {string} p.nonce          `authorization.nonce` (bytes32)
  * @param {string} p.payTo
  * @param {string} p.amount         atomic units
+ * @param {number} [p.validBefore]  `authorization.validBefore` (unix seconds)
  * @param {string} [p.transaction]  the settlement's transaction, when the facilitator gave one
  */
 export async function observeAuthorization(p, { urls = rpcUrlsFor(Number(String(p.network).split(':')[1])) } = {}) {
   if (!/^eip155:\d+$/.test(p.network) || !p.payer || !p.nonce) return { state: 'unknown' };
-  const answers = await Promise.all(urls.slice(0, ENDPOINTS).map(url => readAt(url, p).catch(err => {
+  const asked = urls.slice(0, ENDPOINTS);
+  const answers = await Promise.all(asked.map(url => useAt(url, p).catch(err => {
     logger.debug({ err: err.message, network: p.network }, 'x402 on-chain check failed on one endpoint');
     return null;
   })));
-  const votes = new Map();
-  for (const a of answers) {
-    if (!a || a.state === 'unknown') continue;
-    const key = `${a.state}:${a.transaction ?? ''}`;
-    votes.set(key, { answer: a, n: (votes.get(key)?.n ?? 0) + 1 });
+  const seen = answers.filter(Boolean);
+
+  const agreeOn = (state) => {
+    const votes = new Map();
+    for (const a of seen) if (a.use?.state === state) votes.set(a.use.transaction, [...(votes.get(a.use.transaction) ?? []), a]);
+    return [...votes.entries()].find(([, v]) => v.length >= AGREEMENT);
+  };
+  const paid = agreeOn('paid');
+  if (paid) return { state: 'paid', transaction: paid[0] };
+  // Any sign of use — paid, spent, or a transfer elsewhere not yet agreed — rules out both refusals
+  // below, except 'other' itself when two endpoints show it final and none shows it paid us.
+  if (seen.some(a => a.use?.state === 'paid' || a.use?.spent)) return { state: 'unknown' };
+  const other = agreeOn('other');
+  if (other) {
+    const final = other[1].filter(a => a.finalized && num(a.finalized.number) >= a.use.blockNumber);
+    return final.length >= AGREEMENT ? { state: 'other' } : { state: 'unknown' };
   }
-  const agreed = [...votes.values()].find(v => v.n >= AGREEMENT);
-  return agreed ? agreed.answer : { state: 'unknown' };
+  if (seen.some(a => a.use)) return { state: 'unknown' };
+  const unusedHere = asked.filter((_, i) => answers[i] && !answers[i].use);
+  const heads = unusedHere.map(url => answers[asked.indexOf(url)].finalized);
+  return (await expiredUnused(unusedHere, heads, p)) ? { state: 'expired_unused' } : { state: 'unknown' };
 }

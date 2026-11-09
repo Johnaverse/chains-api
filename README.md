@@ -990,11 +990,15 @@ How it behaves:
   - That retry runs the tool first, as a first attempt does: a payment is settled only for a successful answer, including when it is taken over from a pod that stopped. It then settles the same authorization again, which can move funds only once.
   - Any outcome of that settlement other than success (a refusal, an expired authorization, a spent nonce, no answer) is checked on-chain before it is believed, because the earlier attempt may already have paid.
   - The token contract is read on-chain through the chain's three fastest healthy RPC endpoints from this registry:
-    - first `authorizationState` (still unused?);
-    - then the settlement's transaction receipt when its hash is known, or else `AuthorizationUsed` logs, searched back over 5000 blocks in ranges of at most 1000 (the cap many public endpoints set);
-    - and the `Transfer` in that transaction. A missing receipt counts as unknown, never as a transfer elsewhere.
-  - Public endpoints aren't trusted alone: an answer counts only when two endpoints agree, otherwise the payment stays unresolved.
-  - If that transfer paid at least the price to `payTo`, the call is served with that transaction as its receipt (`recovered`). If the nonce paid someone else, or the authorization expired unused, the payment is refused and a new one is asked for. Otherwise it stays unresolved.
+    - first the settlement's transaction receipt, when its hash is known, so a node that has it is heard even if others lag;
+    - then `authorizationState` at the latest block, and `AuthorizationUsed` logs, searched back over 5000 blocks in ranges of at most 1000 (the cap many public endpoints set);
+    - and the `Transfer` in the transaction found. A missing receipt counts as unknown, never as a transfer elsewhere.
+  - **Paid:** if two endpoints show the same transaction paying at least the price to `payTo`, the call is served with it as its receipt (`recovered`).
+  - **Refused, so a new payment is asked for, only on proof that ours never happened:**
+    - the nonce spent on a transfer that didn't pay us, shown by two endpoints in a finalized block; or
+    - the authorization unusable for good: two endpoints agree on the same finalized block (number and hash) whose time is past its `validBefore`, and show the nonce unspent at that block.
+    - "Unspent at the latest block" is never enough: a lagging node says that of a transfer it hasn't seen yet. Any sign of use on any endpoint (a receipt, a spent nonce, a log) also rules a refusal out.
+  - **Otherwise** the payment stays unresolved.
   - Unresolved payments are logged as `x402 payment unresolved`.
 - **Facilitator outages.** If the facilitator can't be reached, or doesn't serve the network, calls are answered "temporarily unavailable", and the facilitator is asked again after 30 s rather than once per call. The same 30 s pause follows a verify request the facilitator failed to answer.
 - **A definitive refusal** (a settlement the facilitator rejects for any reason but a spent nonce) withholds the result and asks for a new payment.
