@@ -19,9 +19,11 @@ import { logger } from '../util/logger.js';
  * The endpoints are public and may lag, so the answers that would let a caller be asked to pay
  * again need proof that no node can give alone:
  *  - 'paid' and 'other' need two endpoints that agree on the same transaction;
- *  - 'expired_unused' needs two endpoints that agree on the same finalized block (number and
+ *  - 'expired_unused' needs two endpoints that have both finalized the same block (number and
  *    hash), past the authorization's expiry, with the nonce unspent at that block — not "unspent
  *    at latest", which a lagging node says of a transfer it has not seen yet;
+ *  - a transfer counts for one authorization only: in a transaction that uses several of the
+ *    payer's, each is matched to its own transfer, or the answer is unknown;
  *  - any sign that the authorization was used (a receipt, a spent nonce, a log) on any endpoint
  *    rules both refusals out.
  */
@@ -74,10 +76,22 @@ async function useAt(url, p) {
   const judge = (hash, receipt) => {
     // A missing receipt (a reorg, a lagging backend) says nothing about where the funds went.
     if (!receipt) return { spent: true };
-    const paid = receipt.status === '0x1' && (receipt.logs ?? []).some(l => String(l.address).toLowerCase() === p.asset.toLowerCase()
-      && l.topics?.[0] === TRANSFER && sameAddress(l.topics[1], p.payer) && sameAddress(l.topics[2], p.payTo)
+    const logs = receipt.logs ?? [];
+    const ofAsset = (l) => String(l?.address).toLowerCase() === p.asset.toLowerCase();
+    const payersTransfer = (l) => ofAsset(l) && l.topics?.[0] === TRANSFER && sameAddress(l.topics[1], p.payer);
+    // Which transfer is this authorization's? With one authorization of the payer in the
+    // transaction, any transfer of theirs in it. With several (a batch), one transfer must not be
+    // credited to each: the token emits an authorization's Transfer right after its
+    // AuthorizationUsed, so each is read with the log that follows it, and a batch that does not
+    // read that way throughout is left undecided.
+    const mine = logs.findIndex(usedIn);
+    const used = logs.flatMap((l, i) => (ofAsset(l) && l.topics?.[0] === AUTHORIZATION_USED && sameAddress(l.topics[1], p.payer) ? [i] : []));
+    if (mine < 0 || (used.length > 1 && !used.every(i => payersTransfer(logs[i + 1])))) return { spent: true };
+    const transfers = used.length > 1 ? [logs[mine + 1]] : logs.filter(payersTransfer);
+    const paid = receipt.status === '0x1' && transfers.some(l => sameAddress(l.topics[2], p.payTo)
       && /^0x[0-9a-f]+$/i.test(l.data) && BigInt(l.data) >= BigInt(p.amount));
-    return { state: paid ? 'paid' : 'other', transaction: hash, blockNumber: num(receipt.blockNumber ?? '0x0') };
+    // A receipt without a block number cannot be shown final (NaN compares false).
+    return { state: paid ? 'paid' : 'other', transaction: hash, blockNumber: num(receipt.blockNumber) };
   };
   const finalized = await call('eth_getBlockByNumber', ['finalized', false]).catch(() => null);
 
@@ -102,18 +116,21 @@ async function useAt(url, p) {
 
 /**
  * Whether two endpoints agree that the authorization is unspent at one finalized block past its
- * expiry: the lowest finalized head among them, which each must show with the same hash.
+ * expiry: the highest block that two of them have finalized, which each must show with the same
+ * hash. `finalized` holds each endpoint's finalized head. Only endpoints that have finalized that
+ * block take part: one that names no finalized head, or an earlier one, could confirm a block on
+ * a branch that is not final.
  */
-async function expiredUnused(urls, finalizedHeads, p) {
-  const heads = finalizedHeads.filter(Boolean).map(f => num(f.number));
-  if (heads.length < AGREEMENT || !p.validBefore) return false;
-  const at = hexBlock(Math.min(...heads));
-  const views = await Promise.all(urls.map(async (url) => {
+async function expiredUnused(urls, finalized, p) {
+  const heads = finalized.map(f => (f ? num(f.number) : Number.NaN));
+  const at = heads.filter(Number.isFinite).sort((a, b) => b - a)[AGREEMENT - 1];
+  if (at === undefined || !p.validBefore) return false;
+  const views = await Promise.all(urls.filter((_, i) => heads[i] >= at).map(async (url) => {
     try {
       const { call, spentAt } = reader(url, p);
-      const block = await call('eth_getBlockByNumber', [at, false]);
+      const block = await call('eth_getBlockByNumber', [hexBlock(at), false]);
       if (!block?.hash || num(block.timestamp) <= p.validBefore) return null;
-      return (await spentAt(at)) ? null : block.hash;
+      return (await spentAt(hexBlock(at))) ? null : block.hash;
     } catch {
       return null;
     }

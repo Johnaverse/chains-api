@@ -358,6 +358,82 @@ describe('x402Paywall', () => {
       expect(s.chain.size).toBe(1);
     });
 
+    it('does not ask for a new payment when a call that outlived its lease is refused after its takeover settled', async () => {
+      let t = 0;
+      // The takeover settles first; the original call's own attempt is then refused (say, expired).
+      const s = fakeServer({ settleAs: ['ok', 'refuse'] });
+      const ledger = memoryLedger();
+      const claim = vi.spyOn(ledger, 'claim');
+      const pod = () => x402Paywall({ ...CFG, resourceServer: s, ledger, observe: s.observe, now: () => t });
+      let finish;
+      const slow = vi.fn(() => new Promise((resolve) => { finish = () => resolve(ok); }));
+      const original = pod().call(TOOL, PAYMENT, slow);
+      await vi.waitFor(() => expect(slow).toHaveBeenCalled());
+      t = 121_000;
+      expect((await pod().call(TOOL, PAYMENT, () => ok))._meta['x402/payment-response']).toMatchObject({ success: true, transaction: '0xtx1' });
+      finish();
+      const res = await original;
+      expect(asksForPayment(res)).toBe(false);
+      expect(res.content).toEqual(ok.content);
+      expect(res._meta['x402/payment-response']).toMatchObject({ success: true, transaction: '0xtx1' });
+      expect(s.chain.size).toBe(1);
+      // The record is the takeover's: the refusal did not overwrite it.
+      expect((await ledger.get(claim.mock.calls[0][0].id)).status).toBe('settled');
+    });
+
+    it('leaves a refused call that lost its claim pending while its takeover is unresolved', async () => {
+      let t = 0;
+      const s = fakeServer({ settleAs: ['lostBefore', 'refuse'] });
+      const ledger = memoryLedger();
+      const pod = () => x402Paywall({ ...CFG, resourceServer: s, ledger, observe: s.observe, now: () => t });
+      let finish;
+      const slow = vi.fn(() => new Promise((resolve) => { finish = () => resolve(ok); }));
+      const original = pod().call(TOOL, PAYMENT, slow);
+      await vi.waitFor(() => expect(slow).toHaveBeenCalled());
+      t = 121_000;
+      await pod().call(TOOL, PAYMENT, () => ok);
+      finish();
+      const res = await original;
+      expect(asksForPayment(res)).toBe(false);
+      expect(res._meta['x402/payment-response']).toMatchObject({ success: false, status: 'unresolved' });
+      expect(JSON.stringify(res)).not.toContain('hello');
+    });
+
+    describe('after the price changed', () => {
+      const DEARER = { ...ACCEPT, amount: '2000' };
+      // One pod took the payment at the old price and lost its settlement's answer; the next was
+      // started with the new price.
+      async function repriced() {
+        const s = fakeServer({ settleAs: ['lostAfter'] });
+        const ledger = memoryLedger();
+        await x402Paywall({ ...CFG, resourceServer: s, ledger, observe: s.observe }).call(TOOL, PAYMENT, () => ok);
+        s.buildPaymentRequirements.mockResolvedValue([DEARER]);
+        return { s, pod: x402Paywall({ ...CFG, resourceServer: s, ledger, observe: s.observe }) };
+      }
+
+      it('recovers a recorded payment on the terms it was taken under', async () => {
+        const { s, pod } = await repriced();
+        const res = await pod.call(TOOL, PAYMENT, () => ok);
+        expect(res._meta['x402/payment-response']).toMatchObject({ success: true, transaction: '0xtx1' });
+        expect(s.settlePayment).toHaveBeenLastCalledWith(PAYMENT, ACCEPT);
+        expect(s.chain.size).toBe(1);
+      });
+
+      it('takes no new payment at the old price, and none whose terms differ from its record', async () => {
+        const { s, pod } = await repriced();
+        const run = vi.fn();
+        const stale = await pod.call(TOOL, paymentWith(`0x${'cd'.repeat(32)}`), run);
+        expect(stale.structuredContent.error).toBe('Invalid payment: it does not match what this tool accepts');
+        expect(stale.structuredContent.accepts).toEqual([DEARER]);
+        // The recorded payload, relabelled with today's terms.
+        const relabelled = await pod.call(TOOL, { ...PAYMENT, accepted: DEARER }, run);
+        expect(relabelled.structuredContent.error).toMatch(/does not match the payment recorded/);
+        expect(run).not.toHaveBeenCalled();
+        expect(s.verifyPayment).toHaveBeenCalledTimes(1);
+        expect(s.chain.size).toBe(1);
+      });
+    });
+
     it('takes over a payment left in flight by a pod that stopped mid-call', async () => {
       let t = 0;
       const s = fakeServer();

@@ -108,6 +108,21 @@ function paymentId(payment, requirement) {
 }
 
 /**
+ * The requirement a payment says it was signed for (`accepted`), when it is one this paywall could
+ * have issued. Not trusted by itself: it is used only for a payment whose ledger record, written
+ * from the server's own requirement at the time, has the same terms.
+ */
+function ownTerms(payment) {
+  const a = payment?.accepted;
+  const usable = a && typeof a === 'object' && a.scheme === SCHEME
+    && [a.network, a.asset, a.payTo].every(v => typeof v === 'string' && v) && /^\d+$/.test(String(a.amount));
+  return usable ? a : null;
+}
+
+/** Whether two payment records are on the same terms: network, asset, amount and recipient. */
+const sameTerms = (a, b) => ['network', 'asset', 'amount', 'payTo'].every(k => String(a[k]).toLowerCase() === String(b[k]).toLowerCase());
+
+/**
  * What a settle attempt says: settled, refused, nonce_used (spent: by whom?), or unresolved.
  * A SettleError is the facilitator answering with a failed settlement; any other error lost its
  * answer, so the outcome is unknown.
@@ -196,13 +211,38 @@ export function x402Paywall({
    * Record a payment's new state. Once a settlement has happened, a ledger that cannot be written
    * must not cost the caller its result: the write is logged and the call answered. The record
    * then stays in flight, and a retry after the lease recovers it from the chain.
+   * Answers whether the record was written: false when this call no longer holds the claim (it
+   * outlived its lease and was taken over), or the ledger could not be written.
    */
   async function record(rec, fields) {
     try {
-      if (!await ledger.transition(rec, fields)) logger.warn({ id: rec.id, to: fields.status }, 'x402 payment changed by another call meanwhile');
+      if (await ledger.transition(rec, fields)) return true;
+      logger.warn({ id: rec.id, to: fields.status }, 'x402 payment changed by another call meanwhile');
     } catch (err) {
       logger.warn({ err: err.message, id: rec.id, to: fields.status }, 'x402 payment ledger write failed');
     }
+    return false;
+  }
+
+  /**
+   * A first attempt that was refused, but no longer holds its claim: it outlived its lease, and
+   * the call that took the payment over may have settled it since. The refusal says nothing about
+   * that, so the answer comes from the record: its receipt, the refusal the takeover proved
+   * on-chain, or pending. Never a new payment on this call's word.
+   */
+  async function superseded(c, result) {
+    const cur = await ledger.get(c.rec.id).catch(() => null);
+    if (cur?.status === 'settled') {
+      count('redelivered');
+      return receipt(result, cur);
+    }
+    if (cur?.status === 'refused') {
+      count('settlement_failed');
+      return paymentRequired(c, 'Settlement failed');
+    }
+    const takenOver = cur && cur.updatedAt !== c.rec.updatedAt;
+    count(takenOver ? 'busy' : 'unresolved');
+    return pending(cur ?? c.rec, takenOver ? 'This payment is in use by another call.' : 'The payment\'s settlement could not be recorded.');
   }
 
   /** Settle the claimed payment (c.rec, in flight) for `result`, the tool's successful answer. */
@@ -218,7 +258,9 @@ export function x402Paywall({
     // authorization expired or the payer's balance moved. Nor can anyone take "nonce spent". Only
     // the chain may rule our transfer out — the nonce spent elsewhere, or the authorization unusable
     // for good (x402Chain.js); until then the payment stays unresolved, and no new one is asked for.
+    let proven = false;
     if (outcome.kind === 'nonce_used' || (c.recovering && outcome.kind !== 'settled')) {
+      proven = true;
       const seen = await observe({ network: rec.network, asset: rec.asset, payer: rec.payer, nonce: rec.nonce, payTo: rec.payTo, amount: rec.amount, validBefore: rec.validBefore, transaction: outcome.transaction ?? rec.transaction });
       if (seen.state === 'paid') outcome = { kind: 'settled', transaction: seen.transaction };
       else if (seen.state === 'other') outcome = { kind: 'refused', reason: 'its nonce was spent on another transfer' };
@@ -234,7 +276,8 @@ export function x402Paywall({
       return receipt(result, settled, outcome, { rerun: c.recovering });
     }
     if (outcome.kind === 'refused') {
-      await record(rec, { status: 'refused', updatedAt: at });
+      // The facilitator's word is final only while this call holds the claim; the chain's is always.
+      if (!await record(rec, { status: 'refused', updatedAt: at }) && !proven) return superseded(c, result);
       count('settlement_failed');
       return paymentRequired(c, `Settlement failed${outcome.reason ? `: ${outcome.reason}` : ''}`);
     }
@@ -370,11 +413,16 @@ export function x402Paywall({
         return paymentRequired(c, 'Payment required');
       }
       c.payment = decodePayment(token);
+      let current = null;
       try {
-        c.requirement = c.payment && c.s.findMatchingRequirements(c.accepts, c.payment);
+        current = (c.payment && c.s.findMatchingRequirements(c.accepts, c.payment)) || null;
       } catch {
-        c.requirement = null; // an x402Version the library does not know
+        // an x402Version the library does not know
       }
+      // What the payment is for: what this tool accepts today, or else what it says it accepted,
+      // which holds only for a payment already recorded on those terms — one taken before the price
+      // or wallet changed, whose call must still be recovered, not charged again at today's price.
+      c.requirement = current ?? ownTerms(c.payment);
       if (!c.requirement) {
         count('invalid');
         return paymentRequired(c, 'Invalid payment: it does not match what this tool accepts');
@@ -402,7 +450,7 @@ export function x402Paywall({
       }
       let claimed, existing;
       try {
-        claimed = await ledger.claim(c.rec);
+        claimed = Boolean(current) && await ledger.claim(c.rec);
         existing = claimed ? null : await ledger.get(c.rec.id);
       } catch (err) {
         // Without the ledger a lost settlement could not be recovered, so no payment is taken.
@@ -411,12 +459,17 @@ export function x402Paywall({
         return paymentRequired({ tool }, 'Payment is temporarily unavailable');
       }
       if (claimed) return first(c);
-      if (existing && existing.payloadHash !== c.rec.payloadHash) {
-        // Same authorization, different payload: not the payer's. The record is left untouched.
+      if (existing && (existing.payloadHash !== c.rec.payloadHash || !sameTerms(existing, c.rec))) {
+        // Same authorization, different payload or terms: not the payer's payment as it was
+        // recorded. The record is left untouched.
         count('invalid');
         return paymentRequired(c, 'Invalid payment: it does not match the payment recorded for this authorization');
       }
       if (existing) return known(c, existing);
+      if (!current) {
+        count('invalid');
+        return paymentRequired(c, 'Invalid payment: it does not match what this tool accepts');
+      }
       // Claimed by another call and released again in between.
       count('busy');
       return pending(c.rec, 'This payment is in use by another call.');

@@ -22,19 +22,23 @@ const VALID_BEFORE = 10_000;
 const P = { network: 'eip155:84532', asset: ASSET, payer: PAYER, nonce: NONCE, payTo: PAY_TO, amount: '1000', validBefore: VALID_BEFORE };
 const TX = '0xabc';
 
+// The two logs the token emits for an authorization, in this order: AuthorizationUsed, Transfer.
+const used = (nonce) => ({ address: ASSET, topics: [AUTH_USED, topic(PAYER), nonce], transactionHash: TX });
+const moved = (to, value = 1000) => ({ address: ASSET, topics: [TRANSFER, topic(PAYER), topic(to)], data: `0x${value.toString(16).padStart(64, '0')}` });
+
 /**
  * One RPC node's view of that chain. `transfer` is where the authorization was used: { block, to,
  * value, status } or none; the node knows blocks up to `head` and treats `head - lag` as
- * finalized. `fork` gives the node other block hashes (another chain, or a lying node).
+ * finalized. `transfer.logs` replaces the transaction's logs (a batch). `fork` gives the node other block hashes (another chain, or a lying node).
  */
 function node({ head = 9000, lag = 100, transfer = null, fork = '' } = {}) {
   const finalized = head - lag;
   const sees = (n) => transfer && transfer.block <= n;
   const block = (n) => (n > head ? null : { number: hex(n), hash: `0xh${fork}${n}`, timestamp: hex(2 * n) });
-  const usedLog = { address: ASSET, topics: [AUTH_USED, topic(PAYER), NONCE], transactionHash: TX };
+  const usedLog = used(NONCE);
   const receipt = () => ({
     status: transfer.status ?? '0x1', blockNumber: hex(transfer.block),
-    logs: [usedLog, { address: ASSET, topics: [TRANSFER, topic(PAYER), topic(transfer.to ?? PAY_TO)], data: `0x${(transfer.value ?? 1000).toString(16).padStart(64, '0')}` }]
+    logs: transfer.logs ?? [usedLog, moved(transfer.to ?? PAY_TO, transfer.value ?? 1000)]
   });
   return async (method, params) => {
     switch (method) {
@@ -123,9 +127,23 @@ describe('observeAuthorization', () => {
       expect(await observe([node(), node({ fork: 'x' }), node()])).toEqual({ state: 'expired_unused' });
     });
 
+    const noFinality = (n) => async (method, params) => (method === 'eth_getBlockByNumber' && params[0] === 'finalized' ? Promise.reject(new Error('unsupported')) : n(method, params));
+
     it('stays unknown when the endpoints cannot name a finalized block', async () => {
-      const noFinality = (n) => async (method, params) => (method === 'eth_getBlockByNumber' && params[0] === 'finalized' ? Promise.reject(new Error('unsupported')) : n(method, params));
       expect(await observe([noFinality(node()), noFinality(node())])).toEqual({ state: 'unknown' });
+    });
+
+    it('gives no vote to an endpoint that names no finalized block, or has not finalized the agreed one', async () => {
+      // Two finalized branches, and a third endpoint on one of them that cannot say it is final.
+      expect(await observe([node({ fork: 'x' }), node(), noFinality(node())])).toEqual({ state: 'unknown' });
+      // The same with a third endpoint whose finalized head is behind the block the two disagree on.
+      expect(await observe([node({ fork: 'x' }), node(), node({ lag: 500 })])).toEqual({ state: 'unknown' });
+    });
+
+    it('is not held back by a third endpoint that lags: the two ahead agree on a block both finalized', async () => {
+      expect(await observe([node(), node({ head: 8000 }), node({ head: 4000 })])).toEqual({ state: 'expired_unused' });
+      const at = rpc.mock.calls.filter(c => c[1] === 'eth_call' && c[2][1] !== 'latest').map(c => c[2][1]);
+      expect(at).toEqual([hex(7900), hex(7900)]);
     });
 
     it('is not taken for unused while any endpoint shows it used', async () => {
@@ -147,6 +165,23 @@ describe('observeAuthorization', () => {
       const transfer = { block: 8950, to: ELSEWHERE };
       expect(await observe([node({ transfer }), node({ transfer })])).toEqual({ state: 'unknown' });
       expect(await observe([node({ transfer: { block: 6000, to: ELSEWHERE } }), node({ head: 5000, lag: 0 })])).toEqual({ state: 'unknown' });
+    });
+  });
+
+  describe('a transaction that uses several of the payer\'s authorizations', () => {
+    const OTHER_NONCE = `0x${'cd'.repeat(32)}`;
+    const both = (logs) => { const transfer = { block: 6000, logs }; return [node({ transfer }), node({ transfer })]; };
+
+    it('credits a transfer to us only to the authorization it belongs to', async () => {
+      // Ours went elsewhere; the payer's other authorization, in the same transaction, paid us.
+      expect(await observe(both([used(NONCE), moved(ELSEWHERE), used(OTHER_NONCE), moved(PAY_TO)]))).toEqual({ state: 'other' });
+      expect(await observe(both([used(OTHER_NONCE), moved(ELSEWHERE), used(NONCE), moved(PAY_TO)]))).toEqual({ state: 'paid', transaction: TX });
+      expect(await observe(both([used(NONCE), moved(PAY_TO), used(OTHER_NONCE), moved(PAY_TO)]))).toEqual({ state: 'paid', transaction: TX });
+    });
+
+    it('stays unknown when its transfers cannot be told apart', async () => {
+      expect(await observe(both([used(NONCE), used(OTHER_NONCE), moved(PAY_TO)]))).toEqual({ state: 'unknown' });
+      expect(await observe(both([moved(ELSEWHERE), used(NONCE), moved(PAY_TO), used(OTHER_NONCE)]))).toEqual({ state: 'unknown' });
     });
   });
 
