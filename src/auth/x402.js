@@ -357,6 +357,14 @@ export function x402Paywall({
   async function first(c) {
     // Until it is settled, an unspent payment is released so that the caller may use it again.
     const release = () => ledger.release(c.rec).catch(() => {});
+    // A verification that outlived the claim's lease (a slow facilitator, clocks that differ
+    // between pods) may have lost it to a retry of the same payment, which may have settled it —
+    // and a facilitator then calls the payment spent. The record is answered as any existing one
+    // (redelivered, in use, recovered), never with a request for a new payment.
+    const takenOver = async () => {
+      const cur = await ledger.get(c.rec.id).catch(() => null);
+      return cur && cur.updatedAt !== c.rec.updatedAt ? cur : null;
+    };
     let verified;
     try {
       verified = await c.s.verifyPayment(c.payment, c.requirement);
@@ -365,6 +373,8 @@ export function x402Paywall({
       // isValid: false, not an outage — one bad payment must not pause everyone else's.
       if (!(err instanceof c.VerifyError)) {
         await release();
+        const cur = await takenOver();
+        if (cur) return known(c, cur);
         outage();
         logger.warn({ err: err.message, tool: c.tool.name }, 'x402 verification failed');
         count('unavailable');
@@ -374,6 +384,8 @@ export function x402Paywall({
     }
     if (!verified.isValid) {
       await release();
+      const cur = await takenOver();
+      if (cur) return known(c, cur);
       count('invalid');
       return paymentRequired(c, `Invalid payment: ${verified.invalidReason ?? 'rejected by the facilitator'}`, verified.payer ? { payer: verified.payer } : {});
     }

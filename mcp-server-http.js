@@ -97,6 +97,12 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
   // clients that never did grew the map without bound.
   const lastSeen = new Map();
   const sessionCount = () => Object.keys(transports).length;
+  // Sessions opened without a licence on a charged request (x402). Opening one costs nothing, so
+  // they may hold only half of MCP_MAX_SESSIONS: anonymous clients cannot fill the server and lock
+  // licensees out.
+  const paying = new Set();
+  const PAYING_SESSIONS_MAX = Math.max(1, Math.floor(MCP_MAX_SESSIONS / 2));
+  const payingCount = () => [...paying].filter(id => transports[id]).length;
 
   // Per-client request budget for /mcp, keyed like the REST limits (clientKey.js). A tool call
   // can make chains-api reach out — an on-demand RPC probe (get_rpc_monitor_by_id, with its
@@ -135,6 +141,7 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
       if (t - seen < MCP_SESSION_IDLE_MS) continue;
       const transport = transports[sessionId];
       lastSeen.delete(sessionId);
+      paying.delete(sessionId);
       delete transports[sessionId];
       if (transport) {
         logger.info({ sessionId }, 'Closing idle MCP session');
@@ -162,8 +169,10 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
         transport = transports[sessionId];
         lastSeen.set(sessionId, now());
       } else if (!sessionId && isInitializeRequest(req.body)) {
-        if (sessionCount() >= MCP_MAX_SESSIONS) await sweep();
-        if (sessionCount() >= MCP_MAX_SESSIONS) {
+        const priced = Boolean(paywall?.charges(req.headers, req.socket?.remoteAddress) && !req.licensee);
+        const full = () => sessionCount() >= MCP_MAX_SESSIONS || (priced && payingCount() >= PAYING_SESSIONS_MAX);
+        if (full()) await sweep();
+        if (full()) {
           res.status(503).json({ jsonrpc: '2.0', error: { code: -32000, message: 'Too many open sessions; try again later' }, id: null });
           return;
         }
@@ -174,6 +183,7 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
             logger.info({ sessionId }, 'MCP session initialized');
             transports[sessionId] = transport;
             lastSeen.set(sessionId, now());
+            if (priced) paying.add(sessionId);
           },
         });
 
@@ -184,11 +194,14 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
             logger.info({ sessionId: sid }, 'MCP transport closed');
             delete transports[sid];
           }
-          if (sid) lastSeen.delete(sid);
+          if (sid) {
+            lastSeen.delete(sid);
+            paying.delete(sid);
+          }
         };
 
         // Connect the transport to the MCP server
-        const server = createServer(paywall, { priced: Boolean(paywall?.charges(req.headers, req.socket?.remoteAddress) && !req.licensee) });
+        const server = createServer(paywall, { priced });
         await server.connect(transport);
         await transport.handleRequest(req, res, req.body);
         return;

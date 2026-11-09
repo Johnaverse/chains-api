@@ -362,6 +362,30 @@ describe('x402Paywall', () => {
       expect(s.chain.size).toBe(1);
     });
 
+    it.each([
+      ['answers that it is spent', 'spent'],
+      ['fails to answer', 'down']
+    ])('does not ask for a new payment when a verification that outlived its lease %s after a takeover settled', async (_label, how) => {
+      let t = 0;
+      const s = fakeServer();
+      const ledger = memoryLedger();
+      const pod = () => x402Paywall({ ...CFG, resourceServer: s, ledger, observe: s.observe, now: () => t });
+      const verify = s.verifyPayment.getMockImplementation();
+      let finish = null;
+      s.verifyPayment.mockImplementationOnce((p) => new Promise((resolve, reject) => {
+        finish = () => (how === 'down' ? reject(new Error('fetch failed')) : resolve(verify(p)));
+      }));
+      const original = pod().call(TOOL, PAYMENT, () => ok);
+      await vi.waitFor(() => expect(finish).not.toBeNull());
+      t = 121_000;
+      expect((await pod().call(TOOL, PAYMENT, () => ok))._meta['x402/payment-response']).toMatchObject({ success: true, transaction: '0xtx1' });
+      finish();
+      const res = await original;
+      expect(asksForPayment(res)).toBe(false);
+      expect(res._meta['x402/payment-response']).toMatchObject({ success: true, transaction: '0xtx1', rerun: true });
+      expect(s.chain.size).toBe(1);
+    });
+
     it('does not ask for a new payment when a call that outlived its lease is refused after its takeover settled', async () => {
       let t = 0;
       // The takeover settles first; the original call's own attempt is then refused (say, expired).
@@ -702,6 +726,15 @@ describe('MCP with x402 on', () => {
     }
     expect(runTool).toHaveBeenCalledTimes(names.length);
     expect(facilitator.chain.size).toBe(names.length);
+  });
+
+  it('lets sessions without a licence hold only half of the session limit, leaving room for licensees', async () => {
+    for (let i = 0; i < 25; i++) expect((await initialize(`${base}/mcp/pay`)).status).toBe(200);
+    const refused = await initialize(`${base}/mcp/pay`);
+    expect(refused.status).toBe(503);
+    expect(refused.json.error.message).toContain('Too many open sessions');
+    const { key } = await createLicenceKey('Acme', store);
+    expect((await initialize(`${base}/mcp`, { authorization: `Bearer ${key}` })).status).toBe(200);
   });
 
   it.each(['/mcp', '/mcp/pay'])('never charges a licensee on %s', async (path) => {

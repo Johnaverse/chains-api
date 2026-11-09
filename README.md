@@ -335,7 +335,7 @@ Each tool returns JSON data that can be used by AI assistants to answer question
 - `SEARCH_RATE_LIMIT_MAX`: Maximum `/search` requests per window (default: 30)
 - `RATE_LIMIT_CLIENT_IP_HEADER`: Header carrying the visitor's address behind the proxy (default: `cf-connecting-ip`). Every public request reaches the pod through Cloudflare and Envoy, so the TCP peer is the gateway; limits key on this header when it holds a valid IP, else on the peer — per visitor, not one bucket for everyone. Empty disables it.
 - `MCP_RATE_LIMIT_MAX`: Maximum `/mcp` requests per window per visitor (default: 120)
-- `MCP_MAX_SESSIONS`: Most open MCP sessions; idle ones are freed before a new one is refused with 503 (default: 200)
+- `MCP_MAX_SESSIONS`: Most open MCP sessions; idle ones are freed before a new one is refused with 503 (default: 200). With x402 on, sessions opened without a licence on a charged request may hold at most half of them, so licensees always find room
 - `MCP_SESSION_IDLE_MS`: An MCP session unused this long is closed (default: 1800000)
 
 ### RPC Health Check
