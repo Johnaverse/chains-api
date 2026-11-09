@@ -30,7 +30,7 @@ describe('x402 config', () => {
   it('charges only the public origin\'s host unless X402_DOMAINS says otherwise', async () => {
     const env = { X402_ENABLED: 'true', X402_PAY_TO: '0x000000000000000000000000000000000000dEaD', PUBLIC_ORIGIN: 'https://chains-api.johnaverse.cc' };
     expect((await load(env)).X402.domains).toEqual(['chains-api.johnaverse.cc']);
-    expect((await load({ ...env, X402_DOMAINS: ' Chains-API.johnaverse.cc, mcp.example.com ' })).X402.domains).toEqual(['chains-api.johnaverse.cc', 'mcp.example.com']);
+    expect((await load({ ...env, X402_DOMAINS: ' Chains-API.johnaverse.cc, mcp.example.com. ' })).X402.domains).toEqual(['chains-api.johnaverse.cc', 'mcp.example.com']);
   });
 
   it('stops the process on a setting it cannot use', async () => {
@@ -40,10 +40,12 @@ describe('x402 config', () => {
       { X402_PAY_TO: '' },
       { X402_PAY_TO: '0x000000000000000000000000000000000000dEaD', X402_NETWORK: 'base' },
       { X402_PAY_TO: '0x000000000000000000000000000000000000dEaD', X402_PRICE_USD: '0' },
-      { X402_PAY_TO: '0x000000000000000000000000000000000000dEaD', X402_FACILITATOR_URL: 'http://facilitator.test' }
+      { X402_PAY_TO: '0x000000000000000000000000000000000000dEaD', X402_FACILITATOR_URL: 'http://facilitator.test' },
+      { X402_PAY_TO: '0x000000000000000000000000000000000000dEaD', X402_DOMAINS: 'https://chains-api.johnaverse.cc' },
+      { X402_PAY_TO: '0x000000000000000000000000000000000000dEaD', X402_DOMAINS: 'chains-api.johnaverse.cc:443' }
     ]) {
       await expect(load({ X402_ENABLED: 'true', ...env })).rejects.toThrow('exit');
     }
-    expect(exit).toHaveBeenCalledTimes(4);
+    expect(exit).toHaveBeenCalledTimes(6);
   });
 });

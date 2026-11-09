@@ -34,7 +34,11 @@ function fakeServer({ valid = true, settles = true, initFails = 0 } = {}) {
   return {
     initialize: vi.fn(async () => { if (failures-- > 0) throw new Error('facilitator down'); }),
     buildPaymentRequirements: vi.fn(async () => [ACCEPT]),
-    findMatchingRequirements: vi.fn((accepts, p) => accepts.find(a => a.payTo === p?.accepted?.payTo && a.amount === p?.accepted?.amount)),
+    findMatchingRequirements: vi.fn((accepts, p) => {
+      if (p.x402Version !== 2) throw new Error(`Unsupported x402 version: ${p.x402Version}`);
+      return accepts.find(a => a.payTo === p?.accepted?.payTo && a.amount === p?.accepted?.amount);
+    }),
+    createPaymentRequiredResponse: vi.fn(async (accepts, resource, error) => ({ x402Version: 2, error, resource, accepts })),
     verifyPayment: vi.fn(async () => (valid ? { isValid: true, payer: '0xpayer' } : { isValid: false, invalidReason: 'insufficient_funds', payer: '0xpayer' })),
     settlePayment: vi.fn(async () => (settles ? { success: true, transaction: '0xtx', network: ACCEPT.network, payer: '0xpayer' } : { success: false, errorReason: 'nonce_used' }))
   };
@@ -101,13 +105,42 @@ describe('x402Paywall', () => {
     expect(JSON.stringify(res)).not.toContain('hello');
   });
 
-  it('retries the facilitator after it was unavailable', async () => {
+  it('asks an unavailable facilitator again only after a pause', async () => {
+    let t = 0;
     const s = fakeServer({ initFails: 1 });
-    const paywall = x402Paywall({ ...CFG, resourceServer: s });
+    const paywall = x402Paywall({ ...CFG, resourceServer: s, now: () => t });
     const first = await paywall.call(TOOL, PAYMENT, () => ok);
     expect(first).toMatchObject({ isError: true, structuredContent: { error: 'Payment is temporarily unavailable', accepts: [] } });
+    t = 29_000;
+    expect((await paywall.call(TOOL, PAYMENT, () => ok)).structuredContent.error).toBe('Payment is temporarily unavailable');
+    expect(s.initialize).toHaveBeenCalledTimes(1);
+    t = 31_000;
     expect((await paywall.call(TOOL, PAYMENT, () => ok))._meta['x402/payment-response'].success).toBe(true);
     expect(s.initialize).toHaveBeenCalledTimes(2);
+  });
+
+  it('answers a payment of an unknown x402 version with PaymentRequired', async () => {
+    const res = await x402Paywall({ ...CFG, resourceServer: fakeServer() }).call(TOOL, { ...PAYMENT, x402Version: 3 }, vi.fn());
+    expect(res).toMatchObject({ isError: true, structuredContent: { accepts: [ACCEPT] } });
+    expect(res.structuredContent.error).toMatch(/^Invalid payment/);
+  });
+
+  it('runs a payment once while it is in use, and frees it afterwards', async () => {
+    const s = fakeServer();
+    const paywall = x402Paywall({ ...CFG, resourceServer: s });
+    let release;
+    const run = vi.fn(() => new Promise(resolve => { release = () => resolve(ok); }));
+    const first = paywall.call(TOOL, PAYMENT, run);
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    const second = await paywall.call(TOOL, base64(PAYMENT), run);
+    expect(second.structuredContent.error).toBe('Invalid payment: it is already being used by another call');
+    release();
+    expect((await first)._meta['x402/payment-response'].success).toBe(true);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(s.settlePayment).toHaveBeenCalledTimes(1);
+    // Settled payments are refused by the facilitator from then on; the set only covers the overlap.
+    await paywall.call(TOOL, PAYMENT, () => ok);
+    expect(s.verifyPayment).toHaveBeenCalledTimes(2);
   });
 
   it('charges only requests addressed to a public domain', () => {
@@ -117,7 +150,10 @@ describe('x402Paywall', () => {
     expect(paywall.charges({ host: 'chains-api.chains-api.svc.cluster.local:3001' })).toBe(false);
     expect(paywall.charges({ host: '10.42.0.17:3001' })).toBe(false);
     expect(paywall.charges({ host: '[::1]:3001' })).toBe(false);
+    expect(paywall.charges({ host: 'chains-api.johnaverse.cc.' })).toBe(true);
     expect(paywall.charges({})).toBe(false);
+    // Through Cloudflare, whatever the Host says.
+    expect(paywall.charges({ host: 'chains-api.chains-api.svc:3001', 'cf-connecting-ip': '203.0.113.9' })).toBe(true);
     expect(x402Paywall(CFG).charges({ host: '10.42.0.17:3001' })).toBe(true);
   });
 
@@ -132,24 +168,31 @@ describe('x402Paywall', () => {
 
 describe('MCP with x402 on', () => {
   const ORIGIN = 'https://chains.test';
-  let store, facilitator, mcp, server, mcpUrl;
+  let store, facilitator, apps, base;
 
+  async function start(x402) {
+    const app = createMcpHttpApp({ publicOrigin: ORIGIN, authStore: store, x402: { ...CFG, resourceServer: facilitator, ...x402 } });
+    const server = await new Promise((resolve) => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
+    apps.push({ app, server });
+    return `http://127.0.0.1:${server.address().port}`;
+  }
   beforeEach(async () => {
     store = memoryStore();
     facilitator = fakeServer();
-    mcp = createMcpHttpApp({ publicOrigin: ORIGIN, authStore: store, x402: { ...CFG, resourceServer: facilitator } });
-    server = await new Promise((resolve) => { const s = mcp.listen(0, '127.0.0.1', () => resolve(s)); });
-    mcpUrl = `http://127.0.0.1:${server.address().port}/mcp`;
+    apps = [];
+    base = await start({});
   });
   afterEach(async () => {
-    mcp.locals.stopSweeper();
-    for (const t of Object.values(mcp.locals.transports ?? {})) await t.close().catch(() => {});
-    await new Promise((resolve) => server.close(resolve));
+    for (const { app, server } of apps) {
+      app.locals.stopSweeper();
+      for (const t of Object.values(app.locals.transports ?? {})) await t.close().catch(() => {});
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 
   // One JSON-RPC exchange; the transport may answer as JSON or as one SSE event.
-  async function rpc(body, headers = {}) {
-    const res = await fetch(mcpUrl, {
+  async function rpc(url, body, headers = {}) {
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...headers },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, ...body })
@@ -158,23 +201,32 @@ describe('MCP with x402 on', () => {
     const data = text.split('\n').find(l => l.startsWith('data: '));
     return { status: res.status, headers: res.headers, json: res.status === 202 || !text ? null : JSON.parse(data ? data.slice(6) : text) };
   }
-  async function session(headers = {}) {
-    const init = await rpc({ method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 't', version: '0' } } }, headers);
+  const initialize = (url, headers) => rpc(url, { method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 't', version: '0' } } }, headers);
+  async function session(url, headers = {}) {
+    const init = await initialize(url, headers);
     expect(init.status).toBe(200);
     const sid = { ...headers, 'mcp-session-id': init.headers.get('mcp-session-id') };
-    await rpc({ method: 'notifications/initialized', id: undefined }, sid);
-    return { init, call: (method, params) => rpc({ method, params }, sid) };
+    await rpc(url, { method: 'notifications/initialized', id: undefined }, sid);
+    return { init, call: (method, params) => rpc(url, { method, params }, sid) };
   }
 
-  it('lets a client without a licence connect, prices the tools, and charges each call', async () => {
-    const { init, call } = await session();
+  it('keeps the licence challenge on /mcp, pointing to /mcp/pay', async () => {
+    const res = await initialize(`${base}/mcp`);
+    expect(res.status).toBe(401);
+    expect(res.headers.get('www-authenticate')).toContain('resource_metadata=');
+    expect(res.json.error.message).toContain(`pay per tool call with x402 at ${ORIGIN}/mcp/pay`);
+    expect((await initialize(`${base}/mcp/pay`, { authorization: `Bearer cak_${'z'.repeat(43)}` })).status).toBe(401);
+  });
+
+  it('lets a client without a licence connect on /mcp/pay, prices the tools, and charges each call', async () => {
+    const { init, call } = await session(`${base}/mcp/pay`);
     expect(init.json.result.instructions).toContain('each tool call is paid with x402: 0.001 USD');
     const list = await call('tools/list', {});
     expect(list.json.result.tools[0]._meta).toEqual({ 'agents-x402/paymentRequired': true, 'agents-x402/priceUSD': 0.001 });
 
     const unpaid = await call('tools/call', { name: 'echo', arguments: {} });
     expect(unpaid.json.result).toMatchObject({ isError: true, structuredContent: { x402Version: 2, accepts: [ACCEPT] } });
-    expect(unpaid.json.result.structuredContent.error).toMatch(/^Payment required\. Or use a licence key \(OAuth or a Bearer token\)/);
+    expect(unpaid.json.result.structuredContent.error).toBe(`Payment required. Or connect to ${ORIGIN}/mcp with a licence key (OAuth or a Bearer token): licensing@johnaverse.cc. Terms: https://chains-api.johnaverse.cc/terms`);
     expect(runTool).not.toHaveBeenCalled();
 
     const paid = await call('tools/call', { name: 'echo', arguments: {}, _meta: { 'x402/payment': base64(PAYMENT) } });
@@ -183,39 +235,38 @@ describe('MCP with x402 on', () => {
     expect(runTool).toHaveBeenCalledTimes(1);
   });
 
-  it('never charges a licensee', async () => {
+  it.each(['/mcp', '/mcp/pay'])('never charges a licensee on %s', async (path) => {
     const { key } = await createLicenceKey('Acme', store);
-    const { call } = await session({ authorization: `Bearer ${key}` });
+    const { init, call } = await session(`${base}${path}`, { authorization: `Bearer ${key}` });
+    expect(init.json.result.instructions).not.toContain('x402');
     expect((await call('tools/list', {})).json.result.tools[0]._meta).toBeUndefined();
-    const res = await call('tools/call', { name: 'echo', arguments: {} });
-    expect(res.json.result).toEqual(ok);
+    expect((await call('tools/call', { name: 'echo', arguments: {} })).json.result).toEqual(ok);
     expect(facilitator.initialize).not.toHaveBeenCalled();
   });
 
-  it('does not charge a call addressed to the service directly, as in-cluster callers do', async () => {
-    const internal = createMcpHttpApp({ publicOrigin: ORIGIN, authStore: store, x402: { ...CFG, domains: ['chains.test'], resourceServer: facilitator } });
-    const s = await new Promise((resolve) => { const l = internal.listen(0, '127.0.0.1', () => resolve(l)); });
-    const saved = mcpUrl;
-    mcpUrl = `http://127.0.0.1:${s.address().port}/mcp`;
-    try {
-      const { init, call } = await session();
-      expect(init.json.result.instructions).not.toContain('x402');
-      expect((await call('tools/list', {})).json.result.tools[0]._meta).toBeUndefined();
-      expect((await call('tools/call', { name: 'echo', arguments: {} })).json.result).toEqual(ok);
-      expect(facilitator.initialize).not.toHaveBeenCalled();
-    } finally {
-      mcpUrl = saved;
-      internal.locals.stopSweeper();
-      for (const t of Object.values(internal.locals.transports ?? {})) await t.close().catch(() => {});
-      await new Promise((resolve) => s.close(resolve));
-    }
+  it('lets a call addressed to the service directly, as in-cluster callers do, through free', async () => {
+    const internal = await start({ domains: ['chains.test'] });
+    const { init, call } = await session(`${internal}/mcp`);
+    expect(init.json.result.instructions).not.toContain('x402');
+    expect((await call('tools/list', {})).json.result.tools[0]._meta).toBeUndefined();
+    expect((await call('tools/call', { name: 'echo', arguments: {} })).json.result).toEqual(ok);
+    expect(facilitator.initialize).not.toHaveBeenCalled();
+    // The same request through Cloudflare is charged, and /mcp challenges it.
+    expect((await initialize(`${internal}/mcp`, { 'cf-connecting-ip': '203.0.113.9' })).status).toBe(401);
   });
 
-  it('still refuses an invalid token, and passes unknown tools through unpriced', async () => {
-    expect((await rpc({ method: 'initialize', params: {} }, { authorization: `Bearer cak_${'z'.repeat(43)}` })).status).toBe(401);
-    const { call } = await session();
+  it('passes unknown tools through unpriced', async () => {
+    const { call } = await session(`${base}/mcp/pay`);
     const res = await call('tools/call', { name: 'nope', arguments: {} });
     expect(res.json.result.content[0].text).toBe('Unknown tool: nope');
     expect(facilitator.initialize).not.toHaveBeenCalled();
+  });
+
+  it('serves no /mcp/pay with x402 off', async () => {
+    const off = createMcpHttpApp({ publicOrigin: ORIGIN, authStore: store, x402: null });
+    const server = await new Promise((resolve) => { const s = off.listen(0, '127.0.0.1', () => resolve(s)); });
+    apps.push({ app: off, server });
+    const res = await fetch(`http://127.0.0.1:${server.address().port}/mcp/pay`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    expect(res.status).toBe(404);
   });
 });

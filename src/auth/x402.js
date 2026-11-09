@@ -19,6 +19,9 @@ import { incCounter } from '../util/metrics.js';
  */
 const SCHEME = 'exact';
 const MAX_TIMEOUT_SECONDS = 300;
+// After the facilitator could not be reached (or does not serve the network), calls are answered
+// "temporarily unavailable" for this long before it is asked again, rather than once per call.
+const RETRY_AFTER_MS = 30_000;
 
 async function facilitatorServer(facilitatorUrl) {
   const [{ x402ResourceServer, HTTPFacilitatorClient }, { registerExactEvmScheme }] = await Promise.all([
@@ -41,10 +44,10 @@ function decodePayment(token) {
   }
 }
 
-/** The host a request was addressed to, without its port. */
+/** The host a request was addressed to, without its port or a trailing dot. */
 function requestHost(headers) {
   const host = String(header(headers, 'host') ?? '').trim().toLowerCase();
-  return host.startsWith('[') ? host.slice(0, host.indexOf(']') + 1) : host.replace(/:\d+$/, '');
+  return (host.startsWith('[') ? host.slice(0, host.indexOf(']') + 1) : host.replace(/:\d+$/, '')).replace(/\.$/, '');
 }
 
 function header(headers, name) {
@@ -67,37 +70,83 @@ export function paymentToken(params, extra) {
  * @param {string[]} [cfg.domains]    hosts whose requests are charged; empty charges every request
  * @param {string} [cfg.alternative]   how to use the tools without paying, told to a client that hasn't paid
  * @param {object} [cfg.resourceServer] an x402ResourceServer stand-in (tests)
+ * @param {() => number} [cfg.now]
  */
-export function x402Paywall({ payTo, network, priceUsd, facilitatorUrl, domains = [], alternative = '', resourceServer = null }) {
-  // The facilitator's supported kinds are read once; a failure is retried on the next call.
+export function x402Paywall({ payTo, network, priceUsd, facilitatorUrl, domains = [], alternative = '', resourceServer = null, now = Date.now }) {
+  // The facilitator's supported kinds are read once; a failure is retried after RETRY_AFTER_MS.
   let ready = null;
-  const server = () => (ready ??= (async () => {
-    const s = resourceServer ?? await facilitatorServer(facilitatorUrl);
-    await s.initialize();
-    const accepts = await s.buildPaymentRequirements({ scheme: SCHEME, payTo, price: priceUsd, network, maxTimeoutSeconds: MAX_TIMEOUT_SECONDS });
-    return { s, accepts };
-  })().catch(err => { ready = null; throw err; }));
+  let failedAt = -Infinity;
+  const server = () => {
+    if (!ready && now() - failedAt < RETRY_AFTER_MS) return Promise.reject(new Error('facilitator unavailable; retrying later'));
+    return (ready ??= (async () => {
+      const s = resourceServer ?? await facilitatorServer(facilitatorUrl);
+      await s.initialize();
+      const accepts = await s.buildPaymentRequirements({ scheme: SCHEME, payTo, price: priceUsd, network, maxTimeoutSeconds: MAX_TIMEOUT_SECONDS });
+      return { s, accepts };
+    })().catch(err => { ready = null; failedAt = now(); throw err; }));
+  };
+  // Payments being verified, run or settled. Verifying does not spend a payment, so the same one
+  // sent on concurrent calls would otherwise run the tool once per call for a single settlement.
+  const inFlight = new Set();
 
   const count = (outcome) => incCounter('chains_api_x402_payments_total', { outcome });
 
-  function paymentRequired(tool, accepts, error, fields = {}) {
-    const body = {
-      x402Version: 2,
-      error: alternative ? `${error}. ${alternative}` : error,
-      resource: { url: `mcp://tool/${tool.name}`, description: tool.description ?? '', mimeType: 'application/json' },
-      accepts,
-      ...fields
-    };
+  // The PaymentRequired body comes from the library, which applies each scheme's additions; when
+  // the facilitator was unreachable there is no library server, and nothing to accept.
+  async function paymentRequired(s, tool, accepts, error, fields = {}) {
+    const resource = { url: `mcp://tool/${tool.name}`, description: tool.description ?? '', mimeType: 'application/json' };
+    const message = alternative ? `${error}. ${alternative}` : error;
+    const required = s ? await s.createPaymentRequiredResponse(accepts, resource, message) : { x402Version: 2, error: message, resource, accepts };
+    const body = { ...required, ...fields };
     return { isError: true, structuredContent: body, content: [{ type: 'text', text: JSON.stringify(body) }], _meta: { 'x402/error': body } };
+  }
+
+  /** Verify, run, then settle one payment (call() holds it in flight meanwhile). */
+  async function verifyRunSettle(s, tool, accepts, payment, requirement, run) {
+    try {
+      const verified = await s.verifyPayment(payment, requirement);
+      if (!verified.isValid) {
+        count('invalid');
+        return paymentRequired(s, tool, accepts, `Invalid payment: ${verified.invalidReason ?? 'rejected by the facilitator'}`, verified.payer ? { payer: verified.payer } : {});
+      }
+    } catch (err) {
+      logger.warn({ err: err.message, tool: tool.name }, 'x402 verification failed');
+      count('unavailable');
+      return paymentRequired(s, tool, accepts, 'Payment could not be verified; try again');
+    }
+
+    const result = await run();
+    if (result?.isError) {
+      count('not_charged');
+      return result;
+    }
+    let settled;
+    try {
+      settled = await s.settlePayment(payment, requirement);
+    } catch (err) {
+      logger.warn({ err: err.message, tool: tool.name }, 'x402 settlement failed');
+      settled = { success: false };
+    }
+    if (!settled.success) {
+      count('settlement_failed');
+      return paymentRequired(s, tool, accepts, `Settlement failed${settled.errorReason ? `: ${settled.errorReason}` : ''}`);
+    }
+    count('settled');
+    logger.info({ tool: tool.name, payer: settled.payer, transaction: settled.transaction, network: settled.network, amount: requirement.amount, asset: requirement.asset }, 'x402 payment');
+    return {
+      ...result,
+      _meta: { ...result?._meta, 'x402/payment-response': { success: true, transaction: settled.transaction, network: settled.network, payer: settled.payer } }
+    };
   }
 
   return {
     /**
      * Whether a request to these headers is charged: only one addressed to a public domain. The
      * gateway routes those hostnames alone to this service and passes the Host on, so a request
-     * from outside always names one; in-cluster callers address the Service and go free.
+     * from outside always names one; in-cluster callers address the Service and go free. Anything
+     * that came through Cloudflare (which sets CF-Connecting-IP) is charged whatever its Host.
      */
-    charges: (headers) => !domains.length || domains.includes(requestHost(headers)),
+    charges: (headers) => !domains.length || domains.includes(requestHost(headers)) || Boolean(header(headers, 'cf-connecting-ip')),
 
     /** Shown on each tool in tools/list (Cloudflare's client adds the price to the description). */
     toolMeta: { 'agents-x402/paymentRequired': true, 'agents-x402/priceUSD': priceUsd },
@@ -113,52 +162,34 @@ export function x402Paywall({ payTo, network, priceUsd, facilitatorUrl, domains 
       } catch (err) {
         logger.warn({ err: err.message, tool: tool.name }, 'x402 facilitator unavailable');
         count('unavailable');
-        return paymentRequired(tool, [], 'Payment is temporarily unavailable');
+        return paymentRequired(null, tool, [], 'Payment is temporarily unavailable');
       }
       if (!token) {
         count('required');
-        return paymentRequired(tool, accepts, 'Payment required');
+        return paymentRequired(s, tool, accepts, 'Payment required');
       }
       const payment = decodePayment(token);
-      const requirement = payment && s.findMatchingRequirements(accepts, payment);
+      let requirement;
+      try {
+        requirement = payment && s.findMatchingRequirements(accepts, payment);
+      } catch {
+        requirement = null; // an x402Version the library does not know
+      }
       if (!requirement) {
         count('invalid');
-        return paymentRequired(tool, accepts, 'Invalid payment: it does not match what this tool accepts');
+        return paymentRequired(s, tool, accepts, 'Invalid payment: it does not match what this tool accepts');
       }
+      const id = JSON.stringify(payment.payload ?? payment);
+      if (inFlight.has(id)) {
+        count('invalid');
+        return paymentRequired(s, tool, accepts, 'Invalid payment: it is already being used by another call');
+      }
+      inFlight.add(id);
       try {
-        const verified = await s.verifyPayment(payment, requirement);
-        if (!verified.isValid) {
-          count('invalid');
-          return paymentRequired(tool, accepts, `Invalid payment: ${verified.invalidReason ?? 'rejected by the facilitator'}`, verified.payer ? { payer: verified.payer } : {});
-        }
-      } catch (err) {
-        logger.warn({ err: err.message, tool: tool.name }, 'x402 verification failed');
-        count('unavailable');
-        return paymentRequired(tool, accepts, 'Payment could not be verified; try again');
+        return await verifyRunSettle(s, tool, accepts, payment, requirement, run);
+      } finally {
+        inFlight.delete(id);
       }
-
-      const result = await run();
-      if (result?.isError) {
-        count('not_charged');
-        return result;
-      }
-      let settled;
-      try {
-        settled = await s.settlePayment(payment, requirement);
-      } catch (err) {
-        logger.warn({ err: err.message, tool: tool.name }, 'x402 settlement failed');
-        settled = { success: false };
-      }
-      if (!settled.success) {
-        count('settlement_failed');
-        return paymentRequired(tool, accepts, `Settlement failed${settled.errorReason ? `: ${settled.errorReason}` : ''}`);
-      }
-      count('settled');
-      logger.info({ tool: tool.name, payer: settled.payer, transaction: settled.transaction, network: settled.network, amount: requirement.amount, asset: requirement.asset }, 'x402 payment');
-      return {
-        ...result,
-        _meta: { ...result?._meta, 'x402/payment-response': { success: true, transaction: settled.transaction, network: settled.network, payer: settled.payer } }
-      };
     }
   };
 }

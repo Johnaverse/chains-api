@@ -195,19 +195,22 @@ function parseX402() {
   const facilitatorUrl = parseStringEnv('X402_FACILITATOR_URL', 'https://x402.org/facilitator').trim();
   let facilitator;
   try { facilitator = new URL(facilitatorUrl); } catch { facilitator = null; }
+  const domains = parseStringEnv('X402_DOMAINS', PUBLIC_ORIGIN ? new URL(PUBLIC_ORIGIN).hostname : '')
+    .split(',').map(d => d.trim().toLowerCase().replace(/\.$/, '')).filter(Boolean);
+  // Bare hostnames: one with a scheme, port or path would never match a request, leaving every call free.
+  const badDomains = domains.filter(d => !d.split('.').every(label => /^[a-z0-9-]{1,63}$/.test(label) && !label.startsWith('-') && !label.endsWith('-')));
   const problems = [
     !/^0x[0-9a-fA-F]{40}$/.test(payTo) && `X402_PAY_TO "${payTo}" (expected a 0x wallet address)`,
     // CAIP-2, e.g. eip155:84532 (Base Sepolia) or eip155:8453 (Base).
     !/^[-a-z0-9]{3,8}:[-_a-zA-Z0-9]{1,32}$/.test(network) && `X402_NETWORK "${network}" (expected a CAIP-2 id such as eip155:8453)`,
     !(Number.isFinite(priceUsd) && priceUsd > 0) && `X402_PRICE_USD "${rawPrice}" (expected a price above 0)`,
-    facilitator?.protocol !== 'https:' && `X402_FACILITATOR_URL "${facilitatorUrl}" (expected an https URL)`
+    facilitator?.protocol !== 'https:' && `X402_FACILITATOR_URL "${facilitatorUrl}" (expected an https URL)`,
+    badDomains.length > 0 && `X402_DOMAINS "${badDomains.join(', ')}" (expected bare hostnames such as chains-api.example.com)`
   ].filter(Boolean);
   if (problems.length) {
     console.error(`X402_ENABLED is set but: ${problems.join('; ')}.`);
     process.exit(1);
   }
-  const domains = parseStringEnv('X402_DOMAINS', PUBLIC_ORIGIN ? new URL(PUBLIC_ORIGIN).hostname : '')
-    .split(',').map(d => d.trim().toLowerCase()).filter(Boolean);
   return { payTo, network, priceUsd, facilitatorUrl: facilitator.href.replace(/\/+$/, ''), domains };
 }
 export const X402 = parseX402();

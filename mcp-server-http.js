@@ -26,6 +26,8 @@ const { version } = require('./package.json');
 // Get configuration from environment
 const MCP_PORT = Number.parseInt(process.env.MCP_PORT || '3001');
 const MCP_HOST = process.env.MCP_HOST || '0.0.0.0';
+// Where a client without a licence connects to pay per tool call, when x402 is on.
+const PAY_PATH = '/mcp/pay';
 
 // Create MCP server factory function. With a paywall (x402), a tool call to a public domain from
 // anyone but a licensee — whom requireLicence marks on the request as `auth` — must be paid for.
@@ -73,7 +75,10 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
   const app = express();
   const paywall = x402 && x402Paywall({
     ...x402,
-    alternative: `Or use a licence key${publicOrigin ? ' (OAuth or a Bearer token)' : ''}: ${LICENSING_CONTACT}. Terms: ${TERMS_URL}`
+    now,
+    alternative: publicOrigin
+      ? `Or connect to ${publicOrigin}/mcp with a licence key (OAuth or a Bearer token): ${LICENSING_CONTACT}. Terms: ${TERMS_URL}`
+      : `Licences: ${LICENSING_CONTACT}. Terms: ${TERMS_URL}`
   });
 
   // Avoid implicit framework/version disclosure
@@ -182,7 +187,7 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
         };
 
         // Connect the transport to the MCP server
-        const server = createServer(paywall, { priced: paywall?.charges(req.headers) });
+        const server = createServer(paywall, { priced: Boolean(paywall?.charges(req.headers) && !req.licensee) });
         await server.connect(transport);
         await transport.handleRequest(req, res, req.body);
         return;
@@ -241,8 +246,10 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
   // With PUBLIC_ORIGIN set, /mcp needs a licence key or an OAuth access token (src/auth/oauth.js).
   // A missing or invalid one gets 401 with the protected-resource metadata URL (RFC 9728), which
   // is how an MCP client discovers the OAuth flow. With x402 on, a request with no token at all
-  // passes instead, and its tool calls are paid for. A browser page from another site is refused
-  // (Origin), against DNS rebinding.
+  // passes on /mcp/pay, where its tool calls are paid for (/mcp keeps the 401, so OAuth clients
+  // still find their way to a licence), and on any path when addressed to a host that is not
+  // charged (in-cluster callers). A browser page from another site is refused (Origin), against
+  // DNS rebinding.
   const requireLicence = async (req, res, next) => {
     if (!publicOrigin) return next();
     const sentOrigin = req.headers.origin;
@@ -252,9 +259,9 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
     const challenge = (error) => res
       .set('WWW-Authenticate', `Bearer resource_metadata="${resourceMetadataUrl(publicOrigin)}"${error ? `, error="${error}"` : ''}`)
       .status(401)
-      .json({ jsonrpc: '2.0', error: { code: -32001, message: `Authorization required: connect with OAuth, or send a licence key as a Bearer token. Terms: ${TERMS_URL}` }, id: null });
+      .json({ jsonrpc: '2.0', error: { code: -32001, message: `Authorization required: connect with OAuth, or send a licence key as a Bearer token${paywall ? `, or pay per tool call with x402 at ${publicOrigin}${PAY_PATH}` : ''}. Terms: ${TERMS_URL}` }, id: null });
     const header = req.headers.authorization;
-    if (!header) return paywall ? next() : challenge(null);
+    if (!header) return paywall && (req.path === PAY_PATH || !paywall.charges(req.headers)) ? next() : challenge(null);
     try {
       const who = await mcpBearer(header, publicOrigin, store);
       if (!who) return challenge('invalid_token');
@@ -272,6 +279,12 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
   // licensee's own once known.
   app.post('/mcp', limitMcp, requireLicence, limitLicensee, mcpPostHandler);
   app.delete('/mcp', limitMcp, requireLicence, limitLicensee, mcpDeleteHandler);
+  // Pay-per-call (x402): the same server, without the licence challenge.
+  if (paywall) {
+    app.post(PAY_PATH, limitMcp, requireLicence, limitLicensee, mcpPostHandler);
+    app.delete(PAY_PATH, limitMcp, requireLicence, limitLicensee, mcpDeleteHandler);
+    app.get(PAY_PATH, (_req, res) => res.set('Allow', 'POST, DELETE').status(405).end());
+  }
   // This server streams no server-initiated messages on GET (the spec's answer is 405).
   app.get('/mcp', (_req, res) => res.set('Allow', 'POST, DELETE').status(405).end());
 
