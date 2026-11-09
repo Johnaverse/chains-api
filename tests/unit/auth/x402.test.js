@@ -31,6 +31,8 @@ const VALID_BEFORE = 2_000_000_000; // seconds; after every test clock below
 const authorization = (nonce = NONCE) => ({ from: '0x857b06519E91e3A54538791bDbb0E22373e36b66', to: ACCEPT.payTo, value: '1000', validAfter: '0', validBefore: String(VALID_BEFORE), nonce });
 const paymentWith = (nonce) => ({ x402Version: 2, accepted: ACCEPT, payload: { signature: '0xsig', authorization: authorization(nonce) } });
 const PAYMENT = paymentWith(NONCE);
+// The same payment with every object's keys in reverse order.
+const reordered = (o) => (o && typeof o === 'object' && !Array.isArray(o) ? Object.fromEntries(Object.entries(o).reverse().map(([k, v]) => [k, reordered(v)])) : o);
 const CFG = { payTo: ACCEPT.payTo, network: ACCEPT.network, priceUsd: 0.001, facilitatorUrl: 'https://facilitator.test' };
 const TOOL = { name: 'echo', description: 'Echo the input' };
 
@@ -47,8 +49,9 @@ const settleError = (errorReason, transaction = '') => new SettleError(500, { su
  *   'refuse'     a definitive refusal
  * A nonce already spent is refused as the EVM scheme does (invalid_exact_evm_nonce_already_used).
  */
-function fakeServer({ valid = true, initFails = 0, settleAs = [] } = {}) {
+function fakeServer({ valid = true, initFails = 0, settleAs = [], verifyFails = 0 } = {}) {
   let failures = initFails;
+  let verifyFailures = verifyFails;
   const chain = new Map(); // nonce -> transaction
   const script = [...settleAs];
   const s = {
@@ -61,6 +64,7 @@ function fakeServer({ valid = true, initFails = 0, settleAs = [] } = {}) {
     }),
     createPaymentRequiredResponse: vi.fn(async (accepts, resource, error) => ({ x402Version: 2, error, resource, accepts })),
     verifyPayment: vi.fn(async (p) => {
+      if (verifyFailures-- > 0) throw new Error('fetch failed');
       if (!valid) return { isValid: false, invalidReason: 'insufficient_funds', payer: p.payload.authorization.from };
       if (chain.has(p.payload.authorization.nonce)) return { isValid: false, invalidReason: 'invalid_exact_evm_nonce_already_used' };
       return { isValid: true, payer: p.payload.authorization.from };
@@ -222,6 +226,51 @@ describe('x402Paywall', () => {
       expect(s.chain.size).toBe(1);
     });
 
+    it('does not take a refusal during recovery at its word: the chain shows the first attempt paid', async () => {
+      const s = fakeServer({ settleAs: ['lostAfter', 'refuse'] });
+      const paywall = paywallOf(s);
+      await paywall.call(TOOL, PAYMENT, () => ok);
+      const retry = await paywall.call(TOOL, PAYMENT, () => ok);
+      expect(retry._meta['x402/payment-response']).toMatchObject({ success: true, transaction: '0xtx1', rerun: true });
+      expect(s.observe).toHaveBeenCalled();
+      expect(s.chain.size).toBe(1);
+    });
+
+    it('stays unresolved after a refusal during recovery when the chain cannot rule the first attempt out', async () => {
+      const s = fakeServer({ settleAs: ['lostBefore', 'refuse'] });
+      s.observe.mockResolvedValue({ state: 'unknown' });
+      const paywall = paywallOf(s);
+      await paywall.call(TOOL, PAYMENT, () => ok);
+      const retry = await paywall.call(TOOL, PAYMENT, () => ok);
+      expect(asksForPayment(retry)).toBe(false);
+      expect(retry._meta['x402/payment-response'].status).toBe('unresolved');
+    });
+
+    it('recovers the same call whatever the key order of its arguments', async () => {
+      const s = fakeServer({ settleAs: ['lostAfter'] });
+      const paywall = paywallOf(s);
+      await paywall.call(TOOL, PAYMENT, () => ok, { chainId: 1, filter: { tag: 'L2', limit: 10 } });
+      const retry = await paywall.call(TOOL, reordered(PAYMENT), () => ok, { filter: { limit: 10, tag: 'L2' }, chainId: 1 });
+      expect(retry._meta['x402/payment-response']).toMatchObject({ success: true, transaction: '0xtx1' });
+    });
+
+    it('lets no one but the payer recover or answer with a recorded payment', async () => {
+      const s = fakeServer({ settleAs: ['lostAfter'] });
+      const ledger = memoryLedger();
+      const paywall = x402Paywall({ ...CFG, resourceServer: s, ledger, observe: s.observe });
+      const run = vi.fn(() => ok);
+      await paywall.call(TOOL, PAYMENT, run);
+      // The authorization's payer and nonce are public once on-chain; the signature here is not the payer's.
+      const forged = { ...PAYMENT, payload: { ...PAYMENT.payload, signature: '0xforged' } };
+      const res = await paywall.call(TOOL, forged, run);
+      expect(res.structuredContent.error).toMatch(/does not match the payment recorded/);
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(s.settlePayment).toHaveBeenCalledTimes(1);
+      const genuine = await paywall.call(TOOL, PAYMENT, run);
+      expect(genuine._meta['x402/payment-response']).toMatchObject({ success: true, transaction: '0xtx1' });
+      expect(await paywall.call(TOOL, forged, run)).toMatchObject({ structuredContent: { error: expect.stringMatching(/does not match the payment recorded/) } });
+    });
+
     it('keeps the transaction of a pending settlement and recovers through it', async () => {
       const s = fakeServer({ settleAs: ['pending'] });
       const paywall = paywallOf(s);
@@ -272,6 +321,25 @@ describe('x402Paywall', () => {
       expect(s.chain.size).toBe(1);
     });
 
+    it('charges nothing when the tool of a taken-over call fails, and settles once it succeeds', async () => {
+      let t = 0;
+      const s = fakeServer();
+      const ledger = memoryLedger();
+      const pod = () => x402Paywall({ ...CFG, resourceServer: s, ledger, observe: s.observe, now: () => t });
+      const stuck = vi.fn(() => new Promise(() => {}));
+      pod().call(TOOL, PAYMENT, stuck);
+      await vi.waitFor(() => expect(stuck).toHaveBeenCalled());
+      t = 121_000;
+      const other = pod();
+      const failed = { isError: true, content: [{ type: 'text', text: 'Chain not found' }] };
+      expect(await other.call(TOOL, PAYMENT, () => failed)).toBe(failed);
+      expect(s.settlePayment).not.toHaveBeenCalled();
+      await expect(other.call(TOOL, PAYMENT, () => { throw new Error('boom'); })).rejects.toThrow('boom');
+      expect(s.settlePayment).not.toHaveBeenCalled();
+      expect((await other.call(TOOL, PAYMENT, () => ok))._meta['x402/payment-response']).toMatchObject({ success: true, transaction: '0xtx1' });
+      expect(s.chain.size).toBe(1);
+    });
+
     it('takes over a payment left in flight by a pod that stopped mid-call', async () => {
       let t = 0;
       const s = fakeServer();
@@ -286,6 +354,33 @@ describe('x402Paywall', () => {
       expect((await other.call(TOOL, PAYMENT, () => ok))._meta['x402/payment-response']).toMatchObject({ success: true, transaction: '0xtx1' });
       expect(s.chain.size).toBe(1);
     });
+  });
+
+  it('treats the same payment with reordered keys as the same payment', async () => {
+    const s = fakeServer();
+    const paywall = paywallOf(s);
+    let release;
+    const run = vi.fn(() => new Promise(resolve => { release = () => resolve(ok); }));
+    const first = paywall.call(TOOL, PAYMENT, run);
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1));
+    const copy = await paywall.call(TOOL, base64(reordered(PAYMENT)), run);
+    expect(copy.content[0].text).toMatch(/^This payment is in use by another call/);
+    release();
+    await first;
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(s.verifyPayment).toHaveBeenCalledTimes(1);
+  });
+
+  it('takes no payments for a while after the facilitator failed to verify one', async () => {
+    let t = 0;
+    const s = fakeServer({ verifyFails: 1 });
+    const paywall = paywallOf(s, { now: () => t });
+    expect((await paywall.call(TOOL, PAYMENT, () => ok)).structuredContent.error).toMatch(/^Payment could not be verified/);
+    t = 10_000;
+    expect((await paywall.call(TOOL, PAYMENT, () => ok)).structuredContent).toMatchObject({ error: 'Payment is temporarily unavailable', accepts: [] });
+    expect(s.verifyPayment).toHaveBeenCalledTimes(1);
+    t = 31_000;
+    expect((await paywall.call(TOOL, PAYMENT, () => ok))._meta['x402/payment-response'].success).toBe(true);
   });
 
   it('refuses a payment in use by another call without asking for a new one, and frees it afterwards', async () => {

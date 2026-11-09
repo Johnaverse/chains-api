@@ -54,6 +54,8 @@ async function readAt(url, { asset, payer, nonce, payTo, amount, transaction }) 
   const usedHere = (log) => String(log.address).toLowerCase() === asset.toLowerCase()
     && log.topics?.[0] === AUTHORIZATION_USED && sameAddress(log.topics[1], payer) && BigInt(log.topics[2]) === BigInt(nonce);
   const judge = (hash, receipt) => {
+    // A missing receipt (a reorg, a lagging backend) says nothing about where the funds went.
+    if (!receipt) return { state: 'unknown' };
     const paid = receipt?.status === '0x1' && (receipt.logs ?? []).some(l => String(l.address).toLowerCase() === asset.toLowerCase()
       && l.topics?.[0] === TRANSFER && sameAddress(l.topics[1], payer) && sameAddress(l.topics[2], payTo)
       && /^0x[0-9a-f]+$/i.test(l.data) && BigInt(l.data) >= BigInt(amount));

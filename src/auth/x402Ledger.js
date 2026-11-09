@@ -18,6 +18,7 @@ const SCHEMA = `CREATE TABLE IF NOT EXISTS x402_payments (
     status       VARCHAR(12) NOT NULL,
     tool         VARCHAR(100) NOT NULL,
     args_hash    CHAR(64) NOT NULL,
+    payload_hash CHAR(64) NOT NULL,
     payer        VARCHAR(100) NULL,
     nonce        VARCHAR(80) NULL,
     network      VARCHAR(40) NOT NULL,
@@ -37,7 +38,7 @@ const COLUMNS = {
 
 function fromRow(r) {
   return {
-    id: r.id, status: r.status, tool: r.tool, argsHash: r.args_hash, payer: r.payer, nonce: r.nonce,
+    id: r.id, status: r.status, tool: r.tool, argsHash: r.args_hash, payloadHash: r.payload_hash, payer: r.payer, nonce: r.nonce,
     network: r.network, asset: r.asset, amount: r.amount, payTo: r.pay_to,
     validBefore: r.valid_before == null ? null : Number(r.valid_before),
     transaction: r.tx_hash, createdAt: Number(r.created_at), updatedAt: Number(r.updated_at)
@@ -59,9 +60,9 @@ function mariadbLedger() {
   return {
     /** Insert a new in-flight record; false when the payment is already known. */
     claim: async (rec) => Number((await run(
-      `INSERT IGNORE INTO x402_payments (id, status, tool, args_hash, payer, nonce, network, asset, amount, pay_to, valid_before, tx_hash, created_at, updated_at)
-       VALUES (?, 'in_flight', ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
-      [rec.id, rec.tool, rec.argsHash, rec.payer, rec.nonce, rec.network, rec.asset, rec.amount, rec.payTo, rec.validBefore, rec.createdAt, rec.createdAt]
+      `INSERT IGNORE INTO x402_payments (id, status, tool, args_hash, payload_hash, payer, nonce, network, asset, amount, pay_to, valid_before, tx_hash, created_at, updated_at)
+       VALUES (?, 'in_flight', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+      [rec.id, rec.tool, rec.argsHash, rec.payloadHash, rec.payer, rec.nonce, rec.network, rec.asset, rec.amount, rec.payTo, rec.validBefore, rec.createdAt, rec.createdAt]
     )).affectedRows) > 0,
     get: async (id) => {
       const [r] = await run('SELECT * FROM x402_payments WHERE id = ?', [id]);
@@ -78,7 +79,8 @@ function mariadbLedger() {
         [...Object.values(fields), rec.id, rec.status, rec.updatedAt]
       )).affectedRows) > 0;
     },
-    release: (id) => run(`DELETE FROM x402_payments WHERE id = ? AND status = 'in_flight'`, [id]),
+    /** Drop an in-flight claim, only as it was read (another call may have taken it over since). */
+    release: (rec) => run(`DELETE FROM x402_payments WHERE id = ? AND status = 'in_flight' AND updated_at = ?`, [rec.id, rec.updatedAt]),
     purge: (settledBefore) => run(`DELETE FROM x402_payments WHERE status IN ('settled', 'refused') AND updated_at < ?`, [settledBefore])
   };
 }
@@ -98,7 +100,10 @@ export function memoryLedger() {
       rows.set(rec.id, { ...cur, ...fields });
       return true;
     },
-    release: async (id) => { if (rows.get(id)?.status === 'in_flight') rows.delete(id); },
+    release: async (rec) => {
+      const cur = rows.get(rec.id);
+      if (cur?.status === 'in_flight' && cur.updatedAt === rec.updatedAt) rows.delete(rec.id);
+    },
     purge: async (settledBefore) => {
       for (const [id, r] of rows) if ((r.status === 'settled' || r.status === 'refused') && r.updatedAt < settledBefore) rows.delete(id);
     }

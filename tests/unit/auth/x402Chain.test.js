@@ -94,6 +94,13 @@ describe('observeAuthorization', () => {
     expect(await observeAuthorization(P, { urls: twice({ used: true, logs }) })).toEqual({ state: 'other' });
   });
 
+  it('answers unknown, not another transfer, when the receipt is missing', async () => {
+    const urls = twice({ used: true, logs: [transfer(PAY_TO, 1000)] });
+    const healthy = rpc.getMockImplementation();
+    rpc.mockImplementation(async (url, method, params) => (method === 'eth_getTransactionReceipt' ? null : healthy(url, method, params)));
+    expect(await observeAuthorization(P, { urls })).toEqual({ state: 'unknown' });
+  });
+
   it('reports a failed transaction as another transfer', async () => {
     expect(await observeAuthorization(P, { urls: twice({ used: true, logs: [transfer(PAY_TO, 1000)], status: '0x0' }) })).toEqual({ state: 'other' });
   });

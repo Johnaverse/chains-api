@@ -979,22 +979,24 @@ How it behaves:
 - **Malformed payments.** A payment of an unknown x402 version, or one that doesn't match what the tool accepts, gets `PaymentRequired` again.
 - **A payment ledger shared by every pod.** Each payment, identified by its EIP-3009 authorization (payer and nonce on the token), is recorded in the `x402_payments` table of the `chains_api` database before its tool runs. The table is created on the ledger's first use, so a deployment with x402 off never touches it. Without a database the ledger is in memory, which is enough for one pod only, and startup warns about it.
   - A payment in use by another call is answered "in use" (no `accepts`, so no new payment is invited) until that call ends. A call that hasn't finished after 2 minutes, for example because its pod stopped, is taken over.
+  - A recorded payment is only acted on for the payload the payer signed: the payer and nonce are public once on-chain, so a payload that matches them but differs anywhere else (a forged signature) is refused, and the record is left untouched. Key order doesn't matter: payloads and arguments are compared in canonical form.
   - A payment is bound to the call it was first used for (tool and arguments). Only that call is answered again or recovered with it. Another call with an unresolved payment is answered "pending for a different call", with nothing to accept, and the record is left for the original call to recover.
   - The same paid call repeated with its payment within 5 minutes of settlement is answered again without another charge, in case the first answer was lost. After that, or for any other call, the payment counts as spent.
   - A recovered or repeated answer is a fresh run of the tool, a current read of live data rather than a stored copy of the first result (which no caller received). Its receipt is the original payment's, marked `"rerun": true` in `_meta["x402/payment-response"]`.
-  - A tool that fails, or throws, is not charged, and its payment is released for reuse at once.
+  - A tool that fails, or throws, is not charged, and its payment is released for reuse at once. Release is checked against the claim as it was read, so a call that lost its claim to a takeover can't drop the new owner's record.
   - Once a payment has settled, a failed ledger write is logged and the call is still answered. The record stays in flight, so a retry after the 2-minute lease is recovered from the chain.
   - If the ledger is unavailable, no payment is taken ("temporarily unavailable").
 - **A settlement whose outcome is lost is never charged twice.** This covers the facilitator not answering, the answer being lost after the transfer happened, and `settlement_pending`. In each case the result is withheld, and the answer is not a `PaymentRequired`: it has no `accepts`, so an x402 client does not sign a second payment. Its `_meta["x402/payment-response"]` is `{ success: false, status: "unresolved" }`, with the transaction hash when known, and its text says to retry with the same payment.
-  - That retry settles the same authorization again, which can move funds only once.
-  - If the facilitator then says its nonce is spent, the token contract is read on-chain through the chain's three fastest healthy RPC endpoints from this registry:
+  - That retry runs the tool first, as a first attempt does: a payment is settled only for a successful answer, including when it is taken over from a pod that stopped. It then settles the same authorization again, which can move funds only once.
+  - Any outcome of that settlement other than success (a refusal, an expired authorization, a spent nonce, no answer) is checked on-chain before it is believed, because the earlier attempt may already have paid.
+  - The token contract is read on-chain through the chain's three fastest healthy RPC endpoints from this registry:
     - first `authorizationState` (still unused?);
     - then the settlement's transaction receipt when its hash is known, or else `AuthorizationUsed` logs, searched back over 5000 blocks in ranges of at most 1000 (the cap many public endpoints set);
-    - and the `Transfer` in that transaction.
+    - and the `Transfer` in that transaction. A missing receipt counts as unknown, never as a transfer elsewhere.
   - Public endpoints aren't trusted alone: an answer counts only when two endpoints agree, otherwise the payment stays unresolved.
   - If that transfer paid at least the price to `payTo`, the call is served with that transaction as its receipt (`recovered`). If the nonce paid someone else, or the authorization expired unused, the payment is refused and a new one is asked for. Otherwise it stays unresolved.
   - Unresolved payments are logged as `x402 payment unresolved`.
-- **Facilitator outages.** If the facilitator can't be reached, or doesn't serve the network, calls are answered "temporarily unavailable", and the facilitator is asked again after 30 s rather than once per call.
+- **Facilitator outages.** If the facilitator can't be reached, or doesn't serve the network, calls are answered "temporarily unavailable", and the facilitator is asked again after 30 s rather than once per call. The same 30 s pause follows a verify request the facilitator failed to answer.
 - **A definitive refusal** (a settlement the facilitator rejects for any reason but a spent nonce) withholds the result and asks for a new payment.
 - **Licensees.** A licence key or OAuth token never pays and sees no prices, on either path. An invalid token is refused with `401`.
 - **Audit.** Each settled payment is logged (`x402 payment`: tool, payer, transaction, network, amount, asset) and counted in `chains_api_x402_payments_total{outcome}` (`required`, `invalid`, `settled`, `recovered`, `redelivered`, `unresolved`, `busy`, `other_call`, `not_charged`, `settlement_failed`, `unavailable`).
