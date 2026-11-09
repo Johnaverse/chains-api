@@ -201,9 +201,11 @@ function parseX402() {
   const badDomains = domains.filter(d => !d.split('.').every(label => /^[a-z0-9-]{1,63}$/.test(label) && !label.startsWith('-') && !label.endsWith('-')));
   const problems = [
     !/^0x[0-9a-fA-F]{40}$/.test(payTo) && `X402_PAY_TO "${payTo}" (expected a 0x wallet address)`,
-    // CAIP-2, e.g. eip155:84532 (Base Sepolia) or eip155:8453 (Base).
-    !/^[-a-z0-9]{3,8}:[-_a-zA-Z0-9]{1,32}$/.test(network) && `X402_NETWORK "${network}" (expected a CAIP-2 id such as eip155:8453)`,
-    !(Number.isFinite(priceUsd) && priceUsd > 0) && `X402_PRICE_USD "${rawPrice}" (expected a price above 0)`,
+    // An EVM chain as CAIP-2, e.g. eip155:84532 (Base Sepolia) or eip155:8453 (Base): the paywall
+    // registers only the EVM exact scheme.
+    !/^eip155:[1-9]\d{0,18}$/.test(network) && `X402_NETWORK "${network}" (expected an EVM CAIP-2 id such as eip155:8453)`,
+    // USDC has 6 decimals: a smaller price would be charged as 0.
+    !(Number.isFinite(priceUsd) && priceUsd >= 0.000001) && `X402_PRICE_USD "${rawPrice}" (expected at least 0.000001)`,
     facilitator?.protocol !== 'https:' && `X402_FACILITATOR_URL "${facilitatorUrl}" (expected an https URL)`,
     badDomains.length > 0 && `X402_DOMAINS "${badDomains.join(', ')}" (expected bare hostnames such as chains-api.example.com)`
   ].filter(Boolean);

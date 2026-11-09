@@ -40,12 +40,15 @@ describe('x402 config', () => {
       { X402_PAY_TO: '' },
       { X402_PAY_TO: '0x000000000000000000000000000000000000dEaD', X402_NETWORK: 'base' },
       { X402_PAY_TO: '0x000000000000000000000000000000000000dEaD', X402_PRICE_USD: '0' },
+      { X402_PAY_TO: '0x000000000000000000000000000000000000dEaD', X402_PRICE_USD: '0.0000001' },
+      { X402_PAY_TO: '0x000000000000000000000000000000000000dEaD', X402_NETWORK: 'cosmos:cosmoshub-4' },
+      { X402_PAY_TO: '0x000000000000000000000000000000000000dEaD', X402_NETWORK: 'eip155:abc' },
       { X402_PAY_TO: '0x000000000000000000000000000000000000dEaD', X402_FACILITATOR_URL: 'http://facilitator.test' },
       { X402_PAY_TO: '0x000000000000000000000000000000000000dEaD', X402_DOMAINS: 'https://chains-api.johnaverse.cc' },
       { X402_PAY_TO: '0x000000000000000000000000000000000000dEaD', X402_DOMAINS: 'chains-api.johnaverse.cc:443' }
     ]) {
       await expect(load({ X402_ENABLED: 'true', ...env })).rejects.toThrow('exit');
     }
-    expect(exit).toHaveBeenCalledTimes(6);
+    expect(exit).toHaveBeenCalledTimes(9);
   });
 });

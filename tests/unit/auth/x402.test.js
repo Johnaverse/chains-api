@@ -119,6 +119,15 @@ describe('x402Paywall', () => {
     expect(s.initialize).toHaveBeenCalledTimes(2);
   });
 
+  it('takes no payment of 0: a price that rounds to nothing leaves payment unavailable', async () => {
+    const s = fakeServer();
+    s.buildPaymentRequirements.mockResolvedValue([{ ...ACCEPT, amount: '0' }]);
+    const run = vi.fn();
+    const res = await x402Paywall({ ...CFG, resourceServer: s }).call(TOOL, PAYMENT, run);
+    expect(res.structuredContent).toMatchObject({ error: 'Payment is temporarily unavailable', accepts: [] });
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it('answers a payment of an unknown x402 version with PaymentRequired', async () => {
     const res = await x402Paywall({ ...CFG, resourceServer: fakeServer() }).call(TOOL, { ...PAYMENT, x402Version: 3 }, vi.fn());
     expect(res).toMatchObject({ isError: true, structuredContent: { accepts: [ACCEPT] } });

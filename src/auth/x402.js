@@ -82,6 +82,10 @@ export function x402Paywall({ payTo, network, priceUsd, facilitatorUrl, domains 
       const s = resourceServer ?? await facilitatorServer(facilitatorUrl);
       await s.initialize();
       const accepts = await s.buildPaymentRequirements({ scheme: SCHEME, payTo, price: priceUsd, network, maxTimeoutSeconds: MAX_TIMEOUT_SECONDS });
+      // A price below the asset's smallest unit comes out as 0, which would give every call away.
+      if (!accepts.length || accepts.some(a => !/^\d+$/.test(String(a.amount)) || BigInt(a.amount) <= 0n)) {
+        throw new Error(`X402_PRICE_USD ${priceUsd} is no payable amount on ${network}`);
+      }
       return { s, accepts };
     })().catch(err => { ready = null; failedAt = now(); throw err; }));
   };

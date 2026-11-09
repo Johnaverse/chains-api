@@ -966,8 +966,8 @@ With `X402_ENABLED=true`, MCP tool calls can also be paid for with [x402](https:
 |----------|---------|---|
 | `X402_ENABLED` | `false` | Turn pay-per-call on |
 | `X402_PAY_TO` | (required when on) | Wallet that receives payments (`0x…`) |
-| `X402_NETWORK` | `eip155:84532` | CAIP-2 network: Base Sepolia (testnet) by default, `eip155:8453` for Base |
-| `X402_PRICE_USD` | `0.001` | Price of one tool call, in USD (paid in USDC) |
+| `X402_NETWORK` | `eip155:84532` | EVM network as CAIP-2 (`eip155:<chainId>`): Base Sepolia (testnet) by default, `eip155:8453` for Base |
+| `X402_PRICE_USD` | `0.001` | Price of one tool call, in USD (paid in USDC); at least `0.000001`, the smallest USDC unit |
 | `X402_FACILITATOR_URL` | `https://x402.org/facilitator` | Facilitator that verifies and settles payments; this one serves testnets, so Base mainnet needs one that supports it |
 | `X402_DOMAINS` | `PUBLIC_ORIGIN`'s host | Comma-separated bare hostnames whose requests are charged (a scheme, port or path stops startup); with neither set, every request is |
 
