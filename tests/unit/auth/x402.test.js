@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 vi.mock('../../../config.js', async (importOriginal) => ({
   ...(await importOriginal()),
   RATE_LIMIT_WINDOW_MS: 60000,
-  MCP_RATE_LIMIT_MAX: 50,
+  MCP_RATE_LIMIT_MAX: 500,
   MCP_MAX_SESSIONS: 50,
   MCP_SESSION_IDLE_MS: 600000
 }));
@@ -12,9 +12,12 @@ vi.mock('../../../dataService.js', () => ({
   getCachedData: () => ({ indexed: null, lastUpdated: null })
 }));
 const runTool = vi.fn();
+// The tools the server lists: one stand-in, or the real registry's definitions where a test sets them.
+const ECHO = [{ name: 'echo', description: 'Echo the input', inputSchema: { type: 'object', properties: {} } }];
+const registry = vi.hoisted(() => ({ tools: [] }));
 vi.mock('../../../mcp-tools.js', () => ({
-  getToolDefinitions: () => [{ name: 'echo', description: 'Echo the input', inputSchema: { type: 'object', properties: {} } }],
-  handleToolCall: (name, args) => (name === 'echo' ? runTool(args) : { isError: true, content: [{ type: 'text', text: `Unknown tool: ${name}` }] })
+  getToolDefinitions: () => registry.tools,
+  handleToolCall: (name, args) => (registry.tools.some(t => t.name === name) ? runTool(args) : { isError: true, content: [{ type: 'text', text: `Unknown tool: ${name}` }] })
 }));
 
 import { x402Paywall, paymentToken } from '../../../src/auth/x402.js';
@@ -98,6 +101,7 @@ const metric = () => renderMetrics({ cache: {} });
 const asksForPayment = (res) => Array.isArray(res?._meta?.['x402/error']?.accepts) && res._meta['x402/error'].accepts.length > 0;
 
 beforeEach(() => {
+  registry.tools = ECHO;
   _resetMetricsForTests();
   runTool.mockReset().mockResolvedValue(ok);
 });
@@ -668,6 +672,26 @@ describe('MCP with x402 on', () => {
     expect(paid.json.result.content).toEqual(ok.content);
     expect(paid.json.result._meta['x402/payment-response']).toMatchObject({ success: true, transaction: '0xtx1' });
     expect(runTool).toHaveBeenCalledTimes(1);
+  });
+
+  it('prices every tool of the registry, runs none unpaid, and settles one payment for each', async () => {
+    registry.tools = (await vi.importActual('../../../mcp-tools.js')).getToolDefinitions();
+    const names = registry.tools.map(t => t.name);
+    expect(names.length).toBeGreaterThan(30);
+    const { call } = await session(`${base}/mcp/pay`);
+    const listed = (await call('tools/list', {})).json.result.tools;
+    expect(listed.map(t => t.name)).toEqual(names);
+    expect(listed.filter(t => t._meta?.['agents-x402/paymentRequired'] === true && t._meta['agents-x402/priceUSD'] === 0.001).length).toBe(names.length);
+
+    for (const [i, name] of names.entries()) {
+      const unpaid = await call('tools/call', { name, arguments: {} });
+      expect(asksForPayment(unpaid.json.result), name).toBe(true);
+      expect(runTool, name).toHaveBeenCalledTimes(i);
+      const paid = await call('tools/call', { name, arguments: {}, _meta: { 'x402/payment': paymentWith(`0x${(i + 1).toString(16).padStart(64, '0')}`) } });
+      expect(paid.json.result._meta['x402/payment-response'], name).toMatchObject({ success: true, transaction: `0xtx${i + 1}` });
+    }
+    expect(runTool).toHaveBeenCalledTimes(names.length);
+    expect(facilitator.chain.size).toBe(names.length);
   });
 
   it.each(['/mcp', '/mcp/pay'])('never charges a licensee on %s', async (path) => {
