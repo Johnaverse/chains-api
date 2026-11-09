@@ -19,6 +19,7 @@ vi.mock('../../../mcp-tools.js', () => ({
 
 import { x402Paywall, paymentToken } from '../../../src/auth/x402.js';
 import { memoryLedger } from '../../../src/auth/x402Ledger.js';
+import { SettleError } from '@x402/core/types';
 import { memoryStore } from '../../../src/auth/store.js';
 import { createLicenceKey } from '../../../src/auth/licenceKeys.js';
 import { createMcpHttpApp } from '../../../mcp-server-http.js';
@@ -33,9 +34,7 @@ const PAYMENT = paymentWith(NONCE);
 const CFG = { payTo: ACCEPT.payTo, network: ACCEPT.network, priceUsd: 0.001, facilitatorUrl: 'https://facilitator.test' };
 const TOOL = { name: 'echo', description: 'Echo the input' };
 
-class SettleError extends Error {
-  constructor(errorReason, transaction = '') { super(errorReason); this.name = 'SettleError'; this.errorReason = errorReason; this.transaction = transaction; }
-}
+const settleError = (errorReason, transaction = '') => new SettleError(500, { success: false, errorReason, transaction, network: ACCEPT.network });
 
 /**
  * A stand-in for @x402/core's x402ResourceServer over a facilitator with a ledger of its own:
@@ -70,8 +69,8 @@ function fakeServer({ valid = true, initFails = 0, settleAs = [] } = {}) {
       const nonce = p.payload.authorization.nonce;
       const mode = script.shift() ?? 'ok';
       if (mode === 'lostBefore') throw new Error('fetch failed');
-      if (mode === 'refuse') throw new SettleError('invalid_exact_evm_payload_signature');
-      if (chain.has(nonce)) throw new SettleError('invalid_exact_evm_nonce_already_used');
+      if (mode === 'refuse') throw settleError('invalid_exact_evm_payload_signature');
+      if (chain.has(nonce)) throw settleError('invalid_exact_evm_nonce_already_used');
       const transaction = `0xtx${chain.size + 1}`;
       chain.set(nonce, transaction);
       if (mode === 'lostAfter') throw new Error('socket hang up');
@@ -262,16 +261,47 @@ describe('x402Paywall', () => {
     expect(s.chain.size).toBe(1);
   });
 
-  it('answers the same paid call again without charging, but not a different one', async () => {
+  it('answers the same paid call again for a few minutes without charging, but not a different one', async () => {
+    let t = 0;
     const s = fakeServer();
-    const paywall = paywallOf(s);
+    const paywall = paywallOf(s, { now: () => t });
     await paywall.call(TOOL, PAYMENT, () => ok, { chainId: 1 });
+    t = 4 * 60_000;
     const again = await paywall.call(TOOL, PAYMENT, () => ok, { chainId: 1 });
     expect(again._meta['x402/payment-response']).toMatchObject({ success: true, transaction: '0xtx1' });
     const another = await paywall.call(TOOL, PAYMENT, () => ok, { chainId: 2 });
-    expect(another.structuredContent.error).toMatch(/already paid for another call/);
+    expect(another.structuredContent.error).toMatch(/already been spent/);
+    t = 6 * 60_000;
+    const late = await paywall.call(TOOL, PAYMENT, () => ok, { chainId: 1 });
+    expect(late.structuredContent.error).toMatch(/already been spent/);
     expect(s.settlePayment).toHaveBeenCalledTimes(1);
     expect(s.chain.size).toBe(1);
+  });
+
+  it('answers a settled call even when the ledger cannot record it', async () => {
+    const s = fakeServer();
+    const ledger = memoryLedger();
+    ledger.transition = vi.fn(async () => { throw new Error('db down'); });
+    const res = await x402Paywall({ ...CFG, resourceServer: s, ledger, observe: s.observe }).call(TOOL, PAYMENT, () => ok);
+    expect(res.content).toEqual(ok.content);
+    expect(res._meta['x402/payment-response']).toMatchObject({ success: true, transaction: '0xtx1' });
+  });
+
+  it('frees a payment whose tool threw, so it can be used again at once', async () => {
+    const s = fakeServer();
+    const paywall = paywallOf(s);
+    await expect(paywall.call(TOOL, PAYMENT, () => { throw new Error('boom'); })).rejects.toThrow('boom');
+    expect((await paywall.call(TOOL, PAYMENT, () => ok))._meta['x402/payment-response'].success).toBe(true);
+    expect(s.chain.size).toBe(1);
+  });
+
+  it('takes payments while purging old records fails', async () => {
+    const s = fakeServer();
+    const ledger = memoryLedger();
+    ledger.purge = vi.fn(async () => { throw new Error('db busy'); });
+    const res = await x402Paywall({ ...CFG, resourceServer: s, ledger, observe: s.observe }).call(TOOL, PAYMENT, () => ok);
+    expect(res._meta['x402/payment-response'].success).toBe(true);
+    expect(ledger.purge).toHaveBeenCalled();
   });
 
   it('takes no payment while the ledger is unavailable', async () => {

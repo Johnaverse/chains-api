@@ -35,12 +35,17 @@ const RETRY_AFTER_MS = 30_000;
 // A claimed payment whose call has not finished in this long is treated as unresolved: the pod
 // handling it may have stopped mid-settlement.
 const IN_FLIGHT_LEASE_MS = 120_000;
-// Settled and refused payments are kept this long, for redelivery and audit.
+// How long after its settlement a paid call is answered again for the same payment (its answer
+// may have been lost on the way back); after that the payment is spent.
+const REDELIVER_MS = 5 * 60 * 1000;
+// Settled and refused payments are kept this long, for audit; purged at most once an hour.
 const KEEP_MS = 24 * 60 * 60 * 1000;
+const PURGE_EVERY_MS = 60 * 60 * 1000;
 // Facilitator reasons for a settlement that may still complete, and for an authorization whose
-// nonce is already spent (by an earlier attempt of ours, or by anyone else).
+// nonce is already spent (by an earlier attempt of ours, or by anyone else) — the schemes' names
+// end so, e.g. invalid_exact_evm_nonce_already_used.
 const PENDING_REASON = 'settlement_pending';
-const NONCE_USED = /nonce.*(already|used)/i;
+const NONCE_USED = /nonce_already_used$/;
 
 const sha256 = (s) => createHash('sha256').update(s).digest('hex');
 
@@ -93,16 +98,17 @@ function paymentId(payment, requirement) {
     : sha256(JSON.stringify(payment?.payload ?? payment));
 }
 
-/** What a settle attempt says: settled, refused, nonce_used (spent: by whom?), or unresolved. */
-function settleOutcome(result, err) {
-  if (err) {
-    // SettleError: the facilitator answered with a failed settlement; anything else lost its answer.
-    if (err.name !== 'SettleError' || err.errorReason === PENDING_REASON) return { kind: 'unresolved', transaction: err.transaction || null };
-    return { kind: NONCE_USED.test(err.errorReason ?? '') ? 'nonce_used' : 'refused', reason: err.errorReason };
-  }
-  if (result?.success) return { kind: 'settled', transaction: result.transaction, network: result.network, payer: result.payer };
-  if (!result || result.errorReason === PENDING_REASON || !result.errorReason) return { kind: 'unresolved', transaction: result?.transaction || null };
-  return { kind: NONCE_USED.test(result.errorReason) ? 'nonce_used' : 'refused', reason: result.errorReason };
+/**
+ * What a settle attempt says: settled, refused, nonce_used (spent: by whom?), or unresolved.
+ * A SettleError is the facilitator answering with a failed settlement; any other error lost its
+ * answer, so the outcome is unknown.
+ */
+function settleOutcome(result, err, SettleError) {
+  const failure = err instanceof SettleError ? err : (!err && !result?.success ? result : null);
+  if (err && !failure) return { kind: 'unresolved', transaction: null };
+  if (!failure) return { kind: 'settled', transaction: result.transaction, network: result.network, payer: result.payer };
+  if (!failure.errorReason || failure.errorReason === PENDING_REASON) return { kind: 'unresolved', transaction: failure.transaction || null };
+  return { kind: NONCE_USED.test(failure.errorReason) ? 'nonce_used' : 'refused', reason: failure.errorReason };
 }
 
 /**
@@ -125,17 +131,17 @@ export function x402Paywall({
   // The facilitator's supported kinds are read once; a failure is retried after RETRY_AFTER_MS.
   let ready = null;
   let failedAt = -Infinity;
-  const server = () => {
+  const facilitator = () => {
     if (!ready && now() - failedAt < RETRY_AFTER_MS) return Promise.reject(new Error('facilitator unavailable; retrying later'));
     return (ready ??= (async () => {
-      const s = resourceServer ?? await facilitatorServer(facilitatorUrl);
+      const [s, { SettleError }] = await Promise.all([resourceServer ?? facilitatorServer(facilitatorUrl), import('@x402/core/types')]);
       await s.initialize();
       const accepts = await s.buildPaymentRequirements({ scheme: SCHEME, payTo, price: priceUsd, network, maxTimeoutSeconds: MAX_TIMEOUT_SECONDS });
       // A price below the asset's smallest unit comes out as 0, which would give every call away.
       if (!accepts.length || accepts.some(a => !/^\d+$/.test(String(a.amount)) || BigInt(a.amount) <= 0n)) {
         throw new Error(`X402_PRICE_USD ${priceUsd} is no payable amount on ${network}`);
       }
-      return { s, accepts };
+      return { s, accepts, SettleError };
     })().catch(err => { ready = null; failedAt = now(); throw err; }));
   };
   let purgedAt = 0;
@@ -144,10 +150,10 @@ export function x402Paywall({
 
   // The PaymentRequired body comes from the library, which applies each scheme's additions; when
   // the facilitator was unreachable there is no library server, and nothing to accept.
-  async function paymentRequired(s, tool, accepts, error, fields = {}) {
-    const resource = { url: `mcp://tool/${tool.name}`, description: tool.description ?? '', mimeType: 'application/json' };
+  async function paymentRequired(c, error, fields = {}) {
+    const resource = { url: `mcp://tool/${c.tool.name}`, description: c.tool.description ?? '', mimeType: 'application/json' };
     const message = alternative ? `${error}. ${alternative}` : error;
-    const required = s ? await s.createPaymentRequiredResponse(accepts, resource, message) : { x402Version: 2, error: message, resource, accepts };
+    const required = c.s ? await c.s.createPaymentRequiredResponse(c.accepts, resource, message) : { x402Version: 2, error: message, resource, accepts: [] };
     const body = { ...required, ...fields };
     return { isError: true, structuredContent: body, content: [{ type: 'text', text: JSON.stringify(body) }], _meta: { 'x402/error': body } };
   }
@@ -170,19 +176,33 @@ export function x402Paywall({
   }
 
   /**
-   * Settle a claimed payment (rec is in_flight) whose tool already ran, or run it once paid.
-   * `run` is called only once the payment is known to be settled.
+   * Record a payment's new state. Once a settlement has happened, a ledger that cannot be written
+   * must not cost the caller its result: the write is logged and the call answered. The record
+   * then stays in flight, and a retry after the lease recovers it from the chain.
    */
-  async function settleClaimed(s, tool, accepts, payment, requirement, rec, run, { recovering }) {
+  async function record(rec, fields) {
+    try {
+      if (!await ledger.transition(rec, fields)) logger.warn({ id: rec.id, to: fields.status }, 'x402 payment changed by another call meanwhile');
+    } catch (err) {
+      logger.warn({ err: err.message, id: rec.id, to: fields.status }, 'x402 payment ledger write failed');
+    }
+  }
+
+  /**
+   * Settle the claimed payment (c.rec, in flight). On a first attempt the tool has run and
+   * `result` is its answer; on a recovery the tool runs only once the payment is settled.
+   */
+  async function settle(c, result) {
+    const { s, rec } = c;
     let outcome;
     try {
-      outcome = settleOutcome(await s.settlePayment(payment, requirement));
+      outcome = settleOutcome(await s.settlePayment(c.payment, c.requirement), null, c.SettleError);
     } catch (err) {
-      outcome = settleOutcome(null, err);
+      outcome = settleOutcome(null, err, c.SettleError);
     }
-    if (outcome.kind === 'nonce_used' || (recovering && outcome.kind === 'unresolved')) {
+    if (outcome.kind === 'nonce_used' || (c.recovering && outcome.kind === 'unresolved')) {
       // Spent: by our earlier attempt, by the payer, or by a transfer elsewhere. The chain says which.
-      const seen = await observe({ network: rec.network, asset: rec.asset, payer: rec.payer, nonce: rec.nonce, payTo: rec.payTo, amount: rec.amount });
+      const seen = await observe({ network: rec.network, asset: rec.asset, payer: rec.payer, nonce: rec.nonce, payTo: rec.payTo, amount: rec.amount, transaction: outcome.transaction ?? rec.transaction });
       if (seen.state === 'paid') outcome = { kind: 'settled', transaction: seen.transaction };
       else if (seen.state === 'other') outcome = { kind: 'refused', reason: 'its nonce was spent on another transfer' };
       else if (seen.state === 'unused' && rec.validBefore && now() / 1000 > rec.validBefore) outcome = { kind: 'refused', reason: 'it expired unused' };
@@ -190,51 +210,84 @@ export function x402Paywall({
     }
     const at = now();
     if (outcome.kind === 'settled') {
-      await ledger.transition(rec, { status: 'settled', transaction: outcome.transaction ?? null, updatedAt: at });
-      count(recovering ? 'recovered' : 'settled');
-      logger.info({ tool: tool.name, payer: outcome.payer ?? rec.payer, transaction: outcome.transaction, network: outcome.network ?? rec.network, amount: rec.amount, asset: rec.asset, recovered: recovering }, 'x402 payment');
-      return { settled: { ...rec, transaction: outcome.transaction ?? null }, outcome };
+      const settled = { ...rec, transaction: outcome.transaction ?? null };
+      await record(rec, { status: 'settled', transaction: settled.transaction, updatedAt: at });
+      count(c.recovering ? 'recovered' : 'settled');
+      logger.info({ tool: c.tool.name, payer: outcome.payer ?? rec.payer, transaction: settled.transaction, network: outcome.network ?? rec.network, amount: rec.amount, asset: rec.asset, recovered: c.recovering }, 'x402 payment');
+      return receipt(result ?? await c.run(), settled, outcome);
     }
     if (outcome.kind === 'refused') {
-      await ledger.transition(rec, { status: 'refused', updatedAt: at });
+      await record(rec, { status: 'refused', updatedAt: at });
       count('settlement_failed');
-      return { result: await paymentRequired(s, tool, accepts, `Settlement failed${outcome.reason ? `: ${outcome.reason}` : ''}`) };
+      return paymentRequired(c, `Settlement failed${outcome.reason ? `: ${outcome.reason}` : ''}`);
     }
     const unresolved = { ...rec, transaction: outcome.transaction ?? rec.transaction ?? null };
-    await ledger.transition(rec, { status: 'unresolved', transaction: unresolved.transaction, updatedAt: at });
+    await record(rec, { status: 'unresolved', transaction: unresolved.transaction, updatedAt: at });
     count('unresolved');
-    logger.warn({ tool: tool.name, payer: rec.payer, nonce: rec.nonce, transaction: unresolved.transaction, network: rec.network }, 'x402 payment unresolved');
-    return { result: pending(unresolved, 'The payment\'s settlement could not be confirmed.') };
+    logger.warn({ tool: c.tool.name, payer: rec.payer, nonce: rec.nonce, transaction: unresolved.transaction, network: rec.network }, 'x402 payment unresolved');
+    return pending(unresolved, 'The payment\'s settlement could not be confirmed.');
   }
 
   /** A payment the ledger already knows: in use, settled, refused, or to recover. */
-  async function known(s, tool, accepts, payment, requirement, rec, argsHash, run) {
+  async function known(c, rec) {
     if (rec.status === 'settled') {
-      // Paid, but its result may not have reached the caller: the same call is answered again.
-      if (rec.tool === tool.name && rec.argsHash === argsHash) {
+      // Its answer may have been lost on the way back: the same call, soon after, is answered again.
+      if (rec.tool === c.tool.name && rec.argsHash === c.argsHash && now() - rec.updatedAt < REDELIVER_MS) {
         count('redelivered');
-        return receipt(await run(), rec);
+        return receipt(await c.run(), rec);
       }
       count('invalid');
-      return paymentRequired(s, tool, accepts, 'Invalid payment: it has already paid for another call');
+      return paymentRequired(c, 'Invalid payment: it has already been spent');
     }
     if (rec.status === 'refused') {
       count('invalid');
-      return paymentRequired(s, tool, accepts, 'Invalid payment: it was refused');
+      return paymentRequired(c, 'Invalid payment: it was refused');
     }
     if (rec.status === 'in_flight' && now() - rec.updatedAt < IN_FLIGHT_LEASE_MS) {
       count('busy');
       return pending(rec, 'This payment is in use by another call.');
     }
     // unresolved, or in flight on a pod that never finished: take it over and settle it again.
-    const claimed = { ...rec, status: 'in_flight', tool: tool.name, argsHash, updatedAt: now() };
-    if (!await ledger.transition(rec, { status: 'in_flight', tool: tool.name, argsHash, updatedAt: claimed.updatedAt })) {
+    const fields = { status: 'in_flight', tool: c.tool.name, argsHash: c.argsHash, updatedAt: now() };
+    if (!await ledger.transition(rec, fields)) {
       count('busy');
       return pending(rec, 'This payment is in use by another call.');
     }
-    const done = await settleClaimed(s, tool, accepts, payment, requirement, claimed, run, { recovering: true });
-    if (done.result) return done.result;
-    return receipt(await run(), done.settled, done.outcome);
+    return settle({ ...c, rec: { ...rec, ...fields }, recovering: true }, null);
+  }
+
+  /** A payment just claimed: verify it, run the tool, and settle. */
+  async function first(c) {
+    // Until it is settled, an unspent payment is released so that the caller may use it again.
+    const release = () => ledger.release(c.rec.id).catch(() => {});
+    let verified;
+    try {
+      verified = await c.s.verifyPayment(c.payment, c.requirement);
+    } catch (err) {
+      await release();
+      logger.warn({ err: err.message, tool: c.tool.name }, 'x402 verification failed');
+      count('unavailable');
+      return paymentRequired(c, 'Payment could not be verified; try again');
+    }
+    if (!verified.isValid) {
+      await release();
+      count('invalid');
+      return paymentRequired(c, `Invalid payment: ${verified.invalidReason ?? 'rejected by the facilitator'}`, verified.payer ? { payer: verified.payer } : {});
+    }
+
+    let result;
+    try {
+      result = await c.run();
+    } catch (err) {
+      await release();
+      throw err;
+    }
+    if (result?.isError) {
+      await release();
+      count('not_charged');
+      return result;
+    }
+    return settle({ ...c, recovering: false }, result);
   }
 
   return {
@@ -255,78 +308,57 @@ export function x402Paywall({
      * when it was not (or could not be) paid, or a pending result when the payment is unresolved.
      */
     async call(tool, token, run, args = {}) {
-      let s, accepts;
+      const c = { tool, run, argsHash: sha256(JSON.stringify(args ?? {})) };
       try {
-        ({ s, accepts } = await server());
+        Object.assign(c, await facilitator());
       } catch (err) {
         logger.warn({ err: err.message, tool: tool.name }, 'x402 facilitator unavailable');
         count('unavailable');
-        return paymentRequired(null, tool, [], 'Payment is temporarily unavailable');
+        return paymentRequired(c, 'Payment is temporarily unavailable');
       }
       if (!token) {
         count('required');
-        return paymentRequired(s, tool, accepts, 'Payment required');
+        return paymentRequired(c, 'Payment required');
       }
-      const payment = decodePayment(token);
-      let requirement;
+      c.payment = decodePayment(token);
       try {
-        requirement = payment && s.findMatchingRequirements(accepts, payment);
+        c.requirement = c.payment && c.s.findMatchingRequirements(c.accepts, c.payment);
       } catch {
-        requirement = null; // an x402Version the library does not know
+        c.requirement = null; // an x402Version the library does not know
       }
-      if (!requirement) {
+      if (!c.requirement) {
         count('invalid');
-        return paymentRequired(s, tool, accepts, 'Invalid payment: it does not match what this tool accepts');
+        return paymentRequired(c, 'Invalid payment: it does not match what this tool accepts');
       }
 
-      const authorization = payment.payload?.authorization ?? {};
-      const argsHash = sha256(JSON.stringify(args ?? {}));
+      const authorization = c.payment.payload?.authorization ?? {};
       const t = now();
-      const rec = {
-        id: paymentId(payment, requirement), tool: tool.name, argsHash,
+      c.rec = {
+        id: paymentId(c.payment, c.requirement), status: 'in_flight', tool: tool.name, argsHash: c.argsHash,
         payer: authorization.from ?? null, nonce: authorization.nonce ?? null,
-        network: requirement.network, asset: requirement.asset, amount: String(requirement.amount), payTo: requirement.payTo,
+        network: c.requirement.network, asset: c.requirement.asset, amount: String(c.requirement.amount), payTo: c.requirement.payTo,
         validBefore: Number.isFinite(Number(authorization.validBefore)) ? Number(authorization.validBefore) : null,
-        createdAt: t
+        transaction: null, createdAt: t, updatedAt: t
       };
+      if (t - purgedAt > PURGE_EVERY_MS) {
+        purgedAt = t;
+        ledger.purge(t - KEEP_MS).catch(err => logger.warn({ err: err.message }, 'x402 payment ledger purge failed'));
+      }
+      let claimed, existing;
       try {
-        if (t - purgedAt > 60 * 60 * 1000) { purgedAt = t; await ledger.purge(t - KEEP_MS); }
-        if (!await ledger.claim(rec)) {
-          const existing = await ledger.get(rec.id);
-          if (existing) return await known(s, tool, accepts, payment, requirement, existing, argsHash, run);
-          if (!await ledger.claim(rec)) return pending(rec, 'This payment is in use by another call.');
-        }
+        claimed = await ledger.claim(c.rec);
+        existing = claimed ? null : await ledger.get(c.rec.id);
       } catch (err) {
         // Without the ledger a lost settlement could not be recovered, so no payment is taken.
         logger.warn({ err: err.message, tool: tool.name }, 'x402 payment ledger unavailable');
         count('unavailable');
-        return paymentRequired(null, tool, [], 'Payment is temporarily unavailable');
+        return paymentRequired({ tool }, 'Payment is temporarily unavailable');
       }
-      const claimed = { ...rec, status: 'in_flight', transaction: null, updatedAt: t };
-
-      try {
-        const verified = await s.verifyPayment(payment, requirement);
-        if (!verified.isValid) {
-          await ledger.release(rec.id);
-          count('invalid');
-          return paymentRequired(s, tool, accepts, `Invalid payment: ${verified.invalidReason ?? 'rejected by the facilitator'}`, verified.payer ? { payer: verified.payer } : {});
-        }
-      } catch (err) {
-        await ledger.release(rec.id).catch(() => {});
-        logger.warn({ err: err.message, tool: tool.name }, 'x402 verification failed');
-        count('unavailable');
-        return paymentRequired(s, tool, accepts, 'Payment could not be verified; try again');
-      }
-
-      const result = await run();
-      if (result?.isError) {
-        // Not charged, and the payment stays unspent: the caller may use it again.
-        await ledger.release(rec.id).catch(() => {});
-        count('not_charged');
-        return result;
-      }
-      const done = await settleClaimed(s, tool, accepts, payment, requirement, claimed, run, { recovering: false });
-      return done.result ?? receipt(result, done.settled, done.outcome);
+      if (claimed) return first(c);
+      if (existing) return known(c, existing);
+      // Claimed by another call and released again in between.
+      count('busy');
+      return pending(c.rec, 'This payment is in use by another call.');
     }
   };
 }

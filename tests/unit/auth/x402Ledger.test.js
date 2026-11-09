@@ -92,3 +92,21 @@ describe.each([
     expect(await ledger.get(`${_name}-d`)).toBeNull();
   });
 });
+
+describe('x402 ledger table', () => {
+  it('is created on first use, not at startup with the other stores', async () => {
+    // A fresh process: its own ledger and database modules.
+    vi.resetModules();
+    const db = await import('../../../src/store/database.js');
+    const { x402Ledger } = await import('../../../src/auth/x402Ledger.js');
+    const pool = fakePool();
+    db._setCreatePoolForTests(async () => pool);
+    await db.database();
+    expect(pool.query.mock.calls.some(([sql]) => sql.includes('x402_payments'))).toBe(false);
+    await x402Ledger().get('nope');
+    const sqls = pool.query.mock.calls.map(([sql]) => sql.replace(/\s+/g, ' ').trim());
+    expect(sqls.filter(q => q.startsWith('CREATE TABLE IF NOT EXISTS x402_payments'))).toHaveLength(1);
+    await x402Ledger().get('nope');
+    expect(pool.query.mock.calls.filter(([sql]) => sql.includes('CREATE TABLE IF NOT EXISTS x402_payments'))).toHaveLength(1);
+  });
+});

@@ -1,4 +1,5 @@
-import { database, databaseConfigured, registerSchema } from '../store/database.js';
+import { database, databaseConfigured } from '../store/database.js';
+import { logger } from '../util/logger.js';
 
 /**
  * What became of each x402 payment (src/auth/x402.js), shared by every pod: a payment is claimed
@@ -8,9 +9,11 @@ import { database, databaseConfigured, registerSchema } from '../store/database.
  *
  * status: in_flight (claimed: verifying, running or settling), unresolved (settlement outcome
  * unknown), settled (paid; `transaction` set), refused (will never be paid). Times are epoch ms.
+ *
+ * The table is created on the ledger's first use, not with the other stores' at startup, so a
+ * deployment with x402 off never touches it.
  */
-registerSchema(
-  `CREATE TABLE IF NOT EXISTS x402_payments (
+const SCHEMA = `CREATE TABLE IF NOT EXISTS x402_payments (
     id           CHAR(64) PRIMARY KEY,
     status       VARCHAR(12) NOT NULL,
     tool         VARCHAR(100) NOT NULL,
@@ -26,8 +29,7 @@ registerSchema(
     created_at   BIGINT NOT NULL,
     updated_at   BIGINT NOT NULL,
     INDEX idx_x402_updated (updated_at)
-  )`
-);
+  )`;
 
 const COLUMNS = {
   status: 'status', tool: 'tool', argsHash: 'args_hash', transaction: 'tx_hash', updatedAt: 'updated_at'
@@ -47,9 +49,11 @@ export class LedgerUnavailableError extends Error {
 }
 
 function mariadbLedger() {
+  let schema = null;
   const run = async (sql, params) => {
     const pool = await database();
     if (!pool) throw new LedgerUnavailableError();
+    await (schema ??= pool.query(SCHEMA).catch(err => { schema = null; throw err; }));
     return pool.query(sql, params);
   };
   return {
@@ -65,7 +69,10 @@ function mariadbLedger() {
     },
     /** Compare-and-set on (status, updatedAt): false when another call changed the record first. */
     transition: async (rec, fields) => {
-      const sets = Object.keys(fields).map(k => `${COLUMNS[k]} = ?`);
+      const sets = Object.keys(fields).map(k => {
+        if (!COLUMNS[k]) throw new Error(`x402 ledger: no column for ${k}`);
+        return `${COLUMNS[k]} = ?`;
+      });
       return Number((await run(
         `UPDATE x402_payments SET ${sets.join(', ')} WHERE id = ? AND status = ? AND updated_at = ?`,
         [...Object.values(fields), rec.id, rec.status, rec.updatedAt]
@@ -99,8 +106,15 @@ export function memoryLedger() {
 }
 
 let ledger = null;
-/** The configured ledger: MariaDB when the database is configured, else memory (one pod only). */
+/**
+ * The configured ledger: MariaDB when the database is configured, else memory, which only one
+ * pod can see — with more, a payment whose settlement was lost on one pod cannot be recovered on
+ * another, so that case is warned about.
+ */
 export function x402Ledger() {
-  ledger ??= databaseConfigured() ? mariadbLedger() : memoryLedger();
+  if (!ledger) {
+    ledger = databaseConfigured() ? mariadbLedger() : memoryLedger();
+    if (!databaseConfigured()) logger.warn('x402 payment ledger is in memory (no CHAINS_API_DB_*): payments can be recovered only on the pod that took them; run one replica or configure the database');
+  }
   return ledger;
 }
