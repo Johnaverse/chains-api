@@ -181,7 +181,7 @@ Copy `.env.example` to `.env` for local configuration. Key variables:
 | `ASSISTANT_MODEL` | `qwen3` | Model name for `/v1/chat/completions` |
 | `ASSISTANT_TOPIC_GUARD` | `true` | Pre-classification call that refuses off-topic questions before the tool loop |
 | `ASSISTANT_FALLBACK_LLM_URL` | (empty) | Optional backup LLM server; runs switch to it (sticky) when the primary fails |
-| `X402_ENABLED` | `false` | x402 pay-per-call for MCP tools (`src/auth/x402.js`): with `X402_PAY_TO`, `X402_NETWORK`, `X402_PRICE_USD`, `X402_FACILITATOR_URL`; payers connect to `/mcp/pay` (`/mcp` keeps the licence 401); only requests to `X402_DOMAINS` (default `PUBLIC_ORIGIN`'s host) or through Cloudflare are charged, so in-cluster calls are free; licensees never pay |
+| `X402_ENABLED` | `false` | x402 pay-per-call for MCP tools (`src/auth/x402.js`): with `X402_PAY_TO`, `X402_NETWORK`, `X402_PRICE_USD`, `X402_FACILITATOR_URL`; payers connect to `/mcp/pay` (`/mcp` keeps the licence 401); only requests to `X402_DOMAINS` (default `PUBLIC_ORIGIN`'s host) or through Cloudflare are charged, so in-cluster calls are free; payments are recorded in the shared `x402_payments` ledger, and a settlement whose outcome is lost is withheld and recovered with the same payment (on-chain check via `src/auth/x402Chain.js`), never asked for again; licensees never pay |
 | `LIVE_INCIDENTS_URL` | `https://chains-status-news.johnaverse.cc` | Live incident feed used by the `get_live_incidents` tool |
 | `FORUM_NEWS_URL` | `https://chains-forum-news.johnaverse.cc` | Forum/governance news feed used by the `get_forum_news` tool |
 

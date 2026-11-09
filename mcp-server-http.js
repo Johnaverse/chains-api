@@ -59,7 +59,7 @@ const createServer = (paywall = null, { priced = Boolean(paywall) } = {}) => {
     const { name, arguments: args } = request.params;
     const tool = mustPay(extra) && getToolDefinitions().find(t => t.name === name);
     if (!tool) return handleToolCall(name, args);
-    return paywall.call(tool, paymentToken(request.params, extra), () => handleToolCall(name, args));
+    return paywall.call(tool, paymentToken(request.params, extra), () => handleToolCall(name, args), args);
   });
 
   return server;
