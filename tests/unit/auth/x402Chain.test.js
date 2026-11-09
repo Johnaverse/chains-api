@@ -149,6 +149,15 @@ describe('observeAuthorization', () => {
     it('is not taken for unused while any endpoint shows it used', async () => {
       expect(await observe([node(), node(), node({ transfer: { block: 4000 } })])).toEqual({ state: 'unknown' });
     });
+
+    it('counts an endpoint that shows the nonce spent even when it then fails to find the transaction', async () => {
+      // Public endpoints often cap or refuse eth_getLogs. Two others that agree it is unused
+      // (another branch, or lying) are outvoted by the spent nonce, which is not dropped.
+      const noLogs = (n) => async (method, params) => (method === 'eth_getLogs' || method === 'eth_blockNumber' ? Promise.reject(new Error('limit exceeded')) : n(method, params));
+      const spent = noLogs(node({ transfer: { block: 4000 } }));
+      expect(await observe([spent, node({ fork: 'x' }), node({ fork: 'x' })])).toEqual({ state: 'unknown' });
+      expect(await observe(['down', node({ fork: 'x' }), node({ fork: 'x' })])).toEqual({ state: 'expired_unused' });
+    });
   });
 
   describe('a nonce spent on a transfer that did not pay us', () => {

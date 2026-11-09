@@ -29,10 +29,11 @@ const MCP_HOST = process.env.MCP_HOST || '0.0.0.0';
 // Where a client without a licence connects to pay per tool call, when x402 is on.
 const PAY_PATH = '/mcp/pay';
 
-// Create MCP server factory function. With a paywall (x402), a tool call to a public domain from
-// anyone but a licensee — whom requireLicence marks on the request as `auth` — must be paid for.
+// Create MCP server factory function. With a paywall (x402), a tool call must be paid for unless
+// its HTTP request was marked (as `auth`, read here as `extra.authInfo`) as a licensee's, by
+// requireLicence, or as a free in-cluster call, by markCharge. Unmarked means paid.
 const createServer = (paywall = null, { priced = Boolean(paywall) } = {}) => {
-  const mustPay = (extra) => paywall && !extra?.authInfo?.extra?.licensee && paywall.charges(extra?.requestInfo?.headers);
+  const mustPay = (extra) => paywall && !extra?.authInfo?.extra?.licensee && extra?.authInfo?.extra?.free !== true;
   const server = new Server(
     {
       name: 'chains-api',
@@ -187,7 +188,7 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
         };
 
         // Connect the transport to the MCP server
-        const server = createServer(paywall, { priced: Boolean(paywall?.charges(req.headers) && !req.licensee) });
+        const server = createServer(paywall, { priced: Boolean(paywall?.charges(req.headers, req.socket?.remoteAddress) && !req.licensee) });
         await server.connect(transport);
         await transport.handleRequest(req, res, req.body);
         return;
@@ -261,7 +262,7 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
       .status(401)
       .json({ jsonrpc: '2.0', error: { code: -32001, message: `Authorization required: connect with OAuth, or send a licence key as a Bearer token${paywall ? `, or pay per tool call with x402 at ${publicOrigin}${PAY_PATH}` : ''}. Terms: ${TERMS_URL}` }, id: null });
     const header = req.headers.authorization;
-    if (!header) return paywall && (req.path === PAY_PATH || !paywall.charges(req.headers)) ? next() : challenge(null);
+    if (!header) return paywall && (req.path === PAY_PATH || !paywall.charges(req.headers, req.socket?.remoteAddress)) ? next() : challenge(null);
     try {
       const who = await mcpBearer(header, publicOrigin, store);
       if (!who) return challenge('invalid_token');
@@ -275,14 +276,24 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
     }
   };
 
+  // With x402 on, whether a request without a licence pays is decided here, from the request as
+  // it reached the pod (its socket's address and headers), for every request of a session alike.
+  // The tool handlers charge any request this did not mark free.
+  const markCharge = (req, _res, next) => {
+    if (paywall && !req.licensee) {
+      req.auth = { token: '', clientId: 'anonymous', scopes: [], extra: { free: !paywall.charges(req.headers, req.socket?.remoteAddress) } };
+    }
+    next();
+  };
+
   // Set up routes: the per-address budget first (it also bounds failed authorizations), then the
   // licensee's own once known.
-  app.post('/mcp', limitMcp, requireLicence, limitLicensee, mcpPostHandler);
-  app.delete('/mcp', limitMcp, requireLicence, limitLicensee, mcpDeleteHandler);
+  app.post('/mcp', limitMcp, requireLicence, markCharge, limitLicensee, mcpPostHandler);
+  app.delete('/mcp', limitMcp, requireLicence, markCharge, limitLicensee, mcpDeleteHandler);
   // Pay-per-call (x402): the same server, without the licence challenge.
   if (paywall) {
-    app.post(PAY_PATH, limitMcp, requireLicence, limitLicensee, mcpPostHandler);
-    app.delete(PAY_PATH, limitMcp, requireLicence, limitLicensee, mcpDeleteHandler);
+    app.post(PAY_PATH, limitMcp, requireLicence, markCharge, limitLicensee, mcpPostHandler);
+    app.delete(PAY_PATH, limitMcp, requireLicence, markCharge, limitLicensee, mcpDeleteHandler);
     app.get(PAY_PATH, (_req, res) => res.set('Allow', 'POST, DELETE').status(405).end());
   }
   // This server streams no server-initiated messages on GET (the spec's answer is 405).

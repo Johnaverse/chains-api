@@ -582,18 +582,28 @@ describe('x402Paywall', () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  it('charges only requests addressed to a public domain', () => {
+  it('frees only a request that is provably in-cluster, and charges everything else', () => {
     const paywall = paywallOf(fakeServer(), { domains: ['chains-api.johnaverse.cc'] });
-    expect(paywall.charges({ host: 'chains-api.johnaverse.cc' })).toBe(true);
-    expect(paywall.charges({ host: 'Chains-API.johnaverse.cc:443' })).toBe(true);
-    expect(paywall.charges({ host: 'chains-api.chains-api.svc.cluster.local:3001' })).toBe(false);
-    expect(paywall.charges({ host: '10.42.0.17:3001' })).toBe(false);
-    expect(paywall.charges({ host: '[::1]:3001' })).toBe(false);
-    expect(paywall.charges({ host: 'chains-api.johnaverse.cc.' })).toBe(true);
-    expect(paywall.charges({})).toBe(false);
-    // Through Cloudflare, whatever the Host says.
-    expect(paywall.charges({ host: 'chains-api.chains-api.svc:3001', 'cf-connecting-ip': '203.0.113.9' })).toBe(true);
-    expect(paywallOf(fakeServer()).charges({ host: '10.42.0.17:3001' })).toBe(true);
+    const pod = '10.42.0.9';
+    // A public domain pays, from anywhere.
+    expect(paywall.charges({ host: 'chains-api.johnaverse.cc' }, pod)).toBe(true);
+    expect(paywall.charges({ host: 'Chains-API.johnaverse.cc:443' }, pod)).toBe(true);
+    expect(paywall.charges({ host: 'chains-api.johnaverse.cc.' }, pod)).toBe(true);
+    // An in-cluster caller addressing the Service, a pod or loopback directly is free.
+    expect(paywall.charges({ host: 'chains-api.chains-api.svc.cluster.local:3001' }, pod)).toBe(false);
+    expect(paywall.charges({ host: '10.42.0.17:3001' }, '::ffff:10.42.0.9')).toBe(false);
+    expect(paywall.charges({ host: '[::1]:3001' }, '::1')).toBe(false);
+    expect(paywall.charges({}, '127.0.0.1')).toBe(false);
+    // Any other host pays unless the request came straight from a private address: one through
+    // Cloudflare or a proxy, from a public address, or of unknown origin.
+    for (const name of ['cf-connecting-ip', 'x-forwarded-for', 'forwarded', 'x-real-ip']) {
+      expect(paywall.charges({ host: 'chains-api.chains-api.svc:3001', [name]: '203.0.113.9' }, pod), name).toBe(true);
+    }
+    expect(paywall.charges({ host: 'chains-api.example.org' }, '203.0.113.9')).toBe(true);
+    expect(paywall.charges({ host: 'chains-api.example.org' }, undefined)).toBe(true);
+    expect(paywall.charges({ host: 'chains-api.chains-api.svc:3001' })).toBe(true);
+    // No domains: everything pays.
+    expect(paywallOf(fakeServer()).charges({ host: '10.42.0.17:3001' }, pod)).toBe(true);
   });
 
   it('reads the payment from _meta first, then the PAYMENT-SIGNATURE and X-PAYMENT headers', () => {
@@ -712,6 +722,20 @@ describe('MCP with x402 on', () => {
     expect(facilitator.initialize).not.toHaveBeenCalled();
     // The same request through Cloudflare is charged, and /mcp challenges it.
     expect((await initialize(`${internal}/mcp`, { 'cf-connecting-ip': '203.0.113.9' })).status).toBe(401);
+  });
+
+  it('decides each request of a session on its own: one that came through a proxy pays', async () => {
+    const internal = await start({ domains: ['chains.test'] });
+    const init = await initialize(`${internal}/mcp/pay`);
+    const sid = { 'mcp-session-id': init.headers.get('mcp-session-id') };
+    await rpc(`${internal}/mcp/pay`, { method: 'notifications/initialized', id: undefined }, sid);
+    const callWith = (headers) => rpc(`${internal}/mcp/pay`, { method: 'tools/call', params: { name: 'echo', arguments: {} } }, { ...sid, ...headers });
+
+    expect((await callWith({})).json.result).toEqual(ok);
+    for (const name of ['x-forwarded-for', 'forwarded', 'x-real-ip', 'cf-connecting-ip']) {
+      expect(asksForPayment((await callWith({ [name]: '203.0.113.9' })).json.result), name).toBe(true);
+    }
+    expect(runTool).toHaveBeenCalledTimes(1);
   });
 
   it('passes unknown tools through unpriced', async () => {

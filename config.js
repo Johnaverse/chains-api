@@ -182,9 +182,10 @@ export const PUBLIC_ORIGIN = parseOriginEnv('PUBLIC_ORIGIN');
 
 // x402 pay-per-call for MCP tools (src/auth/x402.js). Off by default. When on, a client without
 // a licence can still connect, and pays X402_PRICE_USD in USDC per tool call, verified and
-// settled by the facilitator; a licensee (key or OAuth token) never pays. Only requests to the
-// X402_DOMAINS hosts are charged (default: PUBLIC_ORIGIN's host), so in-cluster callers, which
-// address the Service directly, use the tools free; with neither set, every request is charged.
+// settled by the facilitator; a licensee (key or OAuth token) never pays. Requests to the
+// X402_DOMAINS hosts (default: PUBLIC_ORIGIN's host) are always charged; any other request is free
+// only when it comes straight from inside the cluster (a private address, no proxy headers), so
+// in-cluster callers use the tools free; with neither set, every request is charged.
 export const X402_ENABLED = parseBooleanEnv('X402_ENABLED', false);
 function parseX402() {
   if (!X402_ENABLED) return {};

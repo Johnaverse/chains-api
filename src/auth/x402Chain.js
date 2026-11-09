@@ -102,14 +102,20 @@ async function useAt(url, p) {
     if (receipt?.logs?.some(usedIn)) return { use: judge(p.transaction, receipt), finalized };
   }
   if (!await spentAt('latest')) return { use: null, finalized };
-  const latest = num(await call('eth_blockNumber', []));
-  for (let to = latest; to > latest - LOG_WINDOW_BLOCKS && to >= 0; to -= LOG_CHUNK_BLOCKS) {
-    const from = Math.max(0, to - LOG_CHUNK_BLOCKS + 1);
-    const logs = await call('eth_getLogs', [{ address: p.asset, topics: [AUTHORIZATION_USED, word(p.payer), word(p.nonce)], fromBlock: hexBlock(from), toBlock: hexBlock(to) }]);
-    if (logs.length) {
-      const hash = logs[0].transactionHash;
-      return { use: judge(hash, await call('eth_getTransactionReceipt', [hash])), finalized };
+  // Spent: from here on this endpoint is a sign of use, whatever else it fails to answer, so a
+  // failed search for the transaction must not drop it from the vote.
+  try {
+    const latest = num(await call('eth_blockNumber', []));
+    for (let to = latest; to > latest - LOG_WINDOW_BLOCKS && to >= 0; to -= LOG_CHUNK_BLOCKS) {
+      const from = Math.max(0, to - LOG_CHUNK_BLOCKS + 1);
+      const logs = await call('eth_getLogs', [{ address: p.asset, topics: [AUTHORIZATION_USED, word(p.payer), word(p.nonce)], fromBlock: hexBlock(from), toBlock: hexBlock(to) }]);
+      if (logs.length) {
+        const hash = logs[0].transactionHash;
+        return { use: judge(hash, await call('eth_getTransactionReceipt', [hash])), finalized };
+      }
     }
+  } catch {
+    return { use: { spent: true }, finalized };
   }
   return { use: { spent: true }, finalized }; // spent, longer ago than the window
 }

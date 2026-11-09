@@ -3,6 +3,7 @@ import { logger } from '../util/logger.js';
 import { incCounter } from '../util/metrics.js';
 import { x402Ledger } from './x402Ledger.js';
 import { observeAuthorization } from './x402Chain.js';
+import { isPrivateAddress } from '../http/accessLog.js';
 
 /**
  * x402 pay-per-call for MCP tools, per the x402 v2 MCP transport
@@ -90,6 +91,15 @@ function header(headers, name) {
   return Array.isArray(value) ? value[0] : value;
 }
 
+// Headers a proxy or Cloudflare adds: a request carrying any of them did not come straight from
+// inside the cluster.
+const FORWARDED = ['cf-connecting-ip', 'x-forwarded-for', 'forwarded', 'x-real-ip'];
+
+/** A request that reached this pod directly from a cluster or LAN address, through no proxy. */
+function direct(headers, peer) {
+  return isPrivateAddress(peer) && !FORWARDED.some(name => header(headers, name) !== undefined);
+}
+
 /** The payment a tools/call carries: request `_meta` first, then the HTTP headers. */
 export function paymentToken(params, extra) {
   const headers = extra?.requestInfo?.headers;
@@ -141,7 +151,8 @@ function settleOutcome(result, err, SettleError) {
  * @param {string} cfg.network         CAIP-2 network id
  * @param {number} cfg.priceUsd        price of one tool call
  * @param {string} cfg.facilitatorUrl  x402 facilitator (verify + settle)
- * @param {string[]} [cfg.domains]    hosts whose requests are charged; empty charges every request
+ * @param {string[]} [cfg.domains]    public hosts, always charged; empty charges every request. A
+ *                                    request to another host is free only from inside the cluster.
  * @param {string} [cfg.alternative]   how to use the tools without paying, told to a client that hasn't paid
  * @param {object} [cfg.resourceServer] an x402ResourceServer stand-in (tests)
  * @param {object} [cfg.ledger]         payment ledger (x402Ledger.js)
@@ -384,12 +395,13 @@ export function x402Paywall({
 
   return {
     /**
-     * Whether a request to these headers is charged: only one addressed to a public domain. The
-     * gateway routes those hostnames alone to this service and passes the Host on, so a request
-     * from outside always names one; in-cluster callers address the Service and go free. Anything
-     * that came through Cloudflare (which sets CF-Connecting-IP) is charged whatever its Host.
+     * Whether a request is charged. Free only when it is provably internal: it reached the pod
+     * directly from a private address (`peer`, the socket's), with no Cloudflare or proxy header,
+     * addressed to a host other than a public domain — an in-cluster caller using the Service.
+     * Everything else pays, including a request whose origin is unknown, so exposing the service
+     * under another hostname or through another proxy charges it rather than giving it away.
      */
-    charges: (headers) => !domains.length || domains.includes(requestHost(headers)) || Boolean(header(headers, 'cf-connecting-ip')),
+    charges: (headers, peer) => !domains.length || domains.includes(requestHost(headers)) || !direct(headers, peer),
 
     /** Shown on each tool in tools/list (Cloudflare's client adds the price to the description). */
     toolMeta: { 'agents-x402/paymentRequired': true, 'agents-x402/priceUSD': priceUsd },
