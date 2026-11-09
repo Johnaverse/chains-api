@@ -168,11 +168,14 @@ export function x402Paywall({
     return { isError: true, content: [{ type: 'text', text }], _meta: { 'x402/payment-response': response } };
   }
 
-  function receipt(result, rec, settled = {}) {
-    return {
-      ...result,
-      _meta: { ...result?._meta, 'x402/payment-response': { success: true, transaction: rec.transaction, network: settled.network ?? rec.network, payer: settled.payer ?? rec.payer } }
-    };
+  /**
+   * The result with its payment's receipt. `rerun`: the tool ran again for this answer (a
+   * recovered or redelivered call) — a fresh read of live data, not the result first produced,
+   * which no caller received; the receipt is still that of the one payment.
+   */
+  function receipt(result, rec, settled = {}, { rerun = false } = {}) {
+    const response = { success: true, transaction: rec.transaction, network: settled.network ?? rec.network, payer: settled.payer ?? rec.payer, ...(rerun ? { rerun: true } : {}) };
+    return { ...result, _meta: { ...result?._meta, 'x402/payment-response': response } };
   }
 
   /**
@@ -214,7 +217,7 @@ export function x402Paywall({
       await record(rec, { status: 'settled', transaction: settled.transaction, updatedAt: at });
       count(c.recovering ? 'recovered' : 'settled');
       logger.info({ tool: c.tool.name, payer: outcome.payer ?? rec.payer, transaction: settled.transaction, network: outcome.network ?? rec.network, amount: rec.amount, asset: rec.asset, recovered: c.recovering }, 'x402 payment');
-      return receipt(result ?? await c.run(), settled, outcome);
+      return result ? receipt(result, settled, outcome) : receipt(await c.run(), settled, outcome, { rerun: true });
     }
     if (outcome.kind === 'refused') {
       await record(rec, { status: 'refused', updatedAt: at });
@@ -228,13 +231,18 @@ export function x402Paywall({
     return pending(unresolved, 'The payment\'s settlement could not be confirmed.');
   }
 
-  /** A payment the ledger already knows: in use, settled, refused, or to recover. */
+  /**
+   * A payment the ledger already knows: in use, settled, refused, or to recover. A payment is
+   * bound to the call it was first used for (tool and arguments): only that call is answered
+   * again or recovered with it.
+   */
   async function known(c, rec) {
+    const sameCall = rec.tool === c.tool.name && rec.argsHash === c.argsHash;
     if (rec.status === 'settled') {
       // Its answer may have been lost on the way back: the same call, soon after, is answered again.
-      if (rec.tool === c.tool.name && rec.argsHash === c.argsHash && now() - rec.updatedAt < REDELIVER_MS) {
+      if (sameCall && now() - rec.updatedAt < REDELIVER_MS) {
         count('redelivered');
-        return receipt(await c.run(), rec);
+        return receipt(await c.run(), rec, {}, { rerun: true });
       }
       count('invalid');
       return paymentRequired(c, 'Invalid payment: it has already been spent');
@@ -247,8 +255,13 @@ export function x402Paywall({
       count('busy');
       return pending(rec, 'This payment is in use by another call.');
     }
+    if (!sameCall) {
+      // Unresolved for another call: left as it is, for that call to recover.
+      count('other_call');
+      return pending(rec, 'This payment is pending for a different call (another tool or other arguments); only that call can recover it.');
+    }
     // unresolved, or in flight on a pod that never finished: take it over and settle it again.
-    const fields = { status: 'in_flight', tool: c.tool.name, argsHash: c.argsHash, updatedAt: now() };
+    const fields = { status: 'in_flight', updatedAt: now() };
     if (!await ledger.transition(rec, fields)) {
       count('busy');
       return pending(rec, 'This payment is in use by another call.');

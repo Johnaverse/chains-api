@@ -179,6 +179,49 @@ describe('x402Paywall', () => {
       expect(metric()).toContain('chains_api_x402_payments_total{outcome="recovered"} 1');
     });
 
+    it('recovers only the call the payment was first used for, leaving it intact for that call', async () => {
+      const s = fakeServer({ settleAs: ['lostAfter'] });
+      const ledger = memoryLedger();
+      const paywall = x402Paywall({ ...CFG, resourceServer: s, ledger, observe: s.observe });
+      const run = vi.fn(() => ok);
+      await paywall.call(TOOL, PAYMENT, run, { chainId: 1 });
+      const before = [...run.mock.calls].length;
+
+      const changed = await paywall.call(TOOL, PAYMENT, run, { chainId: 2 });
+      expect(changed.content[0].text).toMatch(/^This payment is pending for a different call/);
+      expect(asksForPayment(changed)).toBe(false);
+      const otherTool = await paywall.call({ ...TOOL, name: 'get_stats' }, PAYMENT, run, { chainId: 1 });
+      expect(otherTool.content[0].text).toMatch(/^This payment is pending for a different call/);
+      expect(run).toHaveBeenCalledTimes(before);
+      expect(s.settlePayment).toHaveBeenCalledTimes(1);
+      expect(metric()).toContain('chains_api_x402_payments_total{outcome="other_call"} 2');
+
+      const original = await paywall.call(TOOL, PAYMENT, run, { chainId: 1 });
+      expect(original._meta['x402/payment-response']).toMatchObject({ success: true, transaction: '0xtx1', rerun: true });
+      expect(s.chain.size).toBe(1);
+    });
+
+    it('marks a recovered or redelivered answer as a fresh run of the tool, under the one receipt', async () => {
+      let t = 0;
+      let snapshot = 0;
+      const run = () => ({ content: [{ type: 'text', text: `snapshot ${++snapshot}` }] });
+      const s = fakeServer({ settleAs: ['lostAfter'] });
+      const paywall = paywallOf(s, { now: () => t });
+      const first = await paywall.call(TOOL, PAYMENT, run);
+      expect(JSON.stringify(first)).not.toContain('snapshot 1');
+      const recovered = await paywall.call(TOOL, PAYMENT, run);
+      expect(recovered.content[0].text).toBe('snapshot 2');
+      expect(recovered._meta['x402/payment-response']).toEqual({ success: true, transaction: '0xtx1', network: ACCEPT.network, payer: PAYMENT.payload.authorization.from, rerun: true });
+      t = 60_000;
+      const again = await paywall.call(TOOL, PAYMENT, run);
+      expect(again.content[0].text).toBe('snapshot 3');
+      expect(again._meta['x402/payment-response']).toMatchObject({ transaction: '0xtx1', rerun: true });
+
+      const fresh = await paywallOf(fakeServer()).call(TOOL, paymentWith(`0x${'cd'.repeat(32)}`), run);
+      expect(fresh._meta['x402/payment-response'].rerun).toBeUndefined();
+      expect(s.chain.size).toBe(1);
+    });
+
     it('keeps the transaction of a pending settlement and recovers through it', async () => {
       const s = fakeServer({ settleAs: ['pending'] });
       const paywall = paywallOf(s);

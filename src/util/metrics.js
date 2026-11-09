@@ -102,7 +102,7 @@ const METRIC_HELP = {
   chains_api_http_request_duration_seconds: 'API request duration in seconds by route template and method',
   chains_api_mcp_rpc_total: 'MCP JSON-RPC requests by method and HTTP status class',
   chains_api_mcp_tool_calls_total: 'MCP tool calls by tool and HTTP status class',
-  chains_api_x402_payments_total: 'x402 pay-per-call MCP tool calls by outcome (required, invalid, settled, recovered, redelivered, unresolved, busy, not_charged, settlement_failed, unavailable)'
+  chains_api_x402_payments_total: 'x402 pay-per-call MCP tool calls by outcome (required, invalid, settled, recovered, redelivered, unresolved, busy, other_call, not_charged, settlement_failed, unavailable)'
 };
 
 /**
