@@ -1,0 +1,43 @@
+import { describe, it, expect, vi, afterEach } from 'vitest';
+
+const KEYS = ['X402_ENABLED', 'X402_PAY_TO', 'X402_NETWORK', 'X402_PRICE_USD', 'X402_FACILITATOR_URL'];
+const saved = Object.fromEntries(KEYS.map(k => [k, process.env[k]]));
+
+async function load(env) {
+  for (const k of KEYS) delete process.env[k];
+  Object.assign(process.env, env);
+  vi.resetModules();
+  return import('../../config.js');
+}
+
+afterEach(() => {
+  for (const k of KEYS) if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k];
+  vi.restoreAllMocks();
+});
+
+describe('x402 config', () => {
+  it('is off by default', async () => {
+    const config = await load({});
+    expect(config.X402_ENABLED).toBe(false);
+    expect(config.X402).toEqual({});
+  });
+
+  it('defaults to Base Sepolia and the x402.org facilitator', async () => {
+    const config = await load({ X402_ENABLED: 'true', X402_PAY_TO: '0x000000000000000000000000000000000000dEaD' });
+    expect(config.X402).toEqual({ payTo: '0x000000000000000000000000000000000000dEaD', network: 'eip155:84532', priceUsd: 0.001, facilitatorUrl: 'https://x402.org/facilitator' });
+  });
+
+  it('stops the process on a setting it cannot use', async () => {
+    const exit = vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('exit'); });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    for (const env of [
+      { X402_PAY_TO: '' },
+      { X402_PAY_TO: '0x000000000000000000000000000000000000dEaD', X402_NETWORK: 'base' },
+      { X402_PAY_TO: '0x000000000000000000000000000000000000dEaD', X402_PRICE_USD: '0' },
+      { X402_PAY_TO: '0x000000000000000000000000000000000000dEaD', X402_FACILITATOR_URL: 'http://facilitator.test' }
+    ]) {
+      await expect(load({ X402_ENABLED: 'true', ...env })).rejects.toThrow('exit');
+    }
+    expect(exit).toHaveBeenCalledTimes(4);
+  });
+});

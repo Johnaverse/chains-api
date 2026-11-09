@@ -181,6 +181,7 @@ Copy `.env.example` to `.env` for local configuration. Key variables:
 | `ASSISTANT_MODEL` | `qwen3` | Model name for `/v1/chat/completions` |
 | `ASSISTANT_TOPIC_GUARD` | `true` | Pre-classification call that refuses off-topic questions before the tool loop |
 | `ASSISTANT_FALLBACK_LLM_URL` | (empty) | Optional backup LLM server; runs switch to it (sticky) when the primary fails |
+| `X402_ENABLED` | `false` | x402 pay-per-call for MCP tools (`src/auth/x402.js`): with `X402_PAY_TO`, `X402_NETWORK`, `X402_PRICE_USD`, `X402_FACILITATOR_URL`; licensees never pay |
 | `LIVE_INCIDENTS_URL` | `https://chains-status-news.johnaverse.cc` | Live incident feed used by the `get_live_incidents` tool |
 | `FORUM_NEWS_URL` | `https://chains-forum-news.johnaverse.cc` | Forum/governance news feed used by the `get_forum_news` tool |
 

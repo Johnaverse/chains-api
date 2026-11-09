@@ -958,6 +958,26 @@ A client that can send a header uses the key directly: `Authorization: Bearer ca
 
 **Cloudflare MCP Portal:** add `https://chains-api.johnaverse.cc/mcp` as an MCP server with **OAuth → Automatic** (dynamic client registration; approve once on the consent page with a licence key), or through the API with `auth_type: "bearer"` and a licence key as `auth_credentials`. With **Require user auth** on, each portal user consents with their own key and is audited as that licensee; off, every call uses the admin's grant. All portal users arrive from the portal's egress address, so an authorized request does not spend the address's budget, only its licensee's.
 
+### Pay per call: x402 (optional)
+
+With `X402_ENABLED=true`, MCP tool calls can also be paid for with [x402](https://developers.cloudflare.com/agents/tools/payments/x402/) instead of a licence: USDC per call, verified and settled by an x402 facilitator. It follows the x402 v2 MCP transport, so Cloudflare's `withX402Client` (`agents/x402`) and other x402 MCP clients pay without extra setup. It is off by default.
+
+| Variable | Default | |
+|----------|---------|---|
+| `X402_ENABLED` | `false` | Turn pay-per-call on |
+| `X402_PAY_TO` | (required when on) | Wallet that receives payments (`0x…`) |
+| `X402_NETWORK` | `eip155:84532` | CAIP-2 network: Base Sepolia (testnet) by default, `eip155:8453` for Base |
+| `X402_PRICE_USD` | `0.001` | Price of one tool call, in USD (paid in USDC) |
+| `X402_FACILITATOR_URL` | `https://x402.org/facilitator` | Facilitator that verifies and settles payments; this one serves testnets, so Base mainnet needs one that supports it |
+
+How it behaves:
+- A client without a licence can connect (`initialize`, `tools/list`) without paying; `tools/list` marks each tool with `_meta["agents-x402/paymentRequired"]` and `["agents-x402/priceUSD"]`, and the server instructions state the price.
+- An unpaid `tools/call` gets a tool result with `isError: true` whose `structuredContent` (also `content[0].text` and `_meta["x402/error"]`) is the x402 `PaymentRequired`: scheme `exact`, network, amount, asset, `payTo`. The text also names the licence route.
+- The client signs a payment and repeats the call with it in `params._meta["x402/payment"]` (object or base64 JSON; a `PAYMENT-SIGNATURE` or `X-PAYMENT` header also works). The facilitator verifies it, the tool runs, and the payment is settled only if the tool succeeded; the receipt is in `_meta["x402/payment-response"]`. If settlement fails, the result is withheld.
+- A licensee (licence key or OAuth token) never pays and sees no prices. An invalid token is still refused with `401`; with `PUBLIC_ORIGIN` set, a request with no token at all is let through to pay instead of getting the `401`, so an OAuth-only connector of a licensee should be given the licence key as a Bearer token.
+- Each settled payment is logged (`x402 payment`: tool, payer, transaction, network, amount, asset) and counted in `chains_api_x402_payments_total{outcome}` (`required`, `invalid`, `settled`, `not_charged`, `settlement_failed`, `unavailable`).
+- The REST API stays public and is not priced.
+
 ## Usage audit
 
 Every REST and MCP request except `/health`, `/ready` and `/metrics` writes one log line (`"msg":"api access"` or `"mcp access"`, field `audit`), replacing fastify's per-request pair:

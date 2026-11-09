@@ -180,6 +180,34 @@ function parseOriginEnv(name) {
 }
 export const PUBLIC_ORIGIN = parseOriginEnv('PUBLIC_ORIGIN');
 
+// x402 pay-per-call for MCP tools (src/auth/x402.js). Off by default. When on, a client without
+// a licence can still connect, and pays X402_PRICE_USD in USDC per tool call, verified and
+// settled by the facilitator; a licensee (key or OAuth token) never pays.
+export const X402_ENABLED = parseBooleanEnv('X402_ENABLED', false);
+function parseX402() {
+  if (!X402_ENABLED) return {};
+  const payTo = parseStringEnv('X402_PAY_TO', '').trim();
+  const network = parseStringEnv('X402_NETWORK', 'eip155:84532').trim();
+  const rawPrice = parseStringEnv('X402_PRICE_USD', '0.001').trim();
+  const priceUsd = Number(rawPrice);
+  const facilitatorUrl = parseStringEnv('X402_FACILITATOR_URL', 'https://x402.org/facilitator').trim();
+  let facilitator;
+  try { facilitator = new URL(facilitatorUrl); } catch { facilitator = null; }
+  const problems = [
+    !/^0x[0-9a-fA-F]{40}$/.test(payTo) && `X402_PAY_TO "${payTo}" (expected a 0x wallet address)`,
+    // CAIP-2, e.g. eip155:84532 (Base Sepolia) or eip155:8453 (Base).
+    !/^[-a-z0-9]{3,8}:[-_a-zA-Z0-9]{1,32}$/.test(network) && `X402_NETWORK "${network}" (expected a CAIP-2 id such as eip155:8453)`,
+    !(Number.isFinite(priceUsd) && priceUsd > 0) && `X402_PRICE_USD "${rawPrice}" (expected a price above 0)`,
+    facilitator?.protocol !== 'https:' && `X402_FACILITATOR_URL "${facilitatorUrl}" (expected an https URL)`
+  ].filter(Boolean);
+  if (problems.length) {
+    console.error(`X402_ENABLED is set but: ${problems.join('; ')}.`);
+    process.exit(1);
+  }
+  return { payTo, network, priceUsd, facilitatorUrl: facilitator.href.replace(/\/+$/, '') };
+}
+export const X402 = parseX402();
+
 // Terms of use for the hosted service, and where a commercial licence is asked for. Sent as a
 // `Link: <TERMS_URL>; rel="license"` header on every response, in robots.txt and in tdmrep.json.
 export const TERMS_URL = parseStringEnv('TERMS_URL', 'https://chains-api.johnaverse.cc/terms');

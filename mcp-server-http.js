@@ -17,7 +17,8 @@ import { logger } from './src/util/logger.js';
 import { clientKey } from './src/http/clientKey.js';
 import { mcpAccessLog } from './src/http/accessLog.js';
 import { mcpBearer, resourceMetadataUrl } from './src/auth/oauth.js';
-import { RATE_LIMIT_WINDOW_MS, MCP_RATE_LIMIT_MAX, MCP_MAX_SESSIONS, MCP_SESSION_IDLE_MS, DASHBOARD_ORIGINS, TERMS_URL, LICENSING_CONTACT, PUBLIC_ORIGIN } from './config.js';
+import { x402Paywall, paymentToken } from './src/auth/x402.js';
+import { RATE_LIMIT_WINDOW_MS, MCP_RATE_LIMIT_MAX, MCP_MAX_SESSIONS, MCP_SESSION_IDLE_MS, DASHBOARD_ORIGINS, TERMS_URL, LICENSING_CONTACT, PUBLIC_ORIGIN, X402_ENABLED, X402 } from './config.js';
 
 const require = createRequire(import.meta.url);
 const { version } = require('./package.json');
@@ -26,8 +27,10 @@ const { version } = require('./package.json');
 const MCP_PORT = Number.parseInt(process.env.MCP_PORT || '3001');
 const MCP_HOST = process.env.MCP_HOST || '0.0.0.0';
 
-// Create MCP server factory function
-const createServer = () => {
+// Create MCP server factory function. With a paywall (x402), a tool call from anyone but a
+// licensee — whom requireLicence marks on the request as `auth` — must be paid for.
+const createServer = (paywall = null) => {
+  const mustPay = (extra) => paywall && !extra?.authInfo?.extra?.licensee;
   const server = new Server(
     {
       name: 'chains-api',
@@ -38,19 +41,23 @@ const createServer = () => {
         tools: {},
       },
       // Shown to MCP clients on connect: the same terms as the REST API.
-      instructions: `Data from chains-api, under its terms of use (${TERMS_URL}): free for personal and hobby use, academic research and teaching, and non-profit or open-source projects that earn nothing from it. Any commercial or for-profit use, including use that earns revenue, requires a licence: ${LICENSING_CONTACT}.`,
+      instructions: `Data from chains-api, under its terms of use (${TERMS_URL}): free for personal and hobby use, academic research and teaching, and non-profit or open-source projects that earn nothing from it. Any commercial or for-profit use, including use that earns revenue, requires a licence: ${LICENSING_CONTACT}.${paywall ? ` Without a licence, each tool call is paid with x402: ${paywall.toolMeta['agents-x402/priceUSD']} USD in USDC.` : ''}`,
     }
   );
 
   // Define available tools
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: getToolDefinitions(),
+  server.setRequestHandler(ListToolsRequestSchema, async (_request, extra) => ({
+    tools: mustPay(extra)
+      ? getToolDefinitions().map(t => ({ ...t, _meta: { ...t._meta, ...paywall.toolMeta } }))
+      : getToolDefinitions(),
   }));
 
   // Handle tool calls
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const { name, arguments: args } = request.params;
-    return handleToolCall(name, args);
+    const tool = mustPay(extra) && getToolDefinitions().find(t => t.name === name);
+    if (!tool) return handleToolCall(name, args);
+    return paywall.call(tool, paymentToken(request.params, extra), () => handleToolCall(name, args));
   });
 
   return server;
@@ -62,8 +69,12 @@ const createServer = () => {
  * source. When this module runs as the combined server's MCP listener, the
  * REST process has already loaded data into the shared in-memory store.
  */
-export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN, authStore: store = undefined } = {}) {
+export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN, authStore: store = undefined, x402 = X402_ENABLED ? X402 : null } = {}) {
   const app = express();
+  const paywall = x402 && x402Paywall({
+    ...x402,
+    alternative: `Or use a licence key${publicOrigin ? ' (OAuth or a Bearer token)' : ''}: ${LICENSING_CONTACT}. Terms: ${TERMS_URL}`
+  });
 
   // Avoid implicit framework/version disclosure
   app.disable('x-powered-by');
@@ -171,7 +182,7 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
         };
 
         // Connect the transport to the MCP server
-        const server = createServer();
+        const server = createServer(paywall);
         await server.connect(transport);
         await transport.handleRequest(req, res, req.body);
         return;
@@ -229,7 +240,8 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
 
   // With PUBLIC_ORIGIN set, /mcp needs a licence key or an OAuth access token (src/auth/oauth.js).
   // A missing or invalid one gets 401 with the protected-resource metadata URL (RFC 9728), which
-  // is how an MCP client discovers the OAuth flow. A browser page from another site is refused
+  // is how an MCP client discovers the OAuth flow. With x402 on, a request with no token at all
+  // passes instead, and its tool calls are paid for. A browser page from another site is refused
   // (Origin), against DNS rebinding.
   const requireLicence = async (req, res, next) => {
     if (!publicOrigin) return next();
@@ -242,11 +254,13 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
       .status(401)
       .json({ jsonrpc: '2.0', error: { code: -32001, message: `Authorization required: connect with OAuth, or send a licence key as a Bearer token. Terms: ${TERMS_URL}` }, id: null });
     const header = req.headers.authorization;
-    if (!header) return challenge(null);
+    if (!header) return paywall ? next() : challenge(null);
     try {
       const who = await mcpBearer(header, publicOrigin, store);
       if (!who) return challenge('invalid_token');
       req.licensee = who;
+      // Read by the MCP transport as the handlers' `extra.authInfo`: a licensee never pays.
+      req.auth = { token: '', clientId: who.keyId, scopes: ['mcp'], extra: { licensee: who.licensee } };
       return next();
     } catch (err) {
       logger.warn({ err: err.message }, 'MCP authorization check failed');
