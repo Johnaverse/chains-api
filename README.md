@@ -1000,7 +1000,7 @@ How it behaves:
     - "Unspent at the latest block" is never enough: a lagging node says that of a transfer it hasn't seen yet. Any sign of use on any endpoint (a receipt, a spent nonce, a log) also rules a refusal out.
   - **Otherwise** the payment stays unresolved.
   - Unresolved payments are logged as `x402 payment unresolved`.
-- **Facilitator outages.** If the facilitator can't be reached, or doesn't serve the network, calls are answered "temporarily unavailable", and the facilitator is asked again after 30 s rather than once per call. The same 30 s pause follows a verify request the facilitator failed to answer.
+- **Facilitator outages.** If the facilitator can't be reached, or doesn't serve the network, calls are answered "temporarily unavailable", and the facilitator is asked again after 30 s rather than once per call. The same 30 s pause follows a verify request the facilitator failed to answer. A payment the facilitator rejects, whether as `isValid: false` or as an HTTP error carrying that result (`VerifyError`), is an invalid payment and pauses nothing.
 - **A definitive refusal** (a settlement the facilitator rejects for any reason but a spent nonce) withholds the result and asks for a new payment.
 - **Licensees.** A licence key or OAuth token never pays and sees no prices, on either path. An invalid token is refused with `401`.
 - **Audit.** Each settled payment is logged (`x402 payment`: tool, payer, transaction, network, amount, asset) and counted in `chains_api_x402_payments_total{outcome}` (`required`, `invalid`, `settled`, `recovered`, `redelivered`, `unresolved`, `busy`, `other_call`, `not_charged`, `settlement_failed`, `unavailable`).

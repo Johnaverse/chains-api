@@ -19,7 +19,7 @@ vi.mock('../../../mcp-tools.js', () => ({
 
 import { x402Paywall, paymentToken } from '../../../src/auth/x402.js';
 import { memoryLedger } from '../../../src/auth/x402Ledger.js';
-import { SettleError } from '@x402/core/types';
+import { SettleError, VerifyError } from '@x402/core/types';
 import { memoryStore } from '../../../src/auth/store.js';
 import { createLicenceKey } from '../../../src/auth/licenceKeys.js';
 import { createMcpHttpApp } from '../../../mcp-server-http.js';
@@ -49,9 +49,10 @@ const settleError = (errorReason, transaction = '') => new SettleError(500, { su
  *   'refuse'     a definitive refusal
  * A nonce already spent is refused as the EVM scheme does (invalid_exact_evm_nonce_already_used).
  */
-function fakeServer({ valid = true, initFails = 0, settleAs = [], verifyFails = 0 } = {}) {
+function fakeServer({ valid = true, initFails = 0, settleAs = [], verifyFails = 0, verifyRejects = 0 } = {}) {
   let failures = initFails;
   let verifyFailures = verifyFails;
+  let verifyRejections = verifyRejects;
   const chain = new Map(); // nonce -> transaction
   const script = [...settleAs];
   const s = {
@@ -65,6 +66,8 @@ function fakeServer({ valid = true, initFails = 0, settleAs = [], verifyFails = 
     createPaymentRequiredResponse: vi.fn(async (accepts, resource, error) => ({ x402Version: 2, error, resource, accepts })),
     verifyPayment: vi.fn(async (p) => {
       if (verifyFailures-- > 0) throw new Error('fetch failed');
+      // How HTTPFacilitatorClient reports a rejection sent with an HTTP error status.
+      if (verifyRejections-- > 0) throw new VerifyError(400, { isValid: false, invalidReason: 'invalid_exact_evm_payload_signature', payer: p.payload.authorization.from });
       if (!valid) return { isValid: false, invalidReason: 'insufficient_funds', payer: p.payload.authorization.from };
       if (chain.has(p.payload.authorization.nonce)) return { isValid: false, invalidReason: 'invalid_exact_evm_nonce_already_used' };
       return { isValid: true, payer: p.payload.authorization.from };
@@ -384,6 +387,15 @@ describe('x402Paywall', () => {
     await first;
     expect(run).toHaveBeenCalledTimes(1);
     expect(s.verifyPayment).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats a rejection thrown as VerifyError as an invalid payment, with no pause for others', async () => {
+    const s = fakeServer({ verifyRejects: 1 });
+    const paywall = paywallOf(s);
+    const bad = await paywall.call(TOOL, paymentWith(`0x${'ef'.repeat(32)}`), () => ok);
+    expect(bad.structuredContent).toMatchObject({ error: 'Invalid payment: invalid_exact_evm_payload_signature', accepts: [ACCEPT] });
+    expect(metric()).toContain('chains_api_x402_payments_total{outcome="invalid"} 1');
+    expect((await paywall.call(TOOL, PAYMENT, () => ok))._meta['x402/payment-response'].success).toBe(true);
   });
 
   it('takes no payments for a while after the facilitator failed to verify one', async () => {

@@ -143,14 +143,14 @@ export function x402Paywall({
   const facilitator = () => {
     if (!ready && now() - failedAt < RETRY_AFTER_MS) return Promise.reject(new Error('facilitator unavailable; retrying later'));
     return (ready ??= (async () => {
-      const [s, { SettleError }] = await Promise.all([resourceServer ?? facilitatorServer(facilitatorUrl), import('@x402/core/types')]);
+      const [s, { SettleError, VerifyError }] = await Promise.all([resourceServer ?? facilitatorServer(facilitatorUrl), import('@x402/core/types')]);
       await s.initialize();
       const accepts = await s.buildPaymentRequirements({ scheme: SCHEME, payTo, price: priceUsd, network, maxTimeoutSeconds: MAX_TIMEOUT_SECONDS });
       // A price below the asset's smallest unit comes out as 0, which would give every call away.
       if (!accepts.length || accepts.some(a => !/^\d+$/.test(String(a.amount)) || BigInt(a.amount) <= 0n)) {
         throw new Error(`X402_PRICE_USD ${priceUsd} is no payable amount on ${network}`);
       }
-      return { s, accepts, SettleError };
+      return { s, accepts, SettleError, VerifyError };
     })().catch(err => { ready = null; failedAt = now(); throw err; }));
   };
   let purgedAt = 0;
@@ -307,11 +307,16 @@ export function x402Paywall({
     try {
       verified = await c.s.verifyPayment(c.payment, c.requirement);
     } catch (err) {
-      await release();
-      outage();
-      logger.warn({ err: err.message, tool: c.tool.name }, 'x402 verification failed');
-      count('unavailable');
-      return paymentRequired(c, 'Payment could not be verified; try again');
+      // A VerifyError is the facilitator rejecting this payment over HTTP: an invalid payment like
+      // isValid: false, not an outage — one bad payment must not pause everyone else's.
+      if (!(err instanceof c.VerifyError)) {
+        await release();
+        outage();
+        logger.warn({ err: err.message, tool: c.tool.name }, 'x402 verification failed');
+        count('unavailable');
+        return paymentRequired(c, 'Payment could not be verified; try again');
+      }
+      verified = { isValid: false, invalidReason: err.invalidReason, payer: err.payer };
     }
     if (!verified.isValid) {
       await release();
