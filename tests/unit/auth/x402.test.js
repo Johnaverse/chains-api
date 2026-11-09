@@ -110,6 +110,17 @@ describe('x402Paywall', () => {
     expect(s.initialize).toHaveBeenCalledTimes(2);
   });
 
+  it('charges only requests addressed to a public domain', () => {
+    const paywall = x402Paywall({ ...CFG, domains: ['chains-api.johnaverse.cc'] });
+    expect(paywall.charges({ host: 'chains-api.johnaverse.cc' })).toBe(true);
+    expect(paywall.charges({ host: 'Chains-API.johnaverse.cc:443' })).toBe(true);
+    expect(paywall.charges({ host: 'chains-api.chains-api.svc.cluster.local:3001' })).toBe(false);
+    expect(paywall.charges({ host: '10.42.0.17:3001' })).toBe(false);
+    expect(paywall.charges({ host: '[::1]:3001' })).toBe(false);
+    expect(paywall.charges({})).toBe(false);
+    expect(x402Paywall(CFG).charges({ host: '10.42.0.17:3001' })).toBe(true);
+  });
+
   it('reads the payment from _meta first, then the PAYMENT-SIGNATURE and X-PAYMENT headers', () => {
     const headers = { 'payment-signature': 'sig', 'x-payment': 'v1' };
     expect(paymentToken({ _meta: { 'x402/payment': 'meta' } }, { requestInfo: { headers } })).toBe('meta');
@@ -179,6 +190,25 @@ describe('MCP with x402 on', () => {
     const res = await call('tools/call', { name: 'echo', arguments: {} });
     expect(res.json.result).toEqual(ok);
     expect(facilitator.initialize).not.toHaveBeenCalled();
+  });
+
+  it('does not charge a call addressed to the service directly, as in-cluster callers do', async () => {
+    const internal = createMcpHttpApp({ publicOrigin: ORIGIN, authStore: store, x402: { ...CFG, domains: ['chains.test'], resourceServer: facilitator } });
+    const s = await new Promise((resolve) => { const l = internal.listen(0, '127.0.0.1', () => resolve(l)); });
+    const saved = mcpUrl;
+    mcpUrl = `http://127.0.0.1:${s.address().port}/mcp`;
+    try {
+      const { init, call } = await session();
+      expect(init.json.result.instructions).not.toContain('x402');
+      expect((await call('tools/list', {})).json.result.tools[0]._meta).toBeUndefined();
+      expect((await call('tools/call', { name: 'echo', arguments: {} })).json.result).toEqual(ok);
+      expect(facilitator.initialize).not.toHaveBeenCalled();
+    } finally {
+      mcpUrl = saved;
+      internal.locals.stopSweeper();
+      for (const t of Object.values(internal.locals.transports ?? {})) await t.close().catch(() => {});
+      await new Promise((resolve) => s.close(resolve));
+    }
   });
 
   it('still refuses an invalid token, and passes unknown tools through unpriced', async () => {

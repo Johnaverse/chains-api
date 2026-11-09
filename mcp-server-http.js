@@ -27,10 +27,10 @@ const { version } = require('./package.json');
 const MCP_PORT = Number.parseInt(process.env.MCP_PORT || '3001');
 const MCP_HOST = process.env.MCP_HOST || '0.0.0.0';
 
-// Create MCP server factory function. With a paywall (x402), a tool call from anyone but a
-// licensee — whom requireLicence marks on the request as `auth` — must be paid for.
-const createServer = (paywall = null) => {
-  const mustPay = (extra) => paywall && !extra?.authInfo?.extra?.licensee;
+// Create MCP server factory function. With a paywall (x402), a tool call to a public domain from
+// anyone but a licensee — whom requireLicence marks on the request as `auth` — must be paid for.
+const createServer = (paywall = null, { priced = Boolean(paywall) } = {}) => {
+  const mustPay = (extra) => paywall && !extra?.authInfo?.extra?.licensee && paywall.charges(extra?.requestInfo?.headers);
   const server = new Server(
     {
       name: 'chains-api',
@@ -41,7 +41,7 @@ const createServer = (paywall = null) => {
         tools: {},
       },
       // Shown to MCP clients on connect: the same terms as the REST API.
-      instructions: `Data from chains-api, under its terms of use (${TERMS_URL}): free for personal and hobby use, academic research and teaching, and non-profit or open-source projects that earn nothing from it. Any commercial or for-profit use, including use that earns revenue, requires a licence: ${LICENSING_CONTACT}.${paywall ? ` Without a licence, each tool call is paid with x402: ${paywall.toolMeta['agents-x402/priceUSD']} USD in USDC.` : ''}`,
+      instructions: `Data from chains-api, under its terms of use (${TERMS_URL}): free for personal and hobby use, academic research and teaching, and non-profit or open-source projects that earn nothing from it. Any commercial or for-profit use, including use that earns revenue, requires a licence: ${LICENSING_CONTACT}.${priced ? ` Without a licence, each tool call is paid with x402: ${paywall.toolMeta['agents-x402/priceUSD']} USD in USDC.` : ''}`,
     }
   );
 
@@ -182,7 +182,7 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
         };
 
         // Connect the transport to the MCP server
-        const server = createServer(paywall);
+        const server = createServer(paywall, { priced: paywall?.charges(req.headers) });
         await server.connect(transport);
         await transport.handleRequest(req, res, req.body);
         return;

@@ -182,7 +182,9 @@ export const PUBLIC_ORIGIN = parseOriginEnv('PUBLIC_ORIGIN');
 
 // x402 pay-per-call for MCP tools (src/auth/x402.js). Off by default. When on, a client without
 // a licence can still connect, and pays X402_PRICE_USD in USDC per tool call, verified and
-// settled by the facilitator; a licensee (key or OAuth token) never pays.
+// settled by the facilitator; a licensee (key or OAuth token) never pays. Only requests to the
+// X402_DOMAINS hosts are charged (default: PUBLIC_ORIGIN's host), so in-cluster callers, which
+// address the Service directly, use the tools free; with neither set, every request is charged.
 export const X402_ENABLED = parseBooleanEnv('X402_ENABLED', false);
 function parseX402() {
   if (!X402_ENABLED) return {};
@@ -204,7 +206,9 @@ function parseX402() {
     console.error(`X402_ENABLED is set but: ${problems.join('; ')}.`);
     process.exit(1);
   }
-  return { payTo, network, priceUsd, facilitatorUrl: facilitator.href.replace(/\/+$/, '') };
+  const domains = parseStringEnv('X402_DOMAINS', PUBLIC_ORIGIN ? new URL(PUBLIC_ORIGIN).hostname : '')
+    .split(',').map(d => d.trim().toLowerCase()).filter(Boolean);
+  return { payTo, network, priceUsd, facilitatorUrl: facilitator.href.replace(/\/+$/, ''), domains };
 }
 export const X402 = parseX402();
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 
-const KEYS = ['X402_ENABLED', 'X402_PAY_TO', 'X402_NETWORK', 'X402_PRICE_USD', 'X402_FACILITATOR_URL'];
+const KEYS = ['X402_ENABLED', 'X402_PAY_TO', 'X402_NETWORK', 'X402_PRICE_USD', 'X402_FACILITATOR_URL', 'X402_DOMAINS', 'PUBLIC_ORIGIN'];
 const saved = Object.fromEntries(KEYS.map(k => [k, process.env[k]]));
 
 async function load(env) {
@@ -24,7 +24,13 @@ describe('x402 config', () => {
 
   it('defaults to Base Sepolia and the x402.org facilitator', async () => {
     const config = await load({ X402_ENABLED: 'true', X402_PAY_TO: '0x000000000000000000000000000000000000dEaD' });
-    expect(config.X402).toEqual({ payTo: '0x000000000000000000000000000000000000dEaD', network: 'eip155:84532', priceUsd: 0.001, facilitatorUrl: 'https://x402.org/facilitator' });
+    expect(config.X402).toEqual({ payTo: '0x000000000000000000000000000000000000dEaD', network: 'eip155:84532', priceUsd: 0.001, facilitatorUrl: 'https://x402.org/facilitator', domains: [] });
+  });
+
+  it('charges only the public origin\'s host unless X402_DOMAINS says otherwise', async () => {
+    const env = { X402_ENABLED: 'true', X402_PAY_TO: '0x000000000000000000000000000000000000dEaD', PUBLIC_ORIGIN: 'https://chains-api.johnaverse.cc' };
+    expect((await load(env)).X402.domains).toEqual(['chains-api.johnaverse.cc']);
+    expect((await load({ ...env, X402_DOMAINS: ' Chains-API.johnaverse.cc, mcp.example.com ' })).X402.domains).toEqual(['chains-api.johnaverse.cc', 'mcp.example.com']);
   });
 
   it('stops the process on a setting it cannot use', async () => {

@@ -41,6 +41,12 @@ function decodePayment(token) {
   }
 }
 
+/** The host a request was addressed to, without its port. */
+function requestHost(headers) {
+  const host = String(header(headers, 'host') ?? '').trim().toLowerCase();
+  return host.startsWith('[') ? host.slice(0, host.indexOf(']') + 1) : host.replace(/:\d+$/, '');
+}
+
 function header(headers, name) {
   const value = headers?.[name];
   return Array.isArray(value) ? value[0] : value;
@@ -58,10 +64,11 @@ export function paymentToken(params, extra) {
  * @param {string} cfg.network         CAIP-2 network id
  * @param {number} cfg.priceUsd        price of one tool call
  * @param {string} cfg.facilitatorUrl  x402 facilitator (verify + settle)
+ * @param {string[]} [cfg.domains]    hosts whose requests are charged; empty charges every request
  * @param {string} [cfg.alternative]   how to use the tools without paying, told to a client that hasn't paid
  * @param {object} [cfg.resourceServer] an x402ResourceServer stand-in (tests)
  */
-export function x402Paywall({ payTo, network, priceUsd, facilitatorUrl, alternative = '', resourceServer = null }) {
+export function x402Paywall({ payTo, network, priceUsd, facilitatorUrl, domains = [], alternative = '', resourceServer = null }) {
   // The facilitator's supported kinds are read once; a failure is retried on the next call.
   let ready = null;
   const server = () => (ready ??= (async () => {
@@ -85,6 +92,13 @@ export function x402Paywall({ payTo, network, priceUsd, facilitatorUrl, alternat
   }
 
   return {
+    /**
+     * Whether a request to these headers is charged: only one addressed to a public domain. The
+     * gateway routes those hostnames alone to this service and passes the Host on, so a request
+     * from outside always names one; in-cluster callers address the Service and go free.
+     */
+    charges: (headers) => !domains.length || domains.includes(requestHost(headers)),
+
     /** Shown on each tool in tools/list (Cloudflare's client adds the price to the description). */
     toolMeta: { 'agents-x402/paymentRequired': true, 'agents-x402/priceUSD': priceUsd },
 

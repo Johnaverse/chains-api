@@ -969,8 +969,10 @@ With `X402_ENABLED=true`, MCP tool calls can also be paid for with [x402](https:
 | `X402_NETWORK` | `eip155:84532` | CAIP-2 network: Base Sepolia (testnet) by default, `eip155:8453` for Base |
 | `X402_PRICE_USD` | `0.001` | Price of one tool call, in USD (paid in USDC) |
 | `X402_FACILITATOR_URL` | `https://x402.org/facilitator` | Facilitator that verifies and settles payments; this one serves testnets, so Base mainnet needs one that supports it |
+| `X402_DOMAINS` | `PUBLIC_ORIGIN`'s host | Comma-separated hostnames whose requests are charged; with neither set, every request is |
 
 How it behaves:
+- Only requests addressed to an `X402_DOMAINS` host are charged (by the `Host` header, port ignored). The gateway routes only the public hostname to this service and keeps its `Host`, so traffic from outside is always charged, while in-cluster callers that address the Service (`chains-api.chains-api.svc:3001`) or a pod use the tools free and see no prices.
 - A client without a licence can connect (`initialize`, `tools/list`) without paying; `tools/list` marks each tool with `_meta["agents-x402/paymentRequired"]` and `["agents-x402/priceUSD"]`, and the server instructions state the price.
 - An unpaid `tools/call` gets a tool result with `isError: true` whose `structuredContent` (also `content[0].text` and `_meta["x402/error"]`) is the x402 `PaymentRequired`: scheme `exact`, network, amount, asset, `payTo`. The text also names the licence route.
 - The client signs a payment and repeats the call with it in `params._meta["x402/payment"]` (object or base64 JSON; a `PAYMENT-SIGNATURE` or `X-PAYMENT` header also works). The facilitator verifies it, the tool runs, and the payment is settled only if the tool succeeded; the receipt is in `_meta["x402/payment-response"]`. If settlement fails, the result is withheld.
