@@ -81,7 +81,26 @@ describe('observeAuthorization', () => {
   });
 
   it('sees a payment to us when two endpoints find the same transaction', async () => {
-    expect(await observe([node({ transfer: { block: 6000 } }), node({ transfer: { block: 6000 } }), node()])).toEqual({ state: 'paid', transaction: TX });
+    // With the time of its block (block n at 2n), for the caller to tell when it was made.
+    expect(await observe([node({ transfer: { block: 6000 } }), node({ transfer: { block: 6000 } }), node()])).toEqual({ state: 'paid', transaction: TX, time: 12_000 });
+  });
+
+  describe('two endpoints that say it paid us, against a third', () => {
+    const paidAt = () => node({ transfer: { block: 6000 } });
+    // Spent, but no use of it anywhere in the range it read: cancelled (AuthorizationCanceled), say.
+    const spentNoUse = () => async (method, params) => (method === 'eth_call' ? `0x${'1'.padStart(64, '0')}` : node()(method, params));
+    const noLogs = (n) => async (method, params) => (method === 'eth_getLogs' ? Promise.reject(new Error('limit exceeded')) : n(method, params));
+
+    it('is not believed when the third read the authorization\'s use otherwise', async () => {
+      // Endpoints come from a public registry: two of the three could be an attacker's.
+      expect(await observe([paidAt(), paidAt(), spentNoUse()])).toEqual({ state: 'unknown' });
+      expect(await observe([paidAt(), paidAt(), node({ transfer: { block: 6000, to: ELSEWHERE } })])).toEqual({ state: 'unknown' });
+    });
+
+    it('is believed when the third only lags, or failed to search its logs', async () => {
+      expect(await observe([paidAt(), paidAt(), node()])).toMatchObject({ state: 'paid', transaction: TX });
+      expect(await observe([paidAt(), paidAt(), noLogs(spentNoUse())])).toMatchObject({ state: 'paid', transaction: TX });
+    });
   });
 
   describe('a pending settlement that went through, past the authorization\'s expiry', () => {
@@ -100,7 +119,7 @@ describe('observeAuthorization', () => {
 
     it('is recovered when two endpoints show it', async () => {
       const res = await observe([node({ head: 4980, lag: 0 }), node({ transfer: paidAt }), node({ transfer: paidAt })], { transaction: TX });
-      expect(res).toEqual({ state: 'paid', transaction: TX });
+      expect(res).toMatchObject({ state: 'paid', transaction: TX });
       expect(rpc.mock.calls.some(c => c[1] === 'eth_getLogs')).toBe(false);
     });
 
@@ -184,8 +203,8 @@ describe('observeAuthorization', () => {
     it('credits a transfer to us only to the authorization it belongs to', async () => {
       // Ours went elsewhere; the payer's other authorization, in the same transaction, paid us.
       expect(await observe(both([used(NONCE), moved(ELSEWHERE), used(OTHER_NONCE), moved(PAY_TO)]))).toEqual({ state: 'other' });
-      expect(await observe(both([used(OTHER_NONCE), moved(ELSEWHERE), used(NONCE), moved(PAY_TO)]))).toEqual({ state: 'paid', transaction: TX });
-      expect(await observe(both([used(NONCE), moved(PAY_TO), used(OTHER_NONCE), moved(PAY_TO)]))).toEqual({ state: 'paid', transaction: TX });
+      expect(await observe(both([used(OTHER_NONCE), moved(ELSEWHERE), used(NONCE), moved(PAY_TO)]))).toMatchObject({ state: 'paid', transaction: TX });
+      expect(await observe(both([used(NONCE), moved(PAY_TO), used(OTHER_NONCE), moved(PAY_TO)]))).toMatchObject({ state: 'paid', transaction: TX });
     });
 
     it('stays unknown when its transfers cannot be told apart', async () => {
@@ -197,7 +216,7 @@ describe('observeAuthorization', () => {
   it('searches back in ranges of at most 1000 blocks, over 5000', async () => {
     const transfer = { block: 9000 - 3500 };
     const urls = network(node({ transfer }), node({ transfer }));
-    expect(await observeAuthorization(P, { urls })).toEqual({ state: 'paid', transaction: TX });
+    expect(await observeAuthorization(P, { urls })).toMatchObject({ state: 'paid', transaction: TX });
     const ranges = rpc.mock.calls.filter(c => c[0] === urls[0] && c[1] === 'eth_getLogs').map(c => Number(c[2][0].toBlock) - Number(c[2][0].fromBlock) + 1);
     expect(ranges).toEqual([1000, 1000, 1000, 1000]);
     // Spent longer ago than the window: unknown, and never unused.

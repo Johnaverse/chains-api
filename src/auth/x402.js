@@ -47,6 +47,10 @@ const PURGE_EVERY_MS = 60 * 60 * 1000;
 // end so, e.g. invalid_exact_evm_nonce_already_used.
 const PENDING_REASON = 'settlement_pending';
 const NONCE_USED = /nonce_already_used$/;
+// A transfer the chain shows paying us is credited to a payment only when it was mined after the
+// payment was first claimed here (block time against this clock, give or take this much): an
+// earlier one paid for something else — the same authorization used before, elsewhere.
+const CLOCK_SKEW_S = 30;
 
 const sha256 = (s) => createHash('sha256').update(s).digest('hex');
 
@@ -157,11 +161,13 @@ function settleOutcome(result, err, SettleError) {
  * @param {object} [cfg.resourceServer] an x402ResourceServer stand-in (tests)
  * @param {object} [cfg.ledger]         payment ledger (x402Ledger.js)
  * @param {Function} [cfg.observe]      on-chain check of an authorization (x402Chain.js)
+ * @param {string[]} [cfg.rpcUrls]     trusted RPC endpoints of the payment network for that check;
+ *                                    empty: the registry's healthy endpoints
  * @param {() => number} [cfg.now]
  */
 export function x402Paywall({
   payTo, network, priceUsd, facilitatorUrl, domains = [], alternative = '',
-  resourceServer = null, ledger = x402Ledger(), observe = observeAuthorization, now = Date.now
+  resourceServer = null, ledger = x402Ledger(), observe = observeAuthorization, rpcUrls = [], now = Date.now
 }) {
   // The facilitator's supported kinds are read once; a failure is retried after RETRY_AFTER_MS.
   let ready = null;
@@ -272,8 +278,15 @@ export function x402Paywall({
     let proven = false;
     if (outcome.kind === 'nonce_used' || (c.recovering && outcome.kind !== 'settled')) {
       proven = true;
-      const seen = await observe({ network: rec.network, asset: rec.asset, payer: rec.payer, nonce: rec.nonce, payTo: rec.payTo, amount: rec.amount, validBefore: rec.validBefore, transaction: outcome.transaction ?? rec.transaction });
-      if (seen.state === 'paid') outcome = { kind: 'settled', transaction: seen.transaction };
+      const p = { network: rec.network, asset: rec.asset, payer: rec.payer, nonce: rec.nonce, payTo: rec.payTo, amount: rec.amount, validBefore: rec.validBefore, transaction: outcome.transaction ?? rec.transaction };
+      const seen = await (rpcUrls.length ? observe(p, { urls: rpcUrls }) : observe(p));
+      // A transfer that paid us counts for this payment only if it came after the payment was
+      // claimed here; one before paid for another use of the same authorization (another
+      // deployment, or a facilitator that let a spent one through verification).
+      const after = seen.state === 'paid' && seen.time >= rec.createdAt / 1000 - CLOCK_SKEW_S;
+      const before = seen.state === 'paid' && seen.time < rec.createdAt / 1000 - CLOCK_SKEW_S;
+      if (after) outcome = { kind: 'settled', transaction: seen.transaction };
+      else if (before) outcome = { kind: 'refused', reason: 'it was spent before this call took it' };
       else if (seen.state === 'other') outcome = { kind: 'refused', reason: 'its nonce was spent on another transfer' };
       else if (seen.state === 'expired_unused') outcome = { kind: 'refused', reason: 'it expired unused' };
       else outcome = { kind: 'unresolved', transaction: outcome.transaction ?? rec.transaction };

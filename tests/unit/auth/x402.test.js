@@ -90,7 +90,9 @@ function fakeServer({ valid = true, initFails = 0, settleAs = [], verifyFails = 
   };
   // What the chain shows for an authorization: the facilitator's own record of spent nonces.
   // Unspent proves nothing by itself (a node may lag): that takes an expired, finalized view, which tests set.
-  s.observe = vi.fn(async ({ nonce }) => (chain.has(nonce) ? { state: 'paid', transaction: chain.get(nonce) } : { state: 'unknown' }));
+  // A transfer's block time (unix seconds) is `minedAt`: by default after every claim in the tests.
+  s.minedAt = Infinity;
+  s.observe = vi.fn(async ({ nonce }) => (chain.has(nonce) ? { state: 'paid', transaction: chain.get(nonce), time: s.minedAt } : { state: 'unknown' }));
   return s;
 }
 const paywallOf = (s, extra = {}) => x402Paywall({ ...CFG, resourceServer: s, ledger: memoryLedger(), observe: s.observe, ...extra });
@@ -318,6 +320,49 @@ describe('x402Paywall', () => {
       expect(late.structuredContent.error).toBe('Settlement failed: it expired unused');
       expect(expired.observe).toHaveBeenLastCalledWith(expect.objectContaining({ validBefore: VALID_BEFORE }));
       expect(expired.chain.size).toBe(0);
+    });
+
+    describe('when the facilitator calls a payment spent on its first use', () => {
+      // A facilitator that let a spent authorization through verification, or the same one used at
+      // the same time against another deployment's ledger: its transfer paid us, but for that use.
+      function spentAlready(minedAt) {
+        const s = fakeServer();
+        s.chain.set(NONCE, '0xold');
+        s.minedAt = minedAt;
+        s.verifyPayment.mockResolvedValueOnce({ isValid: true, payer: authorization().from });
+        return s;
+      }
+      const at = (ms) => () => ms;
+
+      it('credits no transfer mined before the payment was claimed here', async () => {
+        // Claimed at 1000 s; mined a minute earlier, beyond the 30 s allowed for clock skew.
+        const s = spentAlready(1_000 - 60);
+        const res = await paywallOf(s, { now: at(1_000_000) }).call(TOOL, PAYMENT, () => ok);
+        expect(res.structuredContent.error).toBe('Settlement failed: it was spent before this call took it');
+        expect(asksForPayment(res)).toBe(true);
+        expect(res.content).not.toEqual(ok.content);
+      });
+
+      it('credits one mined after the claim (a facilitator that retried its own submission)', async () => {
+        const res = await paywallOf(spentAlready(1_000 - 5), { now: at(1_000_000) }).call(TOOL, PAYMENT, () => ok);
+        expect(res.content).toEqual(ok.content);
+        expect(res._meta['x402/payment-response']).toMatchObject({ success: true, transaction: '0xold' });
+      });
+
+      it('stays unresolved when the block time is unknown', async () => {
+        const res = await paywallOf(spentAlready(Number.NaN), { now: at(1_000_000) }).call(TOOL, PAYMENT, () => ok);
+        expect(asksForPayment(res)).toBe(false);
+        expect(res._meta['x402/payment-response']).toMatchObject({ success: false, status: 'unresolved' });
+      });
+    });
+
+    it('checks the chain through the trusted RPC endpoints when they are set', async () => {
+      const s = fakeServer({ settleAs: ['lostAfter'] });
+      const urls = ['https://a.rpc.test', 'https://b.rpc.test'];
+      const paywall = paywallOf(s, { rpcUrls: urls });
+      await paywall.call(TOOL, PAYMENT, () => ok);
+      expect((await paywall.call(TOOL, PAYMENT, () => ok)).content).toEqual(ok.content);
+      expect(s.observe).toHaveBeenLastCalledWith(expect.objectContaining({ nonce: NONCE }), { urls });
     });
 
     it('never asks a payer whose pending settlement went through to pay again, while the chain cannot prove otherwise', async () => {

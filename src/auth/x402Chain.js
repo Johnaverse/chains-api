@@ -9,7 +9,9 @@ import { logger } from '../util/logger.js';
  * instead of asking for another payment.
  *
  * Answers one of:
- *   { state: 'paid', transaction }  the authorization moved at least `amount` from payer to payTo
+ *   { state: 'paid', transaction, time }
+ *                                   the authorization moved at least `amount` from payer to payTo,
+ *                                   in a block of that time (unix seconds; NaN when unknown)
  *   { state: 'other' }              its nonce was spent, in a finalized block, on a transfer that
  *                                   did not pay us
  *   { state: 'expired_unused' }     it can never be used: unspent at a finalized block whose time
@@ -18,7 +20,10 @@ import { logger } from '../util/logger.js';
  *
  * The endpoints are public and may lag, so the answers that would let a caller be asked to pay
  * again need proof that no node can give alone:
- *  - 'paid' and 'other' need two endpoints that agree on the same transaction;
+ *  - 'paid' and 'other' need two endpoints that agree on the same transaction; 'paid' also needs
+ *    no endpoint to show the authorization used otherwise (another transaction or outcome, or
+ *    spent with no use in the range it searched) — endpoints come from a public registry, so two
+ *    could be an attacker's;
  *  - 'expired_unused' needs two endpoints that have both finalized the same block (number and
  *    hash), past the authorization's expiry, with the nonce unspent at that block — not "unspent
  *    at latest", which a lagging node says of a transfer it has not seen yet;
@@ -67,8 +72,9 @@ function reader(url, { asset, payer, nonce }) {
 
 /**
  * What one endpoint shows of the authorization's use: { use, finalized }. `use` is null (no sign
- * of use), { spent: true } (spent, transaction not found), or { state: 'paid' | 'other',
- * transaction, blockNumber }. `finalized` is its finalized head, or null. Throws when the endpoint
+ * of use), { spent: true } (spent, transaction not found; `searched` when its whole log range was
+ * read and holds no use), or { state: 'paid' | 'other', transaction, blockNumber } (with the
+ * block's `time` when paid). `finalized` is its finalized head, or null. Throws when the endpoint
  * cannot answer.
  */
 async function useAt(url, p) {
@@ -93,13 +99,20 @@ async function useAt(url, p) {
     // A receipt without a block number cannot be shown final (NaN compares false).
     return { state: paid ? 'paid' : 'other', transaction: hash, blockNumber: num(receipt.blockNumber) };
   };
+  // When a transfer paid us, the time of its block: a caller credits only a transfer made after
+  // it claimed the payment.
+  const timed = async (use) => {
+    if (use.state !== 'paid') return use;
+    const block = Number.isFinite(use.blockNumber) ? await call('eth_getBlockByNumber', [hexBlock(use.blockNumber), false]).catch(() => null) : null;
+    return { ...use, time: block?.timestamp ? num(block.timestamp) : Number.NaN };
+  };
   const finalized = await call('eth_getBlockByNumber', ['finalized', false]).catch(() => null);
 
   // A known transaction (a pending settlement) is read before any state, so that a node which
   // has its receipt is heard even when its state, or another node's, has not caught up.
   if (p.transaction) {
     const receipt = await call('eth_getTransactionReceipt', [p.transaction]);
-    if (receipt?.logs?.some(usedIn)) return { use: judge(p.transaction, receipt), finalized };
+    if (receipt?.logs?.some(usedIn)) return { use: await timed(judge(p.transaction, receipt)), finalized };
   }
   if (!await spentAt('latest')) return { use: null, finalized };
   // Spent: from here on this endpoint is a sign of use, whatever else it fails to answer, so a
@@ -111,13 +124,13 @@ async function useAt(url, p) {
       const logs = await call('eth_getLogs', [{ address: p.asset, topics: [AUTHORIZATION_USED, word(p.payer), word(p.nonce)], fromBlock: hexBlock(from), toBlock: hexBlock(to) }]);
       if (logs.length) {
         const hash = logs[0].transactionHash;
-        return { use: judge(hash, await call('eth_getTransactionReceipt', [hash])), finalized };
+        return { use: await timed(judge(hash, await call('eth_getTransactionReceipt', [hash]))), finalized };
       }
     }
   } catch {
     return { use: { spent: true }, finalized };
   }
-  return { use: { spent: true }, finalized }; // spent, longer ago than the window
+  return { use: { spent: true, searched: true }, finalized }; // spent, with no use in the window
 }
 
 /**
@@ -172,7 +185,15 @@ export async function observeAuthorization(p, { urls = rpcUrlsFor(Number(String(
     return [...votes.entries()].find(([, v]) => v.length >= AGREEMENT);
   };
   const paid = agreeOn('paid');
-  if (paid) return { state: 'paid', transaction: paid[0] };
+  if (paid) {
+    const [transaction, votes] = paid;
+    // Any endpoint that read the authorization's use differently disputes it: the answer stays
+    // unknown. (One that lags, or failed to search its logs, says nothing against it.)
+    const disputed = seen.some(a => a.use && (a.use.state ? !(a.use.state === 'paid' && a.use.transaction === transaction) : a.use.searched));
+    if (disputed) return { state: 'unknown' };
+    const times = votes.map(a => a.use.time).filter(Number.isFinite);
+    return { state: 'paid', transaction, time: times.length ? Math.min(...times) : Number.NaN };
+  }
   // Any sign of use — paid, spent, or a transfer elsewhere not yet agreed — rules out both refusals
   // below, except 'other' itself when two endpoints show it final and none shows it paid us.
   if (seen.some(a => a.use?.state === 'paid' || a.use?.spent)) return { state: 'unknown' };

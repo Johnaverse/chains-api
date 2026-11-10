@@ -198,6 +198,10 @@ function parseX402() {
   try { facilitator = new URL(facilitatorUrl); } catch { facilitator = null; }
   const domains = parseStringEnv('X402_DOMAINS', PUBLIC_ORIGIN ? new URL(PUBLIC_ORIGIN).hostname : '')
     .split(',').map(d => d.trim().toLowerCase().replace(/\.$/, '')).filter(Boolean);
+  // Trusted RPC endpoints of the payment network, for the on-chain check of a lost settlement.
+  // Unset: the registry's fastest healthy endpoints, which come from public lists anyone can add to.
+  const rpcUrls = parseStringEnv('X402_RPC_URLS', '').split(',').map(u => u.trim()).filter(Boolean);
+  const badRpcUrls = rpcUrls.filter(u => { try { return !['https:', 'http:'].includes(new URL(u).protocol); } catch { return true; } });
   // Bare hostnames: one with a scheme, port or path would never match a request, leaving every call free.
   const badDomains = domains.filter(d => !d.split('.').every(label => /^[a-z0-9-]{1,63}$/.test(label) && !label.startsWith('-') && !label.endsWith('-')));
   const problems = [
@@ -208,13 +212,16 @@ function parseX402() {
     // USDC has 6 decimals: a smaller price would be charged as 0.
     !(Number.isFinite(priceUsd) && priceUsd >= 0.000001) && `X402_PRICE_USD "${rawPrice}" (expected at least 0.000001)`,
     facilitator?.protocol !== 'https:' && `X402_FACILITATOR_URL "${facilitatorUrl}" (expected an https URL)`,
-    badDomains.length > 0 && `X402_DOMAINS "${badDomains.join(', ')}" (expected bare hostnames such as chains-api.example.com)`
+    badDomains.length > 0 && `X402_DOMAINS "${badDomains.join(', ')}" (expected bare hostnames such as chains-api.example.com)`,
+    badRpcUrls.length > 0 && `X402_RPC_URLS "${badRpcUrls.join(', ')}" (expected http(s) URLs)`,
+    // The check needs two endpoints to agree; a single one could never confirm a payment.
+    rpcUrls.length === 1 && `X402_RPC_URLS has one endpoint (expected at least two, which must agree)`
   ].filter(Boolean);
   if (problems.length) {
     console.error(`X402_ENABLED is set but: ${problems.join('; ')}.`);
     process.exit(1);
   }
-  return { payTo, network, priceUsd, facilitatorUrl: facilitator.href.replace(/\/+$/, ''), domains };
+  return { payTo, network, priceUsd, facilitatorUrl: facilitator.href.replace(/\/+$/, ''), domains, rpcUrls };
 }
 export const X402 = parseX402();
 

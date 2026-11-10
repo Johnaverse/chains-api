@@ -970,6 +970,7 @@ With `X402_ENABLED=true`, MCP tool calls can also be paid for with [x402](https:
 | `X402_PRICE_USD` | `0.001` | Price of one tool call, in USD (paid in USDC); at least `0.000001`, the smallest USDC unit |
 | `X402_FACILITATOR_URL` | `https://x402.org/facilitator` | Facilitator that verifies and settles payments; this one serves testnets, so Base mainnet needs one that supports it |
 | `X402_DOMAINS` | `PUBLIC_ORIGIN`'s host | Comma-separated bare public hostnames, always charged (a scheme, port or path stops startup); with neither set, every request is |
+| `X402_RPC_URLS` | (registry) | Comma-separated http(s) RPC endpoints of the payment network that you trust, at least two, for the on-chain check of a lost settlement. Unset: the registry's three fastest healthy endpoints, which come from public lists anyone can add to. Recommended for production |
 
 How it behaves:
 - **Where to connect.** Payers use `/mcp/pay` (e.g. `https://chains-api.johnaverse.cc/mcp/pay`). `/mcp` is unchanged: with `PUBLIC_ORIGIN` set, a request without a token still gets the `401` that starts OAuth, so licensees' connectors (claude.ai, the Cloudflare MCP Portal with OAuth → Automatic) keep signing in, and the `401` names `/mcp/pay` for anyone who would rather pay. Without `PUBLIC_ORIGIN` there are no licences, and `/mcp` charges too.
@@ -991,12 +992,14 @@ How it behaves:
 - **A settlement whose outcome is lost is never charged twice.** This covers the facilitator not answering, the answer being lost after the transfer happened, and `settlement_pending`. In each case the result is withheld, and the answer is not a `PaymentRequired`: it has no `accepts`, so an x402 client does not sign a second payment. Its `_meta["x402/payment-response"]` is `{ success: false, status: "unresolved" }`, with the transaction hash when known, and its text says to retry with the same payment.
   - That retry runs the tool first, as a first attempt does: a payment is settled only for a successful answer, including when it is taken over from a pod that stopped. It then settles the same authorization again, which can move funds only once.
   - Any outcome of that settlement other than success (a refusal, an expired authorization, a spent nonce, no answer) is checked on-chain before it is believed, because the earlier attempt may already have paid.
-  - The token contract is read on-chain through the chain's three fastest healthy RPC endpoints from this registry:
+  - The token contract is read on-chain through the endpoints in `X402_RPC_URLS` (the first three), or else the chain's three fastest healthy RPC endpoints from this registry:
     - first the settlement's transaction receipt, when its hash is known, so a node that has it is heard even if others lag;
     - then `authorizationState` at the latest block, and `AuthorizationUsed` logs, searched back over 5000 blocks in ranges of at most 1000 (the cap many public endpoints set);
     - and the `Transfer` in the transaction found. A missing receipt counts as unknown, never as a transfer elsewhere.
     - A transfer counts for one authorization only. When a transaction uses several of the payer's authorizations (a batch), each is matched to the `Transfer` the token emits right after its `AuthorizationUsed`; a batch that can't be read that way stays unknown.
-  - **Paid:** if two endpoints show the same transaction paying at least the price to `payTo`, the call is served with it as its receipt (`recovered`).
+  - **Paid:** if two endpoints show the same transaction paying at least the price to `payTo`, and no endpoint read the authorization's use otherwise, the call is served with it as its receipt (`recovered`).
+    - "Otherwise" is another transaction or outcome, or the nonce spent with no use in the range searched (a cancelled authorization). The registry's endpoints come from public lists, so two of them could be an attacker's, voting "paid" for a payment they cancelled. An endpoint that lags, or fails its log search, disputes nothing.
+    - The transfer counts for this payment only if its block came after the payment was first claimed here (30 s allowed for clock skew). An earlier one paid for another use of the same authorization (another deployment's ledger, or a facilitator that let a spent authorization through verification): the payment is refused. When the block's time can't be read, the payment stays unresolved.
   - **Refused, so a new payment is asked for, only on proof that ours never happened:**
     - the nonce spent on a transfer that didn't pay us, shown by two endpoints in a finalized block; or
     - the authorization unusable for good: two endpoints have both finalized the same block (number and hash) whose time is past its `validBefore`, and show the nonce unspent at that block. An endpoint that names no finalized block, or hasn't finalized that one, has no vote.
