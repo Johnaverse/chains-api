@@ -286,8 +286,10 @@ export function x402Paywall({
       // A transfer that paid us counts for this payment only if it came after the payment was
       // claimed here; one before paid for another use of the same authorization (another
       // deployment, or a facilitator that let a spent one through verification).
-      const after = seen.state === 'paid' && seen.time >= rec.createdAt / 1000 - CLOCK_SKEW_S;
-      const before = seen.state === 'paid' && seen.time < rec.createdAt / 1000 - CLOCK_SKEW_S;
+      // Every agreeing endpoint must date it on the same side; any doubt leaves it unresolved.
+      const claimedAt = rec.createdAt / 1000 - CLOCK_SKEW_S;
+      const after = seen.state === 'paid' && seen.time >= claimedAt;
+      const before = seen.state === 'paid' && (seen.latestTime ?? seen.time) < claimedAt;
       if (after) outcome = { kind: 'settled', transaction: seen.transaction };
       else if (before) outcome = { kind: 'refused', reason: 'it was spent before this call took it' };
       else if (seen.state === 'other') outcome = { kind: 'refused', reason: 'its nonce was spent on another transfer' };

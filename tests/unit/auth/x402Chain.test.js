@@ -83,7 +83,7 @@ describe('observeAuthorization', () => {
 
   it('sees a payment to us when two endpoints find the same transaction', async () => {
     // With the time of its block (block n at 2n), for the caller to tell when it was made.
-    expect(await observe([node({ transfer: { block: 6000 } }), node({ transfer: { block: 6000 } }), node()])).toEqual({ state: 'paid', transaction: TX, time: 12_000 });
+    expect(await observe([node({ transfer: { block: 6000 } }), node({ transfer: { block: 6000 } }), node()])).toEqual({ state: 'paid', transaction: TX, time: 12_000, latestTime: 12_000 });
   });
 
   describe('two endpoints that say it paid us, against a third', () => {
@@ -102,6 +102,20 @@ describe('observeAuthorization', () => {
       expect(await observe([paidAt(), paidAt(), node()])).toMatchObject({ state: 'paid', transaction: TX });
       expect(await observe([paidAt(), paidAt(), noLogs(spentNoUse())])).toMatchObject({ state: 'paid', transaction: TX });
     });
+  });
+
+  it('gives the block time as the agreeing endpoints read it: their earliest and latest, or NaN when one cannot say', async () => {
+    const dated = (n, at) => async (method, params) => {
+      const r = await n(method, params);
+      return method === 'eth_getBlockByNumber' && params[0] === hex(6000) ? { ...r, timestamp: hex(at) } : r;
+    };
+    const paidAt = () => node({ transfer: { block: 6000 } });
+    expect(await observe([dated(paidAt(), 100), paidAt(), node()])).toMatchObject({ state: 'paid', time: 100, latestTime: 12_000 });
+    const undated = (n) => async (method, params) => (method === 'eth_getBlockByNumber' && params[0] === hex(6000) ? Promise.reject(new Error('timeout')) : n(method, params));
+    const res = await observe([undated(paidAt()), paidAt(), node()]);
+    expect(res.state).toBe('paid');
+    expect(res.time).toBeNaN();
+    expect(res.latestTime).toBeNaN();
   });
 
   describe('the endpoints asked', () => {

@@ -349,6 +349,14 @@ describe('x402Paywall', () => {
         expect(res._meta['x402/payment-response']).toMatchObject({ success: true, transaction: '0xold' });
       });
 
+      it('stays unresolved when the agreeing endpoints date the transfer on both sides of the claim', async () => {
+        const s = spentAlready(Infinity);
+        s.observe.mockResolvedValueOnce({ state: 'paid', transaction: '0xold', time: 1_000 - 60, latestTime: 1_000 });
+        const res = await paywallOf(s, { now: at(1_000_000) }).call(TOOL, PAYMENT, () => ok);
+        expect(asksForPayment(res)).toBe(false);
+        expect(res._meta['x402/payment-response']).toMatchObject({ success: false, status: 'unresolved' });
+      });
+
       it('stays unresolved when the block time is unknown', async () => {
         const res = await paywallOf(spentAlready(Number.NaN), { now: at(1_000_000) }).call(TOOL, PAYMENT, () => ok);
         expect(asksForPayment(res)).toBe(false);

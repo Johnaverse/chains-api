@@ -9,9 +9,10 @@ import { logger } from '../util/logger.js';
  * instead of asking for another payment.
  *
  * Answers one of:
- *   { state: 'paid', transaction, time }
+ *   { state: 'paid', transaction, time, latestTime }
  *                                   the authorization moved at least `amount` from payer to payTo,
- *                                   in a block of that time (unix seconds; NaN when unknown)
+ *                                   in a block the agreeing endpoints date between `time` and
+ *                                   `latestTime` (unix seconds; NaN when any could not say)
  *   { state: 'other' }              its nonce was spent, in a finalized block, on a transfer that
  *                                   did not pay us
  *   { state: 'expired_unused' }     it can never be used: unspent at a finalized block whose time
@@ -206,8 +207,11 @@ export async function observeAuthorization(p, { urls = rpcUrlsFor(Number(String(
     // unknown. (One that lags, or failed to search its logs, says nothing against it.)
     const disputed = seen.some(a => a.use && (a.use.state ? !(a.use.state === 'paid' && a.use.transaction === transaction) : a.use.searched));
     if (disputed) return { state: 'unknown' };
-    const times = votes.map(a => a.use.time).filter(Number.isFinite);
-    return { state: 'paid', transaction, time: times.length ? Math.min(...times) : Number.NaN };
+    // The block's time as each agreeing endpoint reads it. A caller acts on it only when they all
+    // put it on the same side of its claim, so one endpoint cannot move a payment either way.
+    const times = votes.map(a => a.use.time);
+    const known = times.every(Number.isFinite);
+    return { state: 'paid', transaction, time: known ? Math.min(...times) : Number.NaN, latestTime: known ? Math.max(...times) : Number.NaN };
   }
   // Any sign of use — paid, spent, or a transfer elsewhere not yet agreed — rules out both refusals
   // below, except 'other' itself when two endpoints show it final and none shows it paid us.
