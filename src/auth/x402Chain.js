@@ -26,8 +26,10 @@ import { logger } from '../util/logger.js';
  *    spent with no use in the range it searched) — endpoints come from a public registry, so two
  *    could be an attacker's;
  *  - 'expired_unused' needs two endpoints that have both finalized the same block (number and
- *    hash), past the authorization's expiry, with the nonce unspent at that block — not "unspent
- *    at latest", which a lagging node says of a transfer it has not seen yet;
+ *    hash), whose timestamp is past the authorization's expiry, with the nonce unspent in that
+ *    block's own state (read by its hash, EIP-1898) — not "unspent at latest", which a lagging
+ *    node says of a transfer it has not seen yet, nor "unspent at that height", which another
+ *    backend of the same endpoint may say of another view;
  *  - a transfer counts for one authorization only: in a transaction that uses several of the
  *    payer's, each is matched to its own transfer, or the answer is unknown;
  *  - any sign that the authorization was used (a receipt, a spent nonce, a log) on any endpoint
@@ -49,7 +51,12 @@ const RPC_TIMEOUT_MS = 8000;
 const word = (hex) => `0x${hex.toLowerCase().replace(/^0x/, '').padStart(64, '0')}`;
 const sameAddress = (topic, address) => BigInt(topic) === BigInt(address);
 const hexBlock = (n) => `0x${n.toString(16)}`;
-const num = (hex) => Number.parseInt(hex, 16);
+// A JSON-RPC quantity as a number, or NaN for anything else (missing, malformed, too large): NaN
+// compares false, so every check on one must be written to pass only on a real value.
+const num = (hex) => {
+  const n = typeof hex === 'string' && /^0x[0-9a-f]+$/i.test(hex) ? Number.parseInt(hex, 16) : Number.NaN;
+  return Number.isSafeInteger(n) ? n : Number.NaN;
+};
 
 function normalUrl(url) {
   try { return new URL(url).href; } catch { return String(url); }
@@ -133,6 +140,7 @@ async function useAt(url, p) {
   // failed search for the transaction must not drop it from the vote.
   try {
     const latest = num(await call('eth_blockNumber', []));
+    if (!Number.isFinite(latest)) throw new Error('no block number');
     for (let to = latest; to > latest - LOG_WINDOW_BLOCKS && to >= 0; to -= LOG_CHUNK_BLOCKS) {
       const from = Math.max(0, to - LOG_CHUNK_BLOCKS + 1);
       const logs = await call('eth_getLogs', [{ address: p.asset, topics: [AUTHORIZATION_USED, word(p.payer), word(p.nonce)], fromBlock: hexBlock(from), toBlock: hexBlock(to) }]);
@@ -162,8 +170,13 @@ async function expiredUnused(urls, finalized, p) {
     try {
       const { call, spentAt } = reader(url, p);
       const block = await call('eth_getBlockByNumber', [hexBlock(at), false]);
-      if (!block?.hash || num(block.timestamp) <= p.validBefore) return null;
-      return (await spentAt(hexBlock(at))) ? null : block.hash;
+      // The block asked for, with a hash, at a time that is known and past the expiry: a missing
+      // or malformed timestamp proves nothing.
+      if (!/^0x[0-9a-f]{64}$/i.test(block?.hash ?? '') || num(block.number) !== at || !(num(block.timestamp) > p.validBefore)) return null;
+      // The state of that very block (EIP-1898), not of whatever a backend holds at its height:
+      // behind a load balancer, the header and a by-number read can come from different views.
+      // An endpoint that cannot read state by block hash has no vote.
+      return (await spentAt({ blockHash: block.hash, requireCanonical: true })) ? null : block.hash;
     } catch {
       return null;
     }

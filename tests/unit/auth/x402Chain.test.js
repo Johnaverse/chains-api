@@ -26,6 +26,9 @@ const TX = '0xabc';
 const used = (nonce) => ({ address: ASSET, topics: [AUTH_USED, topic(PAYER), nonce], transactionHash: TX });
 const moved = (to, value = 1000) => ({ address: ASSET, topics: [TRANSFER, topic(PAYER), topic(to)], data: `0x${value.toString(16).padStart(64, '0')}` });
 
+// 32-byte block hashes: the block number, under a first nibble that differs between forks.
+const blockHash = (n, fork = '') => `0x${fork ? 'f' : 'e'}${n.toString(16).padStart(63, '0')}`;
+
 /**
  * One RPC node's view of that chain. `transfer` is where the authorization was used: { block, to,
  * value, status } or none; the node knows blocks up to `head` and treats `head - lag` as
@@ -34,7 +37,8 @@ const moved = (to, value = 1000) => ({ address: ASSET, topics: [TRANSFER, topic(
 function node({ head = 9000, lag = 100, transfer = null, fork = '' } = {}) {
   const finalized = head - lag;
   const sees = (n) => transfer && transfer.block <= n;
-  const block = (n) => (n > head ? null : { number: hex(n), hash: `0xh${fork}${n}`, timestamp: hex(2 * n) });
+  const hashOf = (n) => blockHash(n, fork);
+  const block = (n) => (n > head ? null : { number: hex(n), hash: hashOf(n), timestamp: hex(2 * n) });
   const usedLog = used(NONCE);
   const receipt = () => ({
     status: transfer.status ?? '0x1', blockNumber: hex(transfer.block),
@@ -46,7 +50,10 @@ function node({ head = 9000, lag = 100, transfer = null, fork = '' } = {}) {
       case 'eth_blockNumber': return hex(head);
       case 'eth_getBlockByNumber': return block(params[0] === 'finalized' ? finalized : Number(params[0]));
       case 'eth_call': {
-        const at = params[1] === 'latest' ? head : Number(params[1]);
+        // By block hash (EIP-1898): only a block of this node's own chain.
+        const byHash = typeof params[1] === 'object' ? Number.parseInt(params[1].blockHash.slice(3), 16) : null;
+        if (byHash !== null && (params[1].requireCanonical !== true || params[1].blockHash !== hashOf(byHash) || byHash > head)) throw new Error('header not found');
+        const at = byHash ?? (params[1] === 'latest' ? head : Number(params[1]));
         return `0x${(sees(at) ? 1 : 0).toString(16).padStart(64, '0')}`;
       }
       case 'eth_getTransactionReceipt': return params[0] === TX && sees(head) ? receipt() : null;
@@ -162,9 +169,10 @@ describe('observeAuthorization', () => {
   describe('an authorization never used', () => {
     it('is expired_unused once two endpoints agree on a finalized block past its expiry, unspent there', async () => {
       expect(await observe([node(), node({ head: 8000 }), 'down'])).toEqual({ state: 'expired_unused' });
-      // Checked at the lower finalized head of the two (7900), the same block on both.
+      // Checked at the lower finalized head of the two (7900), the same block on both, and in
+      // that block's own state: by its hash, never by its height.
       const at = rpc.mock.calls.filter(c => c[1] === 'eth_call' && c[2][1] !== 'latest').map(c => c[2][1]);
-      expect(at).toEqual([hex(7900), hex(7900)]);
+      expect(at).toEqual(Array(2).fill({ blockHash: blockHash(7900), requireCanonical: true }));
     });
 
     it('stays unknown while the agreed finalized block is not past its expiry', async () => {
@@ -193,7 +201,51 @@ describe('observeAuthorization', () => {
     it('is not held back by a third endpoint that lags: the two ahead agree on a block both finalized', async () => {
       expect(await observe([node(), node({ head: 8000 }), node({ head: 4000 })])).toEqual({ state: 'expired_unused' });
       const at = rpc.mock.calls.filter(c => c[1] === 'eth_call' && c[2][1] !== 'latest').map(c => c[2][1]);
-      expect(at).toEqual([hex(7900), hex(7900)]);
+      expect(at).toEqual(Array(2).fill({ blockHash: blockHash(7900), requireCanonical: true }));
+    });
+
+    it.each([
+      ['missing', undefined],
+      ['malformed', 'not-a-quantity'],
+      ['not hex', '99999'],
+      ['beyond a safe integer', `0x${'f'.repeat(16)}`]
+    ])('stays unknown on a finalized block whose timestamp is %s', async (_label, timestamp) => {
+      // A block before the expiry (4900 < 5000) that cannot say when it was: no proof of expiry.
+      const undated = (n) => async (method, params) => {
+        const r = await n(method, params);
+        return method === 'eth_getBlockByNumber' && r ? { ...r, timestamp } : r;
+      };
+      expect(await observe([undated(node({ head: 5000 })), undated(node({ head: 5000 })), 'down'])).toEqual({ state: 'unknown' });
+    });
+
+    it('stays unknown on a block without a 32-byte hash, or that is not the block asked for', async () => {
+      const altered = (n, change) => async (method, params) => {
+        const r = await n(method, params);
+        return method === 'eth_getBlockByNumber' && params[0] !== 'finalized' && r ? { ...r, ...change } : r;
+      };
+      expect(await observe([altered(node(), { hash: '0xabc' }), altered(node(), { hash: '0xabc' })])).toEqual({ state: 'unknown' });
+      expect(await observe([altered(node(), { number: hex(1) }), altered(node(), { number: hex(1) })])).toEqual({ state: 'unknown' });
+    });
+
+    it('reads the state of the agreed block itself: a by-height read from another backend proves nothing', async () => {
+      // Behind one URL, the header comes from a backend that has the transfer (spent in block
+      // 4000) and a by-height state read from one that lacks it. By hash, the spend is seen.
+      const split = () => {
+        const has = node({ transfer: { block: 4000 } });
+        const lacks = node();
+        return async (method, params) => {
+          if (method === 'eth_getTransactionReceipt' || method === 'eth_getLogs') return lacks(method, params);
+          if (method === 'eth_call') return (typeof params[1] === 'object' ? has : lacks)(method, params);
+          return has(method, params);
+        };
+      };
+      expect(await observe([split(), split(), 'down'])).toEqual({ state: 'unknown' });
+    });
+
+    it('gives no vote to an endpoint that cannot read state by block hash', async () => {
+      const noHashSelector = (n) => async (method, params) => (method === 'eth_call' && typeof params[1] === 'object' ? Promise.reject(new Error('invalid block selector')) : n(method, params));
+      expect(await observe([noHashSelector(node()), noHashSelector(node()), 'down'])).toEqual({ state: 'unknown' });
+      expect(await observe([noHashSelector(node()), node(), node()])).toEqual({ state: 'expired_unused' });
     });
 
     it('is not taken for unused while any endpoint shows it used', async () => {
