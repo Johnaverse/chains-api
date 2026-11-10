@@ -17,7 +17,8 @@ import { logger } from './src/util/logger.js';
 import { clientKey } from './src/http/clientKey.js';
 import { mcpAccessLog } from './src/http/accessLog.js';
 import { mcpBearer, resourceMetadataUrl } from './src/auth/oauth.js';
-import { RATE_LIMIT_WINDOW_MS, MCP_RATE_LIMIT_MAX, MCP_MAX_SESSIONS, MCP_SESSION_IDLE_MS, DASHBOARD_ORIGINS, TERMS_URL, LICENSING_CONTACT, PUBLIC_ORIGIN } from './config.js';
+import { x402Paywall, paymentToken } from './src/auth/x402.js';
+import { RATE_LIMIT_WINDOW_MS, MCP_RATE_LIMIT_MAX, MCP_MAX_SESSIONS, MCP_SESSION_IDLE_MS, DASHBOARD_ORIGINS, TERMS_URL, LICENSING_CONTACT, PUBLIC_ORIGIN, X402_ENABLED, X402 } from './config.js';
 
 const require = createRequire(import.meta.url);
 const { version } = require('./package.json');
@@ -25,9 +26,14 @@ const { version } = require('./package.json');
 // Get configuration from environment
 const MCP_PORT = Number.parseInt(process.env.MCP_PORT || '3001');
 const MCP_HOST = process.env.MCP_HOST || '0.0.0.0';
+// Where a client without a licence connects to pay per tool call, when x402 is on.
+const PAY_PATH = '/mcp/pay';
 
-// Create MCP server factory function
-const createServer = () => {
+// Create MCP server factory function. With a paywall (x402), a tool call must be paid for unless
+// its HTTP request was marked (as `auth`, read here as `extra.authInfo`) as a licensee's, by
+// requireLicence, or as a free in-cluster call, by markCharge. Unmarked means paid.
+const createServer = (paywall = null, { priced = Boolean(paywall) } = {}) => {
+  const mustPay = (extra) => paywall && !extra?.authInfo?.extra?.licensee && extra?.authInfo?.extra?.free !== true;
   const server = new Server(
     {
       name: 'chains-api',
@@ -38,19 +44,23 @@ const createServer = () => {
         tools: {},
       },
       // Shown to MCP clients on connect: the same terms as the REST API.
-      instructions: `Data from chains-api, under its terms of use (${TERMS_URL}): free for personal and hobby use, academic research and teaching, and non-profit or open-source projects that earn nothing from it. Any commercial or for-profit use, including use that earns revenue, requires a licence: ${LICENSING_CONTACT}.`,
+      instructions: `Data from chains-api, under its terms of use (${TERMS_URL}): free for personal and hobby use, academic research and teaching, and non-profit or open-source projects that earn nothing from it. Any commercial or for-profit use, including use that earns revenue, requires a licence: ${LICENSING_CONTACT}.${priced ? ` Without a licence, each tool call is paid with x402: ${paywall.toolMeta['agents-x402/priceUSD']} USD in USDC.` : ''}`,
     }
   );
 
   // Define available tools
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: getToolDefinitions(),
+  server.setRequestHandler(ListToolsRequestSchema, async (_request, extra) => ({
+    tools: mustPay(extra)
+      ? getToolDefinitions().map(t => ({ ...t, _meta: { ...t._meta, ...paywall.toolMeta } }))
+      : getToolDefinitions(),
   }));
 
   // Handle tool calls
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const { name, arguments: args } = request.params;
-    return handleToolCall(name, args);
+    const tool = mustPay(extra) && getToolDefinitions().find(t => t.name === name);
+    if (!tool) return handleToolCall(name, args);
+    return paywall.call(tool, paymentToken(request.params, extra), () => handleToolCall(name, args), args);
   });
 
   return server;
@@ -62,8 +72,15 @@ const createServer = () => {
  * source. When this module runs as the combined server's MCP listener, the
  * REST process has already loaded data into the shared in-memory store.
  */
-export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN, authStore: store = undefined } = {}) {
+export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN, authStore: store = undefined, x402 = X402_ENABLED ? X402 : null } = {}) {
   const app = express();
+  const paywall = x402 && x402Paywall({
+    ...x402,
+    now,
+    alternative: publicOrigin
+      ? `Or connect to ${publicOrigin}/mcp with a licence key (OAuth or a Bearer token): ${LICENSING_CONTACT}. Terms: ${TERMS_URL}`
+      : `Licences: ${LICENSING_CONTACT}. Terms: ${TERMS_URL}`
+  });
 
   // Avoid implicit framework/version disclosure
   app.disable('x-powered-by');
@@ -80,6 +97,12 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
   // clients that never did grew the map without bound.
   const lastSeen = new Map();
   const sessionCount = () => Object.keys(transports).length;
+  // Sessions opened without a licence on a charged request (x402). Opening one costs nothing, so
+  // they may hold only half of MCP_MAX_SESSIONS: anonymous clients cannot fill the server and lock
+  // licensees out.
+  const paying = new Set();
+  const PAYING_SESSIONS_MAX = Math.max(1, Math.floor(MCP_MAX_SESSIONS / 2));
+  const payingCount = () => [...paying].filter(id => transports[id]).length;
 
   // Per-client request budget for /mcp, keyed like the REST limits (clientKey.js). A tool call
   // can make chains-api reach out — an on-demand RPC probe (get_rpc_monitor_by_id, with its
@@ -118,6 +141,7 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
       if (t - seen < MCP_SESSION_IDLE_MS) continue;
       const transport = transports[sessionId];
       lastSeen.delete(sessionId);
+      paying.delete(sessionId);
       delete transports[sessionId];
       if (transport) {
         logger.info({ sessionId }, 'Closing idle MCP session');
@@ -145,8 +169,10 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
         transport = transports[sessionId];
         lastSeen.set(sessionId, now());
       } else if (!sessionId && isInitializeRequest(req.body)) {
-        if (sessionCount() >= MCP_MAX_SESSIONS) await sweep();
-        if (sessionCount() >= MCP_MAX_SESSIONS) {
+        const priced = Boolean(paywall?.charges(req.headers, req.socket?.remoteAddress) && !req.licensee);
+        const full = () => sessionCount() >= MCP_MAX_SESSIONS || (priced && payingCount() >= PAYING_SESSIONS_MAX);
+        if (full()) await sweep();
+        if (full()) {
           res.status(503).json({ jsonrpc: '2.0', error: { code: -32000, message: 'Too many open sessions; try again later' }, id: null });
           return;
         }
@@ -157,6 +183,7 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
             logger.info({ sessionId }, 'MCP session initialized');
             transports[sessionId] = transport;
             lastSeen.set(sessionId, now());
+            if (priced) paying.add(sessionId);
           },
         });
 
@@ -167,11 +194,14 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
             logger.info({ sessionId: sid }, 'MCP transport closed');
             delete transports[sid];
           }
-          if (sid) lastSeen.delete(sid);
+          if (sid) {
+            lastSeen.delete(sid);
+            paying.delete(sid);
+          }
         };
 
         // Connect the transport to the MCP server
-        const server = createServer();
+        const server = createServer(paywall, { priced });
         await server.connect(transport);
         await transport.handleRequest(req, res, req.body);
         return;
@@ -229,8 +259,11 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
 
   // With PUBLIC_ORIGIN set, /mcp needs a licence key or an OAuth access token (src/auth/oauth.js).
   // A missing or invalid one gets 401 with the protected-resource metadata URL (RFC 9728), which
-  // is how an MCP client discovers the OAuth flow. A browser page from another site is refused
-  // (Origin), against DNS rebinding.
+  // is how an MCP client discovers the OAuth flow. With x402 on, a request with no token at all
+  // passes on /mcp/pay, where its tool calls are paid for (/mcp keeps the 401, so OAuth clients
+  // still find their way to a licence), and on any path when addressed to a host that is not
+  // charged (in-cluster callers). A browser page from another site is refused (Origin), against
+  // DNS rebinding.
   const requireLicence = async (req, res, next) => {
     if (!publicOrigin) return next();
     const sentOrigin = req.headers.origin;
@@ -240,13 +273,15 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
     const challenge = (error) => res
       .set('WWW-Authenticate', `Bearer resource_metadata="${resourceMetadataUrl(publicOrigin)}"${error ? `, error="${error}"` : ''}`)
       .status(401)
-      .json({ jsonrpc: '2.0', error: { code: -32001, message: `Authorization required: connect with OAuth, or send a licence key as a Bearer token. Terms: ${TERMS_URL}` }, id: null });
+      .json({ jsonrpc: '2.0', error: { code: -32001, message: `Authorization required: connect with OAuth, or send a licence key as a Bearer token${paywall ? `, or pay per tool call with x402 at ${publicOrigin}${PAY_PATH}` : ''}. Terms: ${TERMS_URL}` }, id: null });
     const header = req.headers.authorization;
-    if (!header) return challenge(null);
+    if (!header) return paywall && (req.path === PAY_PATH || !paywall.charges(req.headers, req.socket?.remoteAddress)) ? next() : challenge(null);
     try {
       const who = await mcpBearer(header, publicOrigin, store);
       if (!who) return challenge('invalid_token');
       req.licensee = who;
+      // Read by the MCP transport as the handlers' `extra.authInfo`: a licensee never pays.
+      req.auth = { token: '', clientId: who.keyId, scopes: ['mcp'], extra: { licensee: who.licensee } };
       return next();
     } catch (err) {
       logger.warn({ err: err.message }, 'MCP authorization check failed');
@@ -254,10 +289,26 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
     }
   };
 
+  // With x402 on, whether a request without a licence pays is decided here, from the request as
+  // it reached the pod (its socket's address and headers), for every request of a session alike.
+  // The tool handlers charge any request this did not mark free.
+  const markCharge = (req, _res, next) => {
+    if (paywall && !req.licensee) {
+      req.auth = { token: '', clientId: 'anonymous', scopes: [], extra: { free: !paywall.charges(req.headers, req.socket?.remoteAddress) } };
+    }
+    next();
+  };
+
   // Set up routes: the per-address budget first (it also bounds failed authorizations), then the
   // licensee's own once known.
-  app.post('/mcp', limitMcp, requireLicence, limitLicensee, mcpPostHandler);
-  app.delete('/mcp', limitMcp, requireLicence, limitLicensee, mcpDeleteHandler);
+  app.post('/mcp', limitMcp, requireLicence, markCharge, limitLicensee, mcpPostHandler);
+  app.delete('/mcp', limitMcp, requireLicence, markCharge, limitLicensee, mcpDeleteHandler);
+  // Pay-per-call (x402): the same server, without the licence challenge.
+  if (paywall) {
+    app.post(PAY_PATH, limitMcp, requireLicence, markCharge, limitLicensee, mcpPostHandler);
+    app.delete(PAY_PATH, limitMcp, requireLicence, markCharge, limitLicensee, mcpDeleteHandler);
+    app.get(PAY_PATH, (_req, res) => res.set('Allow', 'POST, DELETE').status(405).end());
+  }
   // This server streams no server-initiated messages on GET (the spec's answer is 405).
   app.get('/mcp', (_req, res) => res.set('Allow', 'POST, DELETE').status(405).end());
 

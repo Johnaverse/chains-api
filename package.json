@@ -1,6 +1,6 @@
 {
   "name": "chains-api",
-  "version": "1.7.104",
+  "version": "1.7.105",
   "description": "API query service for blockchain chain data from multiple sources",
   "main": "index.js",
   "type": "module",
@@ -43,6 +43,8 @@
     "@fastify/swagger": "^9.9.3",
     "@fastify/swagger-ui": "^6.1.2",
     "@modelcontextprotocol/sdk": "^1.32.2",
+    "@x402/core": "2.29.0",
+    "@x402/evm": "2.29.0",
     "ajv": "^8.20.0",
     "ajv-errors": "^3.0.0",
     "express": "^5.3.0",
@@ -57,6 +59,10 @@
     "@vitest/coverage-v8": "^5.0.5",
     "eslint": "^10.13.0",
     "fast-check": "^4.9.0",
+    "viem": "2.57.11",
     "vitest": "^5.0.5"
+  },
+  "overrides": {
+    "viem": "2.57.11"
   }
 }
