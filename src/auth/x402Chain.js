@@ -50,6 +50,19 @@ const sameAddress = (topic, address) => BigInt(topic) === BigInt(address);
 const hexBlock = (n) => `0x${n.toString(16)}`;
 const num = (hex) => Number.parseInt(hex, 16);
 
+function normalUrl(url) {
+  try { return new URL(url).href; } catch { return String(url); }
+}
+
+/**
+ * Throws unless the endpoint serves this chain: one for another chain could show the authorization
+ * unspent at a finalized block past its expiry, and so refuse a payer who paid.
+ */
+async function onChain(url, chainId) {
+  const served = await jsonRpcCall(url, 'eth_chainId', { params: [], timeoutMs: RPC_TIMEOUT_MS });
+  if (BigInt(served) !== chainId) throw new Error(`serves chain ${BigInt(served)}, not ${chainId}`);
+}
+
 /** Healthy http(s) RPC endpoints of a chain, fastest first. */
 export function rpcUrlsFor(chainId) {
   const results = cachedData.rpcHealth?.[chainId] ?? cachedData.rpcHealth?.[String(chainId)] ?? [];
@@ -172,8 +185,10 @@ async function expiredUnused(urls, finalized, p) {
  */
 export async function observeAuthorization(p, { urls = rpcUrlsFor(Number(String(p.network).split(':')[1])) } = {}) {
   if (!/^eip155:\d+$/.test(p.network) || !p.payer || !p.nonce) return { state: 'unknown' };
-  const asked = urls.slice(0, ENDPOINTS);
-  const answers = await Promise.all(asked.map(url => useAt(url, p).catch(err => {
+  // Each endpoint votes once: the same URL listed twice is one endpoint, not two that agree.
+  const asked = [...new Map(urls.map(url => [normalUrl(url), url])).values()].slice(0, ENDPOINTS);
+  const chainId = BigInt(p.network.split(':')[1]);
+  const answers = await Promise.all(asked.map(url => onChain(url, chainId).then(() => useAt(url, p)).catch(err => {
     logger.debug({ err: err.message, network: p.network }, 'x402 on-chain check failed on one endpoint');
     return null;
   })));

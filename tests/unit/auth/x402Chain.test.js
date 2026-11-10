@@ -42,6 +42,7 @@ function node({ head = 9000, lag = 100, transfer = null, fork = '' } = {}) {
   });
   return async (method, params) => {
     switch (method) {
+      case 'eth_chainId': return hex(84532);
       case 'eth_blockNumber': return hex(head);
       case 'eth_getBlockByNumber': return block(params[0] === 'finalized' ? finalized : Number(params[0]));
       case 'eth_call': {
@@ -100,6 +101,22 @@ describe('observeAuthorization', () => {
     it('is believed when the third only lags, or failed to search its logs', async () => {
       expect(await observe([paidAt(), paidAt(), node()])).toMatchObject({ state: 'paid', transaction: TX });
       expect(await observe([paidAt(), paidAt(), noLogs(spentNoUse())])).toMatchObject({ state: 'paid', transaction: TX });
+    });
+  });
+
+  describe('the endpoints asked', () => {
+    it('counts the same endpoint listed twice as one', async () => {
+      const [paid] = network(node({ transfer: { block: 6000 } }));
+      expect(await observeAuthorization(P, { urls: [paid, paid, paid] })).toEqual({ state: 'unknown' });
+      const [unused] = network(node());
+      expect(await observeAuthorization(P, { urls: [unused, unused] })).toEqual({ state: 'unknown' });
+    });
+
+    it('leaves out an endpoint that serves another chain', async () => {
+      // Its blocks are past the expiry with the nonce unspent: it would refuse a payer who paid.
+      const otherChain = (n) => async (method, params) => (method === 'eth_chainId' ? hex(1) : n(method, params));
+      expect(await observe([otherChain(node()), otherChain(node()), 'down'])).toEqual({ state: 'unknown' });
+      expect(await observe([otherChain(node()), node(), node()])).toEqual({ state: 'expired_unused' });
     });
   });
 

@@ -200,8 +200,10 @@ function parseX402() {
     .split(',').map(d => d.trim().toLowerCase().replace(/\.$/, '')).filter(Boolean);
   // Trusted RPC endpoints of the payment network, for the on-chain check of a lost settlement.
   // Unset: the registry's fastest healthy endpoints, which come from public lists anyone can add to.
-  const rpcUrls = parseStringEnv('X402_RPC_URLS', '').split(',').map(u => u.trim()).filter(Boolean);
-  const badRpcUrls = rpcUrls.filter(u => { try { return !['https:', 'http:'].includes(new URL(u).protocol); } catch { return true; } });
+  const listedRpcUrls = parseStringEnv('X402_RPC_URLS', '').split(',').map(u => u.trim()).filter(Boolean);
+  const badRpcUrls = listedRpcUrls.filter(u => { try { return !['https:', 'http:'].includes(new URL(u).protocol); } catch { return true; } });
+  // Each counted once: the same endpoint listed twice must not pass for two that agree.
+  const rpcUrls = badRpcUrls.length ? listedRpcUrls : [...new Set(listedRpcUrls.map(u => new URL(u).href))];
   // Bare hostnames: one with a scheme, port or path would never match a request, leaving every call free.
   const badDomains = domains.filter(d => !d.split('.').every(label => /^[a-z0-9-]{1,63}$/.test(label) && !label.startsWith('-') && !label.endsWith('-')));
   const problems = [
@@ -215,7 +217,7 @@ function parseX402() {
     badDomains.length > 0 && `X402_DOMAINS "${badDomains.join(', ')}" (expected bare hostnames such as chains-api.example.com)`,
     badRpcUrls.length > 0 && `X402_RPC_URLS "${badRpcUrls.join(', ')}" (expected http(s) URLs)`,
     // The check needs two endpoints to agree; a single one could never confirm a payment.
-    rpcUrls.length === 1 && `X402_RPC_URLS has one endpoint (expected at least two, which must agree)`
+    rpcUrls.length === 1 && `X402_RPC_URLS has one distinct endpoint (expected at least two, which must agree)`
   ].filter(Boolean);
   if (problems.length) {
     console.error(`X402_ENABLED is set but: ${problems.join('; ')}.`);

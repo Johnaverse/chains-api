@@ -161,8 +161,9 @@ function settleOutcome(result, err, SettleError) {
  * @param {object} [cfg.resourceServer] an x402ResourceServer stand-in (tests)
  * @param {object} [cfg.ledger]         payment ledger (x402Ledger.js)
  * @param {Function} [cfg.observe]      on-chain check of an authorization (x402Chain.js)
- * @param {string[]} [cfg.rpcUrls]     trusted RPC endpoints of the payment network for that check;
- *                                    empty: the registry's healthy endpoints
+ * @param {string[]} [cfg.rpcUrls]     trusted RPC endpoints of the payment network (`network`) for
+ *                                    that check; empty, or a payment on another network: the
+ *                                    registry's healthy endpoints
  * @param {() => number} [cfg.now]
  */
 export function x402Paywall({
@@ -279,7 +280,9 @@ export function x402Paywall({
     if (outcome.kind === 'nonce_used' || (c.recovering && outcome.kind !== 'settled')) {
       proven = true;
       const p = { network: rec.network, asset: rec.asset, payer: rec.payer, nonce: rec.nonce, payTo: rec.payTo, amount: rec.amount, validBefore: rec.validBefore, transaction: outcome.transaction ?? rec.transaction };
-      const seen = await (rpcUrls.length ? observe(p, { urls: rpcUrls }) : observe(p));
+      // The trusted endpoints serve the configured network; a payment recorded on another (taken
+      // before X402_NETWORK changed) is checked through the registry's endpoints for its own.
+      const seen = await (rpcUrls.length && rec.network === network ? observe(p, { urls: rpcUrls }) : observe(p));
       // A transfer that paid us counts for this payment only if it came after the payment was
       // claimed here; one before paid for another use of the same authorization (another
       // deployment, or a facilitator that let a spent one through verification).

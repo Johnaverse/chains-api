@@ -36,7 +36,7 @@ describe('x402 config', () => {
   it('checks payments on-chain through the trusted RPC endpoints given, else the registry\'s', async () => {
     const env = { X402_ENABLED: 'true', X402_PAY_TO: '0x000000000000000000000000000000000000dEaD' };
     expect((await load(env)).X402.rpcUrls).toEqual([]);
-    expect((await load({ ...env, X402_RPC_URLS: ' https://a.example.com , http://node.chains.svc:8545 ' })).X402.rpcUrls).toEqual(['https://a.example.com', 'http://node.chains.svc:8545']);
+    expect((await load({ ...env, X402_RPC_URLS: ' https://a.example.com , http://node.chains.svc:8545 ' })).X402.rpcUrls).toEqual(['https://a.example.com/', 'http://node.chains.svc:8545/']);
   });
 
   it('stops the process on a setting it cannot use', async () => {
@@ -53,10 +53,11 @@ describe('x402 config', () => {
       { X402_PAY_TO: '0x000000000000000000000000000000000000dEaD', X402_DOMAINS: 'https://chains-api.johnaverse.cc' },
       { X402_PAY_TO: '0x000000000000000000000000000000000000dEaD', X402_DOMAINS: 'chains-api.johnaverse.cc:443' },
       { X402_PAY_TO: '0x000000000000000000000000000000000000dEaD', X402_RPC_URLS: 'https://base-sepolia.example.com' },
-      { X402_PAY_TO: '0x000000000000000000000000000000000000dEaD', X402_RPC_URLS: 'https://a.example.com, wss://b.example.com' }
+      { X402_PAY_TO: '0x000000000000000000000000000000000000dEaD', X402_RPC_URLS: 'https://a.example.com, wss://b.example.com' },
+      { X402_PAY_TO: '0x000000000000000000000000000000000000dEaD', X402_RPC_URLS: 'https://a.example.com, https://A.example.com/' }
     ]) {
       await expect(load({ X402_ENABLED: 'true', ...env })).rejects.toThrow('exit');
     }
-    expect(exit).toHaveBeenCalledTimes(11);
+    expect(exit).toHaveBeenCalledTimes(12);
   });
 });

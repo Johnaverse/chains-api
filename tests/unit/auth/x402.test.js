@@ -64,7 +64,7 @@ function fakeServer({ valid = true, initFails = 0, settleAs = [], verifyFails = 
     buildPaymentRequirements: vi.fn(async () => [ACCEPT]),
     findMatchingRequirements: vi.fn((accepts, p) => {
       if (p.x402Version !== 2) throw new Error(`Unsupported x402 version: ${p.x402Version}`);
-      return accepts.find(a => a.payTo === p?.accepted?.payTo && a.amount === p?.accepted?.amount);
+      return accepts.find(a => a.network === p?.accepted?.network && a.payTo === p?.accepted?.payTo && a.amount === p?.accepted?.amount);
     }),
     createPaymentRequiredResponse: vi.fn(async (accepts, resource, error) => ({ x402Version: 2, error, resource, accepts })),
     verifyPayment: vi.fn(async (p) => {
@@ -470,6 +470,18 @@ describe('x402Paywall', () => {
       expect(asksForPayment(res)).toBe(false);
       expect(res._meta['x402/payment-response']).toMatchObject({ success: false, status: 'unresolved' });
       expect(JSON.stringify(res)).not.toContain('hello');
+    });
+
+    it('checks a payment taken on another network through that network\'s registry endpoints, not the trusted ones', async () => {
+      // Taken on Base Sepolia, its answer lost; the next pod runs on Base with Base's trusted RPCs.
+      const s = fakeServer({ settleAs: ['lostAfter'] });
+      const ledger = memoryLedger();
+      await x402Paywall({ ...CFG, resourceServer: s, ledger, observe: s.observe }).call(TOOL, PAYMENT, () => ok);
+      s.buildPaymentRequirements.mockResolvedValue([{ ...ACCEPT, network: 'eip155:8453' }]);
+      const urls = ['https://base-a.rpc.test', 'https://base-b.rpc.test'];
+      const pod = x402Paywall({ ...CFG, network: 'eip155:8453', rpcUrls: urls, resourceServer: s, ledger, observe: s.observe });
+      expect((await pod.call(TOOL, PAYMENT, () => ok)).content).toEqual(ok.content);
+      expect(s.observe.mock.lastCall).toEqual([expect.objectContaining({ network: 'eip155:84532' })]);
     });
 
     describe('after the price changed', () => {
