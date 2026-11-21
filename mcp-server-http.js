@@ -103,6 +103,9 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
   const paying = new Set();
   const PAYING_SESSIONS_MAX = Math.max(1, Math.floor(MCP_MAX_SESSIONS / 2));
   const payingCount = () => [...paying].filter(id => transports[id]).length;
+  // Sessions being opened: counted from the moment they pass the limits until they are registered,
+  // so requests arriving together cannot all pass a check that none of them has yet filled.
+  const opening = { all: 0, paying: 0 };
 
   // Per-client request budget for /mcp, keyed like the REST limits (clientKey.js). A tool call
   // can make chains-api reach out — an on-demand RPC probe (get_rpc_monitor_by_id, with its
@@ -170,12 +173,22 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
         lastSeen.set(sessionId, now());
       } else if (!sessionId && isInitializeRequest(req.body)) {
         const priced = Boolean(paywall?.charges(req.headers, req.socket?.remoteAddress) && !req.licensee);
-        const full = () => sessionCount() >= MCP_MAX_SESSIONS || (priced && payingCount() >= PAYING_SESSIONS_MAX);
+        const full = () => sessionCount() + opening.all >= MCP_MAX_SESSIONS || (priced && payingCount() + opening.paying >= PAYING_SESSIONS_MAX);
         if (full()) await sweep();
         if (full()) {
           res.status(503).json({ jsonrpc: '2.0', error: { code: -32000, message: 'Too many open sessions; try again later' }, id: null });
           return;
         }
+        // Hold a place (no await since the check) until the session is registered or fails to open.
+        let held = true;
+        opening.all += 1;
+        if (priced) opening.paying += 1;
+        const letGo = () => {
+          if (!held) return;
+          held = false;
+          opening.all -= 1;
+          if (priced) opening.paying -= 1;
+        };
         // New initialization request
         transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
@@ -184,6 +197,7 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
             transports[sessionId] = transport;
             lastSeen.set(sessionId, now());
             if (priced) paying.add(sessionId);
+            letGo();
           },
         });
 
@@ -201,9 +215,13 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
         };
 
         // Connect the transport to the MCP server
-        const server = createServer(paywall, { priced });
-        await server.connect(transport);
-        await transport.handleRequest(req, res, req.body);
+        try {
+          const server = createServer(paywall, { priced });
+          await server.connect(transport);
+          await transport.handleRequest(req, res, req.body);
+        } finally {
+          letGo();
+        }
         return;
       } else {
         // Invalid request

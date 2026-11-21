@@ -802,6 +802,15 @@ describe('MCP with x402 on', () => {
     expect((await initialize(`${base}/mcp`, { authorization: `Bearer ${key}` })).status).toBe(200);
   });
 
+  it('holds the limits for sessions opened at the same moment', async () => {
+    const opened = await Promise.all(Array.from({ length: 40 }, () => initialize(`${base}/mcp/pay`)));
+    expect(opened.filter(r => r.status === 200)).toHaveLength(25);
+    expect(opened.filter(r => r.status === 503)).toHaveLength(15);
+    const { key } = await createLicenceKey('Acme', store);
+    const licensed = await Promise.all(Array.from({ length: 40 }, () => initialize(`${base}/mcp`, { authorization: `Bearer ${key}` })));
+    expect(licensed.filter(r => r.status === 200)).toHaveLength(25);
+  });
+
   it.each(['/mcp', '/mcp/pay'])('never charges a licensee on %s', async (path) => {
     const { key } = await createLicenceKey('Acme', store);
     const { init, call } = await session(`${base}${path}`, { authorization: `Bearer ${key}` });

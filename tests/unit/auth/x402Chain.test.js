@@ -329,6 +329,18 @@ describe('observeAuthorization', () => {
       expect(await observe([node({ transfer }), node({ transfer })])).toEqual({ state: 'other' });
     });
 
+    it.each([
+      ['no number', {}],
+      ['a malformed number', { number: 'latest' }],
+      ['a number that is not hex', { number: '99999' }],
+      ['a number beyond a safe integer', { number: `0x${'f'.repeat(16)}` }]
+    ])('stays unknown when the finalized head has %s', async (_label, head) => {
+      const badFinality = (n) => async (method, params) => (method === 'eth_getBlockByNumber' && params[0] === 'finalized' ? head : n(method, params));
+      const transfer = { block: 6000, to: ELSEWHERE };
+      expect(await observe([badFinality(node({ transfer })), badFinality(node({ transfer }))])).toEqual({ state: 'unknown' });
+      expect(await observe([badFinality(node()), badFinality(node())])).toEqual({ state: 'unknown' });
+    });
+
     it('stays unknown while that transfer is not final, or only one endpoint shows it', async () => {
       const transfer = { block: 8950, to: ELSEWHERE };
       expect(await observe([node({ transfer }), node({ transfer })])).toEqual({ state: 'unknown' });
