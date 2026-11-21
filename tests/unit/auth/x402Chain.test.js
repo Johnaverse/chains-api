@@ -41,7 +41,7 @@ function node({ head = 9000, lag = 100, transfer = null, fork = '' } = {}) {
   const block = (n) => (n > head ? null : { number: hex(n), hash: hashOf(n), timestamp: hex(2 * n) });
   const usedLog = used(NONCE);
   const receipt = () => ({
-    status: transfer.status ?? '0x1', blockNumber: hex(transfer.block),
+    status: transfer.status ?? '0x1', blockNumber: hex(transfer.block), blockHash: transfer.blockHash ?? hashOf(transfer.block),
     logs: transfer.logs ?? [usedLog, moved(transfer.to ?? PAY_TO, transfer.value ?? 1000)]
   });
   return async (method, params) => {
@@ -118,11 +118,43 @@ describe('observeAuthorization', () => {
     };
     const paidAt = () => node({ transfer: { block: 6000 } });
     expect(await observe([dated(paidAt(), 100), paidAt(), node()])).toMatchObject({ state: 'paid', time: 100, latestTime: 12_000 });
-    const undated = (n) => async (method, params) => (method === 'eth_getBlockByNumber' && params[0] === hex(6000) ? Promise.reject(new Error('timeout')) : n(method, params));
+    const undated = (n) => async (method, params) => {
+      const r = await n(method, params);
+      return method === 'eth_getBlockByNumber' && params[0] === hex(6000) ? { ...r, timestamp: undefined } : r;
+    };
     const res = await observe([undated(paidAt()), paidAt(), node()]);
     expect(res.state).toBe('paid');
     expect(res.time).toBeNaN();
     expect(res.latestTime).toBeNaN();
+  });
+
+  describe('a receipt and the block it names', () => {
+    const STALE = `0x${'9'.repeat(64)}`;
+    const noBlock = (n) => async (method, params) => (method === 'eth_getBlockByNumber' && params[0] === hex(6000) ? Promise.reject(new Error('timeout')) : n(method, params));
+
+    it('is no proof of payment when the endpoint holds another block at that height, or cannot read it', async () => {
+      // A receipt from a branch that was dropped: the transfer may never have happened.
+      const dropped = () => node({ transfer: { block: 6000, blockHash: STALE } });
+      expect(await observe([dropped(), dropped(), node()])).toEqual({ state: 'unknown' });
+      const paidAt = () => node({ transfer: { block: 6000 } });
+      expect(await observe([noBlock(paidAt()), noBlock(paidAt())])).toEqual({ state: 'unknown' });
+      expect(await observe([paidAt(), dropped(), node()])).toEqual({ state: 'unknown' });
+    });
+
+    it('is no proof of a transfer elsewhere either, so no new payment is asked for', async () => {
+      // Finalized by height on both endpoints, but not the block they hold there.
+      const elsewhere = (extra = {}) => node({ transfer: { block: 6000, to: ELSEWHERE, ...extra } });
+      expect(await observe([elsewhere({ blockHash: STALE }), elsewhere({ blockHash: STALE })])).toEqual({ state: 'unknown' });
+      expect(await observe([noBlock(elsewhere()), noBlock(elsewhere())])).toEqual({ state: 'unknown' });
+      expect(await observe([elsewhere(), elsewhere()])).toEqual({ state: 'other' });
+    });
+
+    it('needs the endpoints to place the transaction in the same block', async () => {
+      const paidOn = (fork) => node({ transfer: { block: 6000 }, fork });
+      expect(await observe([paidOn(''), paidOn('x')])).toEqual({ state: 'unknown' });
+      const elsewhereOn = (fork) => node({ transfer: { block: 6000, to: ELSEWHERE }, fork });
+      expect(await observe([elsewhereOn(''), elsewhereOn('x')])).toEqual({ state: 'unknown' });
+    });
   });
 
   describe('the endpoints asked', () => {

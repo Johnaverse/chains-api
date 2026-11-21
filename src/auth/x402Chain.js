@@ -21,7 +21,8 @@ import { logger } from '../util/logger.js';
  *
  * The endpoints are public and may lag, so the answers that would let a caller be asked to pay
  * again need proof that no node can give alone:
- *  - 'paid' and 'other' need two endpoints that agree on the same transaction; 'paid' also needs
+ *  - 'paid' and 'other' need two endpoints that agree on the same transaction in the same block,
+ *    each holding that block at its height (a receipt from a dropped branch proves nothing); 'paid' also needs
  *    no endpoint to show the authorization used otherwise (another transaction or outcome, or
  *    spent with no use in the range it searched) — endpoints come from a public registry, so two
  *    could be an attacker's;
@@ -118,14 +119,17 @@ async function useAt(url, p) {
     const paid = receipt.status === '0x1' && transfers.some(l => sameAddress(l.topics[2], p.payTo)
       && /^0x[0-9a-f]+$/i.test(l.data) && BigInt(l.data) >= BigInt(p.amount));
     // A receipt without a block number cannot be shown final (NaN compares false).
-    return { state: paid ? 'paid' : 'other', transaction: hash, blockNumber: num(receipt.blockNumber) };
+    return { state: paid ? 'paid' : 'other', transaction: hash, blockNumber: num(receipt.blockNumber), blockHash: String(receipt.blockHash ?? '').toLowerCase() };
   };
-  // When a transfer paid us, the time of its block: a caller credits only a transfer made after
-  // it claimed the payment.
+  // A transaction's receipt is evidence only for the block it names, and only while that block is
+  // the one this endpoint holds at that height: a receipt from a branch that was dropped, or one
+  // whose block cannot be read, leaves the use undecided (spent, outcome unknown). With it comes
+  // the block's time, for a caller to credit only a transfer made after it claimed the payment.
   const timed = async (use) => {
-    if (use.state !== 'paid') return use;
+    if (!use.state) return use;
     const block = Number.isFinite(use.blockNumber) ? await call('eth_getBlockByNumber', [hexBlock(use.blockNumber), false]).catch(() => null) : null;
-    return { ...use, time: block?.timestamp ? num(block.timestamp) : Number.NaN };
+    if (!/^0x[0-9a-f]{64}$/.test(use.blockHash) || String(block?.hash ?? '').toLowerCase() !== use.blockHash) return { spent: true };
+    return { ...use, time: num(block.timestamp) };
   };
   const finalized = await call('eth_getBlockByNumber', ['finalized', false]).catch(() => null);
 
@@ -214,8 +218,11 @@ export async function observeAuthorization(p, { urls = rpcUrlsFor(Number(String(
 
   const agreeOn = (state) => {
     const votes = new Map();
-    for (const a of seen) if (a.use?.state === state) votes.set(a.use.transaction, [...(votes.get(a.use.transaction) ?? []), a]);
-    return [...votes.entries()].find(([, v]) => v.length >= AGREEMENT);
+    // The same transaction in the same block: endpoints that place it in different blocks do not agree.
+    const key = (a) => `${a.use.transaction}|${a.use.blockHash}`;
+    for (const a of seen) if (a.use?.state === state) votes.set(key(a), [...(votes.get(key(a)) ?? []), a]);
+    const agreed = [...votes.values()].find(v => v.length >= AGREEMENT);
+    return agreed && [agreed[0].use.transaction, agreed];
   };
   const paid = agreeOn('paid');
   if (paid) {
