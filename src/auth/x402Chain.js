@@ -229,7 +229,7 @@ export async function observeAuthorization(p, { urls = rpcUrlsFor(Number(String(
     const [transaction, votes] = paid;
     // Any endpoint that read the authorization's use differently disputes it: the answer stays
     // unknown. (One that lags, or failed to search its logs, says nothing against it.)
-    const disputed = seen.some(a => a.use && (a.use.state ? !(a.use.state === 'paid' && a.use.transaction === transaction) : a.use.searched));
+    const disputed = seen.some(a => a.use && (a.use.state ? !(a.use.state === 'paid' && a.use.transaction === transaction && a.use.blockHash === votes[0].use.blockHash) : a.use.searched));
     if (disputed) return { state: 'unknown' };
     // The block's time as each agreeing endpoint reads it. A caller acts on it only when they all
     // put it on the same side of its claim, so one endpoint cannot move a payment either way.
@@ -242,6 +242,8 @@ export async function observeAuthorization(p, { urls = rpcUrlsFor(Number(String(
   if (seen.some(a => a.use?.state === 'paid' || a.use?.spent)) return { state: 'unknown' };
   const other = agreeOn('other');
   if (other) {
+    // As for 'paid': an endpoint that places the transaction in another block disputes it.
+    if (seen.some(a => a.use?.state && a.use.blockHash !== other[1][0].use.blockHash)) return { state: 'unknown' };
     const final = other[1].filter(a => a.finalized && num(a.finalized.number) >= a.use.blockNumber);
     return final.length >= AGREEMENT ? { state: 'other' } : { state: 'unknown' };
   }

@@ -149,6 +149,18 @@ describe('observeAuthorization', () => {
       expect(await observe([elsewhere(), elsewhere()])).toEqual({ state: 'other' });
     });
 
+    it('is not believed paid when a third endpoint places the transaction in another block', async () => {
+      const paidOn = (fork) => node({ transfer: { block: 6000 }, fork });
+      expect(await observe([paidOn(''), paidOn(''), paidOn('x')])).toEqual({ state: 'unknown' });
+      expect(await observe([paidOn('x'), paidOn(''), paidOn('')])).toEqual({ state: 'unknown' });
+    });
+
+    it('is not believed spent elsewhere when a third endpoint places the transaction in another block', async () => {
+      const elsewhereOn = (fork) => node({ transfer: { block: 6000, to: ELSEWHERE }, fork });
+      expect(await observe([elsewhereOn(''), elsewhereOn(''), elsewhereOn('x')])).toEqual({ state: 'unknown' });
+      expect(await observe([elsewhereOn(''), elsewhereOn(''), node()])).toEqual({ state: 'other' });
+    });
+
     it('needs the endpoints to place the transaction in the same block', async () => {
       const paidOn = (fork) => node({ transfer: { block: 6000 }, fork });
       expect(await observe([paidOn(''), paidOn('x')])).toEqual({ state: 'unknown' });
