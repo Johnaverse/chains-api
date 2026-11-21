@@ -242,6 +242,19 @@ describe('observeAuthorization', () => {
       expect(await observe([split(), split(), 'down'])).toEqual({ state: 'unknown' });
     });
 
+    it('is ruled out by one endpoint that shows the nonce spent in the finalized block, against two that agree it is unused', async () => {
+      // Unspent at latest on all three (the one's latest read comes from a lagging backend), but
+      // its finalized block's own state has the spend.
+      const has = node({ transfer: { block: 4000 } });
+      const lacks = node();
+      const spentAtFinalized = async (method, params) => {
+        if (method === 'eth_call' && typeof params[1] === 'object') return has(method, params);
+        return method === 'eth_getBlockByNumber' ? has(method, params) : lacks(method, params);
+      };
+      expect(await observe([spentAtFinalized, node(), node()])).toEqual({ state: 'unknown' });
+      expect(await observe([node(), node(), spentAtFinalized])).toEqual({ state: 'unknown' });
+    });
+
     it('gives no vote to an endpoint that cannot read state by block hash', async () => {
       const noHashSelector = (n) => async (method, params) => (method === 'eth_call' && typeof params[1] === 'object' ? Promise.reject(new Error('invalid block selector')) : n(method, params));
       expect(await observe([noHashSelector(node()), noHashSelector(node()), 'down'])).toEqual({ state: 'unknown' });

@@ -162,6 +162,7 @@ async function useAt(url, p) {
  * block take part: one that names no finalized head, or an earlier one, could confirm a block on
  * a branch that is not final.
  */
+const SPENT = Symbol('spent');
 async function expiredUnused(urls, finalized, p) {
   const heads = finalized.map(f => (f ? num(f.number) : Number.NaN));
   const at = heads.filter(Number.isFinite).sort((a, b) => b - a)[AGREEMENT - 1];
@@ -176,11 +177,14 @@ async function expiredUnused(urls, finalized, p) {
       // The state of that very block (EIP-1898), not of whatever a backend holds at its height:
       // behind a load balancer, the header and a by-number read can come from different views.
       // An endpoint that cannot read state by block hash has no vote.
-      return (await spentAt({ blockHash: block.hash, requireCanonical: true })) ? null : block.hash;
+      return (await spentAt({ blockHash: block.hash, requireCanonical: true })) ? SPENT : block.hash;
     } catch {
       return null;
     }
   }));
+  // The nonce spent in a finalized block, on any endpoint, is a sign of use like any other: it
+  // rules the refusal out, whatever the other endpoints agree on.
+  if (views.includes(SPENT)) return false;
   const byHash = new Map();
   for (const h of views.filter(Boolean)) byHash.set(h, (byHash.get(h) ?? 0) + 1);
   return [...byHash.values()].some(n => n >= AGREEMENT);
