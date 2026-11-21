@@ -28,7 +28,7 @@ export function clientIp(headers = {}, fallback = null) {
 }
 
 // A cluster or LAN address: a request that reached the pod without Cloudflare or the ingress.
-function isPrivateAddress(ip) {
+export function isPrivateAddress(ip) {
   const a = String(ip ?? '').replace(/^::ffff:/, '');
   return /^(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|fc|fd|::1$)/i.test(a);
 }

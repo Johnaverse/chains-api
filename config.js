@@ -180,6 +180,53 @@ function parseOriginEnv(name) {
 }
 export const PUBLIC_ORIGIN = parseOriginEnv('PUBLIC_ORIGIN');
 
+// x402 pay-per-call for MCP tools (src/auth/x402.js). Off by default. When on, a client without
+// a licence can still connect, and pays X402_PRICE_USD in USDC per tool call, verified and
+// settled by the facilitator; a licensee (key or OAuth token) never pays. Requests to the
+// X402_DOMAINS hosts (default: PUBLIC_ORIGIN's host) are always charged; any other request is free
+// only when it comes straight from inside the cluster (a private address, no proxy headers), so
+// in-cluster callers use the tools free; with neither set, every request is charged.
+export const X402_ENABLED = parseBooleanEnv('X402_ENABLED', false);
+function parseX402() {
+  if (!X402_ENABLED) return {};
+  const payTo = parseStringEnv('X402_PAY_TO', '').trim();
+  const network = parseStringEnv('X402_NETWORK', 'eip155:84532').trim();
+  const rawPrice = parseStringEnv('X402_PRICE_USD', '0.001').trim();
+  const priceUsd = Number(rawPrice);
+  const facilitatorUrl = parseStringEnv('X402_FACILITATOR_URL', 'https://x402.org/facilitator').trim();
+  let facilitator;
+  try { facilitator = new URL(facilitatorUrl); } catch { facilitator = null; }
+  const domains = parseStringEnv('X402_DOMAINS', PUBLIC_ORIGIN ? new URL(PUBLIC_ORIGIN).hostname : '')
+    .split(',').map(d => d.trim().toLowerCase().replace(/\.$/, '')).filter(Boolean);
+  // Trusted RPC endpoints of the payment network, for the on-chain check of a lost settlement.
+  // Unset: the registry's fastest healthy endpoints, which come from public lists anyone can add to.
+  const listedRpcUrls = parseStringEnv('X402_RPC_URLS', '').split(',').map(u => u.trim()).filter(Boolean);
+  const badRpcUrls = listedRpcUrls.filter(u => { try { return !['https:', 'http:'].includes(new URL(u).protocol); } catch { return true; } });
+  // Each counted once: the same endpoint listed twice must not pass for two that agree.
+  const rpcUrls = badRpcUrls.length ? listedRpcUrls : [...new Set(listedRpcUrls.map(u => new URL(u).href))];
+  // Bare hostnames: one with a scheme, port or path would never match a request, leaving every call free.
+  const badDomains = domains.filter(d => !d.split('.').every(label => /^[a-z0-9-]{1,63}$/.test(label) && !label.startsWith('-') && !label.endsWith('-')));
+  const problems = [
+    !/^0x[0-9a-fA-F]{40}$/.test(payTo) && `X402_PAY_TO "${payTo}" (expected a 0x wallet address)`,
+    // An EVM chain as CAIP-2, e.g. eip155:84532 (Base Sepolia) or eip155:8453 (Base): the paywall
+    // registers only the EVM exact scheme.
+    !/^eip155:[1-9]\d{0,18}$/.test(network) && `X402_NETWORK "${network}" (expected an EVM CAIP-2 id such as eip155:8453)`,
+    // USDC has 6 decimals: a smaller price would be charged as 0.
+    !(Number.isFinite(priceUsd) && priceUsd >= 0.000001) && `X402_PRICE_USD "${rawPrice}" (expected at least 0.000001)`,
+    facilitator?.protocol !== 'https:' && `X402_FACILITATOR_URL "${facilitatorUrl}" (expected an https URL)`,
+    badDomains.length > 0 && `X402_DOMAINS "${badDomains.join(', ')}" (expected bare hostnames such as chains-api.example.com)`,
+    badRpcUrls.length > 0 && `X402_RPC_URLS "${badRpcUrls.join(', ')}" (expected http(s) URLs)`,
+    // The check needs two endpoints to agree; a single one could never confirm a payment.
+    rpcUrls.length === 1 && `X402_RPC_URLS has one distinct endpoint (expected at least two, which must agree)`
+  ].filter(Boolean);
+  if (problems.length) {
+    console.error(`X402_ENABLED is set but: ${problems.join('; ')}.`);
+    process.exit(1);
+  }
+  return { payTo, network, priceUsd, facilitatorUrl: facilitator.href.replace(/\/+$/, ''), domains, rpcUrls };
+}
+export const X402 = parseX402();
+
 // Terms of use for the hosted service, and where a commercial licence is asked for. Sent as a
 // `Link: <TERMS_URL>; rel="license"` header on every response, in robots.txt and in tdmrep.json.
 export const TERMS_URL = parseStringEnv('TERMS_URL', 'https://chains-api.johnaverse.cc/terms');
