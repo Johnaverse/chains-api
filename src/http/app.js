@@ -15,7 +15,7 @@ import { initializeDataOnStartup } from '../services/loader.js';
 import { startRpcHealthCheck } from '../services/rpcHealth.js';
 import { appShell } from './appShell.js';
 import { registerAccessLog } from './accessLog.js';
-import { traceRequests } from '../util/telemetry.js';
+import { traceRequests, withLogIds } from '../util/telemetry.js';
 import { startL2BeatRefresh } from '../services/l2beatRefresher.js';
 import { startGrowthepieRefresh } from '../sources/growthepie.js';
 import { startSourceRefresher } from '../services/sourceRefresher.js';
@@ -180,7 +180,8 @@ export async function buildApp(options = {}) {
   } = options;
 
   const fastify = Fastify({
-    logger,
+    // With the trace ids on every line written inside a traced request (request.log included).
+    logger: withLogIds(logger),
     // One audit line per request instead (accessLog.js): fastify's pair split each request over
     // two lines, the second without its path, and logged every kubelet probe.
     disableRequestLogging: true,

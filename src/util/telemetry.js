@@ -1,6 +1,6 @@
 import { trace, context, propagation, SpanKind, SpanStatusCode } from '@opentelemetry/api';
 import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
-import { W3CTraceContextPropagator, suppressTracing } from '@opentelemetry/core';
+import { W3CTraceContextPropagator, suppressTracing, isTracingSuppressed } from '@opentelemetry/core';
 import { defaultResource, resourceFromAttributes } from '@opentelemetry/resources';
 import { BatchSpanProcessor, ParentBasedSampler, SimpleSpanProcessor, TraceIdRatioBasedSampler, TracerProvider } from '@opentelemetry/sdk-trace';
 
@@ -83,10 +83,19 @@ export function setActive(attributes) {
   setAttributes(activeSpan(), attributes);
 }
 
+/**
+ * Mark a span failed by the error's category alone. Its message and stack are not recorded: an
+ * endpoint's error text is the endpoint's own (rpcUtil.js builds errors from the response body)
+ * and can echo a key or a request value.
+ */
 export function fail(span, err) {
-  span.recordException(err);
-  span.setStatus({ code: SpanStatusCode.ERROR, message: String(err?.message ?? err).slice(0, 300) });
-  span.setAttribute('error.type', err?.kind ?? err?.name ?? 'Error');
+  span.setStatus({ code: SpanStatusCode.ERROR });
+  span.setAttribute('error.type', label(err?.kind ?? err?.name, 'Error'));
+}
+
+// A short identifier, or the fallback: what a span name or attribute may be made of.
+function label(value, fallback) {
+  return typeof value === 'string' && /^[A-Za-z][\w./-]{0,63}$/.test(value) ? value : fallback;
 }
 
 /**
@@ -131,7 +140,9 @@ export function safePath(pathname) {
 
 // A service of ours in the cluster or on this host: where the trace context may go.
 function internalHost(hostname) {
-  return /(^|\.)svc(\.cluster\.local)?$|^localhost$|^127\.|^\[?::1\]?$/.test(hostname) || !hostname.includes('.');
+  if (/(^|\.)svc(\.cluster\.local)?$|^localhost$|^127\.|^\[?::1\]?$/.test(hostname)) return true;
+  // A bare service name ("chains-client-feed"). An IPv6 literal has no dot either, and is not one.
+  return !hostname.includes('.') && !hostname.includes(':');
 }
 
 /**
@@ -143,11 +154,14 @@ function internalHost(hostname) {
  */
 export function tracedFetch(fetcher) {
   return async (input, init = {}) => {
-    if (!inTrace()) return fetcher(input, init);
+    if (!provider || !activeSpan() || isTracingSuppressed(context.active())) return fetcher(input, init);
     let url = null;
     try {
       url = new URL(typeof input === 'string' ? input : input?.url ?? String(input));
     } catch { /* recorded without a URL */ }
+    // Part of a trace that is not sampled: no span, but a service of ours still gets the
+    // caller's trace id and its decision, or it would start an unrelated trace of its own.
+    if (!activeSpan().isRecording()) return fetcher(input, url && internalHost(url.hostname) ? withTraceContext(init) : init);
     const method = String(init?.method ?? 'GET').toUpperCase();
     const asked = url?.pathname.endsWith('/chat/completions') ? chatRequest(init?.body) : null;
     return withSpan(asked ? `chat ${asked.model}` : method, {
@@ -159,13 +173,7 @@ export function tracedFetch(fetcher) {
         'server.address': url?.hostname ?? null
       }
     }, async (span) => {
-      let request = init;
-      if (url && internalHost(url.hostname)) {
-        const headers = { ...(init?.headers ?? {}) };
-        propagation.inject(context.active(), headers);
-        request = { ...init, headers };
-      }
-      const response = await fetcher(input, request);
+      const response = await fetcher(input, url && internalHost(url.hostname) ? withTraceContext(init) : init);
       span.setAttribute('http.response.status_code', response.status);
       if (response.status >= 400) span.setStatus({ code: SpanStatusCode.ERROR });
       if (asked && response.ok) setAttributes(span, await chatAnswer(response));
@@ -174,10 +182,16 @@ export function tracedFetch(fetcher) {
   };
 }
 
+function withTraceContext(init) {
+  const headers = { ...(init?.headers ?? {}) };
+  propagation.inject(context.active(), headers);
+  return { ...init, headers };
+}
+
 function chatRequest(body) {
   try {
     const parsed = JSON.parse(body);
-    return typeof parsed?.model === 'string' ? { model: parsed.model, maxTokens: parsed.max_tokens ?? null } : null;
+    return typeof parsed?.model === 'string' ? { model: label(parsed.model, 'model'), maxTokens: Number.isFinite(parsed.max_tokens) ? parsed.max_tokens : null } : null;
   } catch {
     return null;
   }
@@ -208,9 +222,10 @@ export function rpcSpan(url, method, fn) {
   if (!inTrace()) return fn();
   let host = null;
   try { host = new URL(url).hostname; } catch { /* recorded without a host */ }
-  return withSpan(`rpc ${method}`, {
+  const name = label(method, 'other');
+  return withSpan(`rpc ${name}`, {
     kind: SpanKind.CLIENT,
-    attributes: { 'rpc.system': 'jsonrpc', 'rpc.method': method, 'server.address': host }
+    attributes: { 'rpc.system': 'jsonrpc', 'rpc.method': name, 'server.address': host }
   }, () => context.with(suppressTracing(context.active()), fn));
 }
 
@@ -274,24 +289,39 @@ export function traceRequests(app, { skip = PROBES } = {}) {
   });
 }
 
+// The JSON-RPC methods of the Model Context Protocol. A request names its method before it is
+// authenticated, so anything else is recorded as `other`.
+const MCP_METHODS = new Set([
+  'initialize', 'ping', 'tools/list', 'tools/call', 'resources/list', 'resources/read', 'resources/templates/list',
+  'resources/subscribe', 'resources/unsubscribe', 'prompts/list', 'prompts/get', 'completion/complete', 'logging/setLevel',
+  'notifications/initialized', 'notifications/cancelled', 'notifications/progress', 'notifications/roots/list_changed'
+]);
+
 /**
- * Express middleware for the MCP endpoint: one server span per request, named by its JSON-RPC
- * method and tool (`tools/call get_chain_by_id`) once the body is parsed. Mount it after the
+ * Express middleware for the MCP endpoint: one server span per request to one of `paths` (a
+ * trailing slash aside; any other path is not traced), named by its JSON-RPC method and tool
+ * (`tools/call get_chain_by_id`). The method is recorded only when it is a protocol method and
+ * the tool only when `tools()` lists it: both arrive unauthenticated, so anything else becomes
+ * `other` / `unknown` and can neither grow a span nor multiply span names. Mount it after the
  * JSON body parser.
  */
-export function traceMcp() {
+export function traceMcp({ paths = ['/mcp'], tools = () => [] } = {}) {
+  const known = new Set(paths);
   return (req, res, next) => {
-    if (!provider || PROBES.has(req.path)) return next();
+    const route = String(req.path ?? '').replace(/(.)\/$/, '$1');
+    if (!provider || !known.has(route)) return next();
     const parent = propagation.extract(context.active(), req.headers);
     const call = req.body && !Array.isArray(req.body) && typeof req.body.method === 'string' ? req.body : null;
-    const tool = call?.method === 'tools/call' && typeof call.params?.name === 'string' ? call.params.name : null;
-    const span = tracer().startSpan(call ? [call.method, tool].filter(Boolean).join(' ') : `${req.method} ${req.path}`, {
+    const method = call ? (MCP_METHODS.has(call.method) ? call.method : 'other') : null;
+    const asked = method === 'tools/call' ? call.params?.name : null;
+    const tool = method === 'tools/call' ? (typeof asked === 'string' && tools().includes(asked) ? asked : 'unknown') : null;
+    const span = tracer().startSpan(method ? [method, tool].filter(Boolean).join(' ') : `${label(req.method, 'OTHER')} ${route}`, {
       kind: SpanKind.SERVER,
       attributes: clean({
-        'http.request.method': req.method,
-        'http.route': req.path,
-        'rpc.system': call ? 'jsonrpc' : null,
-        'rpc.method': call?.method,
+        'http.request.method': label(req.method, 'OTHER'),
+        'http.route': route,
+        'rpc.system': method ? 'jsonrpc' : null,
+        'rpc.method': method,
         'mcp.tool.name': tool,
         'mcp.batch': Array.isArray(req.body) ? req.body.length : null
       })
@@ -303,6 +333,18 @@ export function traceMcp() {
     });
     return context.with(trace.setSpan(parent, span), next);
   };
+}
+
+/**
+ * Logger options with the trace ids added to every line: `false` stays off, `true` becomes the
+ * mixin alone, and a caller's own options and mixin are kept.
+ */
+export function withLogIds(options) {
+  if (options === false || options == null) return options;
+  if (options === true) return { mixin: logIds };
+  if (typeof options !== 'object' || typeof options.child === 'function') return options;
+  const own = options.mixin;
+  return { ...options, mixin: own ? (...args) => ({ ...own(...args), ...logIds() }) : logIds };
 }
 
 export { SpanKind };

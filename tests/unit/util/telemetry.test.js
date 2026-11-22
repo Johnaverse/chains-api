@@ -7,7 +7,7 @@ import { InMemorySpanExporter } from '@opentelemetry/sdk-trace';
 import { buildApp } from '../../../src/http/app.js';
 import {
   startTelemetry, stopTelemetry, tracingOn, withSpan, jobSpan, rpcSpan, tracedFetch, tracedPool,
-  traceMcp, logIds, safePath, setActive
+  traceMcp, logIds, safePath, setActive, withLogIds
 } from '../../../src/util/telemetry.js';
 
 let exporter;
@@ -188,16 +188,15 @@ describe('jobs, database and logs', () => {
 });
 
 describe('MCP requests', () => {
-  const request = (body, headers = {}, path = '/mcp') => ({ method: 'POST', path, body, headers });
+  const request = (body, headers = {}, path = '/mcp', method = 'POST') => ({ method, path, body, headers });
   const response = (statusCode = 200) => Object.assign(new EventEmitter(), { statusCode });
+  const mcp = () => traceMcp({ paths: ['/mcp', '/mcp/pay'], tools: () => ['get_chain_by_id', 'get_chains'] });
+  const run = (req, res = response()) => { let inside; mcp()(req, res, () => { inside = logIds(); }); res.emit('close'); return inside; };
 
   it('are named by JSON-RPC method and tool, and continue the caller\'s trace', async () => {
     await traced();
     const traceId = '0af7651916cd43dd8448eb211c80319c';
-    const res = response();
-    let inside;
-    traceMcp()(request({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'get_chain_by_id', arguments: { chainId: 1 } } }, { traceparent: `00-${traceId}-b7ad6b7169203331-01`, 'cf-connecting-ip': '203.0.113.9', 'user-agent': 'agent/1' }), res, () => { inside = logIds(); });
-    res.emit('close');
+    const inside = run(request({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'get_chain_by_id', arguments: { chainId: 1 } } }, { traceparent: `00-${traceId}-b7ad6b7169203331-01`, 'cf-connecting-ip': '203.0.113.9', 'user-agent': 'agent/1' }));
     const span = named('tools/call get_chain_by_id');
     expect(span.kind).toBe(SpanKind.SERVER);
     expect(span.spanContext().traceId).toBe(traceId);
@@ -207,20 +206,106 @@ describe('MCP requests', () => {
     expect(JSON.stringify(span.attributes)).not.toMatch(/203\.0\.113|agent\/1|chainId/);
   });
 
-  it('cover a batch, a request without a body, a failure, and skip probes', async () => {
+  it('record a method or tool they do not know as other / unknown, whatever was sent', async () => {
     await traced();
-    const batch = response();
-    traceMcp()(request([{ method: 'tools/list' }, { method: 'ping' }], {}, '/mcp/pay'), batch, () => {});
-    batch.emit('close');
-    expect(named('POST /mcp/pay').attributes).toMatchObject({ 'mcp.batch': 2, 'http.route': '/mcp/pay' });
-    const failed = response(500);
-    traceMcp()({ method: 'GET', path: '/mcp', headers: {} }, failed, () => {});
-    failed.emit('close');
-    expect(named('GET /mcp').status.code).toBe(SpanStatusCode.ERROR);
+    const huge = 'x'.repeat(100000);
+    run(request({ method: `tools/${huge}` }));
+    run(request({ method: 'tools/call', params: { name: huge } }));
+    run(request({ method: 'tools/call', params: { name: { not: 'a string' } } }));
+    run(request({ method: 'tools/call' }));
+    expect(spans().map(span => span.name)).toEqual(['other', 'tools/call unknown', 'tools/call unknown', 'tools/call unknown']);
+    expect(spans()[0].attributes['rpc.method']).toBe('other');
+    expect(JSON.stringify(spans().map(span => [span.name, span.attributes])).length).toBeLessThan(2000);
+  });
+
+  it('trace the MCP paths only: an unmatched path is never on a span', async () => {
+    await traced();
     const next = vi.fn();
-    traceMcp()({ method: 'GET', path: '/health', headers: {} }, response(), next);
-    expect(next).toHaveBeenCalled();
-    expect(spans()).toHaveLength(2);
+    for (const path of ['/unknown/private-token-9f8e7d', '/health', '/', '/mcp/other']) mcp()(request(null, {}, path, 'GET'), response(), next);
+    expect(next).toHaveBeenCalledTimes(4);
+    expect(spans()).toEqual([]);
+    // A trailing slash is the same route.
+    run(request([{ method: 'tools/list' }, { method: 'ping' }], {}, '/mcp/pay/'));
+    expect(named('POST /mcp/pay').attributes).toEqual({ 'http.request.method': 'POST', 'http.route': '/mcp/pay', 'mcp.batch': 2, 'http.response.status_code': 200 });
+    run(request(undefined, {}, '/mcp', 'GET'), response(500));
+    expect(named('GET /mcp').status.code).toBe(SpanStatusCode.ERROR);
+  });
+});
+
+describe('review hardening', () => {
+  it('records a failure by its category, never its message or stack', async () => {
+    await traced();
+    const echoed = Object.assign(new Error('invalid project id 9aa3d95b3bc440fa88ea12eaa4456161 for params ["0xsecret"]'), { kind: 'rpc_error' });
+    await withSpan('request', {}, () => rpcSpan('https://mainnet.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161', 'eth_call', async () => { throw echoed; })).catch(() => {});
+    await withSpan('odd', {}, async () => { throw Object.assign(new Error('x'), { kind: 'a kind with spaces and 9aa3d95b' }); }).catch(() => {});
+    const rpc = named('rpc eth_call');
+    expect(rpc.status).toEqual({ code: SpanStatusCode.ERROR });
+    expect(rpc.attributes['error.type']).toBe('rpc_error');
+    expect(rpc.events).toEqual([]);
+    expect(named('odd').attributes['error.type']).toBe('Error');
+    const exported = JSON.stringify(spans().map(span => [span.name, span.attributes, span.status, span.events]));
+    expect(exported).not.toMatch(/9aa3d95b|0xsecret|invalid project/);
+  });
+
+  it('records an unusual JSON-RPC method or model name as a fixed label', async () => {
+    await traced();
+    await withSpan('request', {}, async () => {
+      await rpcSpan('https://rpc.example', 'eth_call\n' + 'x'.repeat(5000), async () => 1);
+      await tracedFetch(async () => ok())('http://litellm.litellm.svc:4000/v1/chat/completions', { method: 'POST', body: JSON.stringify({ model: 'm '.repeat(4000), max_tokens: 'many' }) });
+    });
+    expect(spans().map(span => span.name)).toEqual(['rpc other', 'chat model', 'request']);
+    expect(named('chat model').attributes['gen_ai.request.max_tokens']).toBeUndefined();
+  });
+
+  it('does not take an IPv6 literal for a service in the cluster', async () => {
+    await traced();
+    const fetcher = vi.fn(async () => ok());
+    await withSpan('request', {}, async () => {
+      await tracedFetch(fetcher)('http://[2606:4700:4700::1111]/x', { headers: {} });
+      await tracedFetch(fetcher)('http://[::1]:8080/x', { headers: {} });
+      await tracedFetch(fetcher)('http://chains-client-feed:8080/x', { headers: {} });
+    });
+    const [publicV6, loopback, bare] = fetcher.mock.calls.map(([, init]) => init.headers);
+    expect(publicV6).toEqual({});
+    expect(loopback.traceparent).toBeDefined();
+    expect(bare.traceparent).toBeDefined();
+  });
+
+  it('passes an unsampled trace on to services in the cluster, without recording it', async () => {
+    await traced({ sampleRatio: 0 });
+    const fetcher = vi.fn(async () => ok());
+    let traceId;
+    await withSpan('request', {}, async (span) => {
+      traceId = span.spanContext().traceId;
+      await tracedFetch(fetcher)('http://chains-client-feed.chains-api.svc.cluster.local:8080/releases', { headers: { accept: 'application/json' } });
+      await tracedFetch(fetcher)('https://l2beat.com/api', { headers: { accept: 'application/json' } });
+    });
+    expect(spans()).toEqual([]);
+    expect(fetcher.mock.calls[0][1].headers).toEqual({ accept: 'application/json', traceparent: expect.stringMatching(new RegExp(`^00-${traceId}-[0-9a-f]{16}-00$`)) });
+    expect(fetcher.mock.calls[1][1].headers).toEqual({ accept: 'application/json' });
+  });
+
+  it('sends nothing from inside a job whose calls are not traced', async () => {
+    await traced();
+    const fetcher = vi.fn(async () => ok());
+    const init = { headers: {} };
+    await jobSpan('rpc sweep', {}, () => tracedFetch(fetcher)('http://chains-client-feed:8080/x', init));
+    expect(fetcher).toHaveBeenCalledWith('http://chains-client-feed:8080/x', init);
+  });
+
+  it('adds the trace ids to a logger\'s options without replacing what the caller set', async () => {
+    expect(withLogIds(false)).toBe(false);
+    expect(withLogIds(undefined)).toBeUndefined();
+    expect(withLogIds(true)).toEqual({ mixin: logIds });
+    const instance = { child: () => instance };
+    expect(withLogIds(instance)).toBe(instance);
+    const own = withLogIds({ level: 'debug', mixin: () => ({ app: 'x', trace_id: 'mine' }) });
+    expect(own.level).toBe('debug');
+    expect(own.mixin()).toEqual({ app: 'x', trace_id: 'mine' });
+    await traced();
+    await withSpan('work', {}, async (span) => {
+      expect(own.mixin()).toEqual({ app: 'x', trace_id: span.spanContext().traceId, span_id: span.spanContext().spanId });
+    });
   });
 });
 

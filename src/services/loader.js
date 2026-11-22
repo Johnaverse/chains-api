@@ -117,7 +117,9 @@ async function refreshDataWithGuard(options = {}) {
 
   if (dataRefreshPromise) return dataRefreshPromise;
 
-  dataRefreshPromise = (async () => {
+  // One span per refresh, with each source fetch under it, when tracing is on: the first load,
+  // the stale-first background refresh and the periodic ones all come through here.
+  dataRefreshPromise = withSpan('load data', {}, async () => {
     const { data, loadedSourceCount } = await fetchAndBuildData({ lastGood: keepLastGood && cachedData.indexed ? cachedData : null });
 
     if (requireAtLeastOneSource && loadedSourceCount === 0) {
@@ -140,7 +142,7 @@ async function refreshDataWithGuard(options = {}) {
     }
 
     return cachedData;
-  })();
+  });
 
   try {
     return await dataRefreshPromise;
@@ -150,8 +152,7 @@ async function refreshDataWithGuard(options = {}) {
 }
 
 export async function loadData() {
-  // One span per load, with each source fetch under it, when tracing is on.
-  return withSpan('load data', {}, () => refreshDataWithGuard({ requireAtLeastOneSource: true }));
+  return refreshDataWithGuard({ requireAtLeastOneSource: true });
 }
 
 /**

@@ -91,7 +91,7 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
   app.use(express.json({ limit: '4mb' }));
 
   // One server span per MCP request when tracing is on, named by its JSON-RPC method and tool.
-  app.use(traceMcp());
+  app.use(traceMcp({ paths: ['/mcp', PAY_PATH], tools: () => getToolDefinitions().map(tool => tool.name) }));
 
   // Usage audit: one line per MCP request with its JSON-RPC method and tool (src/http/accessLog.js).
   app.use(mcpAccessLog({ dashboardOrigins: DASHBOARD_ORIGINS }));
@@ -416,13 +416,18 @@ export async function startMcpHttpServer({ loadData = true } = {}) {
 const isMainModule = process.argv[1] === fileURLToPath(import.meta.url);
 
 if (isMainModule) {
-  await startTracing();
-  const { app } = await startMcpHttpServer({ loadData: true });
+  const tracing = await startTracing();
+  const { app, server } = await startMcpHttpServer({ loadData: true });
   const transports = app.locals.transports;
 
-  // Handle graceful shutdown
-  process.on('SIGINT', async () => {
+  // Graceful shutdown, on either signal: stop accepting requests, close the sessions, and send
+  // the spans still buffered.
+  let stopping = false;
+  const shutdown = async () => {
+    if (stopping) return;
+    stopping = true;
     logger.info('Shutting down MCP HTTP server');
+    server.close();
 
     for (const sessionId in transports) {
       try {
@@ -434,7 +439,10 @@ if (isMainModule) {
       }
     }
 
+    await tracing.shutdown();
     logger.info('MCP server shutdown complete');
     process.exit(0);
-  });
+  };
+  process.on('SIGINT', shutdown);
+  process.on('SIGTERM', shutdown);
 }
