@@ -18,8 +18,11 @@ import { startMcpHttpServer } from './mcp-server-http.js';
 import { PORT, HOST } from './config.js';
 import { logger } from './src/util/logger.js';
 import { closeRpcHealthDb } from './src/store/rpcHealthDb.js';
+import { startTracing } from './src/util/startTracing.js';
 
 const start = async () => {
+  // Before anything is built: the first load and every request after it are traced.
+  const tracing = await startTracing();
   // buildApp() loads data and starts the refreshers (RPC health, L2BEAT,
   // source self-heal) exactly once for the whole process.
   const app = await buildApp();
@@ -46,6 +49,7 @@ const start = async () => {
       logger.error({ err: error.message || error }, 'Error closing REST server');
     }
     await closeRpcHealthDb();
+    await tracing.shutdown();
     process.exit(0);
   };
 

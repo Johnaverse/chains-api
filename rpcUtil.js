@@ -1,4 +1,5 @@
 import { proxyFetch } from './fetchUtil.js';
+import { rpcSpan } from './src/util/telemetry.js';
 
 /**
  * Perform a JSON-RPC call with timeout and error handling.
@@ -37,7 +38,11 @@ function failureKind(error) {
   return 'unknown';
 }
 
-export async function jsonRpcCall(url, method, { params = [], timeoutMs = 10000 } = {}) {
+export function jsonRpcCall(url, method, options = {}) {
+  return rpcSpan(url, method, () => call(url, method, options));
+}
+
+async function call(url, method, { params = [], timeoutMs = 10000 } = {}) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 

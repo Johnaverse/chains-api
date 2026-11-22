@@ -166,6 +166,7 @@ Copy `.env.example` to `.env` for local configuration. Key variables:
 | `DATA_CACHE_ENABLED` | `true` | Enable disk caching |
 | `DATA_CACHE_FILE` | `.cache/chains-api-data.json` | Cache file path |
 | `LOG_LEVEL` | `info` | pino log level |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | (empty) | OpenTelemetry tracing (`src/util/telemetry.js`): OTLP/HTTP collector; empty = off. Server spans for REST and MCP requests, and the outbound HTTP / JSON-RPC / model / database calls made inside them; background jobs are one span each. No client address, raw path, query, body, prompt or key goes on a span. Also `OTEL_SERVICE_NAME`, `OTEL_TRACES_SAMPLER_ARG`, `OTEL_SDK_DISABLED` |
 | `CHAIN_REFRESHER_TICK_MS` | `1000` | Unified refresher tick interval |
 | `DATA_SOURCE_L2BEAT_API` | `https://l2beat.com/api/scaling/summary` | L2BEAT endpoint |
 | `L2BEAT_FETCH_TIMEOUT_MS` | `10000` | L2BEAT live fetch timeout |

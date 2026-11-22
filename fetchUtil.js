@@ -1,6 +1,7 @@
 import { HttpsProxyAgent } from 'https-proxy-agent';
 import { PROXY_URL, PROXY_ENABLED } from './config.js';
 import { logger } from './src/util/logger.js';
+import { tracedFetch } from './src/util/telemetry.js';
 
 /**
  * Proxy-aware fetch wrapper
@@ -25,7 +26,7 @@ if (PROXY_ENABLED) {
  * @param {object} options - Fetch options
  * @returns {Promise<Response>} Fetch response
  */
-export async function proxyFetch(url, options = {}) {
+async function plainFetch(url, options = {}) {
   // If proxy is enabled and agent is initialized, add it to options
   if (proxyAgent && (url.startsWith('http://') || url.startsWith('https://'))) {
     // Create a new options object to avoid mutating the original
@@ -40,6 +41,12 @@ export async function proxyFetch(url, options = {}) {
   // Use standard fetch if no proxy configured
   return fetch(url, options);
 }
+
+/**
+ * The fetch every outbound call goes through. Inside a traced request it is recorded as a client
+ * span (src/util/telemetry.js); otherwise it is the plain proxy-aware fetch.
+ */
+export const proxyFetch = tracedFetch(plainFetch);
 
 /**
  * Get proxy status information

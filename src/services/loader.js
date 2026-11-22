@@ -20,6 +20,7 @@ import {
 import { loadAllRpcHealth } from '../store/rpcHealthStore.js';
 import { loadPrivateRpcsFromDisk, stripPrivateRpcs } from '../store/privateRpcStore.js';
 import { logger } from '../util/logger.js';
+import { withSpan } from '../util/telemetry.js';
 
 const DATA_SOURCES = {
   theGraph: DATA_SOURCE_THE_GRAPH,
@@ -149,7 +150,8 @@ async function refreshDataWithGuard(options = {}) {
 }
 
 export async function loadData() {
-  return refreshDataWithGuard({ requireAtLeastOneSource: true });
+  // One span per load, with each source fetch under it, when tracing is on.
+  return withSpan('load data', {}, () => refreshDataWithGuard({ requireAtLeastOneSource: true }));
 }
 
 /**

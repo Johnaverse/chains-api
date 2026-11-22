@@ -1,6 +1,7 @@
 import { getAllEndpoints } from './dataService.js';
 import { MAX_ENDPOINTS_PER_CHAIN, RPC_CHECK_CONCURRENCY } from './config.js';
 import { jsonRpcCall } from './rpcUtil.js';
+import { jobSpan, setAttributes } from './src/util/telemetry.js';
 
 // Store monitoring results in memory
 let monitoringResults = {
@@ -161,7 +162,16 @@ async function testChainEndpoints(chainEndpoints, counters) {
 /**
  * Test all RPC endpoints for all chains with concurrency
  */
-async function testAllEndpoints() {
+function testAllEndpoints() {
+  // One span for the whole sweep, carrying its totals; the calls inside are not traced.
+  return jobSpan('rpc sweep', {}, async (span) => {
+    const results = await sweep();
+    setAttributes(span, { 'rpc.sweep.endpoints': results.totalEndpoints, 'rpc.sweep.tested': results.testedEndpoints, 'rpc.sweep.working': results.workingEndpoints, 'rpc.sweep.failed': results.failedEndpoints });
+    return results;
+  });
+}
+
+async function sweep() {
   console.log(`Starting RPC endpoint monitoring (concurrency: ${RPC_CHECK_CONCURRENCY})...`);
 
   const allEndpoints = getAllEndpoints();

@@ -15,6 +15,7 @@ import { initializeDataOnStartup } from '../services/loader.js';
 import { startRpcHealthCheck } from '../services/rpcHealth.js';
 import { appShell } from './appShell.js';
 import { registerAccessLog } from './accessLog.js';
+import { traceRequests } from '../util/telemetry.js';
 import { startL2BeatRefresh } from '../services/l2beatRefresher.js';
 import { startGrowthepieRefresh } from '../sources/growthepie.js';
 import { startSourceRefresher } from '../services/sourceRefresher.js';
@@ -196,6 +197,9 @@ export async function buildApp(options = {}) {
       plugins: [ajvErrors]
     }
   });
+
+  // One server span per request when tracing is on (telemetry.js); a no-op otherwise.
+  traceRequests(fastify);
 
   fastify.setErrorHandler((error, _request, reply) => {
     // 4xx: validation errors are safe to surface to clients.

@@ -16,6 +16,8 @@ import { getToolDefinitions, handleToolCall } from './mcp-tools.js';
 import { logger } from './src/util/logger.js';
 import { clientKey } from './src/http/clientKey.js';
 import { mcpAccessLog } from './src/http/accessLog.js';
+import { traceMcp } from './src/util/telemetry.js';
+import { startTracing } from './src/util/startTracing.js';
 import { mcpBearer, resourceMetadataUrl } from './src/auth/oauth.js';
 import { x402Paywall, paymentToken } from './src/auth/x402.js';
 import { RATE_LIMIT_WINDOW_MS, MCP_RATE_LIMIT_MAX, MCP_MAX_SESSIONS, MCP_SESSION_IDLE_MS, DASHBOARD_ORIGINS, TERMS_URL, LICENSING_CONTACT, PUBLIC_ORIGIN, X402_ENABLED, X402 } from './config.js';
@@ -87,6 +89,9 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
 
   // Parse JSON bodies
   app.use(express.json({ limit: '4mb' }));
+
+  // One server span per MCP request when tracing is on, named by its JSON-RPC method and tool.
+  app.use(traceMcp());
 
   // Usage audit: one line per MCP request with its JSON-RPC method and tool (src/http/accessLog.js).
   app.use(mcpAccessLog({ dashboardOrigins: DASHBOARD_ORIGINS }));
@@ -411,6 +416,7 @@ export async function startMcpHttpServer({ loadData = true } = {}) {
 const isMainModule = process.argv[1] === fileURLToPath(import.meta.url);
 
 if (isMainModule) {
+  await startTracing();
   const { app } = await startMcpHttpServer({ loadData: true });
   const transports = app.locals.transports;
 
