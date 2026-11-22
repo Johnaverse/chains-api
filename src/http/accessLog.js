@@ -46,8 +46,10 @@ const FORWARDED = ['cf-connecting-ip', 'x-forwarded-for', 'forwarded', 'x-real-i
 export function directFromCluster(headers = {}, peer = null, { publicHosts = [] } = {}) {
   if (!isPrivateAddress(peer)) return false;
   if (FORWARDED.some(name => headers[name] !== undefined)) return false;
-  const host = String(Array.isArray(headers.host) ? headers.host[0] : headers.host ?? '').toLowerCase().replace(/:\d+$/, '');
-  return !publicHosts.some(name => name && host === String(name).toLowerCase());
+  // Compared as DNS names: any letter case, no port, no trailing dot ("example.org." is the same host).
+  const dnsName = value => String(value ?? '').trim().toLowerCase().replace(/:\d+$/, '').replace(/\.+$/, '');
+  const host = dnsName(Array.isArray(headers.host) ? headers.host[0] : headers.host);
+  return !publicHosts.some(name => name && host === dnsName(name));
 }
 
 /**

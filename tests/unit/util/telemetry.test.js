@@ -445,6 +445,8 @@ describe('fourth review', () => {
     }
     expect(directFromCluster({ host: 'chains-api.johnaverse.cc' }, '10.42.1.16', { publicHosts })).toBe(false);
     expect(directFromCluster({ host: 'CHAINS-API.johnaverse.cc:443' }, '10.42.1.16', { publicHosts })).toBe(false);
+    for (const host of ['chains-api.johnaverse.cc.', 'chains-api.johnaverse.cc.:443', ' chains-api.johnaverse.cc.. ']) expect(directFromCluster({ host }, '10.42.1.16', { publicHosts })).toBe(false);
+    expect(directFromCluster(inCluster, '10.42.1.16', { publicHosts: ['chains-api.johnaverse.cc.'] })).toBe(true);
 
     await traced({ sampleRatio: 0 });
     const app = await buildApp({ logger: false, loadDataOnStartup: false });
