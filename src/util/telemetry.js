@@ -22,6 +22,7 @@ const NAME = 'chains-api';
 const tracer = () => trace.getTracer(NAME);
 
 let provider = null;
+let stopping = null;
 // Spans started and not yet ended. Shutting the provider down sends finished spans only, so
 // what is still running then (a request, an assistant run, a sweep) is ended first.
 const live = new Set();
@@ -33,6 +34,7 @@ export const tracingOn = () => provider !== null;
 /** Register the tracer provider. `exporter` is injected by tests; production exports OTLP/HTTP protobuf. */
 export async function startTelemetry({ enabled = false, serviceName = NAME, sampleRatio = 1, version = 'unknown' } = {}, { exporter = null, logger = console } = {}) {
   if (!enabled && !exporter) return { enabled: false, shutdown: async () => {} };
+  if (stopping) await stopping;
   if (provider) await stopTelemetry();
   let processor;
   if (exporter) {
@@ -57,19 +59,25 @@ export async function startTelemetry({ enabled = false, serviceName = NAME, samp
 }
 
 /** Flush what is buffered and unregister. Safe to call when tracing never started. */
-export async function stopTelemetry() {
+export function stopTelemetry() {
+  // A second call while the first is still sending (two signals in a row) waits for the same
+  // flush instead of returning at once and letting the process exit under it.
+  if (stopping) return stopping;
   const current = provider;
   provider = null;
-  if (!current) return;
-  for (const span of live) {
-    span.setAttribute('shutdown', true);
-    span.end();
-  }
-  live.clear();
-  await current.shutdown().catch(() => {});
-  trace.disable();
-  context.disable();
-  propagation.disable();
+  if (!current) return Promise.resolve();
+  stopping = (async () => {
+    for (const span of live) {
+      span.setAttribute('shutdown', true);
+      span.end();
+    }
+    live.clear();
+    await current.shutdown().catch(() => {});
+    trace.disable();
+    context.disable();
+    propagation.disable();
+  })().finally(() => { stopping = null; });
+  return stopping;
 }
 
 const activeSpan = () => trace.getSpan(context.active());
@@ -180,7 +188,7 @@ export function tracedFetch(fetcher) {
     } catch { /* recorded without a URL */ }
     // Part of a trace that is not sampled: no span, but a service of ours still gets the
     // caller's trace id and its decision, or it would start an unrelated trace of its own.
-    if (!activeSpan().isRecording()) return fetcher(input, url && internalHost(url.hostname) ? withTraceContext(init) : init);
+    if (!activeSpan().isRecording()) return url && internalHost(url.hostname) ? sendWithTrace(fetcher, input, init) : fetcher(input, init);
     const method = String(init?.method ?? 'GET').toUpperCase();
     const asked = url?.pathname.endsWith('/chat/completions') ? chatRequest(init?.body) : null;
     return withSpan(asked ? `chat ${asked.model}` : method, {
@@ -192,13 +200,25 @@ export function tracedFetch(fetcher) {
         'server.address': url?.hostname ?? null
       }
     }, async (span) => {
-      const response = await fetcher(input, url && internalHost(url.hostname) ? withTraceContext(init) : init);
+      const response = await (url && internalHost(url.hostname) ? sendWithTrace(fetcher, input, init) : fetcher(input, init));
       span.setAttribute('http.response.status_code', response.status);
       if (response.status >= 400) span.setStatus({ code: SpanStatusCode.ERROR });
       if (asked && response.ok) setAttributes(span, await chatAnswer(response));
       return response;
     });
   };
+}
+
+// The trace context goes to the host that was asked and no further: a redirect is not followed
+// with it (fetch would carry the header to wherever the redirect points, outside the cluster
+// included). A redirected request is asked again as the caller wrote it, without the context.
+async function sendWithTrace(fetcher, input, init) {
+  if (init?.redirect && init.redirect !== 'follow') return fetcher(input, withTraceContext(init));
+  const response = await fetcher(input, { ...withTraceContext(init), redirect: 'manual' });
+  const redirected = response.status >= 300 && response.status < 400 && Boolean(response.headers?.get?.('location'));
+  if (!redirected) return response;
+  await response.body?.cancel?.().catch(() => {});
+  return fetcher(input, init);
 }
 
 // The request with the trace context added to its headers, in whichever form the caller gave

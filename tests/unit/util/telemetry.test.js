@@ -457,6 +457,48 @@ describe('fourth review', () => {
   });
 });
 
+describe('fifth review', () => {
+  it('does not carry the trace context across a redirect', async () => {
+    await traced();
+    const redirect = () => new Response(null, { status: 302, headers: { location: 'https://elsewhere.example/releases' } });
+    const fetcher = vi.fn(async (_url, init) => (init?.redirect === 'manual' ? redirect() : ok({ followed: true })));
+    const url = 'http://chains-client-feed.chains-api.svc.cluster.local:8080/releases';
+    const init = { headers: { accept: 'application/json' } };
+    const response = await withSpan('request', {}, () => tracedFetch(fetcher)(url, init));
+    expect(await response.json()).toEqual({ followed: true });
+    // First with the context and no following; then as the caller wrote it, without the context.
+    expect(fetcher.mock.calls[0][1]).toMatchObject({ redirect: 'manual', headers: { accept: 'application/json', traceparent: expect.any(String) } });
+    expect(fetcher.mock.calls[1]).toEqual([url, init]);
+    // No redirect, one request; a 304 is an answer; the caller's own redirect mode is kept.
+    const plain = vi.fn(async () => new Response(null, { status: 304 }));
+    await withSpan('request', {}, () => tracedFetch(plain)(url, init));
+    expect(plain).toHaveBeenCalledTimes(1);
+    const own = vi.fn(async () => redirect());
+    await withSpan('request', {}, () => tracedFetch(own)(url, { ...init, redirect: 'error' }));
+    expect(own).toHaveBeenCalledTimes(1);
+    expect(own.mock.calls[0][1].redirect).toBe('error');
+  });
+
+  it('makes a second stop wait for the flush the first one started', async () => {
+    let flushed = false;
+    let finishFlush;
+    const slow = { export: (_batch, done) => done({ code: 0 }), forceFlush: async () => {}, shutdown: () => new Promise((resolve) => { finishFlush = () => { flushed = true; resolve(); }; }) };
+    await startTelemetry({ serviceName: 'chains-api' }, { exporter: slow, logger: {} });
+    const first = stopTelemetry();
+    let secondDone = false;
+    const second = stopTelemetry().then(() => { secondDone = true; });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(secondDone).toBe(false);
+    finishFlush();
+    await Promise.all([first, second]);
+    expect(flushed).toBe(true);
+    expect(secondDone).toBe(true);
+    // And tracing can start again afterwards.
+    await traced();
+    expect(tracingOn()).toBe(true);
+  });
+});
+
 describe('REST requests', () => {
   it('are named by route template, continue the caller\'s trace, and skip probes and the scrape', async () => {
     await traced();

@@ -34,7 +34,11 @@ const start = async () => {
   const { app: mcpApp } = await startMcpHttpServer({ loadData: false });
   const transports = mcpApp.locals.transports;
 
+  // Once: a second signal must not start a second shutdown that exits under the first.
+  let stopping = false;
   const shutdown = async () => {
+    if (stopping) return;
+    stopping = true;
     logger.info('Shutting down combined server');
     for (const sessionId in transports) {
       try {
