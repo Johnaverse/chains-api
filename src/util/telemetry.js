@@ -173,7 +173,8 @@ export function safePath(pathname) {
 
 // A service of ours in the cluster or on this host: where the trace context may go.
 function internalHost(hostname) {
-  if (/(^|\.)svc(\.cluster\.local)?$|^localhost$|^127\.|^\[?::1\]?$/.test(hostname)) return true;
+  // Cluster service names, and loopback as a whole address ("127.example.com" is a public name).
+  if (/(^|\.)svc(\.cluster\.local)?$|^localhost$|^127(\.\d{1,3}){3}$|^\[?::1\]?$/.test(hostname)) return true;
   // A bare service name ("chains-client-feed"). An IPv6 literal has no dot either, and is not one.
   return !hostname.includes('.') && !hostname.includes(':');
 }

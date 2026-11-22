@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { SpanKind, SpanStatusCode } from '@opentelemetry/api';
+import Fastify from 'fastify';
 import { InMemorySpanExporter } from '@opentelemetry/sdk-trace';
 // Imported here, not inside a test: the configuration tests reset the module registry, and a
 // later import would get a second copy of the telemetry module with no provider.
@@ -275,6 +276,45 @@ describe('review hardening', () => {
     });
     expect(spans().map(span => span.name)).toEqual(['rpc other', 'chat model', 'request']);
     expect(named('chat model').attributes['gen_ai.request.max_tokens']).toBeUndefined();
+  });
+
+  it('does not take a public name that starts like a loopback address for a local one', async () => {
+    await traced();
+    const fetcher = vi.fn(async () => ok());
+    await withSpan('request', {}, async () => {
+      await tracedFetch(fetcher)('https://127.example.com/x', { headers: {} });
+      await tracedFetch(fetcher)('https://svc.example.com/x', { headers: {} });
+      await tracedFetch(fetcher)('http://127.0.0.1:8080/x', { headers: {} });
+    });
+    const [lookalike, alsoPublic, loopback] = fetcher.mock.calls.map(([, init]) => init.headers);
+    expect(lookalike).toEqual({});
+    expect(alsoPublic).toEqual({});
+    expect(loopback.traceparent).toBeDefined();
+  });
+
+  it('keeps the trace context through a request body that arrives late', async () => {
+    await traced();
+    const app = Fastify();
+    traceRequests(app);
+    let seen;
+    app.post('/echo', async (request) => { seen = logIds(); return request.body; });
+    await app.listen({ port: 0, host: '127.0.0.1' });
+    try {
+      const encode = text => new TextEncoder().encode(text);
+      const body = new ReadableStream({
+        async start(controller) {
+          controller.enqueue(encode('{"a":'));
+          await new Promise(resolve => setTimeout(resolve, 30));
+          controller.enqueue(encode('1}'));
+          controller.close();
+        }
+      });
+      const response = await fetch(`http://127.0.0.1:${app.server.address().port}/echo`, { method: 'POST', headers: { 'content-type': 'application/json' }, body, duplex: 'half' });
+      expect(await response.json()).toEqual({ a: 1 });
+    } finally {
+      await app.close();
+    }
+    expect(seen.trace_id).toBe(named('POST /echo').spanContext().traceId);
   });
 
   it('does not take an IPv6 literal for a service in the cluster', async () => {
