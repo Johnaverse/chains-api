@@ -209,16 +209,36 @@ export function tracedFetch(fetcher) {
   };
 }
 
-// The trace context goes to the host that was asked and no further: a redirect is not followed
-// with it (fetch would carry the header to wherever the redirect points, outside the cluster
-// included). A redirected request is asked again as the caller wrote it, without the context.
+// The trace context goes to the host that was asked and no further: fetch would carry the header
+// to wherever a redirect points, outside the cluster included. So the first hop is made without
+// following, and a redirect is then followed here the way fetch follows one (the request is
+// never sent a second time): to its Location, as a GET where the status says so, without the
+// trace context, and without credentials when it leaves the origin.
 async function sendWithTrace(fetcher, input, init) {
   if (init?.redirect && init.redirect !== 'follow') return fetcher(input, withTraceContext(init));
   const response = await fetcher(input, { ...withTraceContext(init), redirect: 'manual' });
-  const redirected = response.status >= 300 && response.status < 400 && Boolean(response.headers?.get?.('location'));
-  if (!redirected) return response;
+  const location = response.status >= 300 && response.status < 400 ? response.headers?.get?.('location') : null;
+  if (!location) return response;
+  let from;
+  let to;
+  try {
+    from = new URL(typeof input === 'string' ? input : input?.url ?? String(input));
+    to = new URL(location, from);
+  } catch {
+    return response;
+  }
   await response.body?.cancel?.().catch(() => {});
-  return fetcher(input, init);
+  const method = String(init?.method ?? 'GET').toUpperCase();
+  const asGet = response.status === 303 ? method !== 'HEAD' : (response.status === 301 || response.status === 302) && method === 'POST';
+  const headers = new Headers(init?.headers ?? {});
+  if (asGet) for (const name of ['content-type', 'content-length', 'content-encoding', 'content-language', 'content-location']) headers.delete(name);
+  if (to.origin !== from.origin) for (const name of ['authorization', 'proxy-authorization', 'cookie']) headers.delete(name);
+  const next = { ...init, headers };
+  if (asGet) {
+    next.method = 'GET';
+    delete next.body;
+  }
+  return fetcher(to.href, next);
 }
 
 // The request with the trace context added to its headers, in whichever form the caller gave

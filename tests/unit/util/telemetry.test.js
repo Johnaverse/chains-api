@@ -458,23 +458,45 @@ describe('fourth review', () => {
 });
 
 describe('fifth review', () => {
-  it('does not carry the trace context across a redirect', async () => {
+  it('follows a redirect itself, once, without the trace context', async () => {
     await traced();
-    const redirect = () => new Response(null, { status: 302, headers: { location: 'https://elsewhere.example/releases' } });
-    const fetcher = vi.fn(async (_url, init) => (init?.redirect === 'manual' ? redirect() : ok({ followed: true })));
     const url = 'http://chains-client-feed.chains-api.svc.cluster.local:8080/releases';
-    const init = { headers: { accept: 'application/json' } };
-    const response = await withSpan('request', {}, () => tracedFetch(fetcher)(url, init));
+    const to = (status, location) => new Response(null, { status, headers: { location } });
+    const run = (fetcher, init) => withSpan('request', {}, () => tracedFetch(fetcher)(url, init));
+
+    // A GET redirected out of the cluster: followed to its Location, no context, no credentials.
+    const get = vi.fn(async (_url, init) => (init?.redirect === 'manual' ? to(302, 'https://elsewhere.example/releases') : ok({ followed: true })));
+    const response = await run(get, { headers: { accept: 'application/json', authorization: 'Bearer t' } });
     expect(await response.json()).toEqual({ followed: true });
-    // First with the context and no following; then as the caller wrote it, without the context.
-    expect(fetcher.mock.calls[0][1]).toMatchObject({ redirect: 'manual', headers: { accept: 'application/json', traceparent: expect.any(String) } });
-    expect(fetcher.mock.calls[1]).toEqual([url, init]);
+    expect(get.mock.calls[0][0]).toBe(url);
+    expect(get.mock.calls[0][1]).toMatchObject({ redirect: 'manual', headers: { authorization: 'Bearer t', traceparent: expect.any(String) } });
+    expect(get.mock.calls[1][0]).toBe('https://elsewhere.example/releases');
+    const followed = get.mock.calls[1][1].headers;
+    expect([followed.get('accept'), followed.get('authorization'), followed.get('traceparent')]).toEqual(['application/json', null, null]);
+
+    // A POST answered 303 has run: it is not sent again, its result is fetched with a GET.
+    const post = vi.fn(async (_url, init) => (init?.redirect === 'manual' ? to(303, '/jobs/7') : ok({ job: 7 })));
+    await run(post, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer t' }, body: '{"a":1}' });
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(post.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(1);
+    const [target, next] = post.mock.calls[1];
+    expect(target).toBe('http://chains-client-feed.chains-api.svc.cluster.local:8080/jobs/7');
+    expect(next.method).toBe('GET');
+    expect('body' in next).toBe(false);
+    // Same origin: the credentials stay; the body's headers go with the body.
+    expect([next.headers.get('authorization'), next.headers.get('content-type'), next.headers.get('traceparent')]).toEqual(['Bearer t', null, null]);
+
+    // A 307 keeps its method and body.
+    const keep = vi.fn(async (_url, init) => (init?.redirect === 'manual' ? to(307, '/v2/releases') : ok()));
+    await run(keep, { method: 'POST', body: '{"a":1}' });
+    expect(keep.mock.calls[1][1]).toMatchObject({ method: 'POST', body: '{"a":1}' });
+
     // No redirect, one request; a 304 is an answer; the caller's own redirect mode is kept.
     const plain = vi.fn(async () => new Response(null, { status: 304 }));
-    await withSpan('request', {}, () => tracedFetch(plain)(url, init));
+    await run(plain, {});
     expect(plain).toHaveBeenCalledTimes(1);
-    const own = vi.fn(async () => redirect());
-    await withSpan('request', {}, () => tracedFetch(own)(url, { ...init, redirect: 'error' }));
+    const own = vi.fn(async () => to(302, 'https://elsewhere.example/'));
+    await run(own, { redirect: 'error' });
     expect(own).toHaveBeenCalledTimes(1);
     expect(own.mock.calls[0][1].redirect).toBe('error');
   });
