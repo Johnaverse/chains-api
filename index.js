@@ -2,6 +2,7 @@ import { fileURLToPath as toFilePath } from 'node:url';
 import { buildApp } from './src/http/app.js';
 import { PORT, HOST } from './config.js';
 import { startTracing } from './src/util/startTracing.js';
+import { stopChainRefresher } from './src/services/chainRefresher.js';
 
 export { buildApp };
 
@@ -21,6 +22,8 @@ if (isMainModule) {
         if (stopping) return;
         stopping = true;
         await app.close().catch(() => {});
+        // Ends the sweep in progress (as not completed) so its span is sent with the rest.
+        stopChainRefresher();
         await tracing.shutdown();
         process.exit(0);
       };

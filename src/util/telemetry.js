@@ -131,11 +131,19 @@ export function logIds() {
   return active && trace.isSpanContextValid(active) ? { trace_id: active.traceId, span_id: active.spanId } : {};
 }
 
-// A path segment that looks like a credential: long and without a word in it (an Infura or
-// Alchemy key, a token, a hash). Route words ("chain-registry", "v2") stay.
-const KEY_LIKE = /^(?=.*\d)[A-Za-z0-9_-]{20,}$|^[0-9a-fA-F]{16,}$/;
+// A URL path is recorded only where it reads as words. RPC and API URLs carry keys in their
+// path, in any alphabet and sometimes percent-escaped, so a key cannot be recognised reliably;
+// a plain route word can. Each segment is decoded and split on - _ . and is kept when every
+// part is a short lowercase word, a short number, or a word with a number ("v2", "slip44").
+// Anything else is recorded as `:key` ("DefiLlama" too: over-redaction is the safe side).
+const PLAIN_PART = /^(?:[a-z]{1,14}|\d{1,6}|[a-z]{1,8}\d{1,6})$/;
+function plainSegment(segment) {
+  let text;
+  try { text = decodeURIComponent(segment); } catch { return false; }
+  return text.length <= 64 && text.split(/[-_.]/).every(part => PLAIN_PART.test(part));
+}
 export function safePath(pathname) {
-  return String(pathname ?? '').split('/').map(part => (KEY_LIKE.test(part) ? ':key' : part)).join('/');
+  return String(pathname ?? '').split('/').map(part => (part === '' || plainSegment(part) ? part : ':key')).join('/');
 }
 
 // A service of ours in the cluster or on this host: where the trace context may go.
@@ -246,14 +254,18 @@ async function chatAnswer(response) {
  * recorded a second time.
  */
 export function rpcSpan(url, method, fn) {
-  if (!inTrace()) return fn();
+  if (!provider) return fn();
+  const quiet = () => context.with(suppressTracing(context.active()), fn);
+  // Not recorded (no trace around it, or one that is not sampled): still nothing of the trace
+  // goes to the endpoint, whatever its host looks like.
+  if (!inTrace()) return quiet();
   let host = null;
   try { host = new URL(url).hostname; } catch { /* recorded without a host */ }
   const name = label(method, 'other');
   return withSpan(`rpc ${name}`, {
     kind: SpanKind.CLIENT,
     attributes: { 'rpc.system': 'jsonrpc', 'rpc.method': name, 'server.address': host }
-  }, () => context.with(suppressTracing(context.active()), fn));
+  }, quiet);
 }
 
 /**

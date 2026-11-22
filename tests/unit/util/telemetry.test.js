@@ -88,8 +88,18 @@ describe('outbound calls', () => {
   it('keep keys out of the recorded URL', async () => {
     expect(safePath('/v3/9aa3d95b3bc440fa88ea12eaa4456161')).toBe('/v3/:key');
     expect(safePath('/v2/AbCdEfGh1234567890abcdEFGH')).toBe('/v2/:key');
+    // A key in letters only, a percent-escaped one, a short one, one that cannot be decoded.
+    expect(safePath('/v2/AbCdEfGhIjKlMnOpQrStUvWxYzAbCdEf')).toBe('/v2/:key');
+    expect(safePath('/v2/abcdefghijklmnopqrstuvwxyzabcdef')).toBe('/v2/:key');
+    expect(safePath('/v3/%39aa3d95b3bc440fa88ea12eaa4456161')).toBe('/v3/:key');
+    expect(safePath('/rpc/Xk3pQ9')).toBe('/rpc/:key');
+    expect(safePath('/rpc/%E0%A4%A')).toBe('/rpc/:key');
+    // Route words stay readable.
     expect(safePath('/api/scaling/summary')).toBe('/api/scaling/summary');
     expect(safePath('/chain-registry-production/chains.json')).toBe('/chain-registry-production/chains.json');
+    expect(safePath('/satoshilabs/slips/master/slip-0044.md')).toBe('/satoshilabs/slips/master/slip-0044.md');
+    expect(safePath('/v1/chat/completions')).toBe('/v1/chat/completions');
+    expect(safePath('/')).toBe('/');
     await traced();
     await withSpan('request', {}, () => tracedFetch(async () => ok())('https://mainnet.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161?apikey=zzz'));
     expect(named('GET').attributes['url.full']).toBe('https://mainnet.infura.io/v3/:key');
@@ -353,6 +363,17 @@ describe('second review', () => {
     const run = named('assistant run');
     expect(parentOf(run)).toBe(named('POST /assistant/chat').spanContext().spanId);
     expect(parentOf(named('GET'))).toBe(run.spanContext().spanId);
+  });
+
+  it('sends no trace context to an RPC endpoint when the trace is not sampled either', async () => {
+    await traced({ sampleRatio: 0 });
+    const fetcher = vi.fn(async () => ok({ result: '0x1' }));
+    const init = { method: 'POST', headers: { 'content-type': 'application/json' } };
+    await withSpan('request', {}, () => rpcSpan('http://ethereum-rpc:8545', 'eth_chainId', () => tracedFetch(fetcher)('http://ethereum-rpc:8545', init)));
+    // And with no trace around the call at all.
+    await rpcSpan('http://ethereum-rpc:8545', 'eth_chainId', () => tracedFetch(fetcher)('http://ethereum-rpc:8545', init));
+    expect(fetcher.mock.calls.map(([, sent]) => sent)).toEqual([init, init]);
+    expect(spans()).toEqual([]);
   });
 
   it('holds a sweep open across ticks as one root span, closed once with its totals', async () => {

@@ -18,6 +18,7 @@ import { clientKey } from './src/http/clientKey.js';
 import { mcpAccessLog } from './src/http/accessLog.js';
 import { traceMcp } from './src/util/telemetry.js';
 import { startTracing } from './src/util/startTracing.js';
+import { stopChainRefresher } from './src/services/chainRefresher.js';
 import { mcpBearer, resourceMetadataUrl } from './src/auth/oauth.js';
 import { x402Paywall, paymentToken } from './src/auth/x402.js';
 import { RATE_LIMIT_WINDOW_MS, MCP_RATE_LIMIT_MAX, MCP_MAX_SESSIONS, MCP_SESSION_IDLE_MS, DASHBOARD_ORIGINS, TERMS_URL, LICENSING_CONTACT, PUBLIC_ORIGIN, X402_ENABLED, X402 } from './config.js';
@@ -439,6 +440,8 @@ if (isMainModule) {
       }
     }
 
+    // Ends the sweep in progress (as not completed) so its span is sent with the rest.
+    stopChainRefresher();
     await tracing.shutdown();
     logger.info('MCP server shutdown complete');
     process.exit(0);

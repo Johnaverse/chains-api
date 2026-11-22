@@ -19,6 +19,7 @@ import { PORT, HOST } from './config.js';
 import { logger } from './src/util/logger.js';
 import { closeRpcHealthDb } from './src/store/rpcHealthDb.js';
 import { startTracing } from './src/util/startTracing.js';
+import { stopChainRefresher } from './src/services/chainRefresher.js';
 
 const start = async () => {
   // Before anything is built: the first load and every request after it are traced.
@@ -49,6 +50,8 @@ const start = async () => {
       logger.error({ err: error.message || error }, 'Error closing REST server');
     }
     await closeRpcHealthDb();
+    // Ends the sweep in progress (as not completed) so its span is sent with the rest.
+    stopChainRefresher();
     await tracing.shutdown();
     process.exit(0);
   };
