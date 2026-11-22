@@ -260,6 +260,13 @@ describe('review hardening', () => {
     expect(exported).not.toMatch(/9aa3d95b|0xsecret|invalid project/);
   });
 
+  it('keeps a model\'s tag and namespace in its name', async () => {
+    await traced();
+    const ask = model => tracedFetch(async () => ok())('http://litellm.litellm.svc:4000/v1/chat/completions', { method: 'POST', body: JSON.stringify({ model }) });
+    await withSpan('request', {}, async () => { for (const model of ['qwen3:latest', 'pinax/qwen3.8-flash-next', 'org/model@v2', 'gpt-6-luna']) await ask(model); });
+    expect(spans().filter(span => span.kind === SpanKind.CLIENT).map(span => span.attributes['gen_ai.request.model'])).toEqual(['qwen3:latest', 'pinax/qwen3.8-flash-next', 'org/model@v2', 'gpt-6-luna']);
+  });
+
   it('records an unusual JSON-RPC method or model name as a fixed label', async () => {
     await traced();
     await withSpan('request', {}, async () => {
@@ -518,6 +525,12 @@ describe('fifth review', () => {
     const keep = vi.fn(async (_url, init) => (init?.redirect === 'manual' ? to(307, '/v2/releases') : ok()));
     await run(keep, { method: 'POST', body: '{"a":1}' });
     expect(keep.mock.calls[1][1]).toMatchObject({ method: 'POST', body: '{"a":1}' });
+
+    // A 304 is an answer, even one that carries a Location.
+    const notModified = vi.fn(async () => new Response(null, { status: 304, headers: { location: 'https://elsewhere.example/', etag: '"v1"' } }));
+    const cached = await run(notModified, { headers: { 'if-none-match': '"v1"' } });
+    expect(notModified).toHaveBeenCalledTimes(1);
+    expect([cached.status, cached.headers.get('etag')]).toEqual([304, '"v1"']);
 
     // No redirect, one request; a 304 is an answer; the caller's own redirect mode is kept.
     const plain = vi.fn(async () => new Response(null, { status: 304 }));

@@ -111,6 +111,12 @@ export function fail(span, err) {
   span.setAttribute('error.type', label(err?.kind ?? err?.name, 'Error'));
 }
 
+// A model as its provider writes it, tag and namespace included ("qwen3:latest",
+// "pinax/qwen3.8-flash-next", "org/model@v2"), when it is a short name; else a fixed word.
+function modelName(value) {
+  return typeof value === 'string' && /^[A-Za-z0-9][\w.:/@+-]{0,95}$/.test(value) ? value : 'model';
+}
+
 // A short identifier, or the fallback: what a span name or attribute may be made of.
 function label(value, fallback) {
   return typeof value === 'string' && /^[A-Za-z][\w./-]{0,63}$/.test(value) ? value : fallback;
@@ -217,7 +223,8 @@ export function tracedFetch(fetcher) {
 async function sendWithTrace(fetcher, input, init) {
   if (init?.redirect && init.redirect !== 'follow') return fetcher(input, withTraceContext(init));
   const response = await fetcher(input, { ...withTraceContext(init), redirect: 'manual' });
-  const location = response.status >= 300 && response.status < 400 ? response.headers?.get?.('location') : null;
+  // The statuses that are redirects. A 304 is an answer, whatever headers it carries.
+  const location = [301, 302, 303, 307, 308].includes(response.status) ? response.headers?.get?.('location') : null;
   if (!location) return response;
   let from;
   let to;
@@ -277,7 +284,7 @@ export function openSpan(name, attributes = {}) {
 function chatRequest(body) {
   try {
     const parsed = JSON.parse(body);
-    return typeof parsed?.model === 'string' ? { model: label(parsed.model, 'model'), maxTokens: Number.isFinite(parsed.max_tokens) ? parsed.max_tokens : null } : null;
+    return typeof parsed?.model === 'string' ? { model: modelName(parsed.model), maxTokens: Number.isFinite(parsed.max_tokens) ? parsed.max_tokens : null } : null;
   } catch {
     return null;
   }
