@@ -14,7 +14,7 @@ import pkg from '../../package.json' with { type: 'json' };
 import { initializeDataOnStartup } from '../services/loader.js';
 import { startRpcHealthCheck } from '../services/rpcHealth.js';
 import { appShell } from './appShell.js';
-import { registerAccessLog, clientKind } from './accessLog.js';
+import { registerAccessLog, directFromCluster } from './accessLog.js';
 import { traceRequests, withLogIds } from '../util/telemetry.js';
 import { startL2BeatRefresh } from '../services/l2beatRefresher.js';
 import { startGrowthepieRefresh } from '../sources/growthepie.js';
@@ -201,7 +201,7 @@ export async function buildApp(options = {}) {
 
   // One server span per request when tracing is on (telemetry.js); a no-op otherwise.
   // A caller's trace is continued only for another service in the cluster (accessLog.js).
-  traceRequests(fastify, { trusted: request => clientKind(request.headers, { peer: request.socket?.remoteAddress }) === 'internal' });
+  traceRequests(fastify, { trusted: request => directFromCluster(request.headers, request.socket?.remoteAddress, { publicHosts: PUBLIC_ORIGIN ? [new URL(PUBLIC_ORIGIN).hostname] : [] }) });
 
   fastify.setErrorHandler((error, _request, reply) => {
     // 4xx: validation errors are safe to surface to clients.

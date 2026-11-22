@@ -33,6 +33,23 @@ export function isPrivateAddress(ip) {
   return /^(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|fc|fd|::1$)/i.test(a);
 }
 
+// Headers a proxy or Cloudflare adds: a request carrying any of them, even empty, did not come
+// straight from inside the cluster.
+const FORWARDED = ['cf-connecting-ip', 'x-forwarded-for', 'forwarded', 'x-real-ip'];
+
+/**
+ * A request that reached this pod directly from a cluster or LAN address: a private peer, none
+ * of the proxy headers, and not addressed to one of `publicHosts` (the names the gateway serves,
+ * which nothing inside the cluster uses). What may be trusted to continue its own trace
+ * (src/util/telemetry.js); fail-closed, like the x402 rule for who is charged.
+ */
+export function directFromCluster(headers = {}, peer = null, { publicHosts = [] } = {}) {
+  if (!isPrivateAddress(peer)) return false;
+  if (FORWARDED.some(name => headers[name] !== undefined)) return false;
+  const host = String(Array.isArray(headers.host) ? headers.host[0] : headers.host ?? '').toLowerCase().replace(/:\d+$/, '');
+  return !publicHosts.some(name => name && host === String(name).toLowerCase());
+}
+
 /**
  * What kind of client asked, from what it sends rather than from a list of products:
  *   internal  — another service in the cluster (no Cloudflare or proxy headers, a private

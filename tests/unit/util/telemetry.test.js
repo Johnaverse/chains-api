@@ -430,6 +430,32 @@ describe('fourth review', () => {
     }
   });
 
+  it('trusts only a caller that came straight from the cluster', async () => {
+    const { directFromCluster } = await import('../../../src/http/accessLog.js');
+    const publicHosts = ['chains-api.johnaverse.cc'];
+    const inCluster = { host: 'chains-api.chains-api.svc.cluster.local:3000' };
+    expect(directFromCluster(inCluster, '10.42.1.16', { publicHosts })).toBe(true);
+    expect(directFromCluster(inCluster, '::ffff:10.42.1.16', { publicHosts })).toBe(true);
+    // A public peer, any proxy header (even empty), or the public hostname: not trusted.
+    expect(directFromCluster(inCluster, '203.0.113.9', { publicHosts })).toBe(false);
+    expect(directFromCluster(inCluster, null, { publicHosts })).toBe(false);
+    for (const name of ['cf-connecting-ip', 'x-forwarded-for', 'forwarded', 'x-real-ip']) {
+      expect(directFromCluster({ ...inCluster, [name]: '203.0.113.9' }, '10.42.1.16', { publicHosts })).toBe(false);
+      expect(directFromCluster({ ...inCluster, [name]: '' }, '10.42.1.16', { publicHosts })).toBe(false);
+    }
+    expect(directFromCluster({ host: 'chains-api.johnaverse.cc' }, '10.42.1.16', { publicHosts })).toBe(false);
+    expect(directFromCluster({ host: 'CHAINS-API.johnaverse.cc:443' }, '10.42.1.16', { publicHosts })).toBe(false);
+
+    await traced({ sampleRatio: 0 });
+    const app = await buildApp({ logger: false, loadDataOnStartup: false });
+    try {
+      for (const name of ['forwarded', 'x-real-ip']) await app.inject({ url: '/chains/1', headers: { traceparent, [name]: 'for=203.0.113.9' } });
+      expect(spans()).toEqual([]);
+    } finally {
+      await app.close();
+    }
+  });
+
   it('starts a new trace for an MCP request from a caller it does not trust', async () => {
     await traced();
     const res = Object.assign(new EventEmitter(), { statusCode: 200 });
