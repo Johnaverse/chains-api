@@ -171,12 +171,16 @@ export function safePath(pathname) {
   return String(pathname ?? '').split('/').map(part => (part === '' || plainSegment(part) ? part : ':key')).join('/');
 }
 
-// A service of ours in the cluster or on this host: where the trace context may go.
+// A service of ours in the cluster or on this host: where the trace context may go. By name
+// (a cluster service name, fully qualified or bare, with or without the trailing dot) or by
+// address (loopback, or a private range: a ClusterIP or pod address). Whole addresses only:
+// "127.example.com" and "10.example.com" are public names.
+const PRIVATE_V4 = /^(?:127|10)(?:\.\d{1,3}){3}$|^192\.168(?:\.\d{1,3}){2}$|^172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2}$/;
 function internalHost(hostname) {
-  // Cluster service names, and loopback as a whole address ("127.example.com" is a public name).
-  if (/(^|\.)svc(\.cluster\.local)?$|^localhost$|^127(\.\d{1,3}){3}$|^\[?::1\]?$/.test(hostname)) return true;
+  const host = String(hostname ?? '').toLowerCase().replace(/\.$/, '');
+  if (/(^|\.)svc(\.cluster\.local)?$|^localhost$|^\[?::1\]?$/.test(host) || PRIVATE_V4.test(host)) return true;
   // A bare service name ("chains-client-feed"). An IPv6 literal has no dot either, and is not one.
-  return !hostname.includes('.') && !hostname.includes(':');
+  return host !== '' && !host.includes('.') && !host.includes(':');
 }
 
 /**

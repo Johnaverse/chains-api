@@ -278,6 +278,16 @@ describe('review hardening', () => {
     expect(named('chat model').attributes['gen_ai.request.max_tokens']).toBeUndefined();
   });
 
+  it('sends the trace context to a cluster service however it is addressed', async () => {
+    await traced();
+    const fetcher = vi.fn(async () => ok());
+    const internal = ['http://chains-news.chains-api.svc.cluster.local.:8080/x', 'http://CHAINS-NEWS.chains-api.svc:8080/x', 'http://10.43.12.7:8080/x', 'http://172.20.0.5/x', 'http://192.168.100.1/x', 'http://chains-news:8080/x'];
+    const external = ['https://10.example.com/x', 'https://192.168.example.com/x', 'https://172.16.example.com/x', 'https://172.32.0.1/x', 'https://8.8.8.8/x'];
+    await withSpan('request', {}, async () => { for (const url of [...internal, ...external]) await tracedFetch(fetcher)(url, { headers: {} }); });
+    const sent = fetcher.mock.calls.map(([, init]) => Boolean(init.headers.traceparent));
+    expect(sent).toEqual([...internal.map(() => true), ...external.map(() => false)]);
+  });
+
   it('does not take a public name that starts like a loopback address for a local one', async () => {
     await traced();
     const fetcher = vi.fn(async () => ok());
