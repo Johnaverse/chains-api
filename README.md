@@ -1038,10 +1038,12 @@ OpenTelemetry traces, exported as OTLP over HTTP (protobuf). Off unless `OTEL_EX
 | `chat <model>` | client | one model call (assistant), GenAI conventions | `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.finish_reasons` |
 | `rpc eth_blockNumber` | client | one JSON-RPC call made inside a traced request | `rpc.method`, `server.address` |
 | `db SELECT`, `db UPDATE`, … | client | one database query made inside a traced request | `db.system.name`, `db.query.summary` (statement text, placeholders only) |
-| `load data`, `rpc sweep` | internal | one background job. A sweep is a single span with its totals (`rpc.sweep.*`), not one per endpoint | |
+| `assistant run` | internal | one assistant run, under the request that started it and ended when the run settles, so a run answered with 202 keeps its model, feed and RPC calls | |
+| `load data`, `rpc sweep` | internal | one background job: a data refresh with its source fetches, and one refresher sweep as a single span with its totals (`rpc.sweep.number`, `rpc.sweep.jobs`, `rpc.sweep.endpoints_checked`, `rpc.sweep.completed`), not one per endpoint | |
 
 - **Per-call spans exist only inside a trace.** The rolling refresher and the health checks run all day against thousands of endpoints; a call with no request or job span around it is not recorded.
 - **Kept off the spans:** client addresses and user agents (they stay in the usage audit lines), raw paths, query strings, tool arguments, request and response bodies, prompts and answers, and query values. A path segment that looks like a key is recorded as `:key`, and a JSON-RPC span records the endpoint's host only, since RPC URLs carry API keys in their path.
+- **An abandoned request** (the client went away before it was read) ends its span with `http.request.aborted`.
 - **Failures** are recorded by category (`error.type`: the error's kind or class) and an error status. The message and stack are not recorded: an endpoint's error text can echo a key or a request value.
 - **Trace context** (`traceparent`) is sent to services in the cluster only (the feeds, the model gateway), so their spans join the trace, and also when the trace is not sampled, so they follow the caller's decision. It is never sent to public sources or RPC endpoints.
 - **Logs:** with tracing on, every log line written inside a span, the usage audit lines included, carries `trace_id` and `span_id`.

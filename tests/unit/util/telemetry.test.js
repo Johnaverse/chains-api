@@ -7,7 +7,7 @@ import { InMemorySpanExporter } from '@opentelemetry/sdk-trace';
 import { buildApp } from '../../../src/http/app.js';
 import {
   startTelemetry, stopTelemetry, tracingOn, withSpan, jobSpan, rpcSpan, tracedFetch, tracedPool,
-  traceMcp, logIds, safePath, setActive, withLogIds
+  traceMcp, traceRequests, openSpan, logIds, safePath, setActive, withLogIds
 } from '../../../src/util/telemetry.js';
 
 let exporter;
@@ -41,6 +41,9 @@ describe('configuration', () => {
       .toMatchObject({ OTEL_ENABLED: true, OTEL_SERVICE_NAME: 'api', OTEL_SAMPLE_RATIO: 0.1 });
     expect((await config({ OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: 'http://tempo:4318/v1/traces' })).OTEL_ENABLED).toBe(true);
     expect((await config({ OTEL_EXPORTER_OTLP_ENDPOINT: 'http://tempo:4318', OTEL_SDK_DISABLED: 'true' })).OTEL_ENABLED).toBe(false);
+    // The standard flag, read as OpenTelemetry reads it.
+    for (const off of ['TRUE', ' True ', 'true']) expect((await config({ OTEL_EXPORTER_OTLP_ENDPOINT: 'http://tempo:4318', OTEL_SDK_DISABLED: off })).OTEL_ENABLED).toBe(false);
+    expect((await config({ OTEL_EXPORTER_OTLP_ENDPOINT: 'http://tempo:4318', OTEL_SDK_DISABLED: 'false' })).OTEL_ENABLED).toBe(true);
     expect((await config({ OTEL_TRACES_SAMPLER_ARG: 'lots' })).OTEL_SAMPLE_RATIO).toBe(1);
     expect((await config({ OTEL_TRACES_SAMPLER_ARG: '5' })).OTEL_SAMPLE_RATIO).toBe(1);
   });
@@ -306,6 +309,83 @@ describe('review hardening', () => {
     await withSpan('work', {}, async (span) => {
       expect(own.mixin()).toEqual({ app: 'x', trace_id: span.spanContext().traceId, span_id: span.spanContext().spanId });
     });
+  });
+});
+
+describe('second review', () => {
+  it('keeps the caller\'s headers in whichever form they were given', async () => {
+    await traced();
+    const fetcher = vi.fn(async () => ok());
+    const fetch = tracedFetch(fetcher);
+    const url = 'http://chains-client-feed.chains-api.svc.cluster.local:8080/releases';
+    const given = new Headers({ authorization: 'Bearer t', accept: 'application/json' });
+    await withSpan('request', {}, async () => {
+      await fetch(url, { headers: given });
+      await fetch(url, { headers: [['authorization', 'Bearer t'], ['accept', 'application/json']] });
+      await fetch(url, { headers: { authorization: 'Bearer t' } });
+      await fetch(url);
+    });
+    const sent = fetcher.mock.calls.map(([, init]) => init.headers);
+    for (const headers of sent.slice(0, 2)) {
+      expect(headers).toBeInstanceOf(Headers);
+      expect(headers.get('authorization')).toBe('Bearer t');
+      expect(headers.get('accept')).toBe('application/json');
+      expect(headers.get('traceparent')).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
+    }
+    // The caller's own object is not written to.
+    expect(given.has('traceparent')).toBe(false);
+    expect(sent[2]).toEqual({ authorization: 'Bearer t', traceparent: expect.any(String) });
+    expect(sent[3]).toEqual({ traceparent: expect.any(String) });
+  });
+
+  it('traces work that outlives the request that started it under a span of its own', async () => {
+    await traced();
+    const fetch = tracedFetch(async () => ok());
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    let job;
+    // The request answers (its span ends) while the job is still running.
+    await withSpan('POST /assistant/chat', {}, async () => {
+      job = withSpan('assistant run', {}, async () => { await gate; await fetch('https://l2beat.com/api'); });
+    });
+    release();
+    await job;
+    const run = named('assistant run');
+    expect(parentOf(run)).toBe(named('POST /assistant/chat').spanContext().spanId);
+    expect(parentOf(named('GET'))).toBe(run.spanContext().spanId);
+  });
+
+  it('holds a sweep open across ticks as one root span, closed once with its totals', async () => {
+    expect(openSpan('rpc sweep').end()).toBeUndefined();
+    await traced();
+    const fetch = tracedFetch(async () => ok());
+    await withSpan('unrelated request', {}, async () => {
+      const sweep = openSpan('rpc sweep', { 'rpc.sweep.number': 4, 'rpc.sweep.jobs': 120 });
+      // Not the active span: a call made meanwhile belongs to the request it is made in.
+      await fetch('https://l2beat.com/api');
+      sweep.end({ 'rpc.sweep.completed': true, 'rpc.sweep.endpoints_checked': 900 });
+      sweep.end({ 'rpc.sweep.completed': false });
+    });
+    const sweep = named('rpc sweep');
+    expect(parentOf(sweep)).toBeNull();
+    expect(sweep.attributes).toEqual({ 'rpc.sweep.number': 4, 'rpc.sweep.jobs': 120, 'rpc.sweep.completed': true, 'rpc.sweep.endpoints_checked': 900 });
+    expect(parentOf(named('GET'))).toBe(named('unrelated request').spanContext().spanId);
+    expect(spans().filter(span => span.name === 'rpc sweep')).toHaveLength(1);
+  });
+
+  it('ends the span of a request the client abandoned, once', async () => {
+    await traced();
+    const hooks = {};
+    traceRequests({ addHook: (name, fn) => { hooks[name] = fn; } });
+    const request = { method: 'POST', url: '/assistant/chat', headers: {}, routeOptions: { url: '/assistant/chat' } };
+    hooks.onRequest(request, {}, () => {});
+    hooks.onRequestAbort(request, () => {});
+    // Nothing left to finish if a response hook fires afterwards.
+    hooks.onResponse(request, { statusCode: 200 }, () => {});
+    hooks.onRequestAbort(request, () => {});
+    expect(spans()).toHaveLength(1);
+    expect(spans()[0].attributes).toEqual({ 'http.request.method': 'POST', 'http.request.aborted': true });
+    expect(spans()[0].status.code).toBe(SpanStatusCode.ERROR);
   });
 });
 

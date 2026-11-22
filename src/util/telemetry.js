@@ -182,10 +182,37 @@ export function tracedFetch(fetcher) {
   };
 }
 
+// The request with the trace context added to its headers, in whichever form the caller gave
+// them: a plain object stays one; a Headers instance or a list of pairs becomes a Headers copy.
 function withTraceContext(init) {
-  const headers = { ...(init?.headers ?? {}) };
+  const given = init?.headers;
+  if (given && (typeof given.forEach === 'function' || Array.isArray(given))) {
+    const headers = new Headers(given);
+    propagation.inject(context.active(), headers, { set: (carrier, key, value) => carrier.set(key, value) });
+    return { ...init, headers };
+  }
+  const headers = { ...(given ?? {}) };
   propagation.inject(context.active(), headers);
   return { ...init, headers };
+}
+
+/**
+ * A span opened now and ended later by its holder, for work that has no single function around
+ * it (a refresher sweep that advances tick by tick). It is not made the active span: what runs
+ * during it is not traced under it. `end({abandoned})` may be called more than once.
+ */
+export function openSpan(name, attributes = {}) {
+  if (!provider) return { set() {}, end() {} };
+  let span = tracer().startSpan(name, { kind: SpanKind.INTERNAL, attributes: clean(attributes), root: true });
+  return {
+    set(more) { setAttributes(span, more); },
+    end(more = {}) {
+      if (!span) return;
+      setAttributes(span, more);
+      span.end();
+      span = null;
+    }
+  };
 }
 
 function chatRequest(body) {
@@ -272,9 +299,21 @@ export function traceRequests(app, { skip = PROBES } = {}) {
     // The rest of the request runs inside the span, so what the handler does nests under it.
     return context.with(trace.setSpan(parent, span), done);
   });
+  // A client that goes away before the request is read gets no onResponse: end the span here.
+  app.addHook('onRequestAbort', (request, done) => {
+    const span = spans.get(request);
+    if (span) {
+      spans.delete(request);
+      span.setAttribute('http.request.aborted', true);
+      span.setStatus({ code: SpanStatusCode.ERROR });
+      span.end();
+    }
+    done();
+  });
   app.addHook('onResponse', (request, reply, done) => {
     const span = spans.get(request);
     if (span) {
+      spans.delete(request);
       // The route template, never the raw path: bounded names, and no parameter values.
       const route = request.routeOptions?.url ?? null;
       if (route) {

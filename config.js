@@ -239,7 +239,8 @@ export const DASHBOARD_ORIGINS = parseStringEnv('DASHBOARD_ORIGINS', 'https://ww
 
 // OpenTelemetry tracing (src/util/telemetry.js): on when an OTLP endpoint is set. The exporter
 // reads the standard OTEL_EXPORTER_OTLP_* variables (endpoint, headers, timeout) itself.
-export const OTEL_ENABLED = parseStringEnv('OTEL_SDK_DISABLED', '') !== 'true'
+// OTEL_SDK_DISABLED is read as OpenTelemetry reads it: trimmed, any letter case.
+export const OTEL_ENABLED = parseStringEnv('OTEL_SDK_DISABLED', '').trim().toLowerCase() !== 'true'
   && (parseStringEnv('OTEL_EXPORTER_OTLP_ENDPOINT', '') !== '' || parseStringEnv('OTEL_EXPORTER_OTLP_TRACES_ENDPOINT', '') !== '');
 export const OTEL_SERVICE_NAME = parseStringEnv('OTEL_SERVICE_NAME', 'chains-api');
 // Share of traces that start here and are kept (0..1); a trace the caller sampled always is.
