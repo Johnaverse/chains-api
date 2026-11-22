@@ -297,7 +297,8 @@ describe('review hardening', () => {
     const app = Fastify();
     traceRequests(app);
     let seen;
-    app.post('/echo', async (request) => { seen = logIds(); return request.body; });
+    let received;
+    app.post('/echo', async (request) => { seen = logIds(); received = request.body; return { ok: true }; });
     await app.listen({ port: 0, host: '127.0.0.1' });
     try {
       const encode = text => new TextEncoder().encode(text);
@@ -310,7 +311,8 @@ describe('review hardening', () => {
         }
       });
       const response = await fetch(`http://127.0.0.1:${app.server.address().port}/echo`, { method: 'POST', headers: { 'content-type': 'application/json' }, body, duplex: 'half' });
-      expect(await response.json()).toEqual({ a: 1 });
+      expect(await response.json()).toEqual({ ok: true });
+      expect(received).toEqual({ a: 1 });
     } finally {
       await app.close();
     }
@@ -439,6 +441,25 @@ describe('second review', () => {
     expect(sweep.attributes).toEqual({ 'rpc.sweep.number': 4, 'rpc.sweep.jobs': 120, 'rpc.sweep.completed': true, 'rpc.sweep.endpoints_checked': 900 });
     expect(parentOf(named('GET'))).toBe(named('unrelated request').spanContext().spanId);
     expect(spans().filter(span => span.name === 'rpc sweep')).toHaveLength(1);
+  });
+
+  it('ends a request\'s span when its connection closes, if nothing else did', async () => {
+    await traced();
+    const hooks = {};
+    traceRequests({ addHook: (name, fn) => { hooks[name] = fn; } });
+    const request = { method: 'GET', url: '/chains', headers: {}, routeOptions: { url: '/chains' } };
+    const raw = new EventEmitter();
+    hooks.onRequest(request, { raw }, () => {});
+    raw.emit('close');
+    expect(spans().map(span => [span.name, span.attributes['http.request.aborted']])).toEqual([['GET', true]]);
+    // A response that was sent first is recorded as that, and the close after it adds nothing.
+    const answered = { method: 'GET', url: '/chains', headers: {}, routeOptions: { url: '/chains' } };
+    const raw2 = new EventEmitter();
+    hooks.onRequest(answered, { raw: raw2 }, () => {});
+    hooks.onResponse(answered, { statusCode: 200 }, () => {});
+    raw2.emit('close');
+    expect(spans()).toHaveLength(2);
+    expect(spans()[1].attributes).toEqual({ 'http.request.method': 'GET', 'http.route': '/chains', 'http.response.status_code': 200 });
   });
 
   it('ends the span of a request the client abandoned, once', async () => {

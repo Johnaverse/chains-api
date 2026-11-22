@@ -377,6 +377,14 @@ export function traceRequests(app, { skip = PROBES, trusted = () => false } = {}
       attributes: { 'http.request.method': request.method }
     }, parent));
     spans.set(request, span);
+    // Whatever becomes of the request, its span ends when the connection's response does: a
+    // client that disconnects at a moment neither hook below covers must not leave it open.
+    reply.raw?.once?.('close', () => {
+      if (spans.get(request) !== span) return;
+      spans.delete(request);
+      span.setAttribute('http.request.aborted', true);
+      finish(span);
+    });
     // The rest of the request runs inside the span, so what the handler does nests under it.
     return context.with(trace.setSpan(parent, span), done);
   });
