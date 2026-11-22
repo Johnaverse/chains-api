@@ -1,4 +1,4 @@
-import { trace, context, propagation, SpanKind, SpanStatusCode } from '@opentelemetry/api';
+import { trace, context, propagation, ROOT_CONTEXT, SpanKind, SpanStatusCode } from '@opentelemetry/api';
 import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
 import { W3CTraceContextPropagator, suppressTracing, isTracingSuppressed } from '@opentelemetry/core';
 import { defaultResource, resourceFromAttributes } from '@opentelemetry/resources';
@@ -22,6 +22,11 @@ const NAME = 'chains-api';
 const tracer = () => trace.getTracer(NAME);
 
 let provider = null;
+// Spans started and not yet ended. Shutting the provider down sends finished spans only, so
+// what is still running then (a request, an assistant run, a sweep) is ended first.
+const live = new Set();
+function begin(span) { live.add(span); return span; }
+function finish(span) { live.delete(span); span.end(); }
 
 export const tracingOn = () => provider !== null;
 
@@ -56,6 +61,11 @@ export async function stopTelemetry() {
   const current = provider;
   provider = null;
   if (!current) return;
+  for (const span of live) {
+    span.setAttribute('shutdown', true);
+    span.end();
+  }
+  live.clear();
   await current.shutdown().catch(() => {});
   trace.disable();
   context.disable();
@@ -105,13 +115,14 @@ function label(value, fallback) {
 export function withSpan(name, { attributes = {}, kind = SpanKind.INTERNAL } = {}, fn) {
   if (!provider) return fn(null);
   return tracer().startActiveSpan(name, { kind, attributes: clean(attributes) }, async (span) => {
+    begin(span);
     try {
       return await fn(span);
     } catch (err) {
       fail(span, err);
       throw err;
     } finally {
-      span.end();
+      finish(span);
     }
   });
 }
@@ -211,13 +222,13 @@ function withTraceContext(init) {
  */
 export function openSpan(name, attributes = {}) {
   if (!provider) return { set() {}, end() {} };
-  let span = tracer().startSpan(name, { kind: SpanKind.INTERNAL, attributes: clean(attributes), root: true });
+  let span = begin(tracer().startSpan(name, { kind: SpanKind.INTERNAL, attributes: clean(attributes), root: true }));
   return {
     set(more) { setAttributes(span, more); },
     end(more = {}) {
       if (!span) return;
       setAttributes(span, more);
-      span.end();
+      finish(span);
       span = null;
     }
   };
@@ -294,19 +305,29 @@ export function tracedPool(pool) {
 const PROBES = new Set(['/health', '/ready', '/metrics']);
 
 /**
- * Fastify hooks: one server span per request, continuing the caller's trace when it sent a
- * `traceparent`. Probes and the metrics scrape are not traced.
+ * The context a request's span starts in. A `traceparent` is honoured only from a trusted
+ * caller, a service of ours in the cluster: the header also carries the sampling decision, so
+ * taking it from anyone would let a public client have every one of its requests recorded
+ * whatever OTEL_TRACES_SAMPLER_ARG says, and choose our trace ids. Anyone else starts a new trace.
  */
-export function traceRequests(app, { skip = PROBES } = {}) {
+function callerContext(headers, isTrusted) {
+  return isTrusted ? propagation.extract(ROOT_CONTEXT, headers) : ROOT_CONTEXT;
+}
+
+/**
+ * Fastify hooks: one server span per request. Probes and the metrics scrape are not traced.
+ * `trusted(request)` says whether the caller is one of ours (see callerContext).
+ */
+export function traceRequests(app, { skip = PROBES, trusted = () => false } = {}) {
   const spans = new WeakMap();
   app.addHook('onRequest', (request, reply, done) => {
     const path = request.url.split('?')[0];
     if (!provider || skip.has(path)) return done();
-    const parent = propagation.extract(context.active(), request.headers);
-    const span = tracer().startSpan(request.method, {
+    const parent = callerContext(request.headers, trusted(request));
+    const span = begin(tracer().startSpan(request.method, {
       kind: SpanKind.SERVER,
       attributes: { 'http.request.method': request.method }
-    }, parent);
+    }, parent));
     spans.set(request, span);
     // The rest of the request runs inside the span, so what the handler does nests under it.
     return context.with(trace.setSpan(parent, span), done);
@@ -318,7 +339,7 @@ export function traceRequests(app, { skip = PROBES } = {}) {
       spans.delete(request);
       span.setAttribute('http.request.aborted', true);
       span.setStatus({ code: SpanStatusCode.ERROR });
-      span.end();
+      finish(span);
     }
     done();
   });
@@ -334,7 +355,7 @@ export function traceRequests(app, { skip = PROBES } = {}) {
       }
       span.setAttribute('http.response.status_code', reply.statusCode);
       if (reply.statusCode >= 500) span.setStatus({ code: SpanStatusCode.ERROR });
-      span.end();
+      finish(span);
     }
     done();
   });
@@ -356,17 +377,17 @@ const MCP_METHODS = new Set([
  * `other` / `unknown` and can neither grow a span nor multiply span names. Mount it after the
  * JSON body parser.
  */
-export function traceMcp({ paths = ['/mcp'], tools = () => [] } = {}) {
+export function traceMcp({ paths = ['/mcp'], tools = () => [], trusted = () => false } = {}) {
   const known = new Set(paths);
   return (req, res, next) => {
     const route = String(req.path ?? '').replace(/(.)\/$/, '$1');
     if (!provider || !known.has(route)) return next();
-    const parent = propagation.extract(context.active(), req.headers);
+    const parent = callerContext(req.headers, trusted(req));
     const call = req.body && !Array.isArray(req.body) && typeof req.body.method === 'string' ? req.body : null;
     const method = call ? (MCP_METHODS.has(call.method) ? call.method : 'other') : null;
     const asked = method === 'tools/call' ? call.params?.name : null;
     const tool = method === 'tools/call' ? (typeof asked === 'string' && tools().includes(asked) ? asked : 'unknown') : null;
-    const span = tracer().startSpan(method ? [method, tool].filter(Boolean).join(' ') : `${label(req.method, 'OTHER')} ${route}`, {
+    const span = begin(tracer().startSpan(method ? [method, tool].filter(Boolean).join(' ') : `${label(req.method, 'OTHER')} ${route}`, {
       kind: SpanKind.SERVER,
       attributes: clean({
         'http.request.method': label(req.method, 'OTHER'),
@@ -376,11 +397,11 @@ export function traceMcp({ paths = ['/mcp'], tools = () => [] } = {}) {
         'mcp.tool.name': tool,
         'mcp.batch': Array.isArray(req.body) ? req.body.length : null
       })
-    }, parent);
+    }, parent));
     res.once('close', () => {
       span.setAttribute('http.response.status_code', res.statusCode);
       if (res.statusCode >= 500) span.setStatus({ code: SpanStatusCode.ERROR });
-      span.end();
+      if (live.has(span)) finish(span);
     });
     return context.with(trace.setSpan(parent, span), next);
   };

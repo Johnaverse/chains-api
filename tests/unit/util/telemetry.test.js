@@ -203,7 +203,7 @@ describe('jobs, database and logs', () => {
 describe('MCP requests', () => {
   const request = (body, headers = {}, path = '/mcp', method = 'POST') => ({ method, path, body, headers });
   const response = (statusCode = 200) => Object.assign(new EventEmitter(), { statusCode });
-  const mcp = () => traceMcp({ paths: ['/mcp', '/mcp/pay'], tools: () => ['get_chain_by_id', 'get_chains'] });
+  const mcp = (trusted = () => true) => traceMcp({ paths: ['/mcp', '/mcp/pay'], tools: () => ['get_chain_by_id', 'get_chains'], trusted });
   const run = (req, res = response()) => { let inside; mcp()(req, res, () => { inside = logIds(); }); res.emit('close'); return inside; };
 
   it('are named by JSON-RPC method and tool, and continue the caller\'s trace', async () => {
@@ -410,13 +410,61 @@ describe('second review', () => {
   });
 });
 
+describe('fourth review', () => {
+  const traceId = '0af7651916cd43dd8448eb211c80319c';
+  const traceparent = `00-${traceId}-b7ad6b7169203331-01`;
+
+  it('does not let a public caller choose the trace or force it to be recorded', async () => {
+    await traced({ sampleRatio: 0 });
+    const app = await buildApp({ logger: false, loadDataOnStartup: false });
+    try {
+      // Through Cloudflare or the gateway: the header claims "sampled", the ratio says none.
+      await app.inject({ url: '/chains/1', headers: { traceparent, 'cf-connecting-ip': '203.0.113.9' } });
+      await app.inject({ url: '/chains/1', headers: { traceparent, 'x-forwarded-for': '203.0.113.9' } });
+      expect(spans()).toEqual([]);
+      // From inside the cluster the caller's sampled trace is continued.
+      await app.inject({ url: '/chains/1', headers: { traceparent } });
+      expect(spans().map(span => span.spanContext().traceId)).toEqual([traceId]);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('starts a new trace for an MCP request from a caller it does not trust', async () => {
+    await traced();
+    const res = Object.assign(new EventEmitter(), { statusCode: 200 });
+    traceMcp({ paths: ['/mcp'] })({ method: 'POST', path: '/mcp', body: { method: 'ping' }, headers: { traceparent } }, res, () => {});
+    res.emit('close');
+    expect(named('ping').spanContext().traceId).not.toBe(traceId);
+    expect(parentOf(named('ping'))).toBeNull();
+  });
+
+  it('ends and sends what is still running when tracing stops', async () => {
+    // An exporter that keeps what it was sent after shutdown (the in-memory one empties itself).
+    const got = [];
+    const sent = { getFinishedSpans: () => got };
+    await startTelemetry({ serviceName: 'chains-api' }, { exporter: { export: (batch, done) => { got.push(...batch); done({ code: 0 }); }, shutdown: async () => {}, forceFlush: async () => {} }, logger: {} });
+    const sweep = openSpan('rpc sweep', { 'rpc.sweep.number': 1 });
+    let release;
+    const run = withSpan('assistant run', {}, () => new Promise((resolve) => { release = resolve; }));
+    await stopTelemetry();
+    expect(sent.getFinishedSpans().map(span => [span.name, span.attributes.shutdown]).sort()).toEqual([['assistant run', true], ['rpc sweep', true]]);
+    // Settling afterwards changes nothing and throws nothing.
+    release();
+    await run;
+    sweep.end({ 'rpc.sweep.completed': false });
+    expect(sent.getFinishedSpans()).toHaveLength(2);
+  });
+});
+
 describe('REST requests', () => {
   it('are named by route template, continue the caller\'s trace, and skip probes and the scrape', async () => {
     await traced();
     const app = await buildApp({ logger: false, loadDataOnStartup: false });
     try {
       const traceId = '0af7651916cd43dd8448eb211c80319c';
-      await app.inject({ url: '/chains/1?x=1', headers: { traceparent: `00-${traceId}-b7ad6b7169203331-01`, 'cf-connecting-ip': '203.0.113.9', 'user-agent': 'agent/1' } });
+      // From another service in the cluster: no proxy header, a private peer address.
+      await app.inject({ url: '/chains/1?x=1', headers: { traceparent: `00-${traceId}-b7ad6b7169203331-01`, 'user-agent': 'agent/1' } });
       await app.inject('/health');
       await app.inject('/metrics');
       const server = spans().filter(span => span.kind === SpanKind.SERVER);
@@ -426,7 +474,7 @@ describe('REST requests', () => {
       expect(server[0].attributes).toMatchObject({ 'http.request.method': 'GET', 'http.route': '/chains/:id' });
       expect(typeof server[0].attributes['http.response.status_code']).toBe('number');
       // No address, no user agent, no raw path or query.
-      expect(JSON.stringify(server[0].attributes)).not.toMatch(/203\.0\.113|agent\/1|x=1|chains\/1/);
+      expect(JSON.stringify(server[0].attributes)).not.toMatch(/agent\/1|x=1|chains\/1/);
     } finally {
       await app.close();
     }

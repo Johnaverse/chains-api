@@ -1032,7 +1032,7 @@ OpenTelemetry traces, exported as OTLP over HTTP (protobuf). Off unless `OTEL_EX
 
 | Span | Kind | What it covers | Attributes |
 |---|---|---|---|
-| `GET /chains/:id` (method and route template) | server | one REST request; continues the caller's trace from `traceparent`. `/health`, `/ready` and `/metrics` are not traced | `http.request.method`, `http.route`, `http.response.status_code` |
+| `GET /chains/:id` (method and route template) | server | one REST request. `/health`, `/ready` and `/metrics` are not traced | `http.request.method`, `http.route`, `http.response.status_code` |
 | `tools/call get_chain_by_id` (JSON-RPC method and tool) | server | one MCP request on `/mcp` or `/mcp/pay`; no other path of the MCP listener is traced. A method that is not a protocol method is recorded as `other`, a tool that is not registered as `unknown` | `rpc.method`, `mcp.tool.name`, `mcp.batch`, `http.route`, `http.response.status_code` |
 | `GET`, `POST` | client | one outbound HTTP request made inside a traced request or job | `http.request.method`, `url.full`, `server.address`, `http.response.status_code` |
 | `chat <model>` | client | one model call (assistant), GenAI conventions | `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.finish_reasons` |
@@ -1043,6 +1043,8 @@ OpenTelemetry traces, exported as OTLP over HTTP (protobuf). Off unless `OTEL_EX
 
 - **Per-call spans exist only inside a trace.** The rolling refresher and the health checks run all day against thousands of endpoints; a call with no request or job span around it is not recorded.
 - **Kept off the spans:** client addresses and user agents (they stay in the usage audit lines), raw paths, query strings, tool arguments, request and response bodies, prompts and answers, and query values. A URL path is recorded only where it reads as plain route words (short lowercase words and numbers, after decoding); any other segment is recorded as `:key`, since a key in a path cannot be recognised reliably. A JSON-RPC span records the endpoint's host only, and an RPC endpoint is never sent the trace context, sampled or not.
+- **Whose trace is continued.** A `traceparent` is honoured only from another service in the cluster (no Cloudflare or proxy header, a private address). The header carries the sampling decision too, so a public caller's is ignored and its request starts a new trace, kept at `OTEL_TRACES_SAMPLER_ARG`.
+- **At shutdown**, what is still running (a request, an assistant run, a sweep) is ended with `shutdown: true` and sent with the rest.
 - **An abandoned request** (the client went away before it was read) ends its span with `http.request.aborted`.
 - **Failures** are recorded by category (`error.type`: the error's kind or class) and an error status. The message and stack are not recorded: an endpoint's error text can echo a key or a request value.
 - **Trace context** (`traceparent`) is sent to services in the cluster only (the feeds, the model gateway), so their spans join the trace, and also when the trace is not sampled, so they follow the caller's decision. It is never sent to public sources or RPC endpoints.

@@ -15,7 +15,7 @@ import { initializeDataOnStartup, getCachedData, startRpcHealthCheck } from './d
 import { getToolDefinitions, handleToolCall } from './mcp-tools.js';
 import { logger } from './src/util/logger.js';
 import { clientKey } from './src/http/clientKey.js';
-import { mcpAccessLog } from './src/http/accessLog.js';
+import { mcpAccessLog, clientKind } from './src/http/accessLog.js';
 import { traceMcp } from './src/util/telemetry.js';
 import { startTracing } from './src/util/startTracing.js';
 import { stopChainRefresher } from './src/services/chainRefresher.js';
@@ -92,7 +92,12 @@ export function createMcpHttpApp({ now = Date.now, publicOrigin = PUBLIC_ORIGIN,
   app.use(express.json({ limit: '4mb' }));
 
   // One server span per MCP request when tracing is on, named by its JSON-RPC method and tool.
-  app.use(traceMcp({ paths: ['/mcp', PAY_PATH], tools: () => getToolDefinitions().map(tool => tool.name) }));
+  // A caller's trace is continued only for another service in the cluster.
+  app.use(traceMcp({
+    paths: ['/mcp', PAY_PATH],
+    tools: () => getToolDefinitions().map(tool => tool.name),
+    trusted: req => clientKind(req.headers, { peer: req.socket?.remoteAddress }) === 'internal'
+  }));
 
   // Usage audit: one line per MCP request with its JSON-RPC method and tool (src/http/accessLog.js).
   app.use(mcpAccessLog({ dashboardOrigins: DASHBOARD_ORIGINS }));
