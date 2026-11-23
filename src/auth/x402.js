@@ -47,6 +47,17 @@ const PURGE_EVERY_MS = 60 * 60 * 1000;
 // end so, e.g. invalid_exact_evm_nonce_already_used.
 const PENDING_REASON = 'settlement_pending';
 const NONCE_USED = /nonce_already_used$/;
+// Facilitator reasons for a transfer that failed at or after broadcast, e.g.
+// invalid_exact_evm_transaction_failed (with or without a message after it). They say the
+// facilitator's transaction did not go through, not that the payment is bad: a facilitator that
+// settles for many clients from one wallet gives two settlements the same transaction nonce now
+// and then, and the node refuses one. Such a settlement is tried again with the same payment (its
+// authorization moves funds once at most), and it is never taken as final by itself: a send that
+// failed may still have reached the network.
+const BROADCAST_FAILED = /_transaction_failed(?![a-z_])|invalid_transaction_state/;
+// Waits before the second and third settle attempts, each lengthened at random by up to half so
+// that calls refused together do not retry together.
+const SETTLE_RETRY_MS = [400, 1200];
 // A transfer the chain shows paying us is credited to a payment only when it was mined after the
 // payment was first claimed here (block time against this clock, give or take this much): an
 // earlier one paid for something else — the same authorization used before, elsewhere.
@@ -146,8 +157,18 @@ function settleOutcome(result, err, SettleError) {
   if (err && !failure) return { kind: 'unresolved', transaction: null };
   if (!failure) return { kind: 'settled', transaction: result.transaction, network: result.network, payer: result.payer };
   if (!failure.errorReason || failure.errorReason === PENDING_REASON) return { kind: 'unresolved', transaction: failure.transaction || null };
-  return { kind: NONCE_USED.test(failure.errorReason) ? 'nonce_used' : 'refused', reason: failure.errorReason };
+  return {
+    kind: NONCE_USED.test(failure.errorReason) ? 'nonce_used' : 'refused', reason: failure.errorReason,
+    detail: brief(failure.errorMessage), transaction: failure.transaction || null
+  };
 }
+
+/** The start of a facilitator's error message, on one line: enough to tell failures apart in a log. */
+function brief(message) {
+  return typeof message === 'string' && message ? message.replace(/\s+/g, ' ').trim().slice(0, 200) : undefined;
+}
+
+const sleep = (ms) => new Promise(resolve => { setTimeout(resolve, ms); });
 
 /**
  * @param {object} cfg
@@ -165,10 +186,11 @@ function settleOutcome(result, err, SettleError) {
  *                                    that check; empty, or a payment on another network: the
  *                                    registry's healthy endpoints
  * @param {() => number} [cfg.now]
+ * @param {(ms: number) => Promise<void>} [cfg.wait]  the pause between settle attempts
  */
 export function x402Paywall({
   payTo, network, priceUsd, facilitatorUrl, domains = [], alternative = '',
-  resourceServer = null, ledger = x402Ledger(), observe = observeAuthorization, rpcUrls = [], now = Date.now
+  resourceServer = null, ledger = x402Ledger(), observe = observeAuthorization, rpcUrls = [], now = Date.now, wait = sleep
 }) {
   // The facilitator's supported kinds are read once; a failure is retried after RETRY_AFTER_MS.
   let ready = null;
@@ -266,18 +288,31 @@ export function x402Paywall({
   /** Settle the claimed payment (c.rec, in flight) for `result`, the tool's successful answer. */
   async function settle(c, result) {
     const { s, rec } = c;
-    let outcome;
-    try {
-      outcome = settleOutcome(await s.settlePayment(c.payment, c.requirement), null, c.SettleError);
-    } catch (err) {
-      outcome = settleOutcome(null, err, c.SettleError);
+    const attempt = async () => {
+      try {
+        return settleOutcome(await s.settlePayment(c.payment, c.requirement), null, c.SettleError);
+      } catch (err) {
+        return settleOutcome(null, err, c.SettleError);
+      }
+    };
+    const broadcastFailed = (o) => o.kind === 'refused' && BROADCAST_FAILED.test(o.reason);
+    let outcome = await attempt();
+    for (const ms of SETTLE_RETRY_MS) {
+      if (!broadcastFailed(outcome)) break;
+      count('settlement_retried');
+      logger.warn({ tool: c.tool.name, payer: rec.payer, nonce: rec.nonce, reason: outcome.reason, detail: outcome.detail, transaction: outcome.transaction }, 'x402 settlement failed at broadcast; retrying');
+      await wait(ms + Math.floor(Math.random() * ms / 2));
+      outcome = await attempt();
     }
+    const refusal = outcome.kind === 'refused' || outcome.kind === 'nonce_used' ? { reason: outcome.reason, detail: outcome.detail } : null;
     // A recovery cannot take a refusal at its word: the earlier attempt may have paid before the
     // authorization expired or the payer's balance moved. Nor can anyone take "nonce spent". Only
     // the chain may rule our transfer out — the nonce spent elsewhere, or the authorization unusable
     // for good (x402Chain.js); until then the payment stays unresolved, and no new one is asked for.
+    // The same holds for a transfer that still fails at broadcast after the retries: the send may
+    // have reached the network all the same, and asking for a new payment could then charge twice.
     let proven = false;
-    if (outcome.kind === 'nonce_used' || (c.recovering && outcome.kind !== 'settled')) {
+    if (outcome.kind === 'nonce_used' || broadcastFailed(outcome) || (c.recovering && outcome.kind !== 'settled')) {
       proven = true;
       const p = { network: rec.network, asset: rec.asset, payer: rec.payer, nonce: rec.nonce, payTo: rec.payTo, amount: rec.amount, validBefore: rec.validBefore, transaction: outcome.transaction ?? rec.transaction };
       // The trusted endpoints serve the configured network; a payment recorded on another (taken
@@ -308,12 +343,13 @@ export function x402Paywall({
       // The facilitator's word is final only while this call holds the claim; the chain's is always.
       if (!await record(rec, { status: 'refused', updatedAt: at }) && !proven) return superseded(c, result);
       count('settlement_failed');
+      logger.warn({ tool: c.tool.name, payer: rec.payer, nonce: rec.nonce, reason: outcome.reason, facilitatorReason: refusal?.reason, detail: refusal?.detail, network: rec.network }, 'x402 settlement refused');
       return paymentRequired(c, `Settlement failed${outcome.reason ? `: ${outcome.reason}` : ''}`);
     }
     const unresolved = { ...rec, transaction: outcome.transaction ?? rec.transaction ?? null };
     await record(rec, { status: 'unresolved', transaction: unresolved.transaction, updatedAt: at });
     count('unresolved');
-    logger.warn({ tool: c.tool.name, payer: rec.payer, nonce: rec.nonce, transaction: unresolved.transaction, network: rec.network }, 'x402 payment unresolved');
+    logger.warn({ tool: c.tool.name, payer: rec.payer, nonce: rec.nonce, transaction: unresolved.transaction, network: rec.network, facilitatorReason: refusal?.reason, detail: refusal?.detail }, 'x402 payment unresolved');
     return pending(unresolved, 'The payment\'s settlement could not be confirmed.');
   }
 
