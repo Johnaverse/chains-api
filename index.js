@@ -3,6 +3,7 @@ import { buildApp } from './src/http/app.js';
 import { PORT, HOST } from './config.js';
 import { startTracing } from './src/util/startTracing.js';
 import { stopChainRefresher } from './src/services/chainRefresher.js';
+import { closeRpcHealthDb } from './src/store/rpcHealthDb.js';
 
 export { buildApp };
 
@@ -22,6 +23,7 @@ if (isMainModule) {
         if (stopping) return;
         stopping = true;
         await app.close().catch(() => {});
+        await closeRpcHealthDb().catch(() => {});
         // Ends the sweep in progress (as not completed) so its span is sent with the rest.
         stopChainRefresher();
         await tracing.shutdown();

@@ -29,7 +29,7 @@ import {
   L2BEAT_REFRESH_INTERVAL_MS,
   MAX_ENDPOINTS_PER_CHAIN
 } from '../../config.js';
-import { openSpan } from '../util/telemetry.js';
+import { openSpan, detached } from '../util/telemetry.js';
 import { logger } from '../util/logger.js';
 import { incCounter } from '../util/metrics.js';
 import { cachedData } from '../store/cache.js';
@@ -508,9 +508,10 @@ export async function tickOnce() {
 
 export function startChainRefresher() {
   if (tickTimer) return;
-  tickTimer = setInterval(() => {
+  // Outside any trace: POST /reload can start this while it is being served.
+  tickTimer = detached(() => setInterval(() => {
     tickOnce().catch(err => logger.error({ err: err.message || err }, 'Tick swallowed error'));
-  }, SWEEP_TICK_MS);
+  }, SWEEP_TICK_MS));
   tickTimer.unref?.();
   // Kick off the first tick immediately so the first L2BEAT batch happens
   // without waiting one SWEEP_TICK_MS.

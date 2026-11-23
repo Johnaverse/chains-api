@@ -6,8 +6,8 @@ import { BatchSpanProcessor, ParentBasedSampler, SimpleSpanProcessor, TraceIdRat
 
 /**
  * OpenTelemetry tracing. Off unless an OTLP endpoint is configured (OTEL_EXPORTER_OTLP_ENDPOINT
- * or OTEL_EXPORTER_OTLP_TRACES_ENDPOINT): everything below is then a no-op and nothing is
- * loaded, sampled or sent.
+ * or OTEL_EXPORTER_OTLP_TRACES_ENDPOINT): everything below is then a no-op, the exporter is
+ * not loaded, and nothing is sampled or sent.
  *
  * What is traced: an inbound REST request and an MCP request (server spans, continuing the
  * caller's trace), and under them the outbound HTTP, JSON-RPC, model and database calls they
@@ -23,6 +23,8 @@ const tracer = () => trace.getTracer(NAME);
 
 let provider = null;
 let stopping = null;
+// How long stopping waits for the last spans to be sent.
+const FLUSH_MS = 3000;
 // Spans started and not yet ended. Shutting the provider down sends finished spans only, so
 // what is still running then (a request, an assistant run, a sweep) is ended first.
 const live = new Set();
@@ -72,7 +74,14 @@ export function stopTelemetry() {
       span.end();
     }
     live.clear();
-    await current.shutdown().catch(() => {});
+    // Bounded: with the collector down or hung the exporter would otherwise hold the process
+    // for up to ten seconds of every rollout.
+    let timer;
+    await Promise.race([
+      current.shutdown().catch(() => {}),
+      new Promise((resolve) => { timer = setTimeout(resolve, FLUSH_MS); timer.unref?.(); })
+    ]);
+    clearTimeout(timer);
     trace.disable();
     context.disable();
     propagation.disable();
@@ -139,6 +148,15 @@ export function withSpan(name, { attributes = {}, kind = SpanKind.INTERNAL } = {
       finish(span);
     }
   });
+}
+
+/**
+ * Run `fn` outside any trace. For starting a timer or a loop that outlives its caller: a timer
+ * keeps the context it was created in, so one started while a request is being served would tie
+ * every later tick, its log lines and its calls to that request's trace.
+ */
+export function detached(fn) {
+  return provider ? context.with(ROOT_CONTEXT, fn) : fn();
 }
 
 /**
@@ -342,13 +360,13 @@ export function tracedPool(pool) {
       if (key === 'traced') return true;
       const value = Reflect.get(target, key, target);
       if (key !== 'query') return typeof value === 'function' ? value.bind(target) : value;
-      return (sql, params) => {
-        if (!inTrace()) return target.query(sql, params);
+      return (sql, ...rest) => {
+        if (!inTrace()) return target.query(sql, ...rest);
         const text = String(typeof sql === 'string' ? sql : sql?.sql ?? '').replace(/\s+/g, ' ').trim();
         return withSpan(`db ${text.split(' ')[0] ?? ''}`.trim(), {
           kind: SpanKind.CLIENT,
           attributes: { 'db.system.name': 'mariadb', 'db.query.summary': text.slice(0, 80) }
-        }, () => target.query(sql, params));
+        }, () => target.query(sql, ...rest));
       };
     }
   });

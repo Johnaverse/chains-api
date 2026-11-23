@@ -8,7 +8,7 @@ import { InMemorySpanExporter } from '@opentelemetry/sdk-trace';
 import { buildApp } from '../../../src/http/app.js';
 import {
   startTelemetry, stopTelemetry, tracingOn, withSpan, jobSpan, rpcSpan, tracedFetch, tracedPool,
-  traceMcp, traceRequests, openSpan, logIds, safePath, setActive, withLogIds
+  traceMcp, traceRequests, openSpan, detached, logIds, safePath, setActive, withLogIds
 } from '../../../src/util/telemetry.js';
 
 let exporter;
@@ -630,6 +630,47 @@ describe('fifth review', () => {
     // And tracing can start again afterwards.
     await traced();
     expect(tracingOn()).toBe(true);
+  });
+});
+
+describe('independent review', () => {
+  it('stops waiting for a collector that never answers', async () => {
+    vi.useFakeTimers();
+    try {
+      const hung = { export: (_batch, done) => done({ code: 0 }), forceFlush: async () => {}, shutdown: () => new Promise(() => {}) };
+      await startTelemetry({ serviceName: 'chains-api' }, { exporter: hung, logger: {} });
+      let stopped = false;
+      const stop = stopTelemetry().then(() => { stopped = true; });
+      await vi.advanceTimersByTimeAsync(2900);
+      expect(stopped).toBe(false);
+      await vi.advanceTimersByTimeAsync(200);
+      await stop;
+      expect(stopped).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('passes every argument of a query through, traced or not, on or off', async () => {
+    const pool = { query: vi.fn(async () => []) };
+    await tracedPool(pool).query('SELECT 1', [1], { timeout: 5 });
+    await traced();
+    await tracedPool(pool).query('SELECT 1', [1], { timeout: 5 });
+    await withSpan('request', {}, () => tracedPool(pool).query('SELECT 1', [1], { timeout: 5 }));
+    expect(pool.query.mock.calls).toEqual([['SELECT 1', [1], { timeout: 5 }], ['SELECT 1', [1], { timeout: 5 }], ['SELECT 1', [1], { timeout: 5 }]]);
+  });
+
+  it('starts a timer outside the trace of whatever started it', async () => {
+    expect(detached(() => 7)).toBe(7);
+    await traced();
+    let inside;
+    let outside;
+    await withSpan('POST /reload', {}, async () => {
+      inside = logIds();
+      await new Promise((resolve) => { detached(() => setTimeout(() => { outside = logIds(); resolve(); }, 5)); });
+    });
+    expect(inside.trace_id).toBeDefined();
+    expect(outside).toEqual({});
   });
 });
 
