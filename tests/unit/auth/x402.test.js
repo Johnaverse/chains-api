@@ -227,6 +227,92 @@ describe('x402Paywall', () => {
       expect(metric()).toContain('chains_api_x402_payments_total{outcome="settlement_failed"} 1');
     });
 
+    it.each([
+      ['a refusal', 'refuse'],
+      ['a lost answer', 'lostBefore']
+    ])('a send that failed but landed, then %s on the retry: found on-chain, served, and not charged again', async (_label, second) => {
+      const s = fakeServer({ settleAs: ['sentAnyway', second] });
+      const paywall = paywallOf(s);
+      const res = await paywall.call(TOOL, PAYMENT, () => ok);
+      expect(s.settlePayment).toHaveBeenCalledTimes(2);
+      expect(s.observe).toHaveBeenCalledTimes(1);
+      expect(asksForPayment(res)).toBe(false);
+      expect(res.content).toEqual(ok.content);
+      expect(res._meta['x402/payment-response']).toMatchObject({ success: true, transaction: '0xtx1' });
+      expect(s.chain.size).toBe(1);
+    });
+
+    it('a failed send, then a refusal the chain cannot yet confirm: no new payment is asked for', async () => {
+      const s = fakeServer({ settleAs: ['unsent', 'refuse'] });
+      const paywall = paywallOf(s);
+      const res = await paywall.call(TOOL, PAYMENT, () => ok);
+      expect(asksForPayment(res)).toBe(false);
+      expect(res._meta['x402/payment-response']).toMatchObject({ success: false, status: 'unresolved' });
+      expect(JSON.stringify(res)).not.toContain('hello');
+      // The same payment is not "refused": it is settled when the facilitator takes it.
+      const retry = await paywall.call(TOOL, PAYMENT, () => ok);
+      expect(retry._meta['x402/payment-response']).toMatchObject({ success: true, transaction: '0xtx1' });
+      expect(s.chain.size).toBe(1);
+    });
+
+    it.each([
+      ['thrown as a SettleError, with the node\'s message after the reason', () => settleError(`${BROADCAST_FAILED}: nonce too low`)],
+      ['of another scheme', () => settleError('invalid_upto_evm_transaction_failed')],
+      ['reported as an invalid transaction state', () => settleError('invalid_transaction_state')]
+    ])('retries a failure %s', async (_label, failure) => {
+      const s = fakeServer();
+      s.settlePayment.mockRejectedValueOnce(failure());
+      const res = await paywallOf(s).call(TOOL, PAYMENT, () => ok);
+      expect(res._meta['x402/payment-response']).toMatchObject({ success: true });
+      expect(s.settlePayment).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not report a mined, reverted transaction as the payment\'s, but has the chain check look at it', async () => {
+      const s = fakeServer();
+      s.settlePayment.mockRejectedValue(settleError(BROADCAST_FAILED, '0xreverted'));
+      const res = await paywallOf(s).call(TOOL, PAYMENT, () => ok);
+      expect(res._meta['x402/payment-response']).toEqual({ success: false, status: 'unresolved', network: ACCEPT.network, payer: authorization().from });
+      expect(s.observe.mock.calls[0][0]).toMatchObject({ transaction: '0xreverted' });
+    });
+
+    it('stops retrying once settling has taken too long for the claim it holds', async () => {
+      const s = fakeServer({ settleAs: ['unsent', 'unsent', 'unsent'] });
+      let t = 1_700_000_000_000;
+      const slow = s.settlePayment.getMockImplementation();
+      s.settlePayment.mockImplementation(async (p) => { t += 31_000; return slow(p); });
+      const res = await paywallOf(s, { now: () => t }).call(TOOL, PAYMENT, () => ok);
+      expect(s.settlePayment).toHaveBeenCalledTimes(1);
+      expect(asksForPayment(res)).toBe(false);
+      expect(res._meta['x402/payment-response']).toMatchObject({ status: 'unresolved' });
+    });
+
+    it('starts no attempt at the limit, nor after a pause that ran past it', async () => {
+      let t = 1_700_000_000_000;
+      const s = fakeServer({ settleAs: ['unsent', 'unsent', 'unsent'] });
+      const slow = s.settlePayment.getMockImplementation();
+      // The first attempt ends 29.7 s in: the shortest pause before a second (0.4 s) would pass the limit.
+      s.settlePayment.mockImplementation(async (p) => { t += 29_700; return slow(p); });
+      await paywallOf(s, { now: () => t }).call(TOOL, PAYMENT, () => ok);
+      expect(s.settlePayment).toHaveBeenCalledTimes(1);
+      expect(wait).not.toHaveBeenCalled();
+
+      // A pause that overruns: the time is read again before the attempt.
+      const s2 = fakeServer({ settleAs: ['unsent', 'unsent', 'unsent'] });
+      const late = vi.fn(async () => { t += 30_000; });
+      await paywallOf(s2, { now: () => t, wait: late }).call(TOOL, paymentWith(`0x${'cd'.repeat(32)}`), () => ok);
+      expect(late).toHaveBeenCalledTimes(1);
+      expect(s2.settlePayment).toHaveBeenCalledTimes(1);
+      expect(metric()).not.toContain('outcome="settlement_retried"');
+    });
+
+    it('keeps a facilitator\'s reason to a bounded length in what the caller is sent', async () => {
+      const s = fakeServer();
+      s.settlePayment.mockRejectedValue(settleError(`invalid_exact_evm_payload_signature ${'x'.repeat(5000)}`));
+      const res = await paywallOf(s).call(TOOL, PAYMENT, () => ok);
+      expect(asksForPayment(res)).toBe(true);
+      expect(res.structuredContent.error.length).toBeLessThan(260);
+    });
+
     it('does not repeat a settlement the facilitator refused for the payment itself', async () => {
       const s = fakeServer({ settleAs: ['refuse'] });
       const res = await paywallOf(s).call(TOOL, PAYMENT, () => ok);
