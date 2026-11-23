@@ -310,10 +310,15 @@ export function x402Paywall({
     // Not the payment's transaction: it failed, and is neither recorded nor reported as one.
     let failedSend = sendInDoubt ? outcome.transaction : null;
     for (const ms of SETTLE_RETRY_MS) {
-      if (!broadcastFailed(outcome) || now() - started > SETTLE_RETRY_BUDGET_MS) break;
+      if (!broadcastFailed(outcome)) break;
+      // An attempt starts only inside the budget, counting the pause before it; the pause may
+      // run long, so the time is read again once it is over.
+      const pause = ms + Math.floor(Math.random() * ms / 2);
+      if (now() - started + pause >= SETTLE_RETRY_BUDGET_MS) break;
+      await wait(pause);
+      if (now() - started >= SETTLE_RETRY_BUDGET_MS) break;
       count('settlement_retried');
       logger.warn({ tool: c.tool.name, payer: rec.payer, nonce: rec.nonce, reason: outcome.reason, detail: outcome.detail, transaction: outcome.transaction }, 'x402 settlement failed at broadcast; retrying');
-      await wait(ms + Math.floor(Math.random() * ms / 2));
       outcome = await attempt();
       if (broadcastFailed(outcome)) failedSend = outcome.transaction ?? failedSend;
     }

@@ -286,6 +286,25 @@ describe('x402Paywall', () => {
       expect(res._meta['x402/payment-response']).toMatchObject({ status: 'unresolved' });
     });
 
+    it('starts no attempt at the limit, nor after a pause that ran past it', async () => {
+      let t = 1_700_000_000_000;
+      const s = fakeServer({ settleAs: ['unsent', 'unsent', 'unsent'] });
+      const slow = s.settlePayment.getMockImplementation();
+      // The first attempt ends 29 s in: the pause before a second would reach the limit.
+      s.settlePayment.mockImplementation(async (p) => { t += 29_500; return slow(p); });
+      await paywallOf(s, { now: () => t }).call(TOOL, PAYMENT, () => ok);
+      expect(s.settlePayment).toHaveBeenCalledTimes(1);
+      expect(wait).not.toHaveBeenCalled();
+
+      // A pause that overruns: the time is read again before the attempt.
+      const s2 = fakeServer({ settleAs: ['unsent', 'unsent', 'unsent'] });
+      const late = vi.fn(async () => { t += 30_000; });
+      await paywallOf(s2, { now: () => t, wait: late }).call(TOOL, paymentWith(`0x${'cd'.repeat(32)}`), () => ok);
+      expect(late).toHaveBeenCalledTimes(1);
+      expect(s2.settlePayment).toHaveBeenCalledTimes(1);
+      expect(metric()).not.toContain('outcome="settlement_retried"');
+    });
+
     it('keeps a facilitator\'s reason to a bounded length in what the caller is sent', async () => {
       const s = fakeServer();
       s.settlePayment.mockRejectedValue(settleError(`invalid_exact_evm_payload_signature ${'x'.repeat(5000)}`));
