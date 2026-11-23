@@ -39,7 +39,8 @@ const reordered = (o) => (o && typeof o === 'object' && !Array.isArray(o) ? Obje
 const CFG = { payTo: ACCEPT.payTo, network: ACCEPT.network, priceUsd: 0.001, facilitatorUrl: 'https://facilitator.test' };
 const TOOL = { name: 'echo', description: 'Echo the input' };
 
-const settleError = (errorReason, transaction = '') => new SettleError(500, { success: false, errorReason, transaction, network: ACCEPT.network });
+const settleError = (errorReason, transaction = '', errorMessage = undefined) => new SettleError(500, { success: false, errorReason, errorMessage, transaction, network: ACCEPT.network });
+const BROADCAST_FAILED = 'invalid_exact_evm_transaction_failed';
 
 /**
  * A stand-in for @x402/core's x402ResourceServer over a facilitator with a ledger of its own:
@@ -50,6 +51,8 @@ const settleError = (errorReason, transaction = '') => new SettleError(500, { su
  *   'lostAfter'  the transfer happens, then the answer is lost
  *   'pending'    the transfer is broadcast, answered as settlement_pending with its hash
  *   'refuse'     a definitive refusal
+ *   'unsent'     the facilitator's transaction is refused by its node: nothing happens
+ *   'sentAnyway' the same answer, but the transaction reached the network: the transfer happens
  * A nonce already spent is refused as the EVM scheme does (invalid_exact_evm_nonce_already_used).
  */
 function fakeServer({ valid = true, initFails = 0, settleAs = [], verifyFails = 0, verifyRejects = 0 } = {}) {
@@ -80,6 +83,10 @@ function fakeServer({ valid = true, initFails = 0, settleAs = [], verifyFails = 
       const mode = script.shift() ?? 'ok';
       if (mode === 'lostBefore') throw new Error('fetch failed');
       if (mode === 'refuse') throw settleError('invalid_exact_evm_payload_signature');
+      // As the public facilitator answers it: HTTP 200, success false, the node's words as the message.
+      const unsent = { success: false, errorReason: BROADCAST_FAILED, errorMessage: 'Missing or invalid parameters.\nURL: https://rpc.test\nRequest body: {"method":"eth_sendRawTransaction"}', transaction: '', network: ACCEPT.network };
+      if (mode === 'unsent') return unsent;
+      if (mode === 'sentAnyway' && !chain.has(nonce)) { chain.set(nonce, `0xtx${chain.size + 1}`); return unsent; }
       if (chain.has(nonce)) throw settleError('invalid_exact_evm_nonce_already_used');
       const transaction = `0xtx${chain.size + 1}`;
       chain.set(nonce, transaction);
@@ -95,7 +102,9 @@ function fakeServer({ valid = true, initFails = 0, settleAs = [], verifyFails = 
   s.observe = vi.fn(async ({ nonce }) => (chain.has(nonce) ? { state: 'paid', transaction: chain.get(nonce), time: s.minedAt } : { state: 'unknown' }));
   return s;
 }
-const paywallOf = (s, extra = {}) => x402Paywall({ ...CFG, resourceServer: s, ledger: memoryLedger(), observe: s.observe, ...extra });
+// No real pause between settle attempts.
+const wait = vi.fn(async () => {});
+const paywallOf = (s, extra = {}) => x402Paywall({ ...CFG, resourceServer: s, ledger: memoryLedger(), observe: s.observe, wait, ...extra });
 const base64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64');
 const ok = { content: [{ type: 'text', text: 'hello' }] };
 const metric = () => renderMetrics({ cache: {} });
@@ -106,6 +115,7 @@ beforeEach(() => {
   registry.tools = ECHO;
   _resetMetricsForTests();
   runTool.mockReset().mockResolvedValue(ok);
+  wait.mockClear();
 });
 
 describe('x402Paywall', () => {
@@ -165,6 +175,66 @@ describe('x402Paywall', () => {
     expect(res.structuredContent.error).toBe('Settlement failed: invalid_exact_evm_payload_signature');
     expect(asksForPayment(res)).toBe(true);
     expect(JSON.stringify(res)).not.toContain('hello');
+  });
+
+  describe('when the facilitator\'s transaction fails at broadcast', () => {
+    it('settles the same payment again and serves the call, charged once', async () => {
+      const s = fakeServer({ settleAs: ['unsent', 'unsent'] });
+      const res = await paywallOf(s).call(TOOL, PAYMENT, () => ok);
+      expect(res.content).toEqual(ok.content);
+      expect(res._meta['x402/payment-response']).toMatchObject({ success: true, transaction: '0xtx1' });
+      expect(s.settlePayment).toHaveBeenCalledTimes(3);
+      expect(s.settlePayment.mock.calls.every(([p]) => p === s.settlePayment.mock.calls[0][0])).toBe(true);
+      expect(wait).toHaveBeenCalledTimes(2);
+      expect(s.chain.size).toBe(1);
+      expect(metric()).toContain('chains_api_x402_payments_total{outcome="settled"} 1');
+      expect(metric()).toContain('chains_api_x402_payments_total{outcome="settlement_retried"} 2');
+      expect(metric()).not.toContain('outcome="settlement_failed"');
+    });
+
+    it('finds on-chain a transfer whose send was reported failed, instead of asking to be paid again', async () => {
+      const s = fakeServer({ settleAs: ['sentAnyway'] });
+      const res = await paywallOf(s).call(TOOL, PAYMENT, () => ok);
+      expect(res.content).toEqual(ok.content);
+      expect(res._meta['x402/payment-response']).toMatchObject({ success: true, transaction: '0xtx1' });
+      expect(s.chain.size).toBe(1);
+      expect(s.observe).toHaveBeenCalledTimes(1);
+    });
+
+    it('still failing after the retries: withholds the result, asks for no new payment, and the same payment recovers it', async () => {
+      const s = fakeServer({ settleAs: ['unsent', 'unsent', 'unsent'] });
+      const paywall = paywallOf(s);
+      const first = await paywall.call(TOOL, PAYMENT, () => ok);
+      expect(s.settlePayment).toHaveBeenCalledTimes(3);
+      expect(first.isError).toBe(true);
+      expect(asksForPayment(first)).toBe(false);
+      expect(first._meta['x402/payment-response']).toMatchObject({ success: false, status: 'unresolved' });
+      expect(JSON.stringify(first)).not.toContain('hello');
+      expect(s.chain.size).toBe(0);
+
+      const retry = await paywall.call(TOOL, PAYMENT, () => ok);
+      expect(retry.content).toEqual(ok.content);
+      expect(retry._meta['x402/payment-response']).toMatchObject({ success: true, transaction: '0xtx1' });
+      expect(s.chain.size).toBe(1);
+    });
+
+    it('asks for a new payment once the chain shows the authorization can never pay', async () => {
+      const s = fakeServer({ settleAs: ['unsent', 'unsent', 'unsent'] });
+      s.observe.mockResolvedValue({ state: 'expired_unused' });
+      const res = await paywallOf(s).call(TOOL, PAYMENT, () => ok);
+      expect(asksForPayment(res)).toBe(true);
+      expect(res.structuredContent.error).toBe('Settlement failed: it expired unused');
+      expect(metric()).toContain('chains_api_x402_payments_total{outcome="settlement_failed"} 1');
+    });
+
+    it('does not repeat a settlement the facilitator refused for the payment itself', async () => {
+      const s = fakeServer({ settleAs: ['refuse'] });
+      const res = await paywallOf(s).call(TOOL, PAYMENT, () => ok);
+      expect(asksForPayment(res)).toBe(true);
+      expect(s.settlePayment).toHaveBeenCalledTimes(1);
+      expect(wait).not.toHaveBeenCalled();
+      expect(s.observe).not.toHaveBeenCalled();
+    });
   });
 
   describe('when the settlement outcome is lost', () => {
