@@ -290,8 +290,8 @@ describe('x402Paywall', () => {
       let t = 1_700_000_000_000;
       const s = fakeServer({ settleAs: ['unsent', 'unsent', 'unsent'] });
       const slow = s.settlePayment.getMockImplementation();
-      // The first attempt ends 29 s in: the pause before a second would reach the limit.
-      s.settlePayment.mockImplementation(async (p) => { t += 29_500; return slow(p); });
+      // The first attempt ends 29.7 s in: the shortest pause before a second (0.4 s) would pass the limit.
+      s.settlePayment.mockImplementation(async (p) => { t += 29_700; return slow(p); });
       await paywallOf(s, { now: () => t }).call(TOOL, PAYMENT, () => ok);
       expect(s.settlePayment).toHaveBeenCalledTimes(1);
       expect(wait).not.toHaveBeenCalled();
