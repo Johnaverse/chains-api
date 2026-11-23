@@ -18,8 +18,12 @@ import { startMcpHttpServer } from './mcp-server-http.js';
 import { PORT, HOST } from './config.js';
 import { logger } from './src/util/logger.js';
 import { closeRpcHealthDb } from './src/store/rpcHealthDb.js';
+import { startTracing } from './src/util/startTracing.js';
+import { stopChainRefresher } from './src/services/chainRefresher.js';
 
 const start = async () => {
+  // Before anything is built: the first load and every request after it are traced.
+  const tracing = await startTracing();
   // buildApp() loads data and starts the refreshers (RPC health, L2BEAT,
   // source self-heal) exactly once for the whole process.
   const app = await buildApp();
@@ -30,7 +34,11 @@ const start = async () => {
   const { app: mcpApp } = await startMcpHttpServer({ loadData: false });
   const transports = mcpApp.locals.transports;
 
+  // Once: a second signal must not start a second shutdown that exits under the first.
+  let stopping = false;
   const shutdown = async () => {
+    if (stopping) return;
+    stopping = true;
     logger.info('Shutting down combined server');
     for (const sessionId in transports) {
       try {
@@ -46,6 +54,9 @@ const start = async () => {
       logger.error({ err: error.message || error }, 'Error closing REST server');
     }
     await closeRpcHealthDb();
+    // Ends the sweep in progress (as not completed) so its span is sent with the rest.
+    stopChainRefresher();
+    await tracing.shutdown();
     process.exit(0);
   };
 

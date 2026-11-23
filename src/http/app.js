@@ -14,7 +14,8 @@ import pkg from '../../package.json' with { type: 'json' };
 import { initializeDataOnStartup } from '../services/loader.js';
 import { startRpcHealthCheck } from '../services/rpcHealth.js';
 import { appShell } from './appShell.js';
-import { registerAccessLog } from './accessLog.js';
+import { registerAccessLog, directFromCluster } from './accessLog.js';
+import { traceRequests, withLogIds } from '../util/telemetry.js';
 import { startL2BeatRefresh } from '../services/l2beatRefresher.js';
 import { startGrowthepieRefresh } from '../sources/growthepie.js';
 import { startSourceRefresher } from '../services/sourceRefresher.js';
@@ -179,7 +180,8 @@ export async function buildApp(options = {}) {
   } = options;
 
   const fastify = Fastify({
-    logger,
+    // With the trace ids on every line written inside a traced request (request.log included).
+    logger: withLogIds(logger),
     // One audit line per request instead (accessLog.js): fastify's pair split each request over
     // two lines, the second without its path, and logged every kubelet probe.
     disableRequestLogging: true,
@@ -196,6 +198,10 @@ export async function buildApp(options = {}) {
       plugins: [ajvErrors]
     }
   });
+
+  // One server span per request when tracing is on (telemetry.js); a no-op otherwise.
+  // A caller's trace is continued only for another service in the cluster (accessLog.js).
+  traceRequests(fastify, { trusted: request => directFromCluster(request.headers, request.socket?.remoteAddress, { publicHosts: PUBLIC_ORIGIN ? [new URL(PUBLIC_ORIGIN).hostname] : [] }) });
 
   fastify.setErrorHandler((error, _request, reply) => {
     // 4xx: validation errors are safe to surface to clients.

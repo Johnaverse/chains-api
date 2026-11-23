@@ -14,6 +14,7 @@ import {
 } from '../../../config.js';
 import { runAssistant, checkLlmReachable, AssistantUnavailableError } from '../../services/assistant.js';
 import { sendError } from '../util/sendError.js';
+import { withSpan } from '../../util/telemetry.js';
 import { auditFields } from '../accessLog.js';
 
 // Async job handling. A reverse proxy in front of the API (ingress /
@@ -76,7 +77,9 @@ function startAssistantJob({ messages, context, log, visitor = {} }) {
     if (job.steps.length >= MAX_JOB_STEPS) job.steps.shift();
     job.steps.push({ label, at: Date.now() });
   };
-  job.promise = runAssistant({ messages, context, log, onStep })
+  // Its own span, ended when the run settles: a slow run outlives the request that started it
+  // (202 and polling), and its model, feed and RPC calls are traced under this one.
+  job.promise = withSpan('assistant run', {}, () => runAssistant({ messages, context, log, onStep }))
     .then((result) => { job.status = 'done'; job.result = result; })
     .catch((err) => {
       job.status = 'error';

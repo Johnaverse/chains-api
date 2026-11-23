@@ -1,3 +1,4 @@
+import { tracedPool } from '../util/telemetry.js';
 import {
   CHAINS_API_DB_HOST,
   CHAINS_API_DB_PORT,
@@ -61,7 +62,7 @@ export async function database() {
   if (!initPromise && Date.now() < retryAt) return null;
   initPromise ??= (async () => {
     try {
-      const p = await createPoolImpl();
+      const p = tracedPool(await createPoolImpl());
       for (const ddl of schemas) await p.query(ddl);
       pool = p;
       logger.info({ host: CHAINS_API_DB_HOST, database: CHAINS_API_DB_NAME, tables: schemas.length }, 'MariaDB connected');

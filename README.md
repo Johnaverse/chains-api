@@ -1026,6 +1026,32 @@ Each assistant chat turn writes one more line when it settles, `"msg":"chat acce
 
 Metrics (`/metrics`): `chains_api_http_requests_total{route,method,status,kind}`, `chains_api_http_request_duration_seconds{route,method}` (histogram), `chains_api_mcp_rpc_total{rpc,status}`, `chains_api_mcp_tool_calls_total{tool,status}`, alongside the assistant's `chains_api_assistant_tool_calls_total`. Labels never carry an IP or a raw path.
 
+## Tracing
+
+OpenTelemetry traces, exported as OTLP over HTTP (protobuf). Off unless `OTEL_EXPORTER_OTLP_ENDPOINT` (or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`) is set: without it no exporter is loaded and every span is a no-op. The exporter reads the standard `OTEL_EXPORTER_OTLP_*` variables (endpoint, headers, timeout) itself.
+
+| Span | Kind | What it covers | Attributes |
+|---|---|---|---|
+| `GET /chains/:id` (method and route template) | server | one REST request. `/health`, `/ready` and `/metrics` are not traced | `http.request.method`, `http.route`, `http.response.status_code` |
+| `tools/call get_chain_by_id` (JSON-RPC method and tool) | server | one MCP request on `/mcp` or `/mcp/pay`; no other path of the MCP listener is traced. A method that is not a protocol method is recorded as `other`, a tool that is not registered as `unknown` | `rpc.method`, `mcp.tool.name`, `mcp.batch`, `http.route`, `http.response.status_code` |
+| `GET`, `POST` | client | one outbound HTTP request made inside a traced request or job | `http.request.method`, `url.full`, `server.address`, `http.response.status_code` |
+| `chat <model>` | client | one model call (assistant), GenAI conventions | `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.finish_reasons` |
+| `rpc eth_blockNumber` | client | one JSON-RPC call made inside a traced request | `rpc.method`, `server.address` |
+| `db SELECT`, `db UPDATE`, … | client | one database query made inside a traced request | `db.system.name`, `db.query.summary` (statement text, placeholders only) |
+| `assistant run` | internal | one assistant run, under the request that started it and ended when the run settles, so a run answered with 202 keeps its model, feed and RPC calls | |
+| `load data`, `rpc sweep` | internal | one background job: a data refresh with its source fetches, and one refresher sweep as a single span with its totals (`rpc.sweep.number`, `rpc.sweep.jobs`, `rpc.sweep.jobs_done`, `rpc.sweep.endpoints_checked`, `rpc.sweep.completed`), not one per endpoint. The legacy monitor (`RPC_MONITOR_LOOP`) names its own sweep span the same, with `rpc.sweep.endpoints`, `tested`, `working` and `failed` | |
+
+- **Per-call spans exist only inside a trace.** The rolling refresher and the health checks run all day against thousands of endpoints; a call with no request or job span around it is not recorded.
+- **Kept off the spans:** client addresses and user agents (they stay in the usage audit lines), raw paths, query strings, tool arguments, request and response bodies, prompts and answers, and query values. A URL path segment is recorded only when it reads as plain route words (short lowercase words and numbers, after decoding) and is otherwise recorded as `:key`. This is a reduction, not a guarantee: a key that happens to look like a short lowercase word passes. A JSON-RPC span records the endpoint's host only, and an RPC endpoint is never sent the trace context, sampled or not.
+- **Whose trace is continued.** A `traceparent` is honoured only from another service in the cluster: a private peer address, none of `CF-Connecting-IP`, `X-Forwarded-For`, `Forwarded` or `X-Real-IP` (even empty), and not addressed to the public hostname. The header carries the sampling decision too, so a public caller's is ignored and its request starts a new trace, kept at `OTEL_TRACES_SAMPLER_ARG`.
+- **At shutdown**, what is still running (a request, an assistant run, a sweep) is ended with `shutdown: true` and sent with the rest, waiting at most 3 seconds for the collector.
+- **Of the standard variables** only the ones named here are read: `OTEL_TRACES_SAMPLER` and `OTEL_TRACES_EXPORTER` are not (sampling is always parent-based with the ratio below, export is always OTLP).
+- **An abandoned request** (the client went away before it was read) ends its span with `http.request.aborted`.
+- **Failures** are recorded by category (`error.type`: the error's kind or class) and an error status. The message and stack are not recorded: an endpoint's error text can echo a key or a request value.
+- **Trace context** (`traceparent`) is sent to services in the cluster only (the feeds, the model gateway), so their spans join the trace, and also when the trace is not sampled, so they follow the caller's decision. It is never sent to public sources or RPC endpoints.
+- **Logs:** with tracing on, every log line written inside a span, the usage audit lines included, carries `trace_id` and `span_id`.
+- `OTEL_SERVICE_NAME` (default `chains-api`) names the service. A trace that starts here is kept at `OTEL_TRACES_SAMPLER_ARG` (0..1, default 1); a trace the caller sampled is always kept. `OTEL_SDK_DISABLED=true` turns tracing off.
+
 ## Data Structure
 
 ### Chain Object (from `/chains` endpoints)

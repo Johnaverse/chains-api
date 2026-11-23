@@ -29,6 +29,7 @@ import {
   L2BEAT_REFRESH_INTERVAL_MS,
   MAX_ENDPOINTS_PER_CHAIN
 } from '../../config.js';
+import { openSpan, detached } from '../util/telemetry.js';
 import { logger } from '../util/logger.js';
 import { incCounter } from '../util/metrics.js';
 import { cachedData } from '../store/cache.js';
@@ -418,7 +419,16 @@ export function buildSweepQueue() {
   return jobs;
 }
 
+// The sweep in progress as one span with its totals (telemetry.js); the calls inside are not
+// traced. A sweep that is replaced or stopped before its end is closed as not completed.
+let sweepSpan = null;
+function closeSweepSpan(completed) {
+  sweepSpan?.end({ 'rpc.sweep.completed': completed, 'rpc.sweep.jobs_done': cursor.jobIndex, 'rpc.sweep.endpoints_checked': rpcState.endpointsCheckedThisSweep });
+  sweepSpan = null;
+}
+
 function onSweepStart() {
+  closeSweepSpan(false);
   cursor = {
     jobIndex: 0,
     totalJobs: queue.length,
@@ -427,9 +437,11 @@ function onSweepStart() {
     sweepDataVersion: cachedData.lastUpdated
   };
   rpcState.endpointsCheckedThisSweep = 0;
+  sweepSpan = openSpan('rpc sweep', { 'rpc.sweep.number': cursor.sweepNumber, 'rpc.sweep.jobs': cursor.totalJobs });
 }
 
 function onSweepEnd() {
+  closeSweepSpan(true);
   rpcState.lastSweepCompletedAt = new Date().toISOString();
   cachedData.lastRpcCheck = rpcState.lastSweepCompletedAt;
   logger.info(
@@ -496,9 +508,10 @@ export async function tickOnce() {
 
 export function startChainRefresher() {
   if (tickTimer) return;
-  tickTimer = setInterval(() => {
+  // Outside any trace: POST /reload can start this while it is being served.
+  tickTimer = detached(() => setInterval(() => {
     tickOnce().catch(err => logger.error({ err: err.message || err }, 'Tick swallowed error'));
-  }, SWEEP_TICK_MS);
+  }, SWEEP_TICK_MS));
   tickTimer.unref?.();
   // Kick off the first tick immediately so the first L2BEAT batch happens
   // without waiting one SWEEP_TICK_MS.
@@ -506,6 +519,7 @@ export function startChainRefresher() {
 }
 
 export function stopChainRefresher() {
+  closeSweepSpan(false);
   if (tickTimer) {
     clearInterval(tickTimer);
     tickTimer = null;
