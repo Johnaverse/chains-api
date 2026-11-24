@@ -14,8 +14,9 @@ describe('fetch connection pool recycler', () => {
   });
   afterEach(() => { _resetConnectionPoolsForTests(); globalThis[GLOBAL_DISPATCHER] = saved; vi.useRealTimers(); });
 
-  it('replaces the agent with a fresh one of the same class and closes the old one a round later', async () => {
-    class Agent { constructor() { this.close = vi.fn().mockResolvedValue(); this.destroy = vi.fn().mockResolvedValue(); } }
+  class Agent { constructor() { this.destroy = vi.fn().mockResolvedValue(); } }
+
+  it('replaces the agent with a fresh one of the same class and keeps the old one open for two rounds', async () => {
     const first = new Agent();
     globalThis[GLOBAL_DISPATCHER] = first;
     expect(await recycleConnectionPools()).toBe(true);
@@ -23,33 +24,23 @@ describe('fetch connection pool recycler', () => {
     expect(second).toBeInstanceOf(Agent);
     expect(second).not.toBe(first);
     // Still open: a fetch that started on it may have a redirect hop to make.
-    expect(first.close).not.toHaveBeenCalled();
     expect(await recycleConnectionPools()).toBe(true);
-    await vi.waitFor(() => expect(first.close).toHaveBeenCalledOnce());
-    expect(first.destroy).not.toHaveBeenCalled();
-    expect(second.close).not.toHaveBeenCalled();
-  });
-
-  it('destroys an agent a round after closing it, so an unfinished response cannot keep it', async () => {
-    class Agent { constructor() { this.close = vi.fn(() => new Promise(() => {})); this.destroy = vi.fn().mockResolvedValue(); } }
-    const first = new Agent();
-    globalThis[GLOBAL_DISPATCHER] = first;
-    await recycleConnectionPools();
-    await recycleConnectionPools();
-    await vi.waitFor(() => expect(first.close).toHaveBeenCalledOnce());
     expect(first.destroy).not.toHaveBeenCalled();
     expect(await recycleConnectionPools()).toBe(true);
     await vi.waitFor(() => expect(first.destroy).toHaveBeenCalledOnce());
+    expect(second.destroy).not.toHaveBeenCalled();
   });
 
-  it('closes the retired agent when the recycler is stopped', async () => {
-    class Agent { constructor() { this.close = vi.fn().mockResolvedValue(); this.destroy = vi.fn().mockResolvedValue(); } }
+  it('destroys the replaced agents when the recycler is stopped, not the current one', async () => {
     const first = new Agent();
     globalThis[GLOBAL_DISPATCHER] = first;
     await recycleConnectionPools();
+    const second = globalThis[GLOBAL_DISPATCHER];
+    await recycleConnectionPools();
     stopConnectionPoolRecycler();
-    await vi.waitFor(() => expect(first.close).toHaveBeenCalledOnce());
-    expect(globalThis[GLOBAL_DISPATCHER].close).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(first.destroy).toHaveBeenCalledOnce());
+    expect(second.destroy).toHaveBeenCalledOnce();
+    expect(globalThis[GLOBAL_DISPATCHER].destroy).not.toHaveBeenCalled();
   });
 
   it('does nothing before the first request has created an agent', async () => {
@@ -59,36 +50,36 @@ describe('fetch connection pool recycler', () => {
   });
 
   it('leaves a configured agent of another class in place', async () => {
-    class ProxyAgent { constructor() { this.close = vi.fn(); } }
+    class ProxyAgent { constructor() { this.destroy = vi.fn(); } }
     const proxy = new ProxyAgent();
     globalThis[GLOBAL_DISPATCHER] = proxy;
     expect(await recycleConnectionPools()).toBe(false);
     expect(globalThis[GLOBAL_DISPATCHER]).toBe(proxy);
-    expect(proxy.close).not.toHaveBeenCalled();
+    expect(proxy.destroy).not.toHaveBeenCalled();
   });
 
-  it('still replaces the agent when closing a retired one fails', async () => {
-    class Agent { constructor() { this.close = vi.fn().mockRejectedValue(new Error('boom')); this.destroy = vi.fn().mockResolvedValue(); } }
-    const first = new Agent();
+  it('keeps replacing when destroying an old agent fails', async () => {
+    class Failing { constructor() { this.destroy = vi.fn().mockRejectedValue(new Error('boom')); } }
+    Object.defineProperty(Failing, 'name', { value: 'Agent' });
+    const first = new Failing();
     globalThis[GLOBAL_DISPATCHER] = first;
     await recycleConnectionPools();
-    const second = globalThis[GLOBAL_DISPATCHER];
+    await recycleConnectionPools();
+    const third = globalThis[GLOBAL_DISPATCHER];
     expect(await recycleConnectionPools()).toBe(true);
-    await vi.waitFor(() => expect(first.close).toHaveBeenCalledOnce());
-    expect(globalThis[GLOBAL_DISPATCHER]).not.toBe(second);
+    await vi.waitFor(() => expect(first.destroy).toHaveBeenCalledOnce());
+    expect(globalThis[GLOBAL_DISPATCHER]).not.toBe(third);
   });
 
   it('recycles on the configured interval once started', async () => {
     vi.useFakeTimers();
-    class Agent { constructor() { this.close = vi.fn().mockResolvedValue(); this.destroy = vi.fn().mockResolvedValue(); } }
     const old = new Agent();
     globalThis[GLOBAL_DISPATCHER] = old;
     startConnectionPoolRecycler();
     await vi.advanceTimersByTimeAsync(600000);
     expect(globalThis[GLOBAL_DISPATCHER]).not.toBe(old);
-    expect(old.close).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(600000);
-    expect(old.close).toHaveBeenCalledOnce();
+    expect(old.destroy).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(600000);
     expect(old.destroy).toHaveBeenCalledOnce();
   });
@@ -115,7 +106,7 @@ describe('fetch connection pool recycler', () => {
     }
   });
 
-  it('follows a redirect that arrives after the agent was replaced', async () => {
+  it('follows a redirect that arrives after the agent was replaced twice', async () => {
     let release;
     const target = http.createServer((req, res) => res.end('landed'));
     await new Promise((resolve) => target.listen(0, '127.0.0.1', resolve));
@@ -130,11 +121,30 @@ describe('fetch connection pool recycler', () => {
       const redirected = fetch(`${base}/go`).then((r) => r.text());
       await vi.waitFor(() => expect(release).toBeTypeOf('function'));
       expect(await recycleConnectionPools()).toBe(true);
+      expect(await recycleConnectionPools()).toBe(true);
       release();
       expect(await redirected).toBe('landed');
     } finally {
       await new Promise((resolve) => origin.close(resolve));
       await new Promise((resolve) => target.close(resolve));
+    }
+  });
+
+  it('releases the connection of a response nobody finished reading', async () => {
+    const server = http.createServer((req, res) => { res.writeHead(500); res.write('x'.repeat(1 << 20)); });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const connections = () => new Promise((resolve) => server.getConnections((err, n) => resolve(n)));
+    try {
+      const response = await fetch(`http://127.0.0.1:${server.address().port}/`);
+      expect(response.status).toBe(500);
+      await recycleConnectionPools();
+      await recycleConnectionPools();
+      expect(await connections()).toBe(1);
+      await recycleConnectionPools();
+      await vi.waitFor(async () => expect(await connections()).toBe(0));
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
     }
   });
 });
