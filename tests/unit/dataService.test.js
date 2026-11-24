@@ -20,6 +20,7 @@ vi.mock('../../config.js', () => ({
   SOURCE_FETCH_MAX_RETRIES: 1,
   SOURCE_FETCH_RETRY_BASE_MS: 0,
   SOURCE_REFRESH_INTERVAL_MS: 0,
+  FETCH_POOL_MAX_AGE_MS: 0,
   RPC_DEAD_AFTER_MS: 259200000
 }));
 
@@ -2199,6 +2200,7 @@ describe('initializeDataOnStartup with disk cache', () => {
       SOURCE_FETCH_MAX_RETRIES: 1,
       SOURCE_FETCH_RETRY_BASE_MS: 0,
       SOURCE_REFRESH_INTERVAL_MS: 0,
+      FETCH_POOL_MAX_AGE_MS: 0,
   RPC_DEAD_AFTER_MS: 259200000
     }));
     vi.doMock('../../fetchUtil.js', () => ({

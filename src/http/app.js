@@ -19,7 +19,6 @@ import { traceRequests, withLogIds } from '../util/telemetry.js';
 import { startL2BeatRefresh } from '../services/l2beatRefresher.js';
 import { startGrowthepieRefresh } from '../sources/growthepie.js';
 import { startSourceRefresher } from '../services/sourceRefresher.js';
-import { startConnectionPoolRecycler } from '../transport/connectionPools.js';
 import {
   BODY_LIMIT,
   MAX_PARAM_LENGTH,
@@ -342,7 +341,6 @@ export async function buildApp(options = {}) {
     startRpcHealthCheck();
     startL2BeatRefresh();
     startSourceRefresher();
-    startConnectionPoolRecycler();
     // Warm the price cache now so the first /chains request doesn't pay a CoinGecko
     // round-trip, then keep it warm on a timer. Without the timer, entries expire after
     // PRICE_CACHE_TTL_MS and the next caller to touch an expired one waits on the fetch.

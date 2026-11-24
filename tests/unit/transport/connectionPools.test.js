@@ -1,22 +1,42 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import http from 'node:http';
-import { recycleConnectionPools, startConnectionPoolRecycler, stopConnectionPoolRecycler } from '../../../src/transport/connectionPools.js';
+import { recycleConnectionPools, startConnectionPoolRecycler, stopConnectionPoolRecycler, _resetConnectionPoolsForTests } from '../../../src/transport/connectionPools.js';
 
 const GLOBAL_DISPATCHER = Symbol.for('undici.globalDispatcher.1');
 
 describe('fetch connection pool recycler', () => {
+  // Each test gets its own real agent, so closing one never touches the agent other files use.
   let saved;
-  beforeEach(() => { saved = globalThis[GLOBAL_DISPATCHER]; });
-  afterEach(() => { stopConnectionPoolRecycler(); globalThis[GLOBAL_DISPATCHER] = saved; vi.useRealTimers(); });
+  beforeEach(async () => {
+    await fetch('http://127.0.0.1:1/').catch(() => {}); // the first request creates the agent
+    saved = globalThis[GLOBAL_DISPATCHER];
+    globalThis[GLOBAL_DISPATCHER] = new saved.constructor();
+  });
+  afterEach(() => { _resetConnectionPoolsForTests(); globalThis[GLOBAL_DISPATCHER] = saved; vi.useRealTimers(); });
 
-  it('replaces the agent with a fresh one of the same class and closes the old one', async () => {
+  it('replaces the agent with a fresh one of the same class and closes the old one a round later', async () => {
     class Agent { constructor() { this.close = vi.fn().mockResolvedValue(); } }
-    const old = new Agent();
-    globalThis[GLOBAL_DISPATCHER] = old;
+    const first = new Agent();
+    globalThis[GLOBAL_DISPATCHER] = first;
     expect(await recycleConnectionPools()).toBe(true);
-    expect(globalThis[GLOBAL_DISPATCHER]).toBeInstanceOf(Agent);
-    expect(globalThis[GLOBAL_DISPATCHER]).not.toBe(old);
-    expect(old.close).toHaveBeenCalledOnce();
+    const second = globalThis[GLOBAL_DISPATCHER];
+    expect(second).toBeInstanceOf(Agent);
+    expect(second).not.toBe(first);
+    // Still open: a fetch that started on it may have a redirect hop to make.
+    expect(first.close).not.toHaveBeenCalled();
+    expect(await recycleConnectionPools()).toBe(true);
+    expect(first.close).toHaveBeenCalledOnce();
+    expect(second.close).not.toHaveBeenCalled();
+  });
+
+  it('closes the retired agent when the recycler is stopped', async () => {
+    class Agent { constructor() { this.close = vi.fn().mockResolvedValue(); } }
+    const first = new Agent();
+    globalThis[GLOBAL_DISPATCHER] = first;
+    await recycleConnectionPools();
+    stopConnectionPoolRecycler();
+    expect(first.close).toHaveBeenCalledOnce();
+    expect(globalThis[GLOBAL_DISPATCHER].close).not.toHaveBeenCalled();
   });
 
   it('does nothing before the first request has created an agent', async () => {
@@ -34,12 +54,15 @@ describe('fetch connection pool recycler', () => {
     expect(proxy.close).not.toHaveBeenCalled();
   });
 
-  it('still replaces the agent when closing the old one fails', async () => {
+  it('still replaces the agent when closing a retired one fails', async () => {
     class Agent { constructor() { this.close = vi.fn().mockRejectedValue(new Error('boom')); } }
-    const old = new Agent();
-    globalThis[GLOBAL_DISPATCHER] = old;
+    const first = new Agent();
+    globalThis[GLOBAL_DISPATCHER] = first;
+    await recycleConnectionPools();
+    const second = globalThis[GLOBAL_DISPATCHER];
     expect(await recycleConnectionPools()).toBe(true);
-    expect(globalThis[GLOBAL_DISPATCHER]).not.toBe(old);
+    expect(first.close).toHaveBeenCalledOnce();
+    expect(globalThis[GLOBAL_DISPATCHER]).not.toBe(second);
   });
 
   it('recycles on the configured interval once started', async () => {
@@ -49,8 +72,10 @@ describe('fetch connection pool recycler', () => {
     globalThis[GLOBAL_DISPATCHER] = old;
     startConnectionPoolRecycler();
     await vi.advanceTimersByTimeAsync(600000);
-    expect(old.close).toHaveBeenCalledOnce();
     expect(globalThis[GLOBAL_DISPATCHER]).not.toBe(old);
+    expect(old.close).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(600000);
+    expect(old.close).toHaveBeenCalledOnce();
   });
 
   it('keeps real requests working across a recycle, including one in flight', async () => {
@@ -72,6 +97,29 @@ describe('fetch connection pool recycler', () => {
       expect(await recycled).toBe(true);
     } finally {
       await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it('follows a redirect that arrives after the agent was replaced', async () => {
+    let release;
+    const target = http.createServer((req, res) => res.end('landed'));
+    await new Promise((resolve) => target.listen(0, '127.0.0.1', resolve));
+    const origin = http.createServer((req, res) => {
+      if (req.url === '/warm') { res.end('ok'); return; }
+      release = () => { res.writeHead(302, { location: `http://127.0.0.1:${target.address().port}/` }); res.end(); };
+    });
+    await new Promise((resolve) => origin.listen(0, '127.0.0.1', resolve));
+    const base = `http://127.0.0.1:${origin.address().port}`;
+    try {
+      await (await fetch(`${base}/warm`)).text();
+      const redirected = fetch(`${base}/go`).then((r) => r.text());
+      await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+      expect(await recycleConnectionPools()).toBe(true);
+      release();
+      expect(await redirected).toBe('landed');
+    } finally {
+      await new Promise((resolve) => origin.close(resolve));
+      await new Promise((resolve) => target.close(resolve));
     }
   });
 });
