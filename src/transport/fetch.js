@@ -31,6 +31,8 @@ export async function fetchData(url, format = 'json') {
     try {
       const response = await proxyFetch(url);
       if (!response.ok) {
+        // The body is not read: release its connection now rather than when it is collected.
+        response.body?.cancel().catch(() => {});
         throw new Error(`HTTP error! status: ${response.status}`);
       }
       // Parse the body BEFORE incrementing the success counter so a body-parse

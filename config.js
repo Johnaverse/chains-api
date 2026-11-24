@@ -140,6 +140,10 @@ export const SOURCE_REFRESH_INTERVAL_MS = parseIntEnv('SOURCE_REFRESH_INTERVAL_M
 // reported as a dead network. Default 3 days.
 export const RPC_DEAD_AFTER_MS = parseIntEnv('RPC_DEAD_AFTER_MS', 259200000);
 export const REGISTRY_MAX_AGE_MS = parseIntEnv('REGISTRY_MAX_AGE_MS', 21600000);
+// How long fetch's connection pools live before they are replaced (src/transport/connectionPools.js):
+// Node keeps one per host ever contacted, and the RPC sweep contacts thousands. 0 keeps them forever;
+// anything shorter than a minute runs as a minute.
+export const FETCH_POOL_MAX_AGE_MS = parseIntEnv('FETCH_POOL_MAX_AGE_MS', 600000);
 /**
  * @deprecated Cadence is now driven by the unified rolling refresher
  * (CHAIN_REFRESHER_TICK_MS × queue length). Kept so /scaling/status can keep

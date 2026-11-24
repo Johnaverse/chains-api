@@ -60,6 +60,8 @@ async function call(url, method, { params = [], timeoutMs = 10000 } = {}) {
     });
 
     if (!response.ok) {
+      // The body is not read: release its connection now rather than when it is collected.
+      response.body?.cancel().catch(() => {});
       const httpError = new Error(`HTTP ${response.status}`);
       httpError.status = response.status;
       httpError.kind = response.status === 429 ? 'rate_limited' : 'http_error';

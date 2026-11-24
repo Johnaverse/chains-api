@@ -30,6 +30,7 @@ import {
   MAX_ENDPOINTS_PER_CHAIN
 } from '../../config.js';
 import { openSpan, detached } from '../util/telemetry.js';
+import { startConnectionPoolRecycler, stopConnectionPoolRecycler } from '../transport/connectionPools.js';
 import { logger } from '../util/logger.js';
 import { incCounter } from '../util/metrics.js';
 import { cachedData } from '../store/cache.js';
@@ -508,6 +509,9 @@ export async function tickOnce() {
 
 export function startChainRefresher() {
   if (tickTimer) return;
+  // The sweep is what contacts thousands of hosts, so the pools are bounded wherever it runs:
+  // the combined server, the REST-only one and both standalone MCP servers.
+  startConnectionPoolRecycler();
   // Outside any trace: POST /reload can start this while it is being served.
   tickTimer = detached(() => setInterval(() => {
     tickOnce().catch(err => logger.error({ err: err.message || err }, 'Tick swallowed error'));
@@ -520,6 +524,7 @@ export function startChainRefresher() {
 
 export function stopChainRefresher() {
   closeSweepSpan(false);
+  stopConnectionPoolRecycler();
   if (tickTimer) {
     clearInterval(tickTimer);
     tickTimer = null;

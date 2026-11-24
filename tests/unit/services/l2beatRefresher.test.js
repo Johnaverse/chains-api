@@ -14,6 +14,8 @@ vi.mock('../../../config.js', () => ({
   RPC_CHECK_CONCURRENCY: 8,
   PROXY_URL: '',
   PROXY_ENABLED: false,
+  // chainRefresher starts the connection pool recycler; 0 leaves it off.
+  FETCH_POOL_MAX_AGE_MS: 0,
   // chainRefresher persists sweeps via snapshot.js, which reads these.
   DATA_CACHE_ENABLED: false,
   DATA_CACHE_FILE: '.cache/test-refresher-cache.json'
