@@ -23,6 +23,8 @@ import { incCounter } from '../util/metrics.js';
 const GLOBAL_DISPATCHER = Symbol.for('undici.globalDispatcher.1');
 
 const MIN_AGE_MS = 60_000;
+// The longest delay a timer takes; beyond it setInterval would fire every millisecond.
+const MAX_AGE_MS = 2 ** 31 - 1;
 
 let timer = null;
 // The agent replaced last time, still open for the fetches that started on it.
@@ -61,7 +63,7 @@ export function startConnectionPoolRecycler() {
     logger.info('Fetch connection pools are kept for the life of the process (FETCH_POOL_MAX_AGE_MS=0)');
     return;
   }
-  timer = setInterval(() => { recycleConnectionPools().catch(() => {}); }, Math.max(FETCH_POOL_MAX_AGE_MS, MIN_AGE_MS));
+  timer = setInterval(() => { recycleConnectionPools().catch(() => {}); }, Math.min(Math.max(FETCH_POOL_MAX_AGE_MS, MIN_AGE_MS), MAX_AGE_MS));
   if (typeof timer.unref === 'function') timer.unref();
 }
 
