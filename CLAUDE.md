@@ -177,7 +177,7 @@ Copy `.env.example` to `.env` for local configuration. Key variables:
 | `RPC_DEAD_AFTER_MS` | `259200000` | How long every endpoint of a chain must fail (nothing answering) before validation rule 18 reports it |
 | `CLIENT_FEED_CACHE_MAX_BYTES` | `33554432` | Total size of client-feed responses kept in memory (oldest evicted first, besides the 200-entry cap) |
 | `REGISTRY_MAX_AGE_MS` | `21600000` | Reload the chain registries once they are this old, so the learned index follows upstream (0: reload only on failure) |
-| `FETCH_POOL_MAX_AGE_MS` | `600000` | Replace fetch's connection pools this often (`src/transport/connectionPools.js`): through Node 22 a pool is kept for every host ever contacted (~26 KB each, ~3,400 RPC hosts), which filled the heap. 0 keeps them |
+| `FETCH_POOL_MAX_AGE_MS` | `600000` | Replace fetch's connection pools this often (`src/transport/connectionPools.js`): through Node 22 a pool is kept for every host ever contacted (~26 KB each, ~3,400 RPC hosts), which filled the heap. 0 keeps them; values under a minute run as a minute |
 | `ASSISTANT_LLM_URL` | (empty) | OpenAI-compatible LLM server (e.g. Ollama `http://localhost:11434`); empty disables the assistant |
 | `ASSISTANT_LLM_API_KEY` | (empty) | Bearer token for key-protected LLM servers (OpenAI, OpenRouter, …) |
 | `ASSISTANT_MODEL` | `qwen3` | Model name for `/v1/chat/completions` |

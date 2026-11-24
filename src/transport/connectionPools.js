@@ -7,10 +7,13 @@
  * sweep and stayed there, close enough to the limit that the six-hourly registry reload ran the
  * process out of memory.
  *
- * Every FETCH_POOL_MAX_AGE_MS the agent is replaced by a fresh one. The replaced agent stays open
- * for one more interval and is closed at the next replacement: a fetch keeps the agent it started
- * with for its whole life, redirects included, so a hop that arrives after the swap still has a
- * working agent. Closing is graceful as well: whatever is still in flight then finishes first.
+ * Every FETCH_POOL_MAX_AGE_MS the agent is replaced by a fresh one. A replaced agent goes through
+ * three rounds: it stays open for one, because a fetch keeps the agent it started with for its
+ * whole life and a redirect hop that arrives after the swap needs a working agent; it is closed
+ * gracefully at the next, so whatever is still in flight finishes first; and it is destroyed at
+ * the one after, so a response nobody finished reading cannot keep it, and its pools, forever.
+ * The interval is never shorter than MIN_AGE_MS, which keeps those rounds longer than any
+ * request this service makes with a redirect in it.
  */
 import { FETCH_POOL_MAX_AGE_MS } from '../../config.js';
 import { logger } from '../util/logger.js';
@@ -19,22 +22,25 @@ import { incCounter } from '../util/metrics.js';
 // Where fetch looks up its agent. Set on the first request, so there is nothing to replace before it.
 const GLOBAL_DISPATCHER = Symbol.for('undici.globalDispatcher.1');
 
-let timer = null;
-// The agent replaced last time, still serving the fetches that started on it.
-let retired = null;
+const MIN_AGE_MS = 60_000;
 
-async function close(agent) {
-  try {
-    await agent.close();
-  } catch (err) {
-    logger.warn({ err: err.message || err }, 'Closing a replaced fetch agent failed');
-  }
+let timer = null;
+// The agent replaced last time, still open for the fetches that started on it.
+let retired = null;
+// The agent replaced the time before, closing as its last requests finish.
+let closing = null;
+
+function shut(agent, how) {
+  if (!agent) return;
+  Promise.resolve()
+    .then(() => agent[how]())
+    .catch((err) => logger.warn({ err: err.message || err }, 'Closing a replaced fetch agent failed'));
 }
 
 /**
- * Replace fetch's agent, and close the one replaced the time before. Resolves true when it was
- * replaced. An agent someone configured (a proxy agent, say) is left alone: a fresh one would
- * lose its settings.
+ * Replace fetch's agent and move the earlier ones a round on (see above). Resolves true when it
+ * was replaced. An agent someone configured (a proxy agent, say) is left alone: a fresh one
+ * would lose its settings.
  */
 export async function recycleConnectionPools() {
   const old = globalThis[GLOBAL_DISPATCHER];
@@ -42,9 +48,10 @@ export async function recycleConnectionPools() {
   if (!old || Agent?.name !== 'Agent' || typeof old.close !== 'function') return false;
   globalThis[GLOBAL_DISPATCHER] = new Agent();
   incCounter('chains_api_fetch_pool_recycle_total');
-  const expired = retired;
+  shut(closing, 'destroy');
+  closing = retired;
+  shut(closing, 'close');
   retired = old;
-  if (expired) await close(expired);
   return true;
 }
 
@@ -54,23 +61,25 @@ export function startConnectionPoolRecycler() {
     logger.info('Fetch connection pools are kept for the life of the process (FETCH_POOL_MAX_AGE_MS=0)');
     return;
   }
-  timer = setInterval(() => { recycleConnectionPools().catch(() => {}); }, FETCH_POOL_MAX_AGE_MS);
+  timer = setInterval(() => { recycleConnectionPools().catch(() => {}); }, Math.max(FETCH_POOL_MAX_AGE_MS, MIN_AGE_MS));
   if (typeof timer.unref === 'function') timer.unref();
 }
 
-/** Stop replacing. The agent retired last is closed now; the current one stays in use. */
+/** Stop replacing. The agents already replaced are closed now; the current one stays in use. */
 export function stopConnectionPoolRecycler() {
   if (timer) {
     clearInterval(timer);
     timer = null;
   }
-  const expired = retired;
+  shut(closing, 'destroy');
+  shut(retired, 'close');
+  closing = null;
   retired = null;
-  if (expired) close(expired);
 }
 
-/** Forget the retired agent without closing it. */
+/** Forget the replaced agents without closing them. */
 export function _resetConnectionPoolsForTests() {
+  closing = null;
   retired = null;
   stopConnectionPoolRecycler();
 }
