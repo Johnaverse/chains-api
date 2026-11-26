@@ -195,17 +195,16 @@ GitHub Actions workflows in `.github/workflows/`:
 
 1. **`docker-build.yml`** — On push to main/tags/PRs: runs `npm ci`, `npm run test:coverage`, SonarQube scan, then builds and pushes Docker image to GHCR
 2. **`static.yml`** — Deploys `public/` to GitHub Pages on push to main
-3. **`auto-tag.yml`** — Auto-creates git tags from `package.json` version on main
 
 **Quality gates:** Coverage ≥80%, duplication ≤3%, no critical security vulnerabilities.
 
 ## Releasing / Deploying
 
-Merging to `main` does **not** deploy. Flux rolls out only when a **new** semver tag appears, and `auto-tag.yml` derives that tag from `package.json` — so if the version already equals the latest tag, a merge produces no tag and nothing ships. Cutting a release:
+Merging to `main` does **not** deploy. Flux rolls out only when a **new** semver tag appears, and the cluster's Argo release workflow derives that tag from `package.json` — so if the version already equals the latest tag, a merge produces no tag and nothing ships. Cutting a release:
 
 1. Bump `version` in `package.json` (`npm version patch --no-git-tag-version`).
 2. Run **`npm run openapi`** and commit the result. `public/openapi.json` embeds `pkg.version`, and `docker-build.yml` regenerates it and **fails the build** if the committed copy differs — so every version bump also changes that file.
-3. Open a PR: `main` is branch-protected, so a direct `git push origin main` is rejected. Merge it, and `auto-tag.yml` creates `vX.Y.Z` → Docker image → Flux.
+3. Open a PR: `main` is branch-protected, so a direct `git push origin main` is rejected. Merge it, and the Argo release workflow tags the merge `vX.Y.Z` → Docker image (built only for the tagged commit) → Flux.
 
 Note the two deploy paths move at different speeds: `static.yml` publishes the dashboard as soon as `main` moves, while API/MCP changes wait on the image build plus Flux reconciliation. A `/ui/` fix can therefore be live while the API is still on the previous version.
 
