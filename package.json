@@ -66,7 +66,7 @@
     "eslint": "^10.13.0",
     "fast-check": "^4.9.0",
     "viem": "2.57.11",
-    "vitest": "^5.1.0"
+    "vitest": "^5.1.1"
   },
   "overrides": {
     "viem": "2.57.11"
